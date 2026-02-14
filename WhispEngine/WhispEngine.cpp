@@ -3,7 +3,6 @@
 
 static RenderBackend ParseBackend(int argc, char** argv)
 {
-    // дефолт: DX12 (или Null, если хочешь безопасно)
     RenderBackend backend = RenderBackend::DX12;
 
     for (int i = 1; i < argc; ++i)
@@ -24,7 +23,7 @@ int main(int argc, char** argv)
 {
     Application app;
 
-    app.SetBackend(ParseBackend(argc, argv)); // добавим SetBackend
+    app.SetBackend(ParseBackend(argc, argv)); 
 
     if (!app.Initialize())
         return -1;

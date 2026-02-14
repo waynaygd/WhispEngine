@@ -26,7 +26,6 @@ bool GlfwWindow::Create(int width, int height, const std::string& title)
         return false;
     }
 
-    // важно: для Vulkan и DX12 не нужен OpenGL контекст
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     m_Window = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);

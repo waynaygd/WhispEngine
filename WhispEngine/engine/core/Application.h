@@ -13,7 +13,7 @@ struct TransformState
     float x = 0.0f;
     float y = 0.0f;
     float scale = 1.0f;
-    float angle = 0.0f;          // radians
+    float angle = 0.0f;       
 
     float targetScale = 1.0f;
     float targetAngle = 0.0f;
@@ -26,7 +26,7 @@ class Application
 {
 public:
     Application();
-    ~Application();        // объявили, но НЕ определяем тут
+    ~Application();       
 
     void SetBackend(RenderBackend b) { m_Backend = b; }
 
@@ -37,7 +37,7 @@ public:
     void UpdateInputAndTransform(float dt);
 
 private:
-    TransformState m_Obj; // NEW
+    TransformState m_Obj;
 
     RenderBackend m_Backend = RenderBackend::DX12;
     std::unique_ptr<IWindow> m_Window;

@@ -2,7 +2,7 @@
 #ifdef _WIN32
 
 #include "../../../core/Logger.h"
-#include "../../../platform/GlfwWindow.h"   // <-- важно
+#include "../../../platform/GlfwWindow.h"   
 
 #include <GLFW/glfw3.h>
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -10,9 +10,9 @@
 
 #include <d3d12.h>
 #include <dxgi1_6.h>
-#include <d3dcompiler.h>                   // <-- важно для D3D12SerializeRootSignature
+#include <d3dcompiler.h>                  
 
-#include "../../../external/d3dx12.h" // <-- важно для CD3DX12_* (путь подстрой под твой)
+#include "../../../external/d3dx12.h" 
 
 #include <stdexcept>
 #include <vector>
@@ -54,7 +54,6 @@ bool Dx12RenderAdapter::Initialize(IWindow* window)
 
         UINT dxgiFlags = 0;
 #if defined(_DEBUG)
-        // Можно включить debug layer позже, когда появится D3D12SDKLayers.dll (из Graphics Tools).
 #endif
 
         ThrowIfFailed(CreateDXGIFactory2(dxgiFlags, IID_PPV_ARGS(&m_Factory)), "CreateDXGIFactory2 failed");
@@ -177,7 +176,7 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
 {
     D3D12_ROOT_PARAMETER rp{};
     rp.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    rp.Descriptor.ShaderRegister = 0; // b0
+    rp.Descriptor.ShaderRegister = 0; 
     rp.Descriptor.RegisterSpace = 0;
     rp.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
 
@@ -197,7 +196,6 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
     ThrowIfFailed(m_Device->CreateRootSignature(0, serialized->GetBufferPointer(), serialized->GetBufferSize(), IID_PPV_ARGS(&m_RootSig)),
         "CreateRootSignature failed");
 
-    // Загружаем DXIL из build/shaders/dx12
     auto vs = ReadFileBinary("shaders/dx12/triangle_vs.dxil");
     auto ps = ReadFileBinary("shaders/dx12/triangle_ps.dxil");
     if (vs.empty() || ps.empty())
@@ -235,7 +233,6 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
 
     const UINT vbSize = sizeof(tri);
 
-    // Для простоты и надёжности: upload heap (медленнее, но корректно)
     D3D12_HEAP_PROPERTIES hp{};
     hp.Type = D3D12_HEAP_TYPE_UPLOAD;
 
@@ -280,7 +277,6 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
         m_CbMapped[i] = reinterpret_cast<uint8_t*>(mapped);
         m_CbGpu[i] = m_Cb[i]->GetGPUVirtualAddress();
 
-        // init identity
         CB init{};
         memcpy(init.mvp, m_PendingMVP, sizeof(init.mvp));
         memcpy(m_CbMapped[i], &init, sizeof(CB));
@@ -334,7 +330,6 @@ void Dx12RenderAdapter::Clear(float r, float g, float b, float a)
 
 void Dx12RenderAdapter::DrawTestTriangle()
 {
-    // update CB for current frame
     struct alignas(256) CB { float mvp[16]; };
     CB cb{};
     memcpy(cb.mvp, m_PendingMVP, sizeof(cb.mvp));

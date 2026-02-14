@@ -99,7 +99,6 @@ static SwapchainSupport QuerySwapchainSupport(VkPhysicalDevice phys, VkSurfaceKH
 
 static VkSurfaceFormatKHR ChooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats)
 {
-    // ѕредпочтительно SRGB, но если нет Ч берем первый.
     for (auto& f : formats)
     {
         if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
@@ -110,7 +109,6 @@ static VkSurfaceFormatKHR ChooseSurfaceFormat(const std::vector<VkSurfaceFormatK
 
 static VkPresentModeKHR ChoosePresentMode(const std::vector<VkPresentModeKHR>& modes)
 {
-    // FIFO гарантирован (vsync). Mailbox Ч если хочешь, можно предпочесть.
     for (auto m : modes)
     {
         if (m == VK_PRESENT_MODE_MAILBOX_KHR) return m;
@@ -157,7 +155,6 @@ VkShaderModule VkRenderAdapter::LoadShaderModule(const char* spvPath)
     return m;
 }
 
-// ---- Vertex ----
 struct Vertex
 {
     float pos[2];
@@ -177,13 +174,11 @@ static std::array<VkVertexInputAttributeDescription, 2> VertexAttributes()
 {
     std::array<VkVertexInputAttributeDescription, 2> a{};
 
-    // location 0: vec2 pos
     a[0].location = 0;
     a[0].binding = 0;
     a[0].format = VK_FORMAT_R32G32_SFLOAT;
     a[0].offset = offsetof(Vertex, pos);
 
-    // location 1: vec3 color
     a[1].location = 1;
     a[1].binding = 0;
     a[1].format = VK_FORMAT_R32G32B32_SFLOAT;
@@ -200,7 +195,7 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         GLFWwindow* w = glfwWin->GetGlfwHandle();
         if (!w) throw std::runtime_error("GlfwWindow handle is null");
 
-        // 1) Instance
+
         VkApplicationInfo app{ VK_STRUCTURE_TYPE_APPLICATION_INFO };
         app.pApplicationName = "WhispEngine";
         app.applicationVersion = VK_MAKE_VERSION(0, 1, 0);
@@ -219,11 +214,9 @@ bool VkRenderAdapter::Initialize(IWindow* window)
 
         VK_ThrowIfFailed(vkCreateInstance(&ici, nullptr, &m_Instance), "vkCreateInstance failed");
 
-        // 2) Surface
         VK_ThrowIfFailed((VkResult)glfwCreateWindowSurface(m_Instance, w, nullptr, &m_Surface),
             "glfwCreateWindowSurface failed");
 
-        // 3) Pick physical device
         uint32_t pdCount = 0;
         vkEnumeratePhysicalDevices(m_Instance, &pdCount, nullptr);
         if (!pdCount) throw std::runtime_error("No Vulkan physical devices");
@@ -259,7 +252,6 @@ bool VkRenderAdapter::Initialize(IWindow* window)
 
         if (!m_Physical) throw std::runtime_error("No suitable Vulkan device found");
 
-        // 4) Create logical device + queues
         float prio = 1.0f;
         std::vector<VkDeviceQueueCreateInfo> qcis;
 
@@ -292,7 +284,6 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         vkGetDeviceQueue(m_Device, m_GraphicsFamily, 0, &m_GraphicsQueue);
         vkGetDeviceQueue(m_Device, m_PresentFamily, 0, &m_PresentQueue);
 
-        // 5) Swapchain
         int fbW = 0, fbH = 0;
         glfwGetFramebufferSize(w, &fbW, &fbH);
 
@@ -342,7 +333,6 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         m_SwapImages.resize(imgCount2);
         vkGetSwapchainImagesKHR(m_Device, m_Swapchain, &imgCount2, m_SwapImages.data());
 
-        // 6) Image views
         m_SwapViews.resize(m_SwapImages.size());
         for (size_t i = 0; i < m_SwapImages.size(); ++i)
         {
@@ -362,7 +352,6 @@ bool VkRenderAdapter::Initialize(IWindow* window)
                 "vkCreateImageView failed");
         }
 
-        // 7) Render pass
         VkAttachmentDescription color{};
         color.format = m_SwapFormat;
         color.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -401,11 +390,10 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         VK_ThrowIfFailed(vkCreateRenderPass(m_Device, &rp, nullptr, &m_RenderPass),
             "vkCreateRenderPass failed");
 
-        // 8) Pipeline (layout + shaders + fixed function)
         VkPushConstantRange pcr{};
         pcr.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
         pcr.offset = 0;
-        pcr.size = sizeof(float) * 16; // 64 bytes, mat4
+        pcr.size = sizeof(float) * 16;
 
         VkPipelineLayoutCreateInfo plci{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
         plci.setLayoutCount = 0;
@@ -500,7 +488,6 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         vkDestroyShaderModule(m_Device, vs, nullptr);
         vkDestroyShaderModule(m_Device, fs, nullptr);
 
-        // 9) Framebuffers
         m_Framebuffers.resize(m_SwapViews.size());
         for (size_t i = 0; i < m_SwapViews.size(); ++i)
         {
@@ -517,7 +504,6 @@ bool VkRenderAdapter::Initialize(IWindow* window)
                 "vkCreateFramebuffer failed");
         }
 
-        // 10) Command pool + buffers
         VkCommandPoolCreateInfo pci{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
         pci.queueFamilyIndex = m_GraphicsFamily;
         pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -532,7 +518,6 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         VK_ThrowIfFailed(vkAllocateCommandBuffers(m_Device, &ai, m_CmdBuffers.data()),
             "vkAllocateCommandBuffers failed");
 
-        // 11) Create vertex buffer (host visible)
         Vertex verts[3] = {
             { { 0.0f,  0.5f }, { 1.f, 0.f, 0.f } },
             { { 0.5f, -0.5f }, { 0.f, 1.f, 0.f } },
@@ -562,7 +547,6 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         std::memcpy(mapped, verts, sizeof(verts));
         vkUnmapMemory(m_Device, m_VBMem);
 
-        // 12) Sync objects
         VkSemaphoreCreateInfo sci2{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
         VkFenceCreateInfo fci{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
         fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;

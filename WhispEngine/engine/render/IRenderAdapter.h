@@ -11,7 +11,6 @@ public:
     virtual void BeginFrame() = 0;
     virtual void Clear(float r, float g, float b, float a) = 0;
 
-    // NEW: transform for test primitive
     virtual void SetTestTransform(const float* mvp16) = 0;
 
     virtual void DrawTestTriangle() = 0;

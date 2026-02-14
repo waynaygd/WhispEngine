@@ -33,7 +33,7 @@ private:
 	bool CreateCommandPoolAndBuffers();
 	bool CreateSyncObjects();
 
-	void RecreateSwapchain(); // позже, по resize
+	void RecreateSwapchain();
 	VkShaderModule LoadShaderModule(const char* spvPath);
 
 private:

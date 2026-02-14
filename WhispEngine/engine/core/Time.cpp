@@ -12,7 +12,6 @@ float Time::Tick()
 
     m_DeltaTime = delta.count();
 
-    // защита от скачков
     if (m_DeltaTime > 0.1f)
         m_DeltaTime = 0.1f;
 
