@@ -14,11 +14,14 @@ public:
     Application();
     ~Application();        // объявили, но НЕ определяем тут
 
+    void SetBackend(RenderBackend b) { m_Backend = b; }
+
     bool Initialize();  
     int Run();
     void Shutdown();
 
 private:
+    RenderBackend m_Backend = RenderBackend::DX12;
     std::unique_ptr<IWindow> m_Window;
     std::unique_ptr<IRenderAdapter> m_Renderer;
 

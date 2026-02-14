@@ -14,7 +14,6 @@ std::unique_ptr<IRenderAdapter> RenderFactory::Create(RenderBackend backend)
     switch (backend)
     {
     case RenderBackend::Null:
-    default:
         return std::make_unique<NullRenderAdapter>();
 
 #if defined(ENABLE_DX12)
@@ -26,5 +25,9 @@ std::unique_ptr<IRenderAdapter> RenderFactory::Create(RenderBackend backend)
     case RenderBackend::Vulkan:
         return std::make_unique<VkRenderAdapter>();
 #endif
+
+    default:
+        return std::make_unique<NullRenderAdapter>();
     }
 }
+

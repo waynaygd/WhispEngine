@@ -18,17 +18,10 @@ bool Application::Initialize()
     if (!m_Window->Create(1280, 720, "WhispEngine"))
         return false;
 
-    // пока временно выберем Null/DX12/Vulkan
-    // позже заменим на конфиг/аргумент
-    RenderBackend backend = RenderBackend::Null;
+    m_Renderer = RenderFactory::Create(m_Backend);
+    if (!m_Renderer)
+        return false;
 
-#if defined(ENABLE_DX12)
-    backend = RenderBackend::DX12;
-#elif defined(ENABLE_VULKAN)
-    backend = RenderBackend::Vulkan;
-#endif
-
-    m_Renderer = RenderFactory::Create(backend);
     if (!m_Renderer->Initialize(m_Window.get()))
         return false;
 

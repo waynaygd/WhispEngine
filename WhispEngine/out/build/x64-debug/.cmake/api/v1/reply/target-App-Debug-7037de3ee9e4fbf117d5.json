@@ -134,12 +134,12 @@
 			"id" : "Dx12Shaders::@6890427a1f51a3e7e1df"
 		},
 		{
-			"backtrace" : 10,
-			"id" : "VulkanShaders::@6890427a1f51a3e7e1df"
-		},
-		{
 			"backtrace" : 2,
 			"id" : "glfw::@fa9f4482d3a2b070f206"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "VulkanShaders::@6890427a1f51a3e7e1df"
 		},
 		{
 			"backtrace" : 2,

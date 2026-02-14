@@ -252,6 +252,24 @@ void Dx12RenderAdapter::BeginFrame()
 {
     ThrowIfFailed(m_Allocator[m_FrameIndex]->Reset(), "Allocator Reset failed");
     ThrowIfFailed(m_CmdList->Reset(m_Allocator[m_FrameIndex].Get(), m_Pso.Get()), "CmdList Reset failed");
+
+    D3D12_VIEWPORT vp{};
+    vp.TopLeftX = 0.0f;
+    vp.TopLeftY = 0.0f;
+    vp.Width = (float)m_Width;
+    vp.Height = (float)m_Height;
+    vp.MinDepth = 0.0f;
+    vp.MaxDepth = 1.0f;
+
+    D3D12_RECT sc{};
+    sc.left = 0;
+    sc.top = 0;
+    sc.right = (LONG)m_Width;
+    sc.bottom = (LONG)m_Height;
+
+    m_CmdList->RSSetViewports(1, &vp);
+    m_CmdList->RSSetScissorRects(1, &sc);
+
 }
 
 void Dx12RenderAdapter::Clear(float r, float g, float b, float a)
@@ -274,6 +292,7 @@ void Dx12RenderAdapter::Clear(float r, float g, float b, float a)
 
 void Dx12RenderAdapter::DrawTestTriangle()
 {
+    m_CmdList->SetPipelineState(m_Pso.Get());
     m_CmdList->SetGraphicsRootSignature(m_RootSig.Get());
     m_CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_CmdList->IASetVertexBuffers(0, 1, &m_VbView);

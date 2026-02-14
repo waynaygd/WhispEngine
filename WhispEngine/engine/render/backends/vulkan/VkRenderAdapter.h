@@ -67,5 +67,9 @@ private:
 	int m_Frame = 0;
 
 	float m_Clear[4] = { 0.08f, 0.08f, 0.12f, 1.0f };
+
+	VkBuffer m_VB = VK_NULL_HANDLE;
+	VkDeviceMemory m_VBMem = VK_NULL_HANDLE;
+
 };
 #endif
