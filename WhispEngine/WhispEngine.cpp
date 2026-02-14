@@ -4,7 +4,7 @@
 static RenderBackend ParseBackend(int argc, char** argv)
 {
     // дефолт: DX12 (или Null, если хочешь безопасно)
-    RenderBackend backend = GetCurrentBackend();
+    RenderBackend backend = RenderBackend::DX12;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -12,8 +12,7 @@ static RenderBackend ParseBackend(int argc, char** argv)
         if (std::strncmp(a, "--backend=", 10) == 0)
         {
             const char* v = a + 10;
-            if (std::strcmp(v, "null") == 0) backend = RenderBackend::Null;
-            else if (std::strcmp(v, "dx12") == 0) backend = RenderBackend::DX12;
+            if (std::strcmp(v, "dx12") == 0) backend = RenderBackend::DX12;
             else if (std::strcmp(v, "vulkan") == 0 || std::strcmp(v, "vk") == 0) backend = RenderBackend::Vulkan;
         }
     }

@@ -17,6 +17,9 @@ public:
 	void Present() override;
 	void Shutdown() override;
 
+	void SetTestTransform(const float* mvp16) override;
+
+
 private:
 	bool CreateInstance();
 	bool CreateSurface(IWindow* window);
@@ -70,6 +73,14 @@ private:
 
 	VkBuffer m_VB = VK_NULL_HANDLE;
 	VkDeviceMemory m_VBMem = VK_NULL_HANDLE;
+
+	float m_PendingMVP[16] = {
+		1,0,0,0,
+		0,1,0,0,
+		0,0,1,0,
+		0,0,0,1
+	};
+
 
 };
 #endif

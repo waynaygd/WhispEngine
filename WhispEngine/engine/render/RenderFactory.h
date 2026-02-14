@@ -5,7 +5,6 @@ class IRenderAdapter;
 
 enum class RenderBackend
 {
-    Null,
     DX12,
     Vulkan
 };

@@ -402,8 +402,18 @@ bool VkRenderAdapter::Initialize(IWindow* window)
             "vkCreateRenderPass failed");
 
         // 8) Pipeline (layout + shaders + fixed function)
-        VkPipelineLayoutCreateInfo pl{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-        VK_ThrowIfFailed(vkCreatePipelineLayout(m_Device, &pl, nullptr, &m_PipelineLayout),
+        VkPushConstantRange pcr{};
+        pcr.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        pcr.offset = 0;
+        pcr.size = sizeof(float) * 16; // 64 bytes, mat4
+
+        VkPipelineLayoutCreateInfo plci{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+        plci.setLayoutCount = 0;
+        plci.pSetLayouts = nullptr;
+        plci.pushConstantRangeCount = 1;
+        plci.pPushConstantRanges = &pcr;
+
+        VK_ThrowIfFailed(vkCreatePipelineLayout(m_Device, &plci, nullptr, &m_PipelineLayout),
             "vkCreatePipelineLayout failed");
 
         VkShaderModule vs = LoadShaderModule("shaders/vulkan/triangle_vert.spv");
@@ -434,9 +444,9 @@ bool VkRenderAdapter::Initialize(IWindow* window)
 
         VkViewport vp{};
         vp.x = 0.0f;
-        vp.y = 0.0f;
+        vp.y = (float)m_SwapExtent.height;
         vp.width = (float)m_SwapExtent.width;
-        vp.height = (float)m_SwapExtent.height;
+        vp.height = -(float)m_SwapExtent.height;
         vp.minDepth = 0.0f;
         vp.maxDepth = 1.0f;
 
@@ -455,7 +465,7 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         rs.rasterizerDiscardEnable = VK_FALSE;
         rs.polygonMode = VK_POLYGON_MODE_FILL;
         rs.cullMode = VK_CULL_MODE_BACK_BIT;
-        rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        rs.frontFace = VK_FRONT_FACE_CLOCKWISE;
         rs.depthBiasEnable = VK_FALSE;
         rs.lineWidth = 1.0f;
 
@@ -620,6 +630,15 @@ void VkRenderAdapter::Clear(float r, float g, float b, float a)
 
 void VkRenderAdapter::DrawTestTriangle()
 {
+    vkCmdPushConstants(
+        m_CmdBuffers[m_ImageIndex],
+        m_PipelineLayout,
+        VK_SHADER_STAGE_VERTEX_BIT,
+        0,
+        sizeof(float) * 16,
+        m_PendingMVP
+    );
+
     VkDeviceSize offs = 0;
     vkCmdBindVertexBuffers(m_CmdBuffers[m_ImageIndex], 0, 1, &m_VB, &offs);
     vkCmdDraw(m_CmdBuffers[m_ImageIndex], 3, 1, 0, 0);
@@ -712,4 +731,8 @@ void VkRenderAdapter::Shutdown()
     Logger::Get().Info("Vulkan adapter shutdown");
 }
 
+void VkRenderAdapter::SetTestTransform(const float* mvp16)
+{
+    memcpy(m_PendingMVP, mvp16, sizeof(float) * 16);
+}
 #endif

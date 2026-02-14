@@ -40,6 +40,11 @@ static void ThrowIfFailed(HRESULT hr, const char* msg)
     }
 }
 
+void Dx12RenderAdapter::SetTestTransform(const float* mvp16)
+{
+    memcpy(m_PendingMVP, mvp16, sizeof(float) * 16);
+}
+
 bool Dx12RenderAdapter::Initialize(IWindow* window)
 {
     try
@@ -170,13 +175,19 @@ bool Dx12RenderAdapter::CreateSyncObjects()
 
 bool Dx12RenderAdapter::CreatePipelineAndAssets()
 {
-    // Root signature: пустая, только IA + VS/PS без ресурсов
+    D3D12_ROOT_PARAMETER rp{};
+    rp.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    rp.Descriptor.ShaderRegister = 0; // b0
+    rp.Descriptor.RegisterSpace = 0;
+    rp.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+
     D3D12_ROOT_SIGNATURE_DESC rsd{};
-    rsd.NumParameters = 0;
-    rsd.pParameters = nullptr;
+    rsd.NumParameters = 1;
+    rsd.pParameters = &rp;
     rsd.NumStaticSamplers = 0;
     rsd.pStaticSamplers = nullptr;
     rsd.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
 
     Microsoft::WRL::ComPtr<ID3DBlob> serialized;
     Microsoft::WRL::ComPtr<ID3DBlob> error;
@@ -245,6 +256,37 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
     m_VbView.StrideInBytes = sizeof(Vtx);
     m_VbView.SizeInBytes = vbSize;
 
+    struct alignas(256) CB
+    {
+        float mvp[16];
+    };
+
+    for (UINT i = 0; i < FrameCount; ++i)
+    {
+        D3D12_HEAP_PROPERTIES hp{};
+        hp.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+        D3D12_RESOURCE_DESC rd = CD3DX12_RESOURCE_DESC::Buffer(sizeof(CB));
+
+        ThrowIfFailed(m_Device->CreateCommittedResource(
+            &hp, D3D12_HEAP_FLAG_NONE, &rd,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+            IID_PPV_ARGS(&m_Cb[i])
+        ), "CreateCommittedResource CB failed");
+
+        CD3DX12_RANGE range(0, 0);
+        void* mapped = nullptr;
+        ThrowIfFailed(m_Cb[i]->Map(0, &range, &mapped), "CB Map failed");
+        m_CbMapped[i] = reinterpret_cast<uint8_t*>(mapped);
+        m_CbGpu[i] = m_Cb[i]->GetGPUVirtualAddress();
+
+        // init identity
+        CB init{};
+        memcpy(init.mvp, m_PendingMVP, sizeof(init.mvp));
+        memcpy(m_CbMapped[i], &init, sizeof(CB));
+    }
+
+
     return true;
 }
 
@@ -292,8 +334,15 @@ void Dx12RenderAdapter::Clear(float r, float g, float b, float a)
 
 void Dx12RenderAdapter::DrawTestTriangle()
 {
-    m_CmdList->SetPipelineState(m_Pso.Get());
+    // update CB for current frame
+    struct alignas(256) CB { float mvp[16]; };
+    CB cb{};
+    memcpy(cb.mvp, m_PendingMVP, sizeof(cb.mvp));
+    memcpy(m_CbMapped[m_FrameIndex], &cb, sizeof(CB));
+
     m_CmdList->SetGraphicsRootSignature(m_RootSig.Get());
+    m_CmdList->SetGraphicsRootConstantBufferView(0, m_CbGpu[m_FrameIndex]);
+
     m_CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_CmdList->IASetVertexBuffers(0, 1, &m_VbView);
     m_CmdList->DrawInstanced(3, 1, 0, 0);
@@ -357,6 +406,16 @@ void Dx12RenderAdapter::Shutdown()
     {
         CloseHandle(m_FenceEvent);
         m_FenceEvent = nullptr;
+    }
+
+    for (UINT i = 0; i < FrameCount; ++i)
+    {
+        if (m_Cb[i] && m_CbMapped[i])
+        {
+            m_Cb[i]->Unmap(0, nullptr);
+            m_CbMapped[i] = nullptr;
+        }
+        m_Cb[i].Reset();
     }
 
     m_VB.Reset();

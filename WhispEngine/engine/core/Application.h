@@ -8,6 +8,20 @@
 class IWindow;
 class IRenderAdapter;
 
+struct TransformState
+{
+    float x = 0.0f;
+    float y = 0.0f;
+    float scale = 1.0f;
+    float angle = 0.0f;          // radians
+
+    float targetScale = 1.0f;
+    float targetAngle = 0.0f;
+
+    bool prevLMB = false;
+    bool prevRMB = false;
+};
+
 class Application
 {
 public:
@@ -20,7 +34,11 @@ public:
     int Run();
     void Shutdown();
 
+    void UpdateInputAndTransform(float dt);
+
 private:
+    TransformState m_Obj; // NEW
+
     RenderBackend m_Backend = RenderBackend::DX12;
     std::unique_ptr<IWindow> m_Window;
     std::unique_ptr<IRenderAdapter> m_Renderer;

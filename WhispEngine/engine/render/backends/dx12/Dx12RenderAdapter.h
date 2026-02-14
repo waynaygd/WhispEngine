@@ -18,6 +18,8 @@ public:
 	void Present() override;
 	void Shutdown() override;
 
+	void SetTestTransform(const float* mvp16) override;
+
 private:
 	bool CreateDevice(HWND hwnd);
 	bool CreateCommandObjects();
@@ -58,5 +60,17 @@ private:
 
 	UINT m_Width = 1280;
 	UINT m_Height = 720;
+
+	Microsoft::WRL::ComPtr<ID3D12Resource> m_Cb[FrameCount];
+	uint8_t* m_CbMapped[FrameCount] = {};
+	D3D12_GPU_VIRTUAL_ADDRESS m_CbGpu[FrameCount] = {};
+
+	float m_PendingMVP[16] = {
+		1,0,0,0,
+		0,1,0,0,
+		0,0,1,0,
+		0,0,0,1
+	};
+
 };
 #endif
