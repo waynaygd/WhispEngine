@@ -1,12 +1,14 @@
-﻿// WhispEngine.cpp: определяет точку входа для приложения.
-//
-
-#include "WhispEngine.h"
-
-using namespace std;
+﻿#include "core/Application.h"
 
 int main()
 {
-	cout << "Hello CMake." << endl;
-	return 0;
+    Application app;
+
+    if (!app.Initialize())
+        return -1;
+
+    int result = app.Run();
+    app.Shutdown();
+
+    return result;
 }

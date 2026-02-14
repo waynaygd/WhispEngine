@@ -1,21 +1,40 @@
-﻿# CMakeList.txt: проект CMake для WhispEngine; включите исходный код и определения,
-# укажите здесь логику для конкретного проекта.
-#
-cmake_minimum_required (VERSION 3.8)
+﻿cmake_minimum_required(VERSION 3.20)
+project(WhispEngine LANGUAGES CXX)
 
-# Включение горячей перезагрузки для компиляторов MSVC, если поддерживается.
-if (POLICY CMP0141)
-  cmake_policy(SET CMP0141 NEW)
-  set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+option(ENABLE_DX12 "Enable DirectX 12 backend" ON)
+option(ENABLE_VULKAN "Enable Vulkan backend" ON)
+
+include(FetchContent)
+
+FetchContent_Declare(
+  glfw
+  GIT_REPOSITORY https://github.com/glfw/glfw.git
+  GIT_TAG 3.4
+)
+
+FetchContent_MakeAvailable(glfw)
+
+add_subdirectory(engine)
+
+add_executable(App WhispEngine.cpp)
+target_link_libraries(App PRIVATE Engine)
+
+include(engine/shaders/Shaders.cmake)
+setup_shaders(App)
+
+# копирование dll (если нужно)
+if (WIN32 AND ENABLE_DX12)
+  add_custom_command(TARGET App POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      ${CMAKE_SOURCE_DIR}/external/dxc/bin/x64/dxcompiler.dll
+      $<TARGET_FILE_DIR:App>/dxcompiler.dll
+  )
+  add_custom_command(TARGET App POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      ${CMAKE_SOURCE_DIR}/external/dxc/bin/x64/dxil.dll
+      $<TARGET_FILE_DIR:App>/dxil.dll
+  )
 endif()
-
-project ("WhispEngine")
-
-# Добавьте источник в исполняемый файл этого проекта.
-add_executable (WhispEngine "WhispEngine.cpp" "WhispEngine.h")
-
-if (CMAKE_VERSION VERSION_GREATER 3.12)
-  set_property(TARGET WhispEngine PROPERTY CXX_STANDARD 20)
-endif()
-
-# TODO: Добавьте тесты и целевые объекты, если это необходимо.
