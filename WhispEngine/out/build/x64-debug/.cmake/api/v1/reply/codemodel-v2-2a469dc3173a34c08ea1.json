@@ -22,7 +22,7 @@
 					"targetIndexes" : 
 					[
 						0,
-						1,
+						2,
 						3
 					]
 				},
@@ -87,7 +87,7 @@
 					"source" : "engine",
 					"targetIndexes" : 
 					[
-						2
+						1
 					]
 				}
 			],
@@ -134,13 +134,6 @@
 			[
 				{
 					"directoryIndex" : 0,
-					"id" : "App::@6890427a1f51a3e7e1df",
-					"jsonFile" : "target-App-Debug-7037de3ee9e4fbf117d5.json",
-					"name" : "App",
-					"projectIndex" : 0
-				},
-				{
-					"directoryIndex" : 0,
 					"id" : "Dx12Shaders::@6890427a1f51a3e7e1df",
 					"jsonFile" : "target-Dx12Shaders-Debug-198241ccce44cf1c1323.json",
 					"name" : "Dx12Shaders",
@@ -158,6 +151,13 @@
 					"id" : "VulkanShaders::@6890427a1f51a3e7e1df",
 					"jsonFile" : "target-VulkanShaders-Debug-183cd80f6e4708c3bc3f.json",
 					"name" : "VulkanShaders",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "WhispEngine::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-WhispEngine-Debug-00c5a4935f4ace834d2c.json",
+					"name" : "WhispEngine",
 					"projectIndex" : 0
 				},
 				{

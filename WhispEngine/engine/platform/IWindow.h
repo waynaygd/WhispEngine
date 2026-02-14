@@ -10,4 +10,7 @@ public:
     virtual void PollEvents() = 0;
     virtual bool ShouldClose() const = 0;
     virtual void* GetNativeHandle() const = 0;
+
+    virtual void SetTitle(const char* title) = 0;
+
 };

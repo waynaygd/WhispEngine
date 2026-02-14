@@ -57,6 +57,28 @@ int Application::Run()
         m_Window->PollEvents();
         float dt = m_Time.Tick();
 
+        static float fpsTimer = 0.0f;
+        static int fpsFrames = 0;
+
+        fpsTimer += dt;
+        fpsFrames++;
+
+        if (fpsTimer >= 1.0f)
+        {
+            float fps = fpsFrames / fpsTimer;
+
+            char title[256];
+            snprintf(title, sizeof(title),
+                "WhispEngine | FPS: %.1f | dt: %.3f ms",
+                fps,
+                dt * 1000.0f);
+
+            m_Window->SetTitle(title);
+
+            fpsTimer = 0.0f;
+            fpsFrames = 0;
+        }
+
         UpdateInputAndTransform(dt);
 
         float mvp[16];

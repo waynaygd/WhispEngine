@@ -2,10 +2,10 @@
 	"artifacts" : 
 	[
 		{
-			"path" : "App.exe"
+			"path" : "WhispEngine.exe"
 		},
 		{
-			"path" : "App.pdb"
+			"path" : "WhispEngine.pdb"
 		}
 	],
 	"backtrace" : 1,
@@ -134,19 +134,19 @@
 			"id" : "Dx12Shaders::@6890427a1f51a3e7e1df"
 		},
 		{
-			"backtrace" : 2,
-			"id" : "glfw::@fa9f4482d3a2b070f206"
-		},
-		{
 			"backtrace" : 10,
 			"id" : "VulkanShaders::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "glfw::@fa9f4482d3a2b070f206"
 		},
 		{
 			"backtrace" : 2,
 			"id" : "Engine::@4088515cb4035b412499"
 		}
 	],
-	"id" : "App::@6890427a1f51a3e7e1df",
+	"id" : "WhispEngine::@6890427a1f51a3e7e1df",
 	"link" : 
 	{
 		"commandFragments" : 
@@ -201,8 +201,8 @@
 		],
 		"language" : "CXX"
 	},
-	"name" : "App",
-	"nameOnDisk" : "App.exe",
+	"name" : "WhispEngine",
+	"nameOnDisk" : "WhispEngine.exe",
 	"paths" : 
 	{
 		"build" : ".",

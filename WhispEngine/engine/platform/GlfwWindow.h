@@ -16,6 +16,8 @@ public:
 
     GLFWwindow* GetGlfwHandle() const { return m_Window; }
 
+    void SetTitle(const char* title) override;
+
 private:
     GLFWwindow* m_Window = nullptr;
 };

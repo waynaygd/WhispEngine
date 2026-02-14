@@ -56,3 +56,9 @@ void* GlfwWindow::GetNativeHandle() const
     return nullptr;
 #endif
 }
+
+void GlfwWindow::SetTitle(const char* title)
+{
+    glfwSetWindowTitle(m_Window, title);
+}
+
