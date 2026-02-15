@@ -7,6 +7,12 @@ add_library(Engine
   platform/GlfwWindow.cpp
 )
 
+target_sources(Engine PRIVATE
+    game/states/LoadingState.cpp
+    game/states/MenuState.cpp
+    game/states/GameplayState.cpp
+)
+
 target_include_directories(Engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(Engine PUBLIC glfw)
 

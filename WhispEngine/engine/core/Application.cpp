@@ -1,10 +1,13 @@
 #include "Application.h"
-#include "Application.h"
 #include "Logger.h"
 
 #include "../platform/GlfwWindow.h"
 #include "../render/IRenderAdapter.h"
 #include <GLFW/glfw3.h>
+
+#include "../game/states/LoadingState.h"
+
+#include <sstream>
 
 Application::Application() = default;
 Application::~Application() = default;
@@ -47,15 +50,43 @@ bool Application::Initialize()
         return false;
 
     m_IsRunning = true;
+
+    RequestStateChange(std::make_unique<LoadingState>());
+    m_StateMachine.ApplyPending(*this);
+
     return true;
 }
 
 int Application::Run()
 {
+    double accumulator = 0.0;
+    const double fixedDt = 1.0 / 60.0;
+    const int maxSteps = 5;
+
     while (m_IsRunning && !m_Window->ShouldClose())
     {
         m_Window->PollEvents();
         float dt = m_Time.Tick();
+
+        if (m_UpdateMode == UpdateMode::Fixed)
+        {
+            accumulator += dt;
+
+            int steps = 0;
+            while (accumulator >= fixedDt && steps < maxSteps)
+            {
+                m_StateMachine.Update(*this, fixedDt);
+                m_StateMachine.ApplyPending(*this);
+
+                accumulator -= fixedDt;
+                ++steps;
+            }
+        }
+        else
+        {
+            m_StateMachine.Update(*this, dt);
+            m_StateMachine.ApplyPending(*this);
+        }
 
         static float fpsTimer = 0.0f;
         static int fpsFrames = 0;
@@ -75,21 +106,23 @@ int Application::Run()
 
             m_Window->SetTitle(title);
 
+            std::ostringstream ss;
+            ss << "FPS=" << fps
+                << " dt(ms)=" << dt * 1000.0f;
+
+            Logger::Get().Info(ss.str());
+
             fpsTimer = 0.0f;
             fpsFrames = 0;
         }
-
-        UpdateInputAndTransform(dt);
 
         float mvp[16];
         BuildMVP(mvp, m_Obj.x, m_Obj.y, m_Obj.scale, m_Obj.angle);
         m_Renderer->SetTestTransform(mvp);
 
-        m_StateMachine.Update(dt);
-
         m_Renderer->BeginFrame();
         m_Renderer->Clear(0.08f, 0.08f, 0.12f, 1.0f);
-        m_StateMachine.Render(*m_Renderer);
+        m_StateMachine.Render(*this, *m_Renderer);
         m_Renderer->DrawTestTriangle();
         m_Renderer->EndFrame();
         m_Renderer->Present();
@@ -144,4 +177,9 @@ void Application::UpdateInputAndTransform(float dt)
     if (m_Obj.x > 0.9f) m_Obj.x = 0.9f;
     if (m_Obj.y < -0.9f) m_Obj.y = -0.9f;
     if (m_Obj.y > 0.9f) m_Obj.y = 0.9f;
+}
+
+void Application::RequestStateChange(std::unique_ptr<IGameState> s)
+{
+    m_StateMachine.ChangeState(std::move(s));
 }

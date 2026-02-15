@@ -1,3 +1,27 @@
-[INFO] 01:53:28 Application Initialize
-[INFO] 01:53:29 DX12 adapter initialized
-[INFO] 01:53:49 DX12 adapter shutdown
+[INFO] 12:57:49 Application Initialize
+[INFO] 12:57:50 Vulkan adapter initialized
+[INFO] 12:57:50 LoadingState: OnEnter
+[INFO] 12:57:50 MenuState: OnEnter (ENTER -> Gameplay)
+[INFO] 12:57:50 FPS=7838.61 dt(ms)=0.0577
+[INFO] 12:57:51 FPS=11644.9 dt(ms)=0.0684
+[INFO] 12:57:52 MenuState: ENTER detected -> switch to Gameplay
+[INFO] 12:57:52 GameplayState: OnEnter (ESC -> Menu).
+[INFO] 12:57:52 FPS=12449.4 dt(ms)=0.0722
+[INFO] 12:57:53 FPS=12528.4 dt(ms)=0.0553
+[INFO] 12:57:54 FPS=13483.2 dt(ms)=0.0631
+[INFO] 12:57:55 GameplayState: ESC detected -> switch to Menu
+[INFO] 12:57:55 MenuState: OnEnter (ENTER -> Gameplay)
+[INFO] 12:57:55 FPS=13389.9 dt(ms)=0.0635
+[INFO] 12:57:56 FPS=12518 dt(ms)=0.1294
+[INFO] 12:57:57 FPS=13332.3 dt(ms)=0.0602
+[INFO] 12:57:58 FPS=13080.6 dt(ms)=0.0645
+[INFO] 12:57:59 MenuState: ENTER detected -> switch to Gameplay
+[INFO] 12:57:59 GameplayState: OnEnter (ESC -> Menu).
+[INFO] 12:57:59 FPS=13204.7 dt(ms)=0.0642
+[INFO] 12:58:00 FPS=13264.6 dt(ms)=0.0758
+[INFO] 12:58:01 FPS=12650.2 dt(ms)=0.06
+[INFO] 12:58:02 GameplayState: ESC detected -> switch to Menu
+[INFO] 12:58:02 MenuState: OnEnter (ENTER -> Gameplay)
+[INFO] 12:58:02 FPS=13410.3 dt(ms)=0.238
+[INFO] 12:58:03 FPS=11541.7 dt(ms)=0.0542
+[INFO] 12:58:04 Vulkan adapter shutdown
