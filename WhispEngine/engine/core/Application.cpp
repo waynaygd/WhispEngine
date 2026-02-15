@@ -1,5 +1,6 @@
 #include "Application.h"
 #include "Logger.h"
+#include "ConfigLoader.h"
 
 #include "../platform/GlfwWindow.h"
 #include "../render/IRenderAdapter.h"
@@ -30,6 +31,15 @@ static void BuildMVP(float* out16, float x, float y, float s, float a)
     out16[3] = 0.0f;   out16[7] = 0.0f;    out16[11] = 0.0f; out16[15] = 1.0f;
 }
 
+static const char* BackendToString(RenderBackend b)
+{
+    switch (b)
+    {
+    case RenderBackend::DX12:   return "DX12";
+    case RenderBackend::Vulkan: return "Vulkan";
+    default:                    return "Unknown";
+    }
+}
 
 bool Application::Initialize()
 {
@@ -38,16 +48,39 @@ bool Application::Initialize()
 
     m_Time.Initialize();
 
-    m_Window = std::make_unique<GlfwWindow>();
-    if (!m_Window->Create(1280, 720, "WhispEngine"))
-        return false;
+    AppConfig cfg;
+    ConfigLoader::Load("engine/config/app.json", cfg);
 
-    m_Renderer = RenderFactory::Create(m_Backend);
-    if (!m_Renderer)
-        return false;
+    if (cfg.windows.empty())
+    {
+        Logger::Get().Error("Config has no windows. Falling back to single DX12 window.");
+    }
+    else
+    {
+        for (const auto& wcfg : cfg.windows)
+        {
+            WindowContext ctx;
+            ctx.backend = wcfg.backend;
+            ctx.baseTitle = wcfg.title + " | " + BackendToString(wcfg.backend);
+            ctx.clear[0] = wcfg.clear[0];
+            ctx.clear[1] = wcfg.clear[1];
+            ctx.clear[2] = wcfg.clear[2];
+            ctx.clear[3] = wcfg.clear[3];
 
-    if (!m_Renderer->Initialize(m_Window.get()))
-        return false;
+            ctx.window = std::make_unique<GlfwWindow>();
+            if (!ctx.window->Create(wcfg.width, wcfg.height, ctx.baseTitle))
+                return false;
+
+            ctx.renderer = RenderFactory::Create(ctx.backend);
+            if (!ctx.renderer)
+                return false;
+
+            if (!ctx.renderer->Initialize(ctx.window.get()))
+                return false;
+
+            m_Windows.push_back(std::move(ctx));
+        }
+    }
 
     m_IsRunning = true;
 
@@ -57,15 +90,42 @@ bool Application::Initialize()
     return true;
 }
 
+
 int Application::Run()
 {
     double accumulator = 0.0;
     const double fixedDt = 1.0 / 60.0;
     const int maxSteps = 5;
 
-    while (m_IsRunning && !m_Window->ShouldClose())
+    while (m_IsRunning)
     {
-        m_Window->PollEvents();
+        if (!m_Windows.empty())
+            m_Windows[0].window->PollEvents();
+
+        auto* primary = dynamic_cast<GlfwWindow*>(GetWindow());
+        if (primary)
+        {
+            GLFWwindow* w = primary->GetGlfwHandle();
+            static bool prevF5 = false;
+            bool f5 = glfwGetKey(w, GLFW_KEY_F5) == GLFW_PRESS;
+
+            if (f5 && !prevF5)
+            {
+                for (auto& wc : m_Windows)
+                {
+                    if (wc.backend == RenderBackend::Vulkan && wc.renderer)
+                        wc.renderer->HotReloadShaders();
+                }
+            }
+            prevF5 = f5;
+        }
+
+        bool anyAlive = false;
+        for (auto& wc : m_Windows)
+            anyAlive |= (wc.window && !wc.window->ShouldClose());
+
+        if (!anyAlive) break;
+
         float dt = m_Time.Tick();
 
         if (m_UpdateMode == UpdateMode::Fixed)
@@ -98,18 +158,22 @@ int Application::Run()
         {
             float fps = fpsFrames / fpsTimer;
 
-            char title[256];
-            snprintf(title, sizeof(title),
-                "WhispEngine | FPS: %.1f | dt: %.3f ms",
-                fps,
-                dt * 1000.0f);
+            for (auto& wc : m_Windows)
+            {
+                if (!wc.window || wc.window->ShouldClose()) continue;
 
-            m_Window->SetTitle(title);
+                char title[256];
+                snprintf(title, sizeof(title),
+                    "%s | FPS: %.1f | dt: %.3f ms",
+                    wc.baseTitle.c_str(),
+                    fps,
+                    dt * 1000.0f);
+
+                wc.window->SetTitle(title);
+            }
 
             std::ostringstream ss;
-            ss << "FPS=" << fps
-                << " dt(ms)=" << dt * 1000.0f;
-
+            ss << "FPS=" << fps << " dt(ms)=" << dt * 1000.0f;
             Logger::Get().Info(ss.str());
 
             fpsTimer = 0.0f;
@@ -118,29 +182,43 @@ int Application::Run()
 
         float mvp[16];
         BuildMVP(mvp, m_Obj.x, m_Obj.y, m_Obj.scale, m_Obj.angle);
-        m_Renderer->SetTestTransform(mvp);
 
-        m_Renderer->BeginFrame();
-        m_Renderer->Clear(0.08f, 0.08f, 0.12f, 1.0f);
-        m_StateMachine.Render(*this, *m_Renderer);
-        m_Renderer->DrawTestTriangle();
-        m_Renderer->EndFrame();
-        m_Renderer->Present();
+        for (auto& wc : m_Windows)
+        {
+            if (!wc.window || wc.window->ShouldClose()) continue;
+
+            wc.renderer->SetTestTransform(mvp);
+
+            wc.renderer->BeginFrame();
+            wc.renderer->Clear(wc.clear[0], wc.clear[1], wc.clear[2], wc.clear[3]);
+
+            m_StateMachine.Render(*this, *wc.renderer);
+            wc.renderer->DrawTestTriangle();
+
+            wc.renderer->EndFrame();
+            wc.renderer->Present();
+        }
     }
-
     return 0;
 }
 
 void Application::Shutdown()
 {
-    if (m_Renderer) m_Renderer->Shutdown();
+    for (auto& wc : m_Windows)
+        if (wc.renderer) wc.renderer->Shutdown();
+
+    m_Windows.clear();
     Logger::Get().Shutdown();
 }
 
-void Application::UpdateInputAndTransform(float dt)
+
+void Application::UpdateInputAndTransform(IWindow* srcWindow, float dt)
 {
-    auto* gw = static_cast<GlfwWindow*>(m_Window.get());
+    auto* gw = dynamic_cast<GlfwWindow*>(srcWindow);
+    if (!gw) return;
+
     GLFWwindow* w = gw->GetGlfwHandle();
+    if (!w) return;
 
     const float moveSpeed = 0.8f;    
     const float rotSpeed = 2.0f;    

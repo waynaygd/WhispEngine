@@ -13,6 +13,9 @@ public:
 
     virtual void SetTestTransform(const float* mvp16) = 0;
 
+    virtual bool ReloadShaders() { return false; }
+    virtual bool HotReloadShaders() { return false; }
+
     virtual void DrawTestTriangle() = 0;
     virtual void EndFrame() = 0;
     virtual void Present() = 0;

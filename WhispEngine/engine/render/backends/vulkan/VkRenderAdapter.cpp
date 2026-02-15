@@ -9,6 +9,10 @@
 
 #include <vulkan/vulkan.h>
 
+#include <cstdlib>     
+#include <filesystem>
+#include <sstream>
+
 #include <vector>
 #include <cstring>
 #include <stdexcept>
@@ -17,16 +21,142 @@
 #include <optional>
 #include <cstdint>
 
-static std::vector<uint8_t> ReadFileBinary(const char* path)
+#ifdef _WIN32
+#include <Windows.h>
+#endif
+
+#include <string>
+
+#ifdef _WIN32
+static int RunProcessW(const std::wstring& commandLine)
 {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) return {};
-    f.seekg(0, std::ios::end);
-    size_t sz = (size_t)f.tellg();
-    f.seekg(0, std::ios::beg);
-    std::vector<uint8_t> data(sz);
-    f.read((char*)data.data(), sz);
-    return data;
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+
+    PROCESS_INFORMATION pi{};
+
+    std::wstring cmd = commandLine;
+
+    if (!CreateProcessW(
+        nullptr,
+        cmd.data(),
+        nullptr, nullptr,
+        FALSE,
+        0,
+        nullptr,
+        nullptr,
+        &si,
+        &pi))
+    {
+        return -1;
+    }
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+
+    DWORD exitCode = 0;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+
+    return static_cast<int>(exitCode);
+}
+#endif
+
+
+static bool ReadFileBinary(const std::string& path, std::vector<uint32_t>& outWords, std::string& outErr)
+{
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file.is_open())
+    {
+        outErr = "Cannot open SPIR-V file: " + path;
+        return false;
+    }
+
+    const std::streamsize size = file.tellg();
+    if (size <= 0)
+    {
+        outErr = "Empty SPIR-V file: " + path;
+        return false;
+    }
+
+    if (size % 4 != 0)
+    {
+        outErr = "SPIR-V size is not multiple of 4: " + path;
+        return false;
+    }
+
+    file.seekg(0, std::ios::beg);
+    outWords.resize(static_cast<size_t>(size / 4));
+    if (!file.read(reinterpret_cast<char*>(outWords.data()), size))
+    {
+        outErr = "Failed to read SPIR-V file: " + path;
+        return false;
+    }
+
+    return true;
+}
+
+static bool ResolveExistingPath(const std::string& path, std::string& outResolved)
+{
+    namespace fs = std::filesystem;
+
+    if (fs::exists(path)) { outResolved = path; return true; }
+
+    const std::string p1 = "../" + path;
+    const std::string p2 = "../../" + path;
+    const std::string p3 = "../../../" + path;
+    const std::string p4 = "../../../../" + path;
+
+    if (fs::exists(p1)) { outResolved = p1; return true; }
+    if (fs::exists(p2)) { outResolved = p2; return true; }
+    if (fs::exists(p3)) { outResolved = p3; return true; }
+    if (fs::exists(p4)) { outResolved = p4; return true; }
+
+    return false;
+}
+
+
+static bool TryReadSpv(const std::string& p, std::vector<uint32_t>& outWords, std::string& outErr)
+{
+    return ReadFileBinary(p, outWords, outErr);
+}
+
+static bool ResolveAndReadSpv(const std::string& path,
+    std::vector<uint32_t>& outWords,
+    std::string& outUsedPath,
+    std::string& outErr)
+{
+    if (TryReadSpv(path, outWords, outErr)) { outUsedPath = path; return true; }
+
+    const std::string p1 = "../" + path;
+    const std::string p2 = "../../" + path;
+    const std::string p3 = "../../../" + path;
+    const std::string p4 = "../../../../" + path;
+
+    if (TryReadSpv(p1, outWords, outErr)) { outUsedPath = p1; return true; }
+    if (TryReadSpv(p2, outWords, outErr)) { outUsedPath = p2; return true; }
+    if (TryReadSpv(p3, outWords, outErr)) { outUsedPath = p3; return true; }
+    if (TryReadSpv(p4, outWords, outErr)) { outUsedPath = p4; return true; }
+
+    outErr = "Cannot open SPIR-V file: " + path + " (also tried ../ ../../ ../../../ ../../../../)";
+    return false;
+}
+
+
+static bool CreateShaderModule(VkDevice device, const std::vector<uint32_t>& words, VkShaderModule& outModule, std::string& outErr)
+{
+    VkShaderModuleCreateInfo ci{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+    ci.codeSize = words.size() * sizeof(uint32_t);
+    ci.pCode = words.data();
+
+    VkResult r = vkCreateShaderModule(device, &ci, nullptr, &outModule);
+    if (r != VK_SUCCESS)
+    {
+        outErr = "vkCreateShaderModule failed";
+        return false;
+    }
+    return true;
 }
 
 static void VK_ThrowIfFailed(VkResult r, const char* msg)
@@ -72,89 +202,6 @@ static QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice phys, VkSurfaceKHR 
     return idx;
 }
 
-struct SwapchainSupport
-{
-    VkSurfaceCapabilitiesKHR caps{};
-    std::vector<VkSurfaceFormatKHR> formats;
-    std::vector<VkPresentModeKHR> presentModes;
-};
-
-static SwapchainSupport QuerySwapchainSupport(VkPhysicalDevice phys, VkSurfaceKHR surface)
-{
-    SwapchainSupport s;
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, surface, &s.caps);
-
-    uint32_t count = 0;
-    vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surface, &count, nullptr);
-    s.formats.resize(count);
-    if (count) vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surface, &count, s.formats.data());
-
-    count = 0;
-    vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &count, nullptr);
-    s.presentModes.resize(count);
-    if (count) vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &count, s.presentModes.data());
-
-    return s;
-}
-
-static VkSurfaceFormatKHR ChooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats)
-{
-    for (auto& f : formats)
-    {
-        if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
-            return f;
-    }
-    return formats[0];
-}
-
-static VkPresentModeKHR ChoosePresentMode(const std::vector<VkPresentModeKHR>& modes)
-{
-    for (auto m : modes)
-    {
-        if (m == VK_PRESENT_MODE_MAILBOX_KHR) return m;
-    }
-    return VK_PRESENT_MODE_FIFO_KHR;
-}
-
-static VkExtent2D ChooseExtent(const VkSurfaceCapabilitiesKHR& caps, uint32_t w, uint32_t h)
-{
-    if (caps.currentExtent.width != UINT32_MAX)
-        return caps.currentExtent;
-
-    VkExtent2D e{};
-    e.width = std::max(caps.minImageExtent.width, std::min(caps.maxImageExtent.width, w));
-    e.height = std::max(caps.minImageExtent.height, std::min(caps.maxImageExtent.height, h));
-    return e;
-}
-
-static uint32_t FindMemoryType(VkPhysicalDevice phys, uint32_t typeBits, VkMemoryPropertyFlags props)
-{
-    VkPhysicalDeviceMemoryProperties memProps{};
-    vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
-
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i)
-    {
-        if ((typeBits & (1u << i)) && (memProps.memoryTypes[i].propertyFlags & props) == props)
-            return i;
-    }
-    throw std::runtime_error("Failed to find suitable Vulkan memory type");
-}
-
-VkShaderModule VkRenderAdapter::LoadShaderModule(const char* spvPath)
-{
-    auto data = ReadFileBinary(spvPath);
-    if (data.empty())
-        throw std::runtime_error(std::string("SPIR-V not found: ") + spvPath);
-
-    VkShaderModuleCreateInfo ci{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
-    ci.codeSize = data.size();
-    ci.pCode = reinterpret_cast<const uint32_t*>(data.data());
-
-    VkShaderModule m = VK_NULL_HANDLE;
-    VK_ThrowIfFailed(vkCreateShaderModule(m_Device, &ci, nullptr, &m), "vkCreateShaderModule failed");
-    return m;
-}
-
 struct Vertex
 {
     float pos[2];
@@ -185,6 +232,227 @@ static std::array<VkVertexInputAttributeDescription, 2> VertexAttributes()
     a[1].offset = offsetof(Vertex, color);
 
     return a;
+}
+
+struct SwapchainSupport
+{
+    VkSurfaceCapabilitiesKHR caps{};
+    std::vector<VkSurfaceFormatKHR> formats;
+    std::vector<VkPresentModeKHR> presentModes;
+};
+
+static SwapchainSupport QuerySwapchainSupport(VkPhysicalDevice phys, VkSurfaceKHR surface)
+{
+    SwapchainSupport s;
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, surface, &s.caps);
+
+    uint32_t count = 0;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surface, &count, nullptr);
+    s.formats.resize(count);
+    if (count) vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surface, &count, s.formats.data());
+
+    count = 0;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &count, nullptr);
+    s.presentModes.resize(count);
+    if (count) vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &count, s.presentModes.data());
+
+    return s;
+}
+
+static VkSurfaceFormatKHR ChooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats)
+{
+    for (auto& f : formats)
+    {
+        if (f.format == VK_FORMAT_B8G8R8A8_UNORM && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+            return f;
+    }
+    for (auto& f : formats)
+    {
+        if (f.format == VK_FORMAT_R8G8B8A8_UNORM && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+            return f;
+    }
+    return formats[0];
+}
+
+
+static VkPresentModeKHR ChoosePresentMode(const std::vector<VkPresentModeKHR>& modes)
+{
+    for (auto m : modes)
+    {
+        if (m == VK_PRESENT_MODE_MAILBOX_KHR) return m;
+    }
+    return VK_PRESENT_MODE_FIFO_KHR;
+}
+
+static VkExtent2D ChooseExtent(const VkSurfaceCapabilitiesKHR& caps, uint32_t w, uint32_t h)
+{
+    if (caps.currentExtent.width != UINT32_MAX)
+        return caps.currentExtent;
+
+    VkExtent2D e{};
+    e.width = (std::max)(caps.minImageExtent.width, (std::min)(caps.maxImageExtent.width, w));
+    e.height = (std::max)(caps.minImageExtent.height, (std::min)(caps.maxImageExtent.height, h));
+    return e;
+}
+
+static uint32_t FindMemoryType(VkPhysicalDevice phys, uint32_t typeBits, VkMemoryPropertyFlags props)
+{
+    VkPhysicalDeviceMemoryProperties memProps{};
+    vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
+
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i)
+    {
+        if ((typeBits & (1u << i)) && (memProps.memoryTypes[i].propertyFlags & props) == props)
+            return i;
+    }
+    throw std::runtime_error("Failed to find suitable Vulkan memory type");
+}
+
+VkShaderModule VkRenderAdapter::LoadShaderModule(const char* spvPath)
+{
+    std::vector<uint32_t> words;
+    std::string err;
+    std::string used;
+
+    if (!ResolveAndReadSpv(spvPath, words, used, err))
+    {
+        Logger::Get().Error(err);
+        return VK_NULL_HANDLE;
+    }
+
+    Logger::Get().Info("Vulkan: shader loaded: " + used);
+
+    VkShaderModuleCreateInfo ci{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+    ci.codeSize = words.size() * sizeof(uint32_t);
+    ci.pCode = words.data();
+
+    VkShaderModule m = VK_NULL_HANDLE;
+    VkResult r = vkCreateShaderModule(m_Device, &ci, nullptr, &m);
+    if (r != VK_SUCCESS)
+    {
+        Logger::Get().Error(std::string("vkCreateShaderModule failed for: ") + used);
+        return VK_NULL_HANDLE;
+    }
+
+    return m;
+}
+
+
+bool VkRenderAdapter::CreatePipelineFromModules(VkShaderModule vs, VkShaderModule fs, VkPipeline& outPipeline)
+{
+    VkPipelineShaderStageCreateInfo stages[2]{};
+    stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    stages[0].module = vs;
+    stages[0].pName = "main";
+    stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    stages[1].module = fs;
+    stages[1].pName = "main";
+
+    auto binding = VertexBinding();
+    auto attrs = VertexAttributes();
+
+    VkPipelineVertexInputStateCreateInfo vi{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+    vi.vertexBindingDescriptionCount = 1;
+    vi.pVertexBindingDescriptions = &binding;
+    vi.vertexAttributeDescriptionCount = (uint32_t)attrs.size();
+    vi.pVertexAttributeDescriptions = attrs.data();
+
+    VkPipelineInputAssemblyStateCreateInfo ia{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    ia.primitiveRestartEnable = VK_FALSE;
+
+    VkViewport vp{};
+    vp.x = 0.0f;
+    vp.y = (float)m_SwapExtent.height;
+    vp.width = (float)m_SwapExtent.width;
+    vp.height = -(float)m_SwapExtent.height;
+    vp.minDepth = 0.0f;
+    vp.maxDepth = 1.0f;
+
+    VkRect2D scissor{};
+    scissor.offset = { 0, 0 };
+    scissor.extent = m_SwapExtent;
+
+    VkPipelineViewportStateCreateInfo vpState{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+    vpState.viewportCount = 1;
+    vpState.pViewports = &vp;
+    vpState.scissorCount = 1;
+    vpState.pScissors = &scissor;
+
+    VkPipelineRasterizationStateCreateInfo rs{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+    rs.depthClampEnable = VK_FALSE;
+    rs.rasterizerDiscardEnable = VK_FALSE;
+    rs.polygonMode = VK_POLYGON_MODE_FILL;
+    rs.cullMode = VK_CULL_MODE_BACK_BIT;
+    rs.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    rs.depthBiasEnable = VK_FALSE;
+    rs.lineWidth = 1.0f;
+
+    VkPipelineMultisampleStateCreateInfo ms{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineColorBlendAttachmentState cbAtt{};
+    cbAtt.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    cbAtt.blendEnable = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo cb{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+    cb.attachmentCount = 1;
+    cb.pAttachments = &cbAtt;
+
+    VkGraphicsPipelineCreateInfo gp{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+    gp.stageCount = 2;
+    gp.pStages = stages;
+    gp.pVertexInputState = &vi;
+    gp.pInputAssemblyState = &ia;
+    gp.pViewportState = &vpState;
+    gp.pRasterizationState = &rs;
+    gp.pMultisampleState = &ms;
+    gp.pColorBlendState = &cb;
+    gp.layout = m_PipelineLayout;
+    gp.renderPass = m_RenderPass;
+    gp.subpass = 0;
+
+    VkResult r = vkCreateGraphicsPipelines(m_Device, VK_NULL_HANDLE, 1, &gp, nullptr, &outPipeline);
+    if (r != VK_SUCCESS)
+    {
+        Logger::Get().Error("vkCreateGraphicsPipelines failed");
+        outPipeline = VK_NULL_HANDLE;
+        return false;
+    }
+
+    return true;
+}
+
+bool VkRenderAdapter::RecreateGraphicsPipeline()
+{
+    VkShaderModule vs = LoadShaderModule(m_VertSpvPath.c_str());
+    if (vs == VK_NULL_HANDLE)
+        return false;
+
+    VkShaderModule fs = LoadShaderModule(m_FragSpvPath.c_str());
+    if (fs == VK_NULL_HANDLE)
+    {
+        vkDestroyShaderModule(m_Device, vs, nullptr);
+        return false;
+    }
+
+    VkPipeline newPipeline = VK_NULL_HANDLE;
+    bool ok = CreatePipelineFromModules(vs, fs, newPipeline);
+
+    vkDestroyShaderModule(m_Device, fs, nullptr);
+    vkDestroyShaderModule(m_Device, vs, nullptr);
+
+    if (!ok || newPipeline == VK_NULL_HANDLE)
+        return false;
+
+    if (m_Pipeline)
+        vkDestroyPipeline(m_Device, m_Pipeline, nullptr);
+
+    m_Pipeline = newPipeline;
+    return true;
 }
 
 bool VkRenderAdapter::Initialize(IWindow* window)
@@ -404,8 +672,11 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         VK_ThrowIfFailed(vkCreatePipelineLayout(m_Device, &plci, nullptr, &m_PipelineLayout),
             "vkCreatePipelineLayout failed");
 
-        VkShaderModule vs = LoadShaderModule("shaders/vulkan/triangle_vert.spv");
-        VkShaderModule fs = LoadShaderModule("shaders/vulkan/triangle_frag.spv");
+        VkShaderModule vs = LoadShaderModule(m_VertSpvPath.c_str());
+        VkShaderModule fs = LoadShaderModule(m_FragSpvPath.c_str());
+        if (vs == VK_NULL_HANDLE || fs == VK_NULL_HANDLE)
+            throw std::runtime_error("Failed to load Vulkan shaders (.spv)");
+
 
         VkPipelineShaderStageCreateInfo stages[2]{};
         stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -719,4 +990,110 @@ void VkRenderAdapter::SetTestTransform(const float* mvp16)
 {
     memcpy(m_PendingMVP, mvp16, sizeof(float) * 16);
 }
+
+bool VkRenderAdapter::ReloadShaders()
+{
+    Logger::Get().Info("Vulkan: ReloadShaders requested");
+
+    vkDeviceWaitIdle(m_Device);
+
+    const bool ok = RecreateGraphicsPipeline();
+    if (ok) Logger::Get().Info("Vulkan: ReloadShaders OK");
+    else    Logger::Get().Error("Vulkan: ReloadShaders FAILED (old pipeline kept)");
+
+    return ok;
+}
+
+bool VkRenderAdapter::HotReloadShaders()
+{
+    Logger::Get().Info("Vulkan: HotReloadShaders (compile GLSL -> SPV) requested");
+
+    std::string err;
+
+    if (!CompileGlslToSpv(m_VertSrcPath, m_VertSpvPath, "vert", err))
+    {
+        Logger::Get().Error("Vulkan: vertex shader compile failed: " + err);
+        return false;
+    }
+
+    if (!CompileGlslToSpv(m_FragSrcPath, m_FragSpvPath, "frag", err))
+    {
+        Logger::Get().Error("Vulkan: fragment shader compile failed: " + err);
+        return false;
+    }
+
+    return ReloadShaders();
+}
+
+
+bool VkRenderAdapter::CompileGlslToSpv(const std::string& srcPath,
+    const std::string& outSpvPath,
+    const char* stage, // "vert" / "frag"
+    std::string& outErr)
+{
+    namespace fs = std::filesystem;
+
+    std::string resolvedSrc;
+    if (!ResolveExistingPath(srcPath, resolvedSrc))
+    {
+        outErr = "Shader source not found: " + srcPath;
+        return false;
+    }
+
+#ifdef _WIN32
+    const wchar_t* sdk = _wgetenv(L"VULKAN_SDK");
+    if (!sdk || !sdk[0])
+    {
+        outErr = "VULKAN_SDK env var is not set";
+        return false;
+    }
+
+    fs::path validator = fs::path(sdk) / "Bin" / "glslangValidator.exe";
+    if (!fs::exists(validator))
+    {
+        outErr = "glslangValidator not found: " + validator.string();
+        return false;
+    }
+
+    fs::path srcAbs = fs::absolute(fs::path(resolvedSrc));
+    fs::path spvAbs = fs::absolute(fs::path(outSpvPath));
+    fs::create_directories(spvAbs.parent_path());
+
+    Logger::Get().Info("Vulkan: compiling shader: " + srcAbs.string());
+    Logger::Get().Info("Vulkan: spv out: " + spvAbs.string());
+
+    std::wstring cmd =
+        L"\"" + validator.wstring() + L"\""
+        L" -V -S " + std::wstring(stage, stage + strlen(stage)) +
+        L" \"" + srcAbs.wstring() + L"\"" +
+        L" -o \"" + spvAbs.wstring() + L"\"";
+
+    int code = RunProcessW(cmd);
+    if (code != 0)
+    {
+        outErr = "glslangValidator failed for: " + srcAbs.string() + " (exit code=" + std::to_string(code) + ")";
+        return false;
+    }
+
+    if (!fs::exists(spvAbs))
+    {
+        outErr = "SPV was not produced: " + spvAbs.string();
+        return false;
+    }
+
+    return true;
+#else
+    outErr = "HotReloadShaders is implemented for Windows only in this build.";
+    return false;
+#endif
+}
+
+std::string VkRenderAdapter::Quote(const std::string& s)
+{
+    std::string q = "\"";
+    q += s;
+    q += "\"";
+    return q;
+}
+
 #endif

@@ -14,7 +14,7 @@ void GameplayState::OnEnter(Application& app)
 
 void GameplayState::Update(Application& app, float dt)
 {
-    app.UpdateInputAndTransform(dt);
+    app.UpdateInputAndTransform(app.GetWindow(), dt);
 
     auto* gw = static_cast<GlfwWindow*>(app.GetWindow());
     GLFWwindow* w = gw->GetGlfwHandle();

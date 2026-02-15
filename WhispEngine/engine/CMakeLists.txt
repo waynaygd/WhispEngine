@@ -21,6 +21,15 @@ target_include_directories(Engine PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/external
 )
 
+target_include_directories(Engine PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+target_sources(Engine PRIVATE
+    core/ConfigLoader.cpp
+)
+
+
 if (WIN32 AND ENABLE_DX12)
   target_compile_definitions(Engine PRIVATE ENABLE_DX12=1)
   target_sources(Engine PRIVATE

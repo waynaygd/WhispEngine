@@ -25,7 +25,6 @@ target_link_libraries(WhispEngine PRIVATE Engine)
 include(engine/shaders/Shaders.cmake)
 setup_shaders(WhispEngine)
 
-# копирование dll (если нужно)
 if (WIN32 AND ENABLE_DX12)
   add_custom_command(TARGET WhispEngine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -37,4 +36,12 @@ if (WIN32 AND ENABLE_DX12)
       ${CMAKE_SOURCE_DIR}/external/dxc/bin/x64/dxil.dll
       $<TARGET_FILE_DIR:WhispEngine>/dxil.dll
   )
+  add_custom_command(TARGET WhispEngine POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory
+          $<TARGET_FILE_DIR:WhispEngine>/engine/config
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          ${CMAKE_SOURCE_DIR}/engine/config/app.json
+          $<TARGET_FILE_DIR:WhispEngine>/engine/config/app.json
+)
+
 endif()

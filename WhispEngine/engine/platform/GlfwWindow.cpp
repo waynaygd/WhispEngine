@@ -8,6 +8,8 @@
 #include <GLFW/glfw3native.h>
 #endif
 
+static int g_GlfwRefCount = 0;
+
 GlfwWindow::~GlfwWindow()
 {
     if (m_Window)
@@ -15,16 +17,26 @@ GlfwWindow::~GlfwWindow()
         glfwDestroyWindow(m_Window);
         m_Window = nullptr;
     }
-    glfwTerminate();
+
+    if (g_GlfwRefCount > 0)
+    {
+        --g_GlfwRefCount;
+        if (g_GlfwRefCount == 0)
+            glfwTerminate();
+    }
 }
 
 bool GlfwWindow::Create(int width, int height, const std::string& title)
 {
-    if (!glfwInit())
+    if (g_GlfwRefCount == 0)
     {
-        Logger::Get().Error("glfwInit failed");
-        return false;
+        if (!glfwInit())
+        {
+            Logger::Get().Error("glfwInit failed");
+            return false;
+        }
     }
+    ++g_GlfwRefCount;
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
@@ -32,6 +44,11 @@ bool GlfwWindow::Create(int width, int height, const std::string& title)
     if (!m_Window)
     {
         Logger::Get().Error("glfwCreateWindow failed");
+
+        --g_GlfwRefCount;
+        if (g_GlfwRefCount == 0)
+            glfwTerminate();
+
         return false;
     }
 

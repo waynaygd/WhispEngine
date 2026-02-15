@@ -3,6 +3,8 @@
 #if defined(ENABLE_VULKAN)
 #include <vulkan/vulkan.h>
 #include <vector>
+#include <string>
+#include <filesystem>
 
 class IWindow;
 
@@ -19,22 +21,33 @@ public:
 
 	void SetTestTransform(const float* mvp16) override;
 
+	bool ReloadShaders() override;
+	bool HotReloadShaders() override;
 
 private:
-	bool CreateInstance();
-	bool CreateSurface(IWindow* window);
-	bool PickPhysicalDevice();
-	bool CreateDeviceAndQueues();
-	bool CreateSwapchain();
-	bool CreateImageViews();
-	bool CreateRenderPass();
-	bool CreatePipeline();
-	bool CreateFramebuffers();
-	bool CreateCommandPoolAndBuffers();
 	bool CreateSyncObjects();
 
-	void RecreateSwapchain();
+	bool CreatePipelineFromModules(VkShaderModule vs, VkShaderModule fs, VkPipeline& outPipeline);
+
 	VkShaderModule LoadShaderModule(const char* spvPath);
+
+	std::string m_VertSrcPath = "engine/shaders/vulkan/triangle.vert";
+	std::string m_FragSrcPath = "engine/shaders/vulkan/triangle.frag";
+
+	std::string m_VertSpvPath = "shaders/vulkan/triangle.vert.spv";
+	std::string m_FragSpvPath = "shaders/vulkan/triangle.frag.spv";
+
+	bool CompileGlslToSpv(const std::string& srcPath,
+		const std::string& outSpvPath,
+		const char* stage, std::string& outErr);
+
+	static std::string Quote(const std::string& s);
+
+	bool RecreateGraphicsPipeline();
+
+	bool m_HotReloadInited = false;
+	std::filesystem::file_time_type m_VertStamp{};
+	std::filesystem::file_time_type m_FragStamp{};
 
 private:
 	VkInstance m_Instance = VK_NULL_HANDLE;
@@ -80,7 +93,5 @@ private:
 		0,0,1,0,
 		0,0,0,1
 	};
-
-
 };
 #endif

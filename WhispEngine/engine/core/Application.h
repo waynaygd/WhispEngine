@@ -1,5 +1,8 @@
 #pragma once
 #include <memory>
+#include <vector>
+#include <string>
+
 #include "Time.h"
 #include "../render/RenderFactory.h"
 #include "../platform/IWindow.h"
@@ -7,9 +10,7 @@
 
 class IWindow;
 class IRenderAdapter;
-
 class IGameState;
-class IWindow;
 
 struct TransformState
 {
@@ -36,16 +37,14 @@ public:
     Application();
     ~Application();       
 
-    void SetBackend(RenderBackend b) { m_Backend = b; }
-
     bool Initialize();  
     int Run();
     void Shutdown();
 
-    void UpdateInputAndTransform(float dt);
+    void UpdateInputAndTransform(IWindow* srcWindow, float dt);
     void SetUpdateMode(UpdateMode m) { m_UpdateMode = m; }
 
-    IWindow* GetWindow() { return m_Window.get(); }
+    IWindow* GetWindow() { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
 
     void RequestStateChange(std::unique_ptr<IGameState> s);
 
@@ -53,13 +52,22 @@ public:
 private:
     TransformState m_Obj;
 
-    std::unique_ptr<IWindow> m_Window;
-    std::unique_ptr<IRenderAdapter> m_Renderer;
+    struct WindowContext
+    {
+        std::unique_ptr<IWindow> window;
+        std::unique_ptr<IRenderAdapter> renderer;
+
+        RenderBackend backend = RenderBackend::DX12;
+
+        std::string baseTitle;  
+        float clear[4] = { 0.08f, 0.08f, 0.12f, 1.0f };
+    };
+
+    std::vector<WindowContext> m_Windows;
 
     Time m_Time;
     StateMachine m_StateMachine;
 
-    RenderBackend m_Backend = RenderBackend::DX12;
     UpdateMode m_UpdateMode = UpdateMode::Variable;
 
     bool m_IsRunning = false;

@@ -70,7 +70,7 @@ build WhispEngine.exe: CXX_EXECUTABLE_LINKER__WhispEngine_Debug CMakeFiles\Whisp
   LINK_FLAGS = /machine:x64 /debug /INCREMENTAL /subsystem:console
   LINK_LIBRARIES = engine\Engine.lib  _deps\glfw-build\src\glfw3.lib  d3d12.lib  dxgi.lib  dxguid.lib  C:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\lib\x64\dxcompiler.lib  C:\VulkanSDK\1.4.341.1\Lib\vulkan-1.lib  kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib
   OBJECT_DIR = CMakeFiles\WhispEngine.dir
-  POST_BUILD = C:\WINDOWS\system32\cmd.exe /C "cd /D C:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug && "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/external/dxc/bin/x64/dxcompiler.dll C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/out/build/x64-debug/dxcompiler.dll && cd /D C:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug && "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/external/dxc/bin/x64/dxil.dll C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/out/build/x64-debug/dxil.dll"
+  POST_BUILD = C:\WINDOWS\system32\cmd.exe /C "cd /D C:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug && "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E make_directory C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/out/build/x64-debug/shaders/vulkan && "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/out/build/x64-debug/shaders/vulkan/triangle.vert.spv C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/out/build/x64-debug/shaders/vulkan/triangle.vert.spv && "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/out/build/x64-debug/shaders/vulkan/triangle.frag.spv C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/out/build/x64-debug/shaders/vulkan/triangle.frag.spv && cd /D C:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug && "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/external/dxc/bin/x64/dxcompiler.dll C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/out/build/x64-debug/dxcompiler.dll && cd /D C:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug && "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/external/dxc/bin/x64/dxil.dll C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/out/build/x64-debug/dxil.dll && cd /D C:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug && "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E make_directory C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/out/build/x64-debug/engine/config && "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/engine/config/app.json C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/out/build/x64-debug/engine/config/app.json"
   PRE_LINK = cd .
   TARGET_COMPILE_PDB = CMakeFiles\WhispEngine.dir\
   TARGET_FILE = WhispEngine.exe
@@ -87,7 +87,7 @@ build Dx12Shaders: phony CMakeFiles\Dx12Shaders shaders\dx12\triangle_ps.dxil sh
 #############################################
 # Utility command for VulkanShaders
 
-build VulkanShaders: phony CMakeFiles\VulkanShaders shaders\vulkan\triangle_frag.spv shaders\vulkan\triangle_vert.spv
+build VulkanShaders: phony CMakeFiles\VulkanShaders shaders\vulkan\triangle.frag.spv shaders\vulkan\triangle.vert.spv
 
 
 #############################################
@@ -170,24 +170,24 @@ build shaders\dx12\triangle_vs.dxil | ${cmake_ninja_workdir}shaders\dx12\triangl
 #############################################
 # Phony custom command for CMakeFiles\VulkanShaders
 
-build CMakeFiles\VulkanShaders | ${cmake_ninja_workdir}CMakeFiles\VulkanShaders: phony shaders\vulkan\triangle_vert.spv shaders\vulkan\triangle_frag.spv
+build CMakeFiles\VulkanShaders | ${cmake_ninja_workdir}CMakeFiles\VulkanShaders: phony shaders\vulkan\triangle.vert.spv shaders\vulkan\triangle.frag.spv
 
 
 #############################################
-# Custom command for shaders\vulkan\triangle_frag.spv
+# Custom command for shaders\vulkan\triangle.frag.spv
 
-build shaders\vulkan\triangle_frag.spv | ${cmake_ninja_workdir}shaders\vulkan\triangle_frag.spv: CUSTOM_COMMAND C$:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\shaders\vulkan\triangle.frag
-  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D C:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug && C:\VulkanSDK\1.4.341.1\Bin\glslangValidator.exe -V -o C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/out/build/x64-debug/shaders/vulkan/triangle_frag.spv C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/engine/shaders/vulkan/triangle.frag"
-  DESC = Generating shaders/vulkan/triangle_frag.spv
+build shaders\vulkan\triangle.frag.spv | ${cmake_ninja_workdir}shaders\vulkan\triangle.frag.spv: CUSTOM_COMMAND C$:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\shaders\vulkan\triangle.frag
+  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D C:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug && C:\VulkanSDK\1.4.341.1\Bin\glslangValidator.exe -V C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/engine/shaders/vulkan/triangle.frag -o C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/out/build/x64-debug/shaders/vulkan/triangle.frag.spv"
+  DESC = Generating shaders/vulkan/triangle.frag.spv
   restat = 1
 
 
 #############################################
-# Custom command for shaders\vulkan\triangle_vert.spv
+# Custom command for shaders\vulkan\triangle.vert.spv
 
-build shaders\vulkan\triangle_vert.spv | ${cmake_ninja_workdir}shaders\vulkan\triangle_vert.spv: CUSTOM_COMMAND C$:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\shaders\vulkan\triangle.vert
-  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D C:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug && C:\VulkanSDK\1.4.341.1\Bin\glslangValidator.exe -V -o C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/out/build/x64-debug/shaders/vulkan/triangle_vert.spv C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/engine/shaders/vulkan/triangle.vert"
-  DESC = Generating shaders/vulkan/triangle_vert.spv
+build shaders\vulkan\triangle.vert.spv | ${cmake_ninja_workdir}shaders\vulkan\triangle.vert.spv: CUSTOM_COMMAND C$:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\shaders\vulkan\triangle.vert
+  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D C:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug && C:\VulkanSDK\1.4.341.1\Bin\glslangValidator.exe -V C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/engine/shaders/vulkan/triangle.vert -o C:/Users/Тимофей/source/repos/WhispEngine/WhispEngine/out/build/x64-debug/shaders/vulkan/triangle.vert.spv"
+  DESC = Generating shaders/vulkan/triangle.vert.spv
   restat = 1
 
 # =============================================================================
@@ -624,7 +624,7 @@ build cmake_object_order_depends_target_Engine: phony || cmake_object_order_depe
 build engine\CMakeFiles\Engine.dir\core\Application.cpp.obj: CXX_COMPILER__Engine_unscanned_Debug C$:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\core\Application.cpp || cmake_object_order_depends_target_Engine
   DEFINES = -DENABLE_DX12=1 -DENABLE_VULKAN=1
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd
-  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
+  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\third_party -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
   OBJECT_DIR = engine\CMakeFiles\Engine.dir
   OBJECT_FILE_DIR = engine\CMakeFiles\Engine.dir\core
   TARGET_COMPILE_PDB = engine\CMakeFiles\Engine.dir\Engine.pdb
@@ -633,7 +633,7 @@ build engine\CMakeFiles\Engine.dir\core\Application.cpp.obj: CXX_COMPILER__Engin
 build engine\CMakeFiles\Engine.dir\core\Time.cpp.obj: CXX_COMPILER__Engine_unscanned_Debug C$:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\core\Time.cpp || cmake_object_order_depends_target_Engine
   DEFINES = -DENABLE_DX12=1 -DENABLE_VULKAN=1
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd
-  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
+  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\third_party -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
   OBJECT_DIR = engine\CMakeFiles\Engine.dir
   OBJECT_FILE_DIR = engine\CMakeFiles\Engine.dir\core
   TARGET_COMPILE_PDB = engine\CMakeFiles\Engine.dir\Engine.pdb
@@ -642,7 +642,7 @@ build engine\CMakeFiles\Engine.dir\core\Time.cpp.obj: CXX_COMPILER__Engine_unsca
 build engine\CMakeFiles\Engine.dir\core\Logger.cpp.obj: CXX_COMPILER__Engine_unscanned_Debug C$:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\core\Logger.cpp || cmake_object_order_depends_target_Engine
   DEFINES = -DENABLE_DX12=1 -DENABLE_VULKAN=1
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd
-  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
+  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\third_party -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
   OBJECT_DIR = engine\CMakeFiles\Engine.dir
   OBJECT_FILE_DIR = engine\CMakeFiles\Engine.dir\core
   TARGET_COMPILE_PDB = engine\CMakeFiles\Engine.dir\Engine.pdb
@@ -651,7 +651,7 @@ build engine\CMakeFiles\Engine.dir\core\Logger.cpp.obj: CXX_COMPILER__Engine_uns
 build engine\CMakeFiles\Engine.dir\game\StateMachine.cpp.obj: CXX_COMPILER__Engine_unscanned_Debug C$:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\game\StateMachine.cpp || cmake_object_order_depends_target_Engine
   DEFINES = -DENABLE_DX12=1 -DENABLE_VULKAN=1
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd
-  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
+  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\third_party -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
   OBJECT_DIR = engine\CMakeFiles\Engine.dir
   OBJECT_FILE_DIR = engine\CMakeFiles\Engine.dir\game
   TARGET_COMPILE_PDB = engine\CMakeFiles\Engine.dir\Engine.pdb
@@ -660,7 +660,7 @@ build engine\CMakeFiles\Engine.dir\game\StateMachine.cpp.obj: CXX_COMPILER__Engi
 build engine\CMakeFiles\Engine.dir\render\RenderFactory.cpp.obj: CXX_COMPILER__Engine_unscanned_Debug C$:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\render\RenderFactory.cpp || cmake_object_order_depends_target_Engine
   DEFINES = -DENABLE_DX12=1 -DENABLE_VULKAN=1
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd
-  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
+  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\third_party -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
   OBJECT_DIR = engine\CMakeFiles\Engine.dir
   OBJECT_FILE_DIR = engine\CMakeFiles\Engine.dir\render
   TARGET_COMPILE_PDB = engine\CMakeFiles\Engine.dir\Engine.pdb
@@ -669,7 +669,7 @@ build engine\CMakeFiles\Engine.dir\render\RenderFactory.cpp.obj: CXX_COMPILER__E
 build engine\CMakeFiles\Engine.dir\platform\GlfwWindow.cpp.obj: CXX_COMPILER__Engine_unscanned_Debug C$:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\platform\GlfwWindow.cpp || cmake_object_order_depends_target_Engine
   DEFINES = -DENABLE_DX12=1 -DENABLE_VULKAN=1
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd
-  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
+  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\third_party -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
   OBJECT_DIR = engine\CMakeFiles\Engine.dir
   OBJECT_FILE_DIR = engine\CMakeFiles\Engine.dir\platform
   TARGET_COMPILE_PDB = engine\CMakeFiles\Engine.dir\Engine.pdb
@@ -678,7 +678,7 @@ build engine\CMakeFiles\Engine.dir\platform\GlfwWindow.cpp.obj: CXX_COMPILER__En
 build engine\CMakeFiles\Engine.dir\game\states\LoadingState.cpp.obj: CXX_COMPILER__Engine_unscanned_Debug C$:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\game\states\LoadingState.cpp || cmake_object_order_depends_target_Engine
   DEFINES = -DENABLE_DX12=1 -DENABLE_VULKAN=1
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd
-  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
+  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\third_party -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
   OBJECT_DIR = engine\CMakeFiles\Engine.dir
   OBJECT_FILE_DIR = engine\CMakeFiles\Engine.dir\game\states
   TARGET_COMPILE_PDB = engine\CMakeFiles\Engine.dir\Engine.pdb
@@ -687,7 +687,7 @@ build engine\CMakeFiles\Engine.dir\game\states\LoadingState.cpp.obj: CXX_COMPILE
 build engine\CMakeFiles\Engine.dir\game\states\MenuState.cpp.obj: CXX_COMPILER__Engine_unscanned_Debug C$:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\game\states\MenuState.cpp || cmake_object_order_depends_target_Engine
   DEFINES = -DENABLE_DX12=1 -DENABLE_VULKAN=1
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd
-  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
+  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\third_party -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
   OBJECT_DIR = engine\CMakeFiles\Engine.dir
   OBJECT_FILE_DIR = engine\CMakeFiles\Engine.dir\game\states
   TARGET_COMPILE_PDB = engine\CMakeFiles\Engine.dir\Engine.pdb
@@ -696,16 +696,25 @@ build engine\CMakeFiles\Engine.dir\game\states\MenuState.cpp.obj: CXX_COMPILER__
 build engine\CMakeFiles\Engine.dir\game\states\GameplayState.cpp.obj: CXX_COMPILER__Engine_unscanned_Debug C$:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\game\states\GameplayState.cpp || cmake_object_order_depends_target_Engine
   DEFINES = -DENABLE_DX12=1 -DENABLE_VULKAN=1
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd
-  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
+  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\third_party -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
   OBJECT_DIR = engine\CMakeFiles\Engine.dir
   OBJECT_FILE_DIR = engine\CMakeFiles\Engine.dir\game\states
+  TARGET_COMPILE_PDB = engine\CMakeFiles\Engine.dir\Engine.pdb
+  TARGET_PDB = engine\Engine.pdb
+
+build engine\CMakeFiles\Engine.dir\core\ConfigLoader.cpp.obj: CXX_COMPILER__Engine_unscanned_Debug C$:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\core\ConfigLoader.cpp || cmake_object_order_depends_target_Engine
+  DEFINES = -DENABLE_DX12=1 -DENABLE_VULKAN=1
+  FLAGS = /DWIN32 /D_WINDOWS /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd
+  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\third_party -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
+  OBJECT_DIR = engine\CMakeFiles\Engine.dir
+  OBJECT_FILE_DIR = engine\CMakeFiles\Engine.dir\core
   TARGET_COMPILE_PDB = engine\CMakeFiles\Engine.dir\Engine.pdb
   TARGET_PDB = engine\Engine.pdb
 
 build engine\CMakeFiles\Engine.dir\render\backends\dx12\Dx12RenderAdapter.cpp.obj: CXX_COMPILER__Engine_unscanned_Debug C$:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\render\backends\dx12\Dx12RenderAdapter.cpp || cmake_object_order_depends_target_Engine
   DEFINES = -DENABLE_DX12=1 -DENABLE_VULKAN=1
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd
-  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
+  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\third_party -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
   OBJECT_DIR = engine\CMakeFiles\Engine.dir
   OBJECT_FILE_DIR = engine\CMakeFiles\Engine.dir\render\backends\dx12
   TARGET_COMPILE_PDB = engine\CMakeFiles\Engine.dir\Engine.pdb
@@ -714,7 +723,7 @@ build engine\CMakeFiles\Engine.dir\render\backends\dx12\Dx12RenderAdapter.cpp.ob
 build engine\CMakeFiles\Engine.dir\render\backends\vulkan\VkRenderAdapter.cpp.obj: CXX_COMPILER__Engine_unscanned_Debug C$:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\render\backends\vulkan\VkRenderAdapter.cpp || cmake_object_order_depends_target_Engine
   DEFINES = -DENABLE_DX12=1 -DENABLE_VULKAN=1
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd
-  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
+  INCLUDES = -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\external -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\engine\third_party -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\external\dxc\include -IC:\Users\Тимофей\source\repos\WhispEngine\WhispEngine\out\build\x64-debug\_deps\glfw-src\include -external:IC:\VulkanSDK\1.4.341.1\Include -external:W0
   OBJECT_DIR = engine\CMakeFiles\Engine.dir
   OBJECT_FILE_DIR = engine\CMakeFiles\Engine.dir\render\backends\vulkan
   TARGET_COMPILE_PDB = engine\CMakeFiles\Engine.dir\Engine.pdb
@@ -728,7 +737,7 @@ build engine\CMakeFiles\Engine.dir\render\backends\vulkan\VkRenderAdapter.cpp.ob
 #############################################
 # Link the static library engine\Engine.lib
 
-build engine\Engine.lib: CXX_STATIC_LIBRARY_LINKER__Engine_Debug engine\CMakeFiles\Engine.dir\core\Application.cpp.obj engine\CMakeFiles\Engine.dir\core\Time.cpp.obj engine\CMakeFiles\Engine.dir\core\Logger.cpp.obj engine\CMakeFiles\Engine.dir\game\StateMachine.cpp.obj engine\CMakeFiles\Engine.dir\render\RenderFactory.cpp.obj engine\CMakeFiles\Engine.dir\platform\GlfwWindow.cpp.obj engine\CMakeFiles\Engine.dir\game\states\LoadingState.cpp.obj engine\CMakeFiles\Engine.dir\game\states\MenuState.cpp.obj engine\CMakeFiles\Engine.dir\game\states\GameplayState.cpp.obj engine\CMakeFiles\Engine.dir\render\backends\dx12\Dx12RenderAdapter.cpp.obj engine\CMakeFiles\Engine.dir\render\backends\vulkan\VkRenderAdapter.cpp.obj || _deps\glfw-build\src\glfw3.lib
+build engine\Engine.lib: CXX_STATIC_LIBRARY_LINKER__Engine_Debug engine\CMakeFiles\Engine.dir\core\Application.cpp.obj engine\CMakeFiles\Engine.dir\core\Time.cpp.obj engine\CMakeFiles\Engine.dir\core\Logger.cpp.obj engine\CMakeFiles\Engine.dir\game\StateMachine.cpp.obj engine\CMakeFiles\Engine.dir\render\RenderFactory.cpp.obj engine\CMakeFiles\Engine.dir\platform\GlfwWindow.cpp.obj engine\CMakeFiles\Engine.dir\game\states\LoadingState.cpp.obj engine\CMakeFiles\Engine.dir\game\states\MenuState.cpp.obj engine\CMakeFiles\Engine.dir\game\states\GameplayState.cpp.obj engine\CMakeFiles\Engine.dir\core\ConfigLoader.cpp.obj engine\CMakeFiles\Engine.dir\render\backends\dx12\Dx12RenderAdapter.cpp.obj engine\CMakeFiles\Engine.dir\render\backends\vulkan\VkRenderAdapter.cpp.obj || _deps\glfw-build\src\glfw3.lib
   LANGUAGE_COMPILE_FLAGS = /DWIN32 /D_WINDOWS /EHsc /Zi /Ob0 /Od /RTC1 -MDd
   LINK_FLAGS = /machine:x64
   OBJECT_DIR = engine\CMakeFiles\Engine.dir
