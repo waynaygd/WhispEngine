@@ -6,6 +6,11 @@
 *.VC.opendb
 *.ipch
 
+# Build folders
+out/
+build/
+cmake-build-*/
+
 # CMake build folders
 CMakeCache.txt
 CMakeFiles/

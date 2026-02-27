@@ -1,11 +1,18 @@
 {
   "windows": [
     {
+      "backend": "dx12",
+      "title": "WhispEngine",
+      "width": 640,
+      "height": 480,
+      "clearColor": [ 0.25, 0.85, 0.25, 1 ]
+    },
+    {
       "backend": "vulkan",
       "title": "WhispEngine",
-      "width": 1280,
-      "height": 720,
-      "clearColor": [ 0.5, 0.5, 0.5, 1 ]
+      "width": 640,
+      "height": 480,
+      "clearColor": [ 0.85, 0.25, 0.25, 1 ]
     }
   ]
 }
