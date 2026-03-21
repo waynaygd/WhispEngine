@@ -5,6 +5,7 @@
 
 #include "Time.h"
 #include "../ecs/World.h"
+#include "../ecs/systems/SystemPipeline.h"
 #include "../render/RenderFactory.h"
 #include "../platform/IWindow.h"
 #include "../game/StateMachine.h"
@@ -54,6 +55,8 @@ public:
 
 private:
     void RunEcsBootstrapCheck();
+    void SetupEcsRuntimeDemo();
+    void UpdateEcs(float dt);
 
     TransformState m_Obj;
 
@@ -71,6 +74,9 @@ private:
     std::vector<WindowContext> m_Windows;
 
     ecs::World m_World;
+    ecs::SystemPipeline m_EcsSystems;
+    ecs::Entity m_EcsDebugEntity;
+    float m_EcsDebugLogTimer = 0.0f;
 
     Time m_Time;
     StateMachine m_StateMachine;

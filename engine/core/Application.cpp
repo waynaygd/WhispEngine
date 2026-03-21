@@ -3,6 +3,8 @@
 #include "ConfigLoader.h"
 
 #include "../ecs/components/TransformComponent.h"
+#include "../ecs/components/VelocityComponent.h"
+#include "../ecs/systems/MotionSystem.h"
 #include "../platform/GlfwWindow.h"
 #include "../render/IRenderAdapter.h"
 #include <GLFW/glfw3.h>
@@ -144,6 +146,59 @@ void Application::RunEcsBootstrapCheck()
 
     Logger::Get().Info("ECS bootstrap: alive entities=" + std::to_string(m_World.GetAliveCount()) +
         ", capacity=" + std::to_string(m_World.GetCapacity()));
+
+    m_World.Clear();
+    Logger::Get().Info("ECS bootstrap: world reset after self-check");
+}
+
+void Application::SetupEcsRuntimeDemo()
+{
+    m_EcsSystems.Clear();
+    m_EcsSystems.AddSystem<ecs::MotionSystem>();
+
+    m_EcsDebugEntity = m_World.CreateEntity();
+
+    auto& transform = m_World.AddComponent<ecs::TransformComponent>(m_EcsDebugEntity);
+    transform.x = -0.8f;
+    transform.y = 0.0f;
+    transform.scale = 1.0f;
+    transform.angle = 0.0f;
+
+    auto& velocity = m_World.AddComponent<ecs::VelocityComponent>(m_EcsDebugEntity);
+    velocity.vx = 0.35f;
+    velocity.vy = 0.10f;
+    velocity.angularVelocity = 1.25f;
+
+    m_EcsDebugLogTimer = 0.0f;
+
+    Logger::Get().Info("ECS runtime: motion system registered");
+    Logger::Get().Info("ECS runtime: demo entity created -> " + m_World.DebugDescribeEntity(m_EcsDebugEntity));
+}
+
+void Application::UpdateEcs(float dt)
+{
+    m_EcsSystems.Update(m_World, dt);
+
+    if (!m_World.IsAlive(m_EcsDebugEntity))
+        return;
+
+    m_EcsDebugLogTimer += dt;
+    if (m_EcsDebugLogTimer < 1.0f)
+        return;
+
+    m_EcsDebugLogTimer = 0.0f;
+
+    const auto* transform = m_World.GetComponent<ecs::TransformComponent>(m_EcsDebugEntity);
+    const auto* velocity = m_World.GetComponent<ecs::VelocityComponent>(m_EcsDebugEntity);
+    if (transform == nullptr || velocity == nullptr)
+        return;
+
+    std::ostringstream ss;
+    ss << "ECS runtime: demo entity position=(" << transform->x << ", " << transform->y
+       << ") angle=" << transform->angle
+       << " velocity=(" << velocity->vx << ", " << velocity->vy
+       << ") angularVelocity=" << velocity->angularVelocity;
+    Logger::Get().Info(ss.str());
 }
 
 bool Application::Initialize()
@@ -151,6 +206,7 @@ bool Application::Initialize()
     Logger::Get().Initialize("engine.log");
     Logger::Get().Info("Application Initialize");
     RunEcsBootstrapCheck();
+    SetupEcsRuntimeDemo();
 
     m_Time.Initialize();
 
@@ -279,6 +335,8 @@ int Application::Run()
             m_StateMachine.ApplyPending(*this);
         }
 
+        UpdateEcs(dt);
+
         static float fpsTimer = 0.0f;
         static int fpsFrames = 0;
 
@@ -339,6 +397,7 @@ void Application::Shutdown()
         if (wc.renderer) wc.renderer->Shutdown();
 
     m_Windows.clear();
+    m_EcsSystems.Clear();
     m_World.Clear();
     Logger::Get().Shutdown();
 }

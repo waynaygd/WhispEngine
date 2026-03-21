@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <typeindex>
 #include <typeinfo>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -34,6 +35,9 @@ public:
 
     template <typename T>
     bool RemoveComponent(Entity entity);
+
+    template <typename TPrimary, typename... TOther, typename Func>
+    void ForEach(Func&& func);
 
     [[nodiscard]] bool IsAlive(Entity entity) const;
     [[nodiscard]] std::size_t GetAliveCount() const { return m_AliveCount; }
@@ -93,6 +97,16 @@ private:
         void Clear() override
         {
             m_Components.clear();
+        }
+
+        auto& Items()
+        {
+            return m_Components;
+        }
+
+        const auto& Items() const
+        {
+            return m_Components;
         }
 
     private:
@@ -188,5 +202,58 @@ bool World::RemoveComponent(Entity entity)
 
     ComponentStorage<T>* storage = FindStorage<T>();
     return storage != nullptr && storage->RemoveComponent(entity.index);
+}
+
+template <typename TPrimary, typename... TOther, typename Func>
+void World::ForEach(Func&& func)
+{
+    ComponentStorage<TPrimary>* primaryStorage = FindStorage<TPrimary>();
+    if (primaryStorage == nullptr)
+        return;
+
+    auto otherStorages = std::tuple<ComponentStorage<TOther>*...>{ FindStorage<TOther>()... };
+    const bool hasAllStorages = std::apply(
+        [](auto*... storages)
+        {
+            return ((storages != nullptr) && ...);
+        },
+        otherStorages);
+
+    if constexpr (sizeof...(TOther) > 0)
+    {
+        if (!hasAllStorages)
+            return;
+    }
+
+    for (auto& [entityIndex, primaryComponent] : primaryStorage->Items())
+    {
+        Entity entity{ entityIndex, m_Slots[entityIndex].generation };
+        if (!IsAlive(entity))
+            continue;
+
+        if constexpr (sizeof...(TOther) == 0)
+        {
+            func(entity, primaryComponent);
+        }
+        else
+        {
+            const bool hasAllComponents = std::apply(
+                [entityIndex](auto*... storages)
+                {
+                    return (storages->Has(entityIndex) && ...);
+                },
+                otherStorages);
+
+            if (!hasAllComponents)
+                continue;
+
+            std::apply(
+                [&](auto*... storages)
+                {
+                    func(entity, primaryComponent, *storages->Get(entityIndex)...);
+                },
+                otherStorages);
+        }
+    }
 }
 }
