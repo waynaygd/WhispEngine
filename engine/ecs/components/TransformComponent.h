@@ -1,12 +1,14 @@
 #pragma once
 
+#include "../Component.h"
+#include "../MathTypes.h"
+
 namespace ecs
 {
-struct TransformComponent
+struct TransformComponent : Component
 {
-    float x = 0.0f;
-    float y = 0.0f;
-    float scale = 1.0f;
-    float angle = 0.0f;
+    Vec3 position{};
+    Vec3 rotation{};
+    Vec3 scale{ 1.0f, 1.0f, 1.0f };
 };
 }

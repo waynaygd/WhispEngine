@@ -11,6 +11,9 @@ class RenderSystem final : public ISystem
 public:
     const char* Name() const override { return "RenderSystem"; }
     void Update(World& world, float dt) override;
-    void Render(World& world, IRenderAdapter& renderer) const;
+    void SetRenderAdapter(IRenderAdapter* renderer) { m_Renderer = renderer; }
+
+private:
+    IRenderAdapter* m_Renderer = nullptr;
 };
 }

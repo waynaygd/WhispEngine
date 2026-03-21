@@ -1,8 +1,10 @@
 #pragma once
 
+#include "../Component.h"
+
 namespace ecs
 {
-struct BoundsBounceComponent
+struct BoundsBounceComponent : Component
 {
     float minX = -0.9f;
     float maxX = 0.9f;

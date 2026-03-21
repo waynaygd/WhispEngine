@@ -45,6 +45,14 @@ void Dx12RenderAdapter::SetTestTransform(const float* mvp16)
     memcpy(m_PendingMVP, mvp16, sizeof(float) * 16);
 }
 
+void Dx12RenderAdapter::SetTestColor(float r, float g, float b, float a)
+{
+    m_PendingColor[0] = r;
+    m_PendingColor[1] = g;
+    m_PendingColor[2] = b;
+    m_PendingColor[3] = a;
+}
+
 bool Dx12RenderAdapter::Initialize(IWindow* window)
 {
     try
@@ -178,7 +186,7 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
     rp.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
     rp.Descriptor.ShaderRegister = 0; 
     rp.Descriptor.RegisterSpace = 0;
-    rp.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+    rp.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     D3D12_ROOT_SIGNATURE_DESC rsd{};
     rsd.NumParameters = 1;
@@ -224,38 +232,79 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
 
     ThrowIfFailed(m_Device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_Pso)), "CreateGraphicsPipelineState failed");
 
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC linePso = pso;
+    linePso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+    ThrowIfFailed(m_Device->CreateGraphicsPipelineState(&linePso, IID_PPV_ARGS(&m_LinePso)), "CreateGraphicsPipelineState line failed");
+
     struct Vtx { float x, y, z; float r, g, b; };
     Vtx tri[3] = {
-      { 0.0f,  0.5f, 0.0f, 1,0,0},
-      { 0.5f, -0.5f, 0.0f, 0,1,0},
-      {-0.5f, -0.5f, 0.0f, 0,0,1},
+      { 0.0f,  0.5f, 0.0f, 1,1,1},
+      { 0.5f, -0.5f, 0.0f, 1,1,1},
+      {-0.5f, -0.5f, 0.0f, 1,1,1},
+    };
+    Vtx line[2] = {
+      {-0.5f, 0.0f, 0.0f, 1,1,1},
+      { 0.5f, 0.0f, 0.0f, 1,1,1},
+    };
+    Vtx quad[6] = {
+      {-0.5f,  0.5f, 0.0f, 1,1,1},
+      { 0.5f,  0.5f, 0.0f, 1,1,1},
+      {-0.5f, -0.5f, 0.0f, 1,1,1},
+      {-0.5f, -0.5f, 0.0f, 1,1,1},
+      { 0.5f,  0.5f, 0.0f, 1,1,1},
+      { 0.5f, -0.5f, 0.0f, 1,1,1},
+    };
+    Vtx cube[24] = {
+      { -0.5f, -0.5f,  0.5f, 1,1,1 }, {  0.5f, -0.5f,  0.5f, 1,1,1 },
+      {  0.5f, -0.5f,  0.5f, 1,1,1 }, {  0.5f,  0.5f,  0.5f, 1,1,1 },
+      {  0.5f,  0.5f,  0.5f, 1,1,1 }, { -0.5f,  0.5f,  0.5f, 1,1,1 },
+      { -0.5f,  0.5f,  0.5f, 1,1,1 }, { -0.5f, -0.5f,  0.5f, 1,1,1 },
+      { -0.5f, -0.5f, -0.5f, 1,1,1 }, {  0.5f, -0.5f, -0.5f, 1,1,1 },
+      {  0.5f, -0.5f, -0.5f, 1,1,1 }, {  0.5f,  0.5f, -0.5f, 1,1,1 },
+      {  0.5f,  0.5f, -0.5f, 1,1,1 }, { -0.5f,  0.5f, -0.5f, 1,1,1 },
+      { -0.5f,  0.5f, -0.5f, 1,1,1 }, { -0.5f, -0.5f, -0.5f, 1,1,1 },
+      { -0.5f, -0.5f,  0.5f, 1,1,1 }, { -0.5f, -0.5f, -0.5f, 1,1,1 },
+      {  0.5f, -0.5f,  0.5f, 1,1,1 }, {  0.5f, -0.5f, -0.5f, 1,1,1 },
+      {  0.5f,  0.5f,  0.5f, 1,1,1 }, {  0.5f,  0.5f, -0.5f, 1,1,1 },
+      { -0.5f,  0.5f,  0.5f, 1,1,1 }, { -0.5f,  0.5f, -0.5f, 1,1,1 },
     };
 
     const UINT vbSize = sizeof(tri);
+    const UINT lineVbSize = sizeof(line);
+    const UINT quadVbSize = sizeof(quad);
+    const UINT cubeVbSize = sizeof(cube);
 
     D3D12_HEAP_PROPERTIES hp{};
     hp.Type = D3D12_HEAP_TYPE_UPLOAD;
-
-    D3D12_RESOURCE_DESC rd = CD3DX12_RESOURCE_DESC::Buffer(vbSize);
-
-    ThrowIfFailed(m_Device->CreateCommittedResource(
-        &hp, D3D12_HEAP_FLAG_NONE, &rd,
-        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&m_VB)),
-        "CreateCommittedResource VB failed");
-
-    void* mapped = nullptr;
     CD3DX12_RANGE range(0, 0);
-    ThrowIfFailed(m_VB->Map(0, &range, &mapped), "VB Map failed");
-    memcpy(mapped, tri, vbSize);
-    m_VB->Unmap(0, nullptr);
 
-    m_VbView.BufferLocation = m_VB->GetGPUVirtualAddress();
-    m_VbView.StrideInBytes = sizeof(Vtx);
-    m_VbView.SizeInBytes = vbSize;
+    auto createVertexBuffer = [&](const void* srcData, UINT size, Microsoft::WRL::ComPtr<ID3D12Resource>& resource, D3D12_VERTEX_BUFFER_VIEW& view, const char* errorName)
+    {
+        D3D12_RESOURCE_DESC rd = CD3DX12_RESOURCE_DESC::Buffer(size);
+        ThrowIfFailed(m_Device->CreateCommittedResource(
+            &hp, D3D12_HEAP_FLAG_NONE, &rd,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&resource)),
+            errorName);
+
+        void* mapped = nullptr;
+        ThrowIfFailed(resource->Map(0, &range, &mapped), "VB Map failed");
+        memcpy(mapped, srcData, size);
+        resource->Unmap(0, nullptr);
+
+        view.BufferLocation = resource->GetGPUVirtualAddress();
+        view.StrideInBytes = sizeof(Vtx);
+        view.SizeInBytes = size;
+    };
+
+    createVertexBuffer(tri, vbSize, m_VB, m_VbView, "CreateCommittedResource Triangle VB failed");
+    createVertexBuffer(line, lineVbSize, m_LineVB, m_LineVbView, "CreateCommittedResource Line VB failed");
+    createVertexBuffer(quad, quadVbSize, m_QuadVB, m_QuadVbView, "CreateCommittedResource Quad VB failed");
+    createVertexBuffer(cube, cubeVbSize, m_CubeVB, m_CubeVbView, "CreateCommittedResource Cube VB failed");
 
     struct alignas(256) CB
     {
         float mvp[16];
+        float color[4];
     };
 
     for (UINT frame = 0; frame < FrameCount; ++frame)
@@ -281,6 +330,7 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
 
             CB init{};
             memcpy(init.mvp, m_PendingMVP, sizeof(init.mvp));
+            memcpy(init.color, m_PendingColor, sizeof(init.color));
             memcpy(m_CbMapped[frame][draw], &init, sizeof(CB));
         }
     }
@@ -334,19 +384,87 @@ void Dx12RenderAdapter::Clear(float r, float g, float b, float a)
 
 void Dx12RenderAdapter::DrawTestTriangle()
 {
-    struct alignas(256) CB { float mvp[16]; };
+    struct alignas(256) CB { float mvp[16]; float color[4]; };
     CB cb{};
     memcpy(cb.mvp, m_PendingMVP, sizeof(cb.mvp));
+    memcpy(cb.color, m_PendingColor, sizeof(cb.color));
 
     const UINT cbSlot = (m_DrawCbIndex < MaxDrawsPerFrame) ? m_DrawCbIndex : (MaxDrawsPerFrame - 1);
     memcpy(m_CbMapped[m_FrameIndex][cbSlot], &cb, sizeof(CB));
 
     m_CmdList->SetGraphicsRootSignature(m_RootSig.Get());
+    m_CmdList->SetPipelineState(m_Pso.Get());
     m_CmdList->SetGraphicsRootConstantBufferView(0, m_CbGpu[m_FrameIndex][cbSlot]);
 
     m_CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_CmdList->IASetVertexBuffers(0, 1, &m_VbView);
     m_CmdList->DrawInstanced(3, 1, 0, 0);
+
+    if (m_DrawCbIndex < MaxDrawsPerFrame)
+        ++m_DrawCbIndex;
+}
+
+void Dx12RenderAdapter::DrawTestLine()
+{
+    struct alignas(256) CB { float mvp[16]; float color[4]; };
+    CB cb{};
+    memcpy(cb.mvp, m_PendingMVP, sizeof(cb.mvp));
+    memcpy(cb.color, m_PendingColor, sizeof(cb.color));
+
+    const UINT cbSlot = (m_DrawCbIndex < MaxDrawsPerFrame) ? m_DrawCbIndex : (MaxDrawsPerFrame - 1);
+    memcpy(m_CbMapped[m_FrameIndex][cbSlot], &cb, sizeof(CB));
+
+    m_CmdList->SetGraphicsRootSignature(m_RootSig.Get());
+    m_CmdList->SetPipelineState(m_LinePso.Get());
+    m_CmdList->SetGraphicsRootConstantBufferView(0, m_CbGpu[m_FrameIndex][cbSlot]);
+
+    m_CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+    m_CmdList->IASetVertexBuffers(0, 1, &m_LineVbView);
+    m_CmdList->DrawInstanced(2, 1, 0, 0);
+
+    if (m_DrawCbIndex < MaxDrawsPerFrame)
+        ++m_DrawCbIndex;
+}
+
+void Dx12RenderAdapter::DrawTestQuad()
+{
+    struct alignas(256) CB { float mvp[16]; float color[4]; };
+    CB cb{};
+    memcpy(cb.mvp, m_PendingMVP, sizeof(cb.mvp));
+    memcpy(cb.color, m_PendingColor, sizeof(cb.color));
+
+    const UINT cbSlot = (m_DrawCbIndex < MaxDrawsPerFrame) ? m_DrawCbIndex : (MaxDrawsPerFrame - 1);
+    memcpy(m_CbMapped[m_FrameIndex][cbSlot], &cb, sizeof(CB));
+
+    m_CmdList->SetGraphicsRootSignature(m_RootSig.Get());
+    m_CmdList->SetPipelineState(m_Pso.Get());
+    m_CmdList->SetGraphicsRootConstantBufferView(0, m_CbGpu[m_FrameIndex][cbSlot]);
+
+    m_CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    m_CmdList->IASetVertexBuffers(0, 1, &m_QuadVbView);
+    m_CmdList->DrawInstanced(6, 1, 0, 0);
+
+    if (m_DrawCbIndex < MaxDrawsPerFrame)
+        ++m_DrawCbIndex;
+}
+
+void Dx12RenderAdapter::DrawTestCube()
+{
+    struct alignas(256) CB { float mvp[16]; float color[4]; };
+    CB cb{};
+    memcpy(cb.mvp, m_PendingMVP, sizeof(cb.mvp));
+    memcpy(cb.color, m_PendingColor, sizeof(cb.color));
+
+    const UINT cbSlot = (m_DrawCbIndex < MaxDrawsPerFrame) ? m_DrawCbIndex : (MaxDrawsPerFrame - 1);
+    memcpy(m_CbMapped[m_FrameIndex][cbSlot], &cb, sizeof(CB));
+
+    m_CmdList->SetGraphicsRootSignature(m_RootSig.Get());
+    m_CmdList->SetPipelineState(m_LinePso.Get());
+    m_CmdList->SetGraphicsRootConstantBufferView(0, m_CbGpu[m_FrameIndex][cbSlot]);
+
+    m_CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+    m_CmdList->IASetVertexBuffers(0, 1, &m_CubeVbView);
+    m_CmdList->DrawInstanced(24, 1, 0, 0);
 
     if (m_DrawCbIndex < MaxDrawsPerFrame)
         ++m_DrawCbIndex;
@@ -426,6 +544,9 @@ void Dx12RenderAdapter::Shutdown()
     }
 
     m_VB.Reset();
+    m_LineVB.Reset();
+    m_QuadVB.Reset();
+    m_CubeVB.Reset();
     for (UINT i = 0; i < FrameCount; ++i) m_Rt[i].Reset();
     m_RtvHeap.Reset();
     m_Swapchain.Reset();
@@ -433,6 +554,7 @@ void Dx12RenderAdapter::Shutdown()
     for (UINT i = 0; i < FrameCount; ++i) m_Allocator[i].Reset();
     m_Queue.Reset();
     m_Pso.Reset();
+    m_LinePso.Reset();
     m_RootSig.Reset();
     m_Fence.Reset();
     m_Device.Reset();

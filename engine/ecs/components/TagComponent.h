@@ -1,10 +1,12 @@
 #pragma once
 
+#include "../Component.h"
+
 #include <string>
 
 namespace ecs
 {
-struct TagComponent
+struct TagComponent : Component
 {
     std::string name;
 };

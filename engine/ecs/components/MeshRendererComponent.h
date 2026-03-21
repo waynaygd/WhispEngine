@@ -1,5 +1,8 @@
 #pragma once
 
+#include "../Component.h"
+#include "../MathTypes.h"
+
 #include <string>
 
 namespace ecs
@@ -12,10 +15,10 @@ enum class PrimitiveType
     Cube
 };
 
-struct MeshRendererComponent
+struct MeshRendererComponent : Component
 {
     PrimitiveType primitive = PrimitiveType::Triangle;
-    float color[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    Vec4 color{};
     std::string material = "default";
     std::string texture;
     bool visible = true;

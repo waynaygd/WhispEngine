@@ -91,12 +91,44 @@ static const char* PrimitiveTypeToString(ecs::PrimitiveType primitive)
 
 std::vector<EcsDemoEntityConfig> Application::BuildDefaultEcsDemoEntities()
 {
-    return {
-        EcsDemoEntityConfig{ -0.80f,  0.45f, 0.65f,  0.00f,  0.35f, -0.08f,  1.25f },
-        EcsDemoEntityConfig{  0.55f,  0.55f, 0.40f,  0.20f, -0.28f, -0.16f, -1.80f },
-        EcsDemoEntityConfig{ -0.20f, -0.55f, 0.50f, -0.40f,  0.18f,  0.22f,  0.95f },
-        EcsDemoEntityConfig{  0.72f, -0.22f, 0.30f,  0.00f, -0.20f,  0.14f,  2.40f }
-    };
+    std::vector<EcsDemoEntityConfig> entities(4);
+
+    entities[0].tag = "DemoLine";
+    entities[0].primitive = ecs::PrimitiveType::Line;
+    entities[0].color = ecs::Vec4{ 0.94f, 0.42f, 0.32f, 1.0f };
+    entities[0].position = ecs::Vec3{ -0.75f, 0.45f, 0.0f };
+    entities[0].scale = ecs::Vec3{ 0.70f, 0.70f, 1.0f };
+    entities[0].linearVelocity = ecs::Vec3{ 0.35f, -0.08f, 0.0f };
+    entities[0].angularVelocity = ecs::Vec3{ 0.0f, 0.0f, 1.25f };
+
+    entities[1].tag = "DemoTriangle";
+    entities[1].primitive = ecs::PrimitiveType::Triangle;
+    entities[1].color = ecs::Vec4{ 0.30f, 0.78f, 0.44f, 1.0f };
+    entities[1].position = ecs::Vec3{ 0.50f, 0.55f, 0.0f };
+    entities[1].rotation = ecs::Vec3{ 0.0f, 0.0f, 0.20f };
+    entities[1].scale = ecs::Vec3{ 0.40f, 0.40f, 1.0f };
+    entities[1].linearVelocity = ecs::Vec3{ -0.28f, -0.16f, 0.0f };
+    entities[1].angularVelocity = ecs::Vec3{ 0.0f, 0.0f, -1.80f };
+
+    entities[2].tag = "DemoQuad";
+    entities[2].primitive = ecs::PrimitiveType::Quad;
+    entities[2].color = ecs::Vec4{ 0.26f, 0.57f, 0.92f, 1.0f };
+    entities[2].position = ecs::Vec3{ -0.20f, -0.50f, 0.0f };
+    entities[2].rotation = ecs::Vec3{ 0.0f, 0.0f, -0.40f };
+    entities[2].scale = ecs::Vec3{ 0.45f, 0.45f, 1.0f };
+    entities[2].linearVelocity = ecs::Vec3{ 0.18f, 0.22f, 0.0f };
+    entities[2].angularVelocity = ecs::Vec3{ 0.0f, 0.0f, 0.95f };
+
+    entities[3].tag = "DemoCube";
+    entities[3].primitive = ecs::PrimitiveType::Cube;
+    entities[3].color = ecs::Vec4{ 0.95f, 0.80f, 0.28f, 1.0f };
+    entities[3].position = ecs::Vec3{ 0.68f, -0.18f, 0.0f };
+    entities[3].rotation = ecs::Vec3{ 0.45f, 0.65f, 0.00f };
+    entities[3].scale = ecs::Vec3{ 0.30f, 0.30f, 0.30f };
+    entities[3].linearVelocity = ecs::Vec3{ -0.20f, 0.14f, 0.0f };
+    entities[3].angularVelocity = ecs::Vec3{ 0.80f, 1.15f, 0.60f };
+
+    return entities;
 }
 
 void Application::RunEcsBootstrapCheck()
@@ -119,9 +151,8 @@ void Application::RunEcsBootstrapCheck()
     Logger::Get().Info("ECS bootstrap: recycled slot into " + m_World.DebugDescribeEntity(recycled));
 
     auto& firstTransform = m_World.AddComponent<ecs::TransformComponent>(first);
-    firstTransform.x = 1.5f;
-    firstTransform.y = -0.5f;
-    firstTransform.scale = 2.0f;
+    firstTransform.position = ecs::Vec3{ 1.5f, -0.5f, 0.0f };
+    firstTransform.scale = ecs::Vec3{ 2.0f, 2.0f, 1.0f };
 
     Logger::Get().Info(std::string("ECS bootstrap: first has transform -> ") +
         (m_World.HasComponent<ecs::TransformComponent>(first) ? "true" : "false"));
@@ -129,10 +160,12 @@ void Application::RunEcsBootstrapCheck()
     if (const auto* transform = m_World.GetComponent<ecs::TransformComponent>(first))
     {
         std::ostringstream ss;
-        ss << "ECS bootstrap: first transform x=" << transform->x
-           << " y=" << transform->y
-           << " scale=" << transform->scale
-           << " angle=" << transform->angle;
+        ss << "ECS bootstrap: first transform pos=("
+           << transform->position.x << ", " << transform->position.y << ", " << transform->position.z
+           << ") scale=("
+           << transform->scale.x << ", " << transform->scale.y << ", " << transform->scale.z
+           << ") rot=("
+           << transform->rotation.x << ", " << transform->rotation.y << ", " << transform->rotation.z << ")";
         Logger::Get().Info(ss.str());
     }
 
@@ -142,15 +175,15 @@ void Application::RunEcsBootstrapCheck()
 
     auto& firstMeshRenderer = m_World.AddComponent<ecs::MeshRendererComponent>(first);
     firstMeshRenderer.primitive = ecs::PrimitiveType::Triangle;
-    firstMeshRenderer.color[0] = 0.85f;
-    firstMeshRenderer.color[1] = 0.25f;
-    firstMeshRenderer.color[2] = 0.25f;
-    firstMeshRenderer.color[3] = 1.0f;
+    firstMeshRenderer.color = ecs::Vec4{ 0.85f, 0.25f, 0.25f, 1.0f };
     Logger::Get().Info(
         std::string("ECS bootstrap: first mesh renderer primitive -> ") +
         PrimitiveTypeToString(firstMeshRenderer.primitive));
 
-    m_World.AddComponent<ecs::TransformComponent>(recycled, ecs::TransformComponent{ -2.0f, 3.0f, 0.75f, 0.5f });
+    auto& recycledTransform = m_World.AddComponent<ecs::TransformComponent>(recycled);
+    recycledTransform.position = ecs::Vec3{ -2.0f, 3.0f, 0.0f };
+    recycledTransform.rotation = ecs::Vec3{ 0.0f, 0.0f, 0.5f };
+    recycledTransform.scale = ecs::Vec3{ 0.75f, 0.75f, 1.0f };
     Logger::Get().Info(std::string("ECS bootstrap: recycled has transform before remove -> ") +
         (m_World.HasComponent<ecs::TransformComponent>(recycled) ? "true" : "false"));
 
@@ -160,7 +193,10 @@ void Application::RunEcsBootstrapCheck()
     Logger::Get().Info(std::string("ECS bootstrap: recycled has transform after remove -> ") +
         (m_World.HasComponent<ecs::TransformComponent>(recycled) ? "true" : "false"));
 
-    m_World.AddComponent<ecs::TransformComponent>(third, ecs::TransformComponent{ 4.0f, 2.0f, 1.25f, 0.0f });
+    auto& thirdTransform = m_World.AddComponent<ecs::TransformComponent>(third);
+    thirdTransform.position = ecs::Vec3{ 4.0f, 2.0f, 0.0f };
+    thirdTransform.rotation = ecs::Vec3{};
+    thirdTransform.scale = ecs::Vec3{ 1.25f, 1.25f, 1.0f };
     const bool destroyedThird = m_World.DestroyEntity(third);
     Logger::Get().Info(std::string("ECS bootstrap: destroy third entity with transform -> ") +
         (destroyedThird ? "ok" : "failed"));
@@ -180,9 +216,10 @@ void Application::RunEcsBootstrapCheck()
 
 void Application::SetupEcsRuntimeDemo()
 {
-    m_EcsSystems.Clear();
-    m_EcsSystems.AddSystem<ecs::MotionSystem>();
-    m_EcsSystems.AddSystem<ecs::BoundsBounceSystem>();
+    m_World.ClearSystems();
+    m_World.AddSystem<ecs::MotionSystem>();
+    m_World.AddSystem<ecs::BoundsBounceSystem>();
+    m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
 
     m_EcsDebugEntities.clear();
     const std::vector<EcsDemoEntityConfig> entities =
@@ -190,14 +227,7 @@ void Application::SetupEcsRuntimeDemo()
 
     for (const auto& entityCfg : entities)
     {
-        m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(
-            entityCfg.x,
-            entityCfg.y,
-            entityCfg.scale,
-            entityCfg.angle,
-            entityCfg.vx,
-            entityCfg.vy,
-            entityCfg.angularVelocity));
+        m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(entityCfg));
     }
 
     m_EcsDebugLogTimer = 0.0f;
@@ -205,31 +235,96 @@ void Application::SetupEcsRuntimeDemo()
     Logger::Get().Info("ECS runtime: motion system registered");
     Logger::Get().Info("ECS runtime: bounds bounce system registered");
     Logger::Get().Info("ECS runtime: demo scene created with " + std::to_string(m_EcsDebugEntities.size()) + " ECS entities");
-    Logger::Get().Info("ECS runtime: render system ready");
+    Logger::Get().Info("ECS runtime: render system registered");
 }
 
-ecs::Entity Application::SpawnEcsDemoEntity(
-    float x, float y, float scale, float angle, float vx, float vy, float angularVelocity)
+ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg)
 {
     const ecs::Entity entity = m_World.CreateEntity();
     const std::size_t entityOrdinal = m_EcsDebugEntities.size();
 
     auto& transform = m_World.AddComponent<ecs::TransformComponent>(entity);
-    transform.x = x;
-    transform.y = y;
-    transform.scale = scale;
-    transform.angle = angle;
+    transform.position = entityCfg.position;
+    transform.rotation = entityCfg.rotation;
+    transform.scale = entityCfg.scale;
 
     auto& velocity = m_World.AddComponent<ecs::VelocityComponent>(entity);
-    velocity.vx = vx;
-    velocity.vy = vy;
-    velocity.angularVelocity = angularVelocity;
+    velocity.linear = entityCfg.linearVelocity;
+    velocity.angular = entityCfg.angularVelocity;
 
     auto& tag = m_World.AddComponent<ecs::TagComponent>(entity);
-    tag.name = "DemoEntity_" + std::to_string(entityOrdinal);
+    tag.name = entityCfg.tag.empty() ? ("DemoEntity_" + std::to_string(entityOrdinal)) : entityCfg.tag;
 
     auto& meshRenderer = m_World.AddComponent<ecs::MeshRendererComponent>(entity);
-    meshRenderer.primitive = ecs::PrimitiveType::Triangle;
+    meshRenderer.primitive = entityCfg.primitive;
+    meshRenderer.color = entityCfg.color;
+    meshRenderer.material = entityCfg.material;
+    meshRenderer.texture = entityCfg.texture;
+    meshRenderer.visible = entityCfg.visible;
+
+    if (entityCfg.bounce)
+        m_World.AddComponent<ecs::BoundsBounceComponent>(entity);
+
+    std::ostringstream ss;
+    ss << "ECS runtime: spawned demo entity -> " << m_World.DebugDescribeEntity(entity)
+       << " tag=" << tag.name
+       << " primitive=" << PrimitiveTypeToString(meshRenderer.primitive)
+       << " color=(" << meshRenderer.color.r << ", " << meshRenderer.color.g
+       << ", " << meshRenderer.color.b << ", " << meshRenderer.color.a << ")";
+    Logger::Get().Info(ss.str());
+    return entity;
+}
+
+void Application::EnterGameplayScene()
+{
+    Logger::Get().Info("Application: enter gameplay scene");
+}
+
+void Application::ExitGameplayScene()
+{
+    Logger::Get().Info("Application: exit gameplay scene");
+}
+
+ecs::Entity Application::SpawnGameplayEntity()
+{
+    struct SpawnPreset
+    {
+        float x;
+        float y;
+        float sx;
+        float sy;
+        float sz;
+        float rx;
+        float ry;
+        float rz;
+        float vx;
+        float vy;
+        float vrx;
+        float vry;
+        float vrz;
+        ecs::PrimitiveType primitive;
+    };
+
+    static constexpr std::array<SpawnPreset, 6> presets =
+    {{
+        { -0.65f,  0.15f, 0.32f, 0.32f, 1.0f, 0.0f, 0.0f,  0.15f,  0.42f,  0.21f, 0.0f, 0.0f,  1.70f, ecs::PrimitiveType::Triangle },
+        {  0.68f,  0.05f, 0.28f, 0.28f, 1.0f, 0.0f, 0.0f, -0.35f, -0.36f,  0.18f, 0.0f, 0.0f, -1.45f, ecs::PrimitiveType::Quad },
+        { -0.15f,  0.72f, 0.50f, 0.50f, 1.0f, 0.0f, 0.0f,  0.00f,  0.17f, -0.33f, 0.0f, 0.0f,  2.15f, ecs::PrimitiveType::Line },
+        {  0.12f, -0.68f, 0.28f, 0.28f, 0.28f, 0.35f, 0.55f,  0.40f, -0.24f,  0.29f, 0.65f, 1.15f, -2.30f, ecs::PrimitiveType::Cube },
+        { -0.78f, -0.12f, 0.26f, 0.26f, 1.0f, 0.0f, 0.0f, -0.20f,  0.48f, -0.12f, 0.0f, 0.0f,  1.25f, ecs::PrimitiveType::Triangle },
+        {  0.78f, -0.58f, 0.30f, 0.30f, 1.0f, 0.0f, 0.0f,  0.55f, -0.31f,  0.27f, 0.0f, 0.0f,  1.95f, ecs::PrimitiveType::Quad },
+    }};
+
+    const SpawnPreset& preset = presets[m_EcsDebugEntities.size() % presets.size()];
+    EcsDemoEntityConfig entityCfg;
+    entityCfg.tag = "SpawnedEntity_" + std::to_string(m_EcsDebugEntities.size());
+    entityCfg.primitive = preset.primitive;
+    entityCfg.position = ecs::Vec3{ preset.x, preset.y, 0.0f };
+    entityCfg.rotation = ecs::Vec3{ preset.rx, preset.ry, preset.rz };
+    entityCfg.scale = ecs::Vec3{ preset.sx, preset.sy, preset.sz };
+    entityCfg.linearVelocity = ecs::Vec3{ preset.vx, preset.vy, 0.0f };
+    entityCfg.angularVelocity = ecs::Vec3{ preset.vrx, preset.vry, preset.vrz };
+
     static constexpr float palette[][4] =
     {
         { 0.94f, 0.42f, 0.32f, 1.0f },
@@ -239,71 +334,10 @@ ecs::Entity Application::SpawnEcsDemoEntity(
         { 0.71f, 0.38f, 0.88f, 1.0f },
         { 0.22f, 0.82f, 0.83f, 1.0f },
     };
-    const auto& color = palette[entityOrdinal % (sizeof(palette) / sizeof(palette[0]))];
-    meshRenderer.color[0] = color[0];
-    meshRenderer.color[1] = color[1];
-    meshRenderer.color[2] = color[2];
-    meshRenderer.color[3] = color[3];
-    m_World.AddComponent<ecs::BoundsBounceComponent>(entity);
+    const auto& color = palette[m_EcsDebugEntities.size() % (sizeof(palette) / sizeof(palette[0]))];
+    entityCfg.color = ecs::Vec4{ color[0], color[1], color[2], color[3] };
 
-    std::ostringstream ss;
-    ss << "ECS runtime: spawned demo entity -> " << m_World.DebugDescribeEntity(entity)
-       << " tag=" << tag.name
-       << " primitive=" << PrimitiveTypeToString(meshRenderer.primitive)
-       << " color=(" << meshRenderer.color[0] << ", " << meshRenderer.color[1]
-       << ", " << meshRenderer.color[2] << ", " << meshRenderer.color[3] << ")";
-    Logger::Get().Info(ss.str());
-    return entity;
-}
-
-void Application::EnterGameplayScene()
-{
-    Logger::Get().Info("Application: enter gameplay scene -> setup ECS scene");
-    m_World.Clear();
-    SetupEcsRuntimeDemo();
-}
-
-void Application::ExitGameplayScene()
-{
-    Logger::Get().Info("Application: exit gameplay scene -> clear ECS scene");
-    m_EcsSystems.Clear();
-    m_EcsDebugEntities.clear();
-    m_EcsDebugLogTimer = 0.0f;
-    m_World.Clear();
-}
-
-ecs::Entity Application::SpawnGameplayEntity()
-{
-    struct SpawnPreset
-    {
-        float x;
-        float y;
-        float scale;
-        float angle;
-        float vx;
-        float vy;
-        float angularVelocity;
-    };
-
-    static constexpr std::array<SpawnPreset, 6> presets =
-    {{
-        { -0.65f,  0.15f, 0.32f,  0.15f,  0.42f,  0.21f,  1.70f },
-        {  0.68f,  0.05f, 0.28f, -0.35f, -0.36f,  0.18f, -1.45f },
-        { -0.15f,  0.72f, 0.36f,  0.00f,  0.17f, -0.33f,  2.15f },
-        {  0.12f, -0.68f, 0.34f,  0.40f, -0.24f,  0.29f, -2.30f },
-        { -0.78f, -0.12f, 0.26f, -0.20f,  0.48f, -0.12f,  1.25f },
-        {  0.78f, -0.58f, 0.30f,  0.55f, -0.31f,  0.27f,  1.95f },
-    }};
-
-    const SpawnPreset& preset = presets[m_EcsDebugEntities.size() % presets.size()];
-    const ecs::Entity entity = SpawnEcsDemoEntity(
-        preset.x,
-        preset.y,
-        preset.scale,
-        preset.angle,
-        preset.vx,
-        preset.vy,
-        preset.angularVelocity);
+    const ecs::Entity entity = SpawnEcsDemoEntity(entityCfg);
 
     m_EcsDebugEntities.push_back(entity);
 
@@ -336,8 +370,6 @@ bool Application::DestroyLastGameplayEntity()
 
 void Application::UpdateEcs(float dt)
 {
-    m_EcsSystems.Update(m_World, dt);
-
     if (m_EcsDebugEntities.empty())
         return;
 
@@ -364,10 +396,10 @@ void Application::UpdateEcs(float dt)
 
         ss << " \n e" << i
            << " tag=" << (tag != nullptr ? tag->name : "<unnamed>")
-           << " pos=(" << transform->x << ", " << transform->y << ")"
-           << " scale=" << transform->scale
-           << " angle=" << transform->angle
-           << " vel=(" << velocity->vx << ", " << velocity->vy << ")"
+           << " pos=(" << transform->position.x << ", " << transform->position.y << ", " << transform->position.z << ")"
+           << " scale=(" << transform->scale.x << ", " << transform->scale.y << ", " << transform->scale.z << ")"
+           << " rot=(" << transform->rotation.x << ", " << transform->rotation.y << ", " << transform->rotation.z << ")"
+           << " vel=(" << velocity->linear.x << ", " << velocity->linear.y << ", " << velocity->linear.z << ")"
            << " primitive=" << PrimitiveTypeToString(meshRenderer->primitive);
     }
     Logger::Get().Info(ss.str());
@@ -441,6 +473,7 @@ bool Application::Initialize()
         return false;
 
     m_Windows.push_back(std::move(ctx));
+    SetupEcsRuntimeDemo();
 
     m_IsRunning = true;
 
@@ -508,8 +541,6 @@ int Application::Run()
             m_StateMachine.ApplyPending(*this);
         }
 
-        UpdateEcs(dt);
-
         static float fpsTimer = 0.0f;
         static int fpsFrames = 0;
 
@@ -549,11 +580,19 @@ int Application::Run()
             wc.renderer->BeginFrame();
             wc.renderer->Clear(wc.clear[0], wc.clear[1], wc.clear[2], wc.clear[3]);
 
+            if (m_RenderSystem != nullptr)
+                m_RenderSystem->SetRenderAdapter(wc.renderer.get());
+
+            m_World.UpdateSystems(dt);
+            UpdateEcs(dt);
+
             m_StateMachine.Render(*this, *wc.renderer);
-            m_RenderSystem.Render(m_World, *wc.renderer);
 
             wc.renderer->EndFrame();
             wc.renderer->Present();
+
+            if (m_RenderSystem != nullptr)
+                m_RenderSystem->SetRenderAdapter(nullptr);
         }
     }
     return 0;
@@ -565,7 +604,11 @@ void Application::Shutdown()
         if (wc.renderer) wc.renderer->Shutdown();
 
     m_Windows.clear();
-    ExitGameplayScene();
+    m_World.ClearSystems();
+    m_RenderSystem = nullptr;
+    m_EcsDebugEntities.clear();
+    m_EcsDebugLogTimer = 0.0f;
+    m_World.Clear();
     Logger::Get().Shutdown();
 }
 

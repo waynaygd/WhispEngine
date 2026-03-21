@@ -2,6 +2,8 @@
 #include <string>
 #include <vector>
 
+#include "../ecs/MathTypes.h"
+#include "../ecs/components/MeshRendererComponent.h"
 #include "../render/RenderFactory.h" 
 
 struct WindowConfig
@@ -15,13 +17,18 @@ struct WindowConfig
 
 struct EcsDemoEntityConfig
 {
-    float x = 0.0f;
-    float y = 0.0f;
-    float scale = 0.4f;
-    float angle = 0.0f;
-    float vx = 0.0f;
-    float vy = 0.0f;
-    float angularVelocity = 0.0f;
+    std::string tag;
+    ecs::PrimitiveType primitive = ecs::PrimitiveType::Triangle;
+    ecs::Vec4 color{};
+    std::string material = "default";
+    std::string texture;
+    bool visible = true;
+    bool bounce = true;
+    ecs::Vec3 position{};
+    ecs::Vec3 rotation{};
+    ecs::Vec3 scale{ 0.4f, 0.4f, 1.0f };
+    ecs::Vec3 linearVelocity{};
+    ecs::Vec3 angularVelocity{};
 };
 
 struct EcsDemoConfig
@@ -44,4 +51,5 @@ public:
 
 private:
     static RenderBackend ParseBackend(const std::string& s);
+    static ecs::PrimitiveType ParsePrimitiveType(const std::string& s);
 };

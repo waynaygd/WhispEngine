@@ -12,26 +12,26 @@ void BoundsBounceSystem::Update(World& world, float)
     world.ForEach<TransformComponent, VelocityComponent, BoundsBounceComponent>(
         [](Entity, TransformComponent& transform, VelocityComponent& velocity, BoundsBounceComponent& bounds)
         {
-            if (transform.x < bounds.minX)
+            if (transform.position.x < bounds.minX)
             {
-                transform.x = bounds.minX;
-                velocity.vx = -velocity.vx;
+                transform.position.x = bounds.minX;
+                velocity.linear.x = -velocity.linear.x;
             }
-            else if (transform.x > bounds.maxX)
+            else if (transform.position.x > bounds.maxX)
             {
-                transform.x = bounds.maxX;
-                velocity.vx = -velocity.vx;
+                transform.position.x = bounds.maxX;
+                velocity.linear.x = -velocity.linear.x;
             }
 
-            if (transform.y < bounds.minY)
+            if (transform.position.y < bounds.minY)
             {
-                transform.y = bounds.minY;
-                velocity.vy = -velocity.vy;
+                transform.position.y = bounds.minY;
+                velocity.linear.y = -velocity.linear.y;
             }
-            else if (transform.y > bounds.maxY)
+            else if (transform.position.y > bounds.maxY)
             {
-                transform.y = bounds.maxY;
-                velocity.vy = -velocity.vy;
+                transform.position.y = bounds.maxY;
+                velocity.linear.y = -velocity.linear.y;
             }
         });
 }

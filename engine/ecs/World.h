@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Entity.h"
+#include "systems/SystemPipeline.h"
 
 #include <cstddef>
 #include <memory>
@@ -42,6 +43,22 @@ public:
     [[nodiscard]] bool IsAlive(Entity entity) const;
     [[nodiscard]] std::size_t GetAliveCount() const { return m_AliveCount; }
     [[nodiscard]] std::size_t GetCapacity() const { return m_Slots.size(); }
+
+    template <typename TSystem, typename... Args>
+    TSystem& AddSystem(Args&&... args)
+    {
+        return m_Systems.AddSystem<TSystem>(std::forward<Args>(args)...);
+    }
+
+    void UpdateSystems(float dt)
+    {
+        m_Systems.Update(*this, dt);
+    }
+
+    void ClearSystems()
+    {
+        m_Systems.Clear();
+    }
 
     void Clear();
     [[nodiscard]] std::string DebugDescribeEntity(Entity entity) const;
@@ -152,6 +169,7 @@ private:
     std::vector<EntitySlot> m_Slots;
     std::vector<std::uint32_t> m_FreeIndices;
     std::unordered_map<std::type_index, std::unique_ptr<IComponentStorage>> m_ComponentStorages;
+    SystemPipeline m_Systems;
     std::size_t m_AliveCount = 0;
 };
 

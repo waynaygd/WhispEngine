@@ -1,11 +1,13 @@
 #pragma once
 
+#include "../Component.h"
+#include "../MathTypes.h"
+
 namespace ecs
 {
-struct VelocityComponent
+struct VelocityComponent : Component
 {
-    float vx = 0.0f;
-    float vy = 0.0f;
-    float angularVelocity = 0.0f;
+    Vec3 linear{};
+    Vec3 angular{};
 };
 }
