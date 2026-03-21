@@ -25,6 +25,7 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
 {
     outCfg.activeBackend = RenderBackend::DX12;
     outCfg.windows.clear();
+    outCfg.ecsDemo = EcsDemoConfig{};
 
     std::ifstream f(path);
     if (!f.is_open())
@@ -82,8 +83,31 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
         outCfg.windows.push_back(wc);
     }
 
+    if (j.contains("ecsDemo") && j["ecsDemo"].is_object())
+    {
+        const auto& demo = j["ecsDemo"];
+        outCfg.ecsDemo.logSnapshots = demo.value("logSnapshots", true);
+
+        if (demo.contains("initialEntities") && demo["initialEntities"].is_array())
+        {
+            for (const auto& je : demo["initialEntities"])
+            {
+                EcsDemoEntityConfig entityCfg;
+                entityCfg.x = je.value("x", 0.0f);
+                entityCfg.y = je.value("y", 0.0f);
+                entityCfg.scale = je.value("scale", 0.4f);
+                entityCfg.angle = je.value("angle", 0.0f);
+                entityCfg.vx = je.value("vx", 0.0f);
+                entityCfg.vy = je.value("vy", 0.0f);
+                entityCfg.angularVelocity = je.value("angularVelocity", 0.0f);
+                outCfg.ecsDemo.initialEntities.push_back(entityCfg);
+            }
+        }
+    }
+
     Logger::Get().Info(
         "ConfigLoader: loaded " + std::to_string(outCfg.windows.size()) +
-        " windows from config, active renderer=" + std::string(j.value("activeRenderer", "DX12")));
+        " windows from config, active renderer=" + std::string(j.value("activeRenderer", "DX12")) +
+        ", ecs demo entities=" + std::to_string(outCfg.ecsDemo.initialEntities.size()));
     return true;
 }

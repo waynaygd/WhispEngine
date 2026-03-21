@@ -15,5 +15,46 @@
       "height": 480,
       "clearColor": [ 0.85, 0.25, 0.25, 1 ]
     }
-  ]
+  ],
+  "ecsDemo": {
+    "logSnapshots": true,
+    "initialEntities": [
+      {
+        "x": -0.8,
+        "y": 0.45,
+        "scale": 0.65,
+        "angle": 0.0,
+        "vx": 0.35,
+        "vy": -0.08,
+        "angularVelocity": 4.25
+      },
+      {
+        "x": 0.55,
+        "y": 0.55,
+        "scale": 0.4,
+        "angle": 0.2,
+        "vx": -0.28,
+        "vy": -0.16,
+        "angularVelocity": -1.8
+      },
+      {
+        "x": -0.2,
+        "y": -0.55,
+        "scale": 0.5,
+        "angle": -0.4,
+        "vx": 0.18,
+        "vy": 0.22,
+        "angularVelocity": 0.95
+      },
+      {
+        "x": 0.72,
+        "y": -0.22,
+        "scale": 0.3,
+        "angle": 0.0,
+        "vx": -0.2,
+        "vy": 0.14,
+        "angularVelocity": 2.4
+      }
+    ]
+  }
 }

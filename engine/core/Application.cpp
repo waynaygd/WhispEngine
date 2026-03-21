@@ -94,6 +94,16 @@ static std::string ResolveConfigPath()
     return relativeConfig.string();
 }
 
+std::vector<EcsDemoEntityConfig> Application::BuildDefaultEcsDemoEntities()
+{
+    return {
+        EcsDemoEntityConfig{ -0.80f,  0.45f, 0.65f,  0.00f,  0.35f, -0.08f,  1.25f },
+        EcsDemoEntityConfig{  0.55f,  0.55f, 0.40f,  0.20f, -0.28f, -0.16f, -1.80f },
+        EcsDemoEntityConfig{ -0.20f, -0.55f, 0.50f, -0.40f,  0.18f,  0.22f,  0.95f },
+        EcsDemoEntityConfig{  0.72f, -0.22f, 0.30f,  0.00f, -0.20f,  0.14f,  2.40f }
+    };
+}
+
 void Application::RunEcsBootstrapCheck()
 {
     Logger::Get().Info("ECS bootstrap: starting entity and component self-check");
@@ -162,10 +172,20 @@ void Application::SetupEcsRuntimeDemo()
     m_EcsSystems.AddSystem<ecs::BoundsBounceSystem>();
 
     m_EcsDebugEntities.clear();
-    m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(-0.80f, 0.45f, 0.65f, 0.00f, 0.35f, -0.08f, 1.25f));
-    m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(0.55f, 0.55f, 0.40f, 0.20f, -0.28f, -0.16f, -1.80f));
-    m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(-0.20f, -0.55f, 0.50f, -0.40f, 0.18f, 0.22f, 0.95f));
-    m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(0.72f, -0.22f, 0.30f, 0.00f, -0.20f, 0.14f, 2.40f));
+    const std::vector<EcsDemoEntityConfig> entities =
+        m_Config.ecsDemo.initialEntities.empty() ? BuildDefaultEcsDemoEntities() : m_Config.ecsDemo.initialEntities;
+
+    for (const auto& entityCfg : entities)
+    {
+        m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(
+            entityCfg.x,
+            entityCfg.y,
+            entityCfg.scale,
+            entityCfg.angle,
+            entityCfg.vx,
+            entityCfg.vy,
+            entityCfg.angularVelocity));
+    }
 
     m_EcsDebugLogTimer = 0.0f;
 
@@ -282,6 +302,9 @@ void Application::UpdateEcs(float dt)
     if (m_EcsDebugEntities.empty())
         return;
 
+    if (!m_Config.ecsDemo.logSnapshots)
+        return;
+
     m_EcsDebugLogTimer += dt;
     if (m_EcsDebugLogTimer < 1.0f)
         return;
@@ -330,13 +353,15 @@ bool Application::Initialize()
 
     m_Time.Initialize();
 
-    AppConfig cfg;
     const std::string configPath = ResolveConfigPath();
     Logger::Get().Info("Application: using config file: " + configPath);
 
-    const bool configLoaded = ConfigLoader::Load(configPath, cfg);
+    m_Config = AppConfig{};
+    m_Config.ecsDemo.initialEntities = BuildDefaultEcsDemoEntities();
 
-    WindowConfig selectedWindow = BuildDefaultWindowConfig(cfg.activeBackend);
+    const bool configLoaded = ConfigLoader::Load(configPath, m_Config);
+
+    WindowConfig selectedWindow = BuildDefaultWindowConfig(m_Config.activeBackend);
     bool foundWindowConfig = false;
 
     if (!configLoaded)
@@ -345,9 +370,9 @@ bool Application::Initialize()
     }
     else
     {
-        for (const auto& wcfg : cfg.windows)
+        for (const auto& wcfg : m_Config.windows)
         {
-            if (wcfg.backend == cfg.activeBackend)
+            if (wcfg.backend == m_Config.activeBackend)
             {
                 selectedWindow = wcfg;
                 foundWindowConfig = true;
@@ -359,7 +384,7 @@ bool Application::Initialize()
         {
             Logger::Get().Error(
                 std::string("Application: no window config found for active renderer ") +
-                BackendToString(cfg.activeBackend) +
+                BackendToString(m_Config.activeBackend) +
                 ". Using default single-window setup.");
         }
     }

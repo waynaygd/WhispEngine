@@ -9,6 +9,7 @@
 #include "../render/RenderFactory.h"
 #include "../platform/IWindow.h"
 #include "../game/StateMachine.h"
+#include "ConfigLoader.h"
 
 class IWindow;
 class IRenderAdapter;
@@ -59,6 +60,7 @@ public:
 
 
 private:
+    static std::vector<EcsDemoEntityConfig> BuildDefaultEcsDemoEntities();
     void RunEcsBootstrapCheck();
     void SetupEcsRuntimeDemo();
     ecs::Entity SpawnEcsDemoEntity(float x, float y, float scale, float angle, float vx, float vy, float angularVelocity);
@@ -79,6 +81,7 @@ private:
     };
 
     std::vector<WindowContext> m_Windows;
+    AppConfig m_Config;
 
     ecs::World m_World;
     ecs::SystemPipeline m_EcsSystems;
