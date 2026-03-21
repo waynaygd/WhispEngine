@@ -2,6 +2,7 @@
 #include "Logger.h"
 #include "ConfigLoader.h"
 
+#include "../ecs/components/TransformComponent.h"
 #include "../platform/GlfwWindow.h"
 #include "../render/IRenderAdapter.h"
 #include <GLFW/glfw3.h>
@@ -89,7 +90,7 @@ static std::string ResolveConfigPath()
 
 void Application::RunEcsBootstrapCheck()
 {
-    Logger::Get().Info("ECS bootstrap: starting entity lifecycle self-check");
+    Logger::Get().Info("ECS bootstrap: starting entity and component self-check");
 
     const ecs::Entity first = m_World.CreateEntity();
     const ecs::Entity second = m_World.CreateEntity();
@@ -105,6 +106,42 @@ void Application::RunEcsBootstrapCheck()
 
     const ecs::Entity recycled = m_World.CreateEntity();
     Logger::Get().Info("ECS bootstrap: recycled slot into " + m_World.DebugDescribeEntity(recycled));
+
+    auto& firstTransform = m_World.AddComponent<ecs::TransformComponent>(first);
+    firstTransform.x = 1.5f;
+    firstTransform.y = -0.5f;
+    firstTransform.scale = 2.0f;
+
+    Logger::Get().Info(std::string("ECS bootstrap: first has transform -> ") +
+        (m_World.HasComponent<ecs::TransformComponent>(first) ? "true" : "false"));
+
+    if (const auto* transform = m_World.GetComponent<ecs::TransformComponent>(first))
+    {
+        std::ostringstream ss;
+        ss << "ECS bootstrap: first transform x=" << transform->x
+           << " y=" << transform->y
+           << " scale=" << transform->scale
+           << " angle=" << transform->angle;
+        Logger::Get().Info(ss.str());
+    }
+
+    m_World.AddComponent<ecs::TransformComponent>(recycled, ecs::TransformComponent{ -2.0f, 3.0f, 0.75f, 0.5f });
+    Logger::Get().Info(std::string("ECS bootstrap: recycled has transform before remove -> ") +
+        (m_World.HasComponent<ecs::TransformComponent>(recycled) ? "true" : "false"));
+
+    const bool removedTransform = m_World.RemoveComponent<ecs::TransformComponent>(recycled);
+    Logger::Get().Info(std::string("ECS bootstrap: remove transform from recycled -> ") +
+        (removedTransform ? "ok" : "failed"));
+    Logger::Get().Info(std::string("ECS bootstrap: recycled has transform after remove -> ") +
+        (m_World.HasComponent<ecs::TransformComponent>(recycled) ? "true" : "false"));
+
+    m_World.AddComponent<ecs::TransformComponent>(third, ecs::TransformComponent{ 4.0f, 2.0f, 1.25f, 0.0f });
+    const bool destroyedThird = m_World.DestroyEntity(third);
+    Logger::Get().Info(std::string("ECS bootstrap: destroy third entity with transform -> ") +
+        (destroyedThird ? "ok" : "failed"));
+    Logger::Get().Info(std::string("ECS bootstrap: third has transform after destroy -> ") +
+        (m_World.HasComponent<ecs::TransformComponent>(third) ? "true" : "false"));
+
     Logger::Get().Info("ECS bootstrap: alive entities=" + std::to_string(m_World.GetAliveCount()) +
         ", capacity=" + std::to_string(m_World.GetCapacity()));
 }

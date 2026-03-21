@@ -30,6 +30,12 @@ bool World::DestroyEntity(Entity entity)
     if (!IsAlive(entity))
         return false;
 
+    for (auto& [type, storage] : m_ComponentStorages)
+    {
+        (void)type;
+        storage->Remove(entity.index);
+    }
+
     EntitySlot& slot = m_Slots[entity.index];
     slot.alive = false;
     ++slot.generation;
@@ -51,6 +57,12 @@ void World::Clear()
 {
     m_Slots.clear();
     m_FreeIndices.clear();
+    for (auto& [type, storage] : m_ComponentStorages)
+    {
+        (void)type;
+        storage->Clear();
+    }
+    m_ComponentStorages.clear();
     m_AliveCount = 0;
 }
 
