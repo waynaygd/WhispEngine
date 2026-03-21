@@ -3,8 +3,9 @@
 #include "ConfigLoader.h"
 
 #include "../ecs/components/BoundsBounceComponent.h"
+#include "../ecs/components/MeshRendererComponent.h"
+#include "../ecs/components/TagComponent.h"
 #include "../ecs/components/TransformComponent.h"
-#include "../ecs/components/TriangleRenderComponent.h"
 #include "../ecs/components/VelocityComponent.h"
 #include "../ecs/systems/BoundsBounceSystem.h"
 #include "../ecs/systems/MotionSystem.h"
@@ -20,24 +21,6 @@
 
 Application::Application() = default;
 Application::~Application() = default;
-
-#include <cmath>
-
-static float SmoothFactor(float smooth, float dt)
-{
-    return 1.0f - std::exp(-smooth * dt);
-}
-
-static void BuildMVP(float* out16, float x, float y, float s, float a)
-{
-    float c = std::cos(a);
-    float sn = std::sin(a);
-
-    out16[0] = s * c;  out16[4] = -s * sn; out16[8] = 0.0f; out16[12] = x;
-    out16[1] = s * sn; out16[5] = s * c;  out16[9] = 0.0f; out16[13] = y;
-    out16[2] = 0.0f;   out16[6] = 0.0f;    out16[10] = 1.0f; out16[14] = 0.0f;
-    out16[3] = 0.0f;   out16[7] = 0.0f;    out16[11] = 0.0f; out16[15] = 1.0f;
-}
 
 static const char* BackendToString(RenderBackend b)
 {
@@ -94,6 +77,18 @@ static std::string ResolveConfigPath()
     return relativeConfig.string();
 }
 
+static const char* PrimitiveTypeToString(ecs::PrimitiveType primitive)
+{
+    switch (primitive)
+    {
+    case ecs::PrimitiveType::Line:     return "Line";
+    case ecs::PrimitiveType::Triangle: return "Triangle";
+    case ecs::PrimitiveType::Quad:     return "Quad";
+    case ecs::PrimitiveType::Cube:     return "Cube";
+    default:                           return "Unknown";
+    }
+}
+
 std::vector<EcsDemoEntityConfig> Application::BuildDefaultEcsDemoEntities()
 {
     return {
@@ -141,6 +136,20 @@ void Application::RunEcsBootstrapCheck()
         Logger::Get().Info(ss.str());
     }
 
+    auto& firstTag = m_World.AddComponent<ecs::TagComponent>(first);
+    firstTag.name = "BootstrapEntity";
+    Logger::Get().Info(std::string("ECS bootstrap: first tag -> ") + firstTag.name);
+
+    auto& firstMeshRenderer = m_World.AddComponent<ecs::MeshRendererComponent>(first);
+    firstMeshRenderer.primitive = ecs::PrimitiveType::Triangle;
+    firstMeshRenderer.color[0] = 0.85f;
+    firstMeshRenderer.color[1] = 0.25f;
+    firstMeshRenderer.color[2] = 0.25f;
+    firstMeshRenderer.color[3] = 1.0f;
+    Logger::Get().Info(
+        std::string("ECS bootstrap: first mesh renderer primitive -> ") +
+        PrimitiveTypeToString(firstMeshRenderer.primitive));
+
     m_World.AddComponent<ecs::TransformComponent>(recycled, ecs::TransformComponent{ -2.0f, 3.0f, 0.75f, 0.5f });
     Logger::Get().Info(std::string("ECS bootstrap: recycled has transform before remove -> ") +
         (m_World.HasComponent<ecs::TransformComponent>(recycled) ? "true" : "false"));
@@ -157,6 +166,10 @@ void Application::RunEcsBootstrapCheck()
         (destroyedThird ? "ok" : "failed"));
     Logger::Get().Info(std::string("ECS bootstrap: third has transform after destroy -> ") +
         (m_World.HasComponent<ecs::TransformComponent>(third) ? "true" : "false"));
+    Logger::Get().Info(std::string("ECS bootstrap: first has tag -> ") +
+        (m_World.HasComponent<ecs::TagComponent>(first) ? "true" : "false"));
+    Logger::Get().Info(std::string("ECS bootstrap: first has mesh renderer -> ") +
+        (m_World.HasComponent<ecs::MeshRendererComponent>(first) ? "true" : "false"));
 
     Logger::Get().Info("ECS bootstrap: alive entities=" + std::to_string(m_World.GetAliveCount()) +
         ", capacity=" + std::to_string(m_World.GetCapacity()));
@@ -192,12 +205,14 @@ void Application::SetupEcsRuntimeDemo()
     Logger::Get().Info("ECS runtime: motion system registered");
     Logger::Get().Info("ECS runtime: bounds bounce system registered");
     Logger::Get().Info("ECS runtime: demo scene created with " + std::to_string(m_EcsDebugEntities.size()) + " ECS entities");
+    Logger::Get().Info("ECS runtime: render system ready");
 }
 
 ecs::Entity Application::SpawnEcsDemoEntity(
     float x, float y, float scale, float angle, float vx, float vy, float angularVelocity)
 {
     const ecs::Entity entity = m_World.CreateEntity();
+    const std::size_t entityOrdinal = m_EcsDebugEntities.size();
 
     auto& transform = m_World.AddComponent<ecs::TransformComponent>(entity);
     transform.x = x;
@@ -210,10 +225,34 @@ ecs::Entity Application::SpawnEcsDemoEntity(
     velocity.vy = vy;
     velocity.angularVelocity = angularVelocity;
 
-    m_World.AddComponent<ecs::TriangleRenderComponent>(entity);
+    auto& tag = m_World.AddComponent<ecs::TagComponent>(entity);
+    tag.name = "DemoEntity_" + std::to_string(entityOrdinal);
+
+    auto& meshRenderer = m_World.AddComponent<ecs::MeshRendererComponent>(entity);
+    meshRenderer.primitive = ecs::PrimitiveType::Triangle;
+    static constexpr float palette[][4] =
+    {
+        { 0.94f, 0.42f, 0.32f, 1.0f },
+        { 0.30f, 0.78f, 0.44f, 1.0f },
+        { 0.26f, 0.57f, 0.92f, 1.0f },
+        { 0.95f, 0.80f, 0.28f, 1.0f },
+        { 0.71f, 0.38f, 0.88f, 1.0f },
+        { 0.22f, 0.82f, 0.83f, 1.0f },
+    };
+    const auto& color = palette[entityOrdinal % (sizeof(palette) / sizeof(palette[0]))];
+    meshRenderer.color[0] = color[0];
+    meshRenderer.color[1] = color[1];
+    meshRenderer.color[2] = color[2];
+    meshRenderer.color[3] = color[3];
     m_World.AddComponent<ecs::BoundsBounceComponent>(entity);
 
-    Logger::Get().Info("ECS runtime: spawned demo entity -> " + m_World.DebugDescribeEntity(entity));
+    std::ostringstream ss;
+    ss << "ECS runtime: spawned demo entity -> " << m_World.DebugDescribeEntity(entity)
+       << " tag=" << tag.name
+       << " primitive=" << PrimitiveTypeToString(meshRenderer.primitive)
+       << " color=(" << meshRenderer.color[0] << ", " << meshRenderer.color[1]
+       << ", " << meshRenderer.color[2] << ", " << meshRenderer.color[3] << ")";
+    Logger::Get().Info(ss.str());
     return entity;
 }
 
@@ -316,33 +355,22 @@ void Application::UpdateEcs(float dt)
     for (std::size_t i = 0; i < m_EcsDebugEntities.size(); ++i)
     {
         const ecs::Entity entity = m_EcsDebugEntities[i];
+        const auto* tag = m_World.GetComponent<ecs::TagComponent>(entity);
         const auto* transform = m_World.GetComponent<ecs::TransformComponent>(entity);
         const auto* velocity = m_World.GetComponent<ecs::VelocityComponent>(entity);
-        if (transform == nullptr || velocity == nullptr)
+        const auto* meshRenderer = m_World.GetComponent<ecs::MeshRendererComponent>(entity);
+        if (transform == nullptr || velocity == nullptr || meshRenderer == nullptr)
             continue;
 
         ss << " \n e" << i
+           << " tag=" << (tag != nullptr ? tag->name : "<unnamed>")
            << " pos=(" << transform->x << ", " << transform->y << ")"
            << " scale=" << transform->scale
            << " angle=" << transform->angle
-           << " vel=(" << velocity->vx << ", " << velocity->vy << ")";
+           << " vel=(" << velocity->vx << ", " << velocity->vy << ")"
+           << " primitive=" << PrimitiveTypeToString(meshRenderer->primitive);
     }
     Logger::Get().Info(ss.str());
-}
-
-void Application::RenderEcs(IRenderAdapter& renderer)
-{
-    m_World.ForEach<ecs::TransformComponent, ecs::TriangleRenderComponent>(
-        [&](ecs::Entity, ecs::TransformComponent& transform, ecs::TriangleRenderComponent& renderable)
-        {
-            if (!renderable.visible)
-                return;
-
-            float mvp[16];
-            BuildMVP(mvp, transform.x, transform.y, transform.scale, transform.angle);
-            renderer.SetTestTransform(mvp);
-            renderer.DrawTestTriangle();
-        });
 }
 
 bool Application::Initialize()
@@ -522,7 +550,7 @@ int Application::Run()
             wc.renderer->Clear(wc.clear[0], wc.clear[1], wc.clear[2], wc.clear[3]);
 
             m_StateMachine.Render(*this, *wc.renderer);
-            RenderEcs(*wc.renderer);
+            m_RenderSystem.Render(m_World, *wc.renderer);
 
             wc.renderer->EndFrame();
             wc.renderer->Present();

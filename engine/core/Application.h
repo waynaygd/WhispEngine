@@ -6,6 +6,7 @@
 #include "ConfigLoader.h"
 #include "Time.h"
 #include "../ecs/World.h"
+#include "../ecs/systems/RenderSystem.h"
 #include "../ecs/systems/SystemPipeline.h"
 #include "../render/RenderFactory.h"
 #include "../platform/IWindow.h"
@@ -49,7 +50,6 @@ private:
     void SetupEcsRuntimeDemo();
     ecs::Entity SpawnEcsDemoEntity(float x, float y, float scale, float angle, float vx, float vy, float angularVelocity);
     void UpdateEcs(float dt);
-    void RenderEcs(IRenderAdapter& renderer);
 
     struct WindowContext
     {
@@ -66,6 +66,7 @@ private:
     AppConfig m_Config;
 
     ecs::World m_World;
+    ecs::RenderSystem m_RenderSystem;
     ecs::SystemPipeline m_EcsSystems;
     std::vector<ecs::Entity> m_EcsDebugEntities;
     float m_EcsDebugLogTimer = 0.0f;
