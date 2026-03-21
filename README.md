@@ -1,52 +1,87 @@
 # WhispEngine
 
-The project currently opens a single window with the selected render backend (`DX12` or `Vulkan`) and includes a basic ECS integration bound to `GameplayState`.
+WhispEngine now runs in a single window and uses the render backend selected in config: `DX12` or `Vulkan`.
+
+## Current state
+
+- one active renderer selected through `engine/config/app.json`
+- ECS-based scene and object rendering
+- support for `line`, `triangle`, `quad`, `cube`
+- object color comes from `MeshRendererComponent`
+- scene entities are described in config
 
 ## Renderer
 
-The active renderer is selected in `engine/config/app.json` with the `activeRenderer` field.
+The active renderer is selected in `engine/config/app.json` with:
+
+```json
+"activeRenderer": "dx12"
+```
+
+Change it to `"vulkan"` to switch backend. The config is read on launch, so you do not need to rebuild just to change the renderer.
 
 ## ECS
 
-The ECS layer lives in `engine/ecs` and currently contains:
+The ECS layer is located in `engine/ecs`.
 
-- `World` with entity lifecycle based on `index + generation`
-- component storage with `Add/Get/Has/Remove`
-- update systems through `SystemPipeline`
-- rendering of ECS objects through a bridge into the existing renderer
+### Core
 
-### Components
+- `Entity`
+- `Component`
+- `World`
+- `SystemPipeline`
+
+### Main components
 
 - `TransformComponent`
+- `TagComponent`
+- `MeshRendererComponent`
 - `VelocityComponent`
-- `TriangleRenderComponent`
 - `BoundsBounceComponent`
 
-### Systems
+### Main systems
 
 - `MotionSystem`
 - `BoundsBounceSystem`
+- `RenderSystem`
 
-## Gameplay controls
+## Scene config
+
+The ECS demo scene is described in `engine/config/app.json` inside `ecsDemo.initialEntities`.
+
+Each entity can define:
+
+- `tag`
+- `primitive`
+- `color`
+- `visible`
+- `bounce`
+- `material`
+- `texture`
+- `position`
+- `rotation`
+- `scale`
+- `linearVelocity`
+- `angularVelocity`
+
+Supported primitive values:
+
+- `line`
+- `triangle`
+- `quad`
+- `cube`
+
+Note: the current `cube` is rendered as a wireframe cube.
+
+## Controls
 
 - `ENTER` in `Menu` switches to `Gameplay`
 - `ESC` in `Gameplay` switches back to `Menu`
 - `SPACE` spawns a new ECS entity
 - `BACKSPACE` destroys the last ECS entity
 
-## ECS scene config
+## Notes
 
-`engine/config/app.json` contains an `ecsDemo` section:
-
-- `logSnapshots` enables or disables periodic ECS snapshot logs
-- `initialEntities` defines the initial ECS objects for `Gameplay`
-
-Each `initialEntities` item supports:
-
-- `x`, `y`
-- `scale`
-- `angle`
-- `vx`, `vy`
-- `angularVelocity`
-
-This allows changing the starting ECS scene without editing code.
+- ECS objects are created during application initialization.
+- Rendering goes through `RenderSystem` and the existing `RenderAdapter`.
+- DX12 and Vulkan both support ECS primitive rendering in the current version.
