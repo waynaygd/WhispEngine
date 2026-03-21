@@ -51,6 +51,9 @@ public:
     const ecs::World& GetWorld() const { return m_World; }
     void EnterGameplayScene();
     void ExitGameplayScene();
+    ecs::Entity SpawnGameplayEntity();
+    bool DestroyLastGameplayEntity();
+    std::size_t GetGameplayEntityCount() const { return m_EcsDebugEntities.size(); }
 
     void RequestStateChange(std::unique_ptr<IGameState> s);
 

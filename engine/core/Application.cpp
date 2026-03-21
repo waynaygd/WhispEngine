@@ -15,6 +15,7 @@
 #include "../game/states/LoadingState.h"
 
 #include <filesystem>
+#include <array>
 #include <sstream>
 
 Application::Application() = default;
@@ -210,6 +211,68 @@ void Application::ExitGameplayScene()
     m_EcsDebugEntities.clear();
     m_EcsDebugLogTimer = 0.0f;
     m_World.Clear();
+}
+
+ecs::Entity Application::SpawnGameplayEntity()
+{
+    struct SpawnPreset
+    {
+        float x;
+        float y;
+        float scale;
+        float angle;
+        float vx;
+        float vy;
+        float angularVelocity;
+    };
+
+    static constexpr std::array<SpawnPreset, 6> presets =
+    {{
+        { -0.65f,  0.15f, 0.32f,  0.15f,  0.42f,  0.21f,  1.70f },
+        {  0.68f,  0.05f, 0.28f, -0.35f, -0.36f,  0.18f, -1.45f },
+        { -0.15f,  0.72f, 0.36f,  0.00f,  0.17f, -0.33f,  2.15f },
+        {  0.12f, -0.68f, 0.34f,  0.40f, -0.24f,  0.29f, -2.30f },
+        { -0.78f, -0.12f, 0.26f, -0.20f,  0.48f, -0.12f,  1.25f },
+        {  0.78f, -0.58f, 0.30f,  0.55f, -0.31f,  0.27f,  1.95f },
+    }};
+
+    const SpawnPreset& preset = presets[m_EcsDebugEntities.size() % presets.size()];
+    const ecs::Entity entity = SpawnEcsDemoEntity(
+        preset.x,
+        preset.y,
+        preset.scale,
+        preset.angle,
+        preset.vx,
+        preset.vy,
+        preset.angularVelocity);
+
+    m_EcsDebugEntities.push_back(entity);
+
+    Logger::Get().Info(
+        "ECS runtime: gameplay spawn -> total entities=" + std::to_string(m_EcsDebugEntities.size()));
+    return entity;
+}
+
+bool Application::DestroyLastGameplayEntity()
+{
+    while (!m_EcsDebugEntities.empty())
+    {
+        const ecs::Entity entity = m_EcsDebugEntities.back();
+        m_EcsDebugEntities.pop_back();
+
+        if (!m_World.IsAlive(entity))
+            continue;
+
+        const bool destroyed = m_World.DestroyEntity(entity);
+        Logger::Get().Info(
+            std::string("ECS runtime: gameplay destroy last entity -> ") +
+            (destroyed ? "ok" : "failed") +
+            ", total entities=" + std::to_string(m_EcsDebugEntities.size()));
+        return destroyed;
+    }
+
+    Logger::Get().Info("ECS runtime: gameplay destroy requested, but scene is already empty");
+    return false;
 }
 
 void Application::UpdateEcs(float dt)
