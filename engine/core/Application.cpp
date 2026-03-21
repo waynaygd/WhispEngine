@@ -8,6 +8,7 @@
 
 #include "../game/states/LoadingState.h"
 
+#include <filesystem>
 #include <sstream>
 
 Application::Application() = default;
@@ -41,6 +42,51 @@ static const char* BackendToString(RenderBackend b)
     }
 }
 
+static WindowConfig BuildDefaultWindowConfig(RenderBackend backend)
+{
+    WindowConfig cfg;
+    cfg.backend = backend;
+    cfg.title = "WhispEngine";
+
+    if (backend == RenderBackend::Vulkan)
+    {
+        cfg.clear[0] = 0.85f;
+        cfg.clear[1] = 0.25f;
+        cfg.clear[2] = 0.25f;
+        cfg.clear[3] = 1.0f;
+    }
+    else
+    {
+        cfg.clear[0] = 0.25f;
+        cfg.clear[1] = 0.85f;
+        cfg.clear[2] = 0.25f;
+        cfg.clear[3] = 1.0f;
+    }
+
+    return cfg;
+}
+
+static std::string ResolveConfigPath()
+{
+    namespace fs = std::filesystem;
+
+    const fs::path relativeConfig = fs::path("engine") / "config" / "app.json";
+    const fs::path cwd = fs::current_path();
+
+    for (fs::path probe = cwd.parent_path(); !probe.empty(); probe = probe.parent_path())
+    {
+        const fs::path candidate = probe / relativeConfig;
+        if (fs::exists(candidate))
+            return candidate.string();
+    }
+
+    const fs::path localCandidate = cwd / relativeConfig;
+    if (fs::exists(localCandidate))
+        return localCandidate.string();
+
+    return relativeConfig.string();
+}
+
 bool Application::Initialize()
 {
     Logger::Get().Initialize("engine.log");
@@ -49,38 +95,63 @@ bool Application::Initialize()
     m_Time.Initialize();
 
     AppConfig cfg;
-    ConfigLoader::Load("engine/config/app.json", cfg);
+    const std::string configPath = ResolveConfigPath();
+    Logger::Get().Info("Application: using config file: " + configPath);
 
-    if (cfg.windows.empty())
+    const bool configLoaded = ConfigLoader::Load(configPath, cfg);
+
+    WindowConfig selectedWindow = BuildDefaultWindowConfig(cfg.activeBackend);
+    bool foundWindowConfig = false;
+
+    if (!configLoaded)
     {
-        Logger::Get().Error("Config has no windows. Falling back to single DX12 window.");
+        Logger::Get().Error("Application: failed to load config. Using default single-window setup.");
     }
     else
     {
         for (const auto& wcfg : cfg.windows)
         {
-            WindowContext ctx;
-            ctx.backend = wcfg.backend;
-            ctx.baseTitle = wcfg.title + " | " + BackendToString(wcfg.backend);
-            ctx.clear[0] = wcfg.clear[0];
-            ctx.clear[1] = wcfg.clear[1];
-            ctx.clear[2] = wcfg.clear[2];
-            ctx.clear[3] = wcfg.clear[3];
+            if (wcfg.backend == cfg.activeBackend)
+            {
+                selectedWindow = wcfg;
+                foundWindowConfig = true;
+                break;
+            }
+        }
 
-            ctx.window = std::make_unique<GlfwWindow>();
-            if (!ctx.window->Create(wcfg.width, wcfg.height, ctx.baseTitle))
-                return false;
-
-            ctx.renderer = RenderFactory::Create(ctx.backend);
-            if (!ctx.renderer)
-                return false;
-
-            if (!ctx.renderer->Initialize(ctx.window.get()))
-                return false;
-
-            m_Windows.push_back(std::move(ctx));
+        if (!foundWindowConfig)
+        {
+            Logger::Get().Error(
+                std::string("Application: no window config found for active renderer ") +
+                BackendToString(cfg.activeBackend) +
+                ". Using default single-window setup.");
         }
     }
+
+    WindowContext ctx;
+    ctx.backend = selectedWindow.backend;
+    ctx.baseTitle = selectedWindow.title + " | " + BackendToString(selectedWindow.backend);
+    ctx.clear[0] = selectedWindow.clear[0];
+    ctx.clear[1] = selectedWindow.clear[1];
+    ctx.clear[2] = selectedWindow.clear[2];
+    ctx.clear[3] = selectedWindow.clear[3];
+
+    ctx.window = std::make_unique<GlfwWindow>();
+    if (!ctx.window->Create(selectedWindow.width, selectedWindow.height, ctx.baseTitle))
+        return false;
+
+    ctx.renderer = RenderFactory::Create(ctx.backend);
+    if (!ctx.renderer)
+    {
+        Logger::Get().Error(
+            std::string("Application: renderer backend is unavailable: ") + BackendToString(ctx.backend));
+        return false;
+    }
+
+    if (!ctx.renderer->Initialize(ctx.window.get()))
+        return false;
+
+    m_Windows.push_back(std::move(ctx));
 
     m_IsRunning = true;
 

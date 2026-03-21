@@ -15,6 +15,7 @@ struct WindowConfig
 
 struct AppConfig
 {
+    RenderBackend activeBackend = RenderBackend::DX12;
     std::vector<WindowConfig> windows;
 };
 

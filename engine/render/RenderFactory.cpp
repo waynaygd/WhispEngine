@@ -22,5 +22,7 @@ std::unique_ptr<IRenderAdapter> RenderFactory::Create(RenderBackend backend)
         return std::make_unique<VkRenderAdapter>();
 #endif
     }
+
+    return nullptr;
 }
 

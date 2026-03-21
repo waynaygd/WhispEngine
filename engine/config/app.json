@@ -1,4 +1,5 @@
 {
+  "activeRenderer": "vulkan",
   "windows": [
     {
       "backend": "dx12",

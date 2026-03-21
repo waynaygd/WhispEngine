@@ -23,6 +23,7 @@ RenderBackend ConfigLoader::ParseBackend(const std::string& s)
 
 bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string* outError)
 {
+    outCfg.activeBackend = RenderBackend::DX12;
     outCfg.windows.clear();
 
     std::ifstream f(path);
@@ -48,6 +49,8 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
         Logger::Get().Error(ss.str());
         return false;
     }
+
+    outCfg.activeBackend = ParseBackend(j.value("activeRenderer", std::string("DX12")));
 
     if (!j.contains("windows") || !j["windows"].is_array())
     {
@@ -79,6 +82,8 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
         outCfg.windows.push_back(wc);
     }
 
-    Logger::Get().Info("ConfigLoader: loaded " + std::to_string(outCfg.windows.size()) + " windows from config");
+    Logger::Get().Info(
+        "ConfigLoader: loaded " + std::to_string(outCfg.windows.size()) +
+        " windows from config, active renderer=" + std::string(j.value("activeRenderer", "DX12")));
     return true;
 }
