@@ -258,28 +258,31 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
         float mvp[16];
     };
 
-    for (UINT i = 0; i < FrameCount; ++i)
+    for (UINT frame = 0; frame < FrameCount; ++frame)
     {
-        D3D12_HEAP_PROPERTIES hp{};
-        hp.Type = D3D12_HEAP_TYPE_UPLOAD;
+        for (UINT draw = 0; draw < MaxDrawsPerFrame; ++draw)
+        {
+            D3D12_HEAP_PROPERTIES hp{};
+            hp.Type = D3D12_HEAP_TYPE_UPLOAD;
 
-        D3D12_RESOURCE_DESC rd = CD3DX12_RESOURCE_DESC::Buffer(sizeof(CB));
+            D3D12_RESOURCE_DESC rd = CD3DX12_RESOURCE_DESC::Buffer(sizeof(CB));
 
-        ThrowIfFailed(m_Device->CreateCommittedResource(
-            &hp, D3D12_HEAP_FLAG_NONE, &rd,
-            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-            IID_PPV_ARGS(&m_Cb[i])
-        ), "CreateCommittedResource CB failed");
+            ThrowIfFailed(m_Device->CreateCommittedResource(
+                &hp, D3D12_HEAP_FLAG_NONE, &rd,
+                D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                IID_PPV_ARGS(&m_Cb[frame][draw])
+            ), "CreateCommittedResource CB failed");
 
-        CD3DX12_RANGE range(0, 0);
-        void* mapped = nullptr;
-        ThrowIfFailed(m_Cb[i]->Map(0, &range, &mapped), "CB Map failed");
-        m_CbMapped[i] = reinterpret_cast<uint8_t*>(mapped);
-        m_CbGpu[i] = m_Cb[i]->GetGPUVirtualAddress();
+            CD3DX12_RANGE range(0, 0);
+            void* mapped = nullptr;
+            ThrowIfFailed(m_Cb[frame][draw]->Map(0, &range, &mapped), "CB Map failed");
+            m_CbMapped[frame][draw] = reinterpret_cast<uint8_t*>(mapped);
+            m_CbGpu[frame][draw] = m_Cb[frame][draw]->GetGPUVirtualAddress();
 
-        CB init{};
-        memcpy(init.mvp, m_PendingMVP, sizeof(init.mvp));
-        memcpy(m_CbMapped[i], &init, sizeof(CB));
+            CB init{};
+            memcpy(init.mvp, m_PendingMVP, sizeof(init.mvp));
+            memcpy(m_CbMapped[frame][draw], &init, sizeof(CB));
+        }
     }
 
 
@@ -290,6 +293,7 @@ void Dx12RenderAdapter::BeginFrame()
 {
     ThrowIfFailed(m_Allocator[m_FrameIndex]->Reset(), "Allocator Reset failed");
     ThrowIfFailed(m_CmdList->Reset(m_Allocator[m_FrameIndex].Get(), m_Pso.Get()), "CmdList Reset failed");
+    m_DrawCbIndex = 0;
 
     D3D12_VIEWPORT vp{};
     vp.TopLeftX = 0.0f;
@@ -333,14 +337,19 @@ void Dx12RenderAdapter::DrawTestTriangle()
     struct alignas(256) CB { float mvp[16]; };
     CB cb{};
     memcpy(cb.mvp, m_PendingMVP, sizeof(cb.mvp));
-    memcpy(m_CbMapped[m_FrameIndex], &cb, sizeof(CB));
+
+    const UINT cbSlot = (m_DrawCbIndex < MaxDrawsPerFrame) ? m_DrawCbIndex : (MaxDrawsPerFrame - 1);
+    memcpy(m_CbMapped[m_FrameIndex][cbSlot], &cb, sizeof(CB));
 
     m_CmdList->SetGraphicsRootSignature(m_RootSig.Get());
-    m_CmdList->SetGraphicsRootConstantBufferView(0, m_CbGpu[m_FrameIndex]);
+    m_CmdList->SetGraphicsRootConstantBufferView(0, m_CbGpu[m_FrameIndex][cbSlot]);
 
     m_CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_CmdList->IASetVertexBuffers(0, 1, &m_VbView);
     m_CmdList->DrawInstanced(3, 1, 0, 0);
+
+    if (m_DrawCbIndex < MaxDrawsPerFrame)
+        ++m_DrawCbIndex;
 }
 
 void Dx12RenderAdapter::EndFrame()
@@ -403,14 +412,17 @@ void Dx12RenderAdapter::Shutdown()
         m_FenceEvent = nullptr;
     }
 
-    for (UINT i = 0; i < FrameCount; ++i)
+    for (UINT frame = 0; frame < FrameCount; ++frame)
     {
-        if (m_Cb[i] && m_CbMapped[i])
+        for (UINT draw = 0; draw < MaxDrawsPerFrame; ++draw)
         {
-            m_Cb[i]->Unmap(0, nullptr);
-            m_CbMapped[i] = nullptr;
+            if (m_Cb[frame][draw] && m_CbMapped[frame][draw])
+            {
+                m_Cb[frame][draw]->Unmap(0, nullptr);
+                m_CbMapped[frame][draw] = nullptr;
+            }
+            m_Cb[frame][draw].Reset();
         }
-        m_Cb[i].Reset();
     }
 
     m_VB.Reset();

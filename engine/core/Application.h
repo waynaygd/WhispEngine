@@ -57,6 +57,7 @@ private:
     void RunEcsBootstrapCheck();
     void SetupEcsRuntimeDemo();
     void UpdateEcs(float dt);
+    void RenderEcs(IRenderAdapter& renderer);
 
     TransformState m_Obj;
 

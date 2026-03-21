@@ -32,6 +32,7 @@ private:
 	void MoveToNextFrame();
 
 	static constexpr UINT FrameCount = 2;
+	static constexpr UINT MaxDrawsPerFrame = 64;
 
 	Microsoft::WRL::ComPtr<IDXGIFactory6> m_Factory;
 	Microsoft::WRL::ComPtr<ID3D12Device> m_Device;
@@ -61,9 +62,10 @@ private:
 	UINT m_Width = 1280;
 	UINT m_Height = 720;
 
-	Microsoft::WRL::ComPtr<ID3D12Resource> m_Cb[FrameCount];
-	uint8_t* m_CbMapped[FrameCount] = {};
-	D3D12_GPU_VIRTUAL_ADDRESS m_CbGpu[FrameCount] = {};
+	Microsoft::WRL::ComPtr<ID3D12Resource> m_Cb[FrameCount][MaxDrawsPerFrame];
+	uint8_t* m_CbMapped[FrameCount][MaxDrawsPerFrame] = {};
+	D3D12_GPU_VIRTUAL_ADDRESS m_CbGpu[FrameCount][MaxDrawsPerFrame] = {};
+	UINT m_DrawCbIndex = 0;
 
 	float m_PendingMVP[16] = {
 		1,0,0,0,

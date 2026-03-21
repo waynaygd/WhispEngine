@@ -3,6 +3,7 @@
 #include "ConfigLoader.h"
 
 #include "../ecs/components/TransformComponent.h"
+#include "../ecs/components/TriangleRenderComponent.h"
 #include "../ecs/components/VelocityComponent.h"
 #include "../ecs/systems/MotionSystem.h"
 #include "../platform/GlfwWindow.h"
@@ -160,19 +161,22 @@ void Application::SetupEcsRuntimeDemo()
 
     auto& transform = m_World.AddComponent<ecs::TransformComponent>(m_EcsDebugEntity);
     transform.x = -0.8f;
-    transform.y = 0.0f;
-    transform.scale = 1.0f;
+    transform.y = 0.45f;
+    transform.scale = 0.65f;
     transform.angle = 0.0f;
 
     auto& velocity = m_World.AddComponent<ecs::VelocityComponent>(m_EcsDebugEntity);
     velocity.vx = 0.35f;
-    velocity.vy = 0.10f;
+    velocity.vy = -0.08f;
     velocity.angularVelocity = 1.25f;
+
+    m_World.AddComponent<ecs::TriangleRenderComponent>(m_EcsDebugEntity);
 
     m_EcsDebugLogTimer = 0.0f;
 
     Logger::Get().Info("ECS runtime: motion system registered");
     Logger::Get().Info("ECS runtime: demo entity created -> " + m_World.DebugDescribeEntity(m_EcsDebugEntity));
+    Logger::Get().Info("ECS runtime: demo entity is now renderable through ECS");
 }
 
 void Application::UpdateEcs(float dt)
@@ -199,6 +203,21 @@ void Application::UpdateEcs(float dt)
        << " velocity=(" << velocity->vx << ", " << velocity->vy
        << ") angularVelocity=" << velocity->angularVelocity;
     Logger::Get().Info(ss.str());
+}
+
+void Application::RenderEcs(IRenderAdapter& renderer)
+{
+    m_World.ForEach<ecs::TransformComponent, ecs::TriangleRenderComponent>(
+        [&](ecs::Entity, ecs::TransformComponent& transform, ecs::TriangleRenderComponent& renderable)
+        {
+            if (!renderable.visible)
+                return;
+
+            float mvp[16];
+            BuildMVP(mvp, transform.x, transform.y, transform.scale, transform.angle);
+            renderer.SetTestTransform(mvp);
+            renderer.DrawTestTriangle();
+        });
 }
 
 bool Application::Initialize()
@@ -383,6 +402,7 @@ int Application::Run()
 
             m_StateMachine.Render(*this, *wc.renderer);
             wc.renderer->DrawTestTriangle();
+            RenderEcs(*wc.renderer);
 
             wc.renderer->EndFrame();
             wc.renderer->Present();
