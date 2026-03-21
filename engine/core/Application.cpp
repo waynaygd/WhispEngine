@@ -321,7 +321,7 @@ void Application::UpdateEcs(float dt)
         if (transform == nullptr || velocity == nullptr)
             continue;
 
-        ss << " | e" << i
+        ss << " \n e" << i
            << " pos=(" << transform->x << ", " << transform->y << ")"
            << " scale=" << transform->scale
            << " angle=" << transform->angle
@@ -514,20 +514,14 @@ int Application::Run()
             fpsFrames = 0;
         }
 
-        float mvp[16];
-        BuildMVP(mvp, m_Obj.x, m_Obj.y, m_Obj.scale, m_Obj.angle);
-
         for (auto& wc : m_Windows)
         {
             if (!wc.window || wc.window->ShouldClose()) continue;
-
-            wc.renderer->SetTestTransform(mvp);
 
             wc.renderer->BeginFrame();
             wc.renderer->Clear(wc.clear[0], wc.clear[1], wc.clear[2], wc.clear[3]);
 
             m_StateMachine.Render(*this, *wc.renderer);
-            wc.renderer->DrawTestTriangle();
             RenderEcs(*wc.renderer);
 
             wc.renderer->EndFrame();
@@ -547,51 +541,6 @@ void Application::Shutdown()
     Logger::Get().Shutdown();
 }
 
-
-void Application::UpdateInputAndTransform(IWindow* srcWindow, float dt)
-{
-    auto* gw = dynamic_cast<GlfwWindow*>(srcWindow);
-    if (!gw) return;
-
-    GLFWwindow* w = gw->GetGlfwHandle();
-    if (!w) return;
-
-    const float moveSpeed = 0.8f;    
-    const float rotSpeed = 2.0f;    
-    const float scaleStep = 1.15f;    
-    const float smooth = 12.0f;   
-
-    if (glfwGetKey(w, GLFW_KEY_LEFT) == GLFW_PRESS) m_Obj.x -= moveSpeed * dt;
-    if (glfwGetKey(w, GLFW_KEY_RIGHT) == GLFW_PRESS) m_Obj.x += moveSpeed * dt;
-    if (glfwGetKey(w, GLFW_KEY_UP) == GLFW_PRESS) m_Obj.y += moveSpeed * dt;
-    if (glfwGetKey(w, GLFW_KEY_DOWN) == GLFW_PRESS) m_Obj.y -= moveSpeed * dt;
-
-    bool lmb = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
-    bool rmb = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
-
-    if (lmb && !m_Obj.prevLMB)
-    {
-        m_Obj.targetScale *= scaleStep;
-        if (m_Obj.targetScale > 3.0f) m_Obj.targetScale = 1.0f;
-    }
-
-    if (rmb)
-    {
-        m_Obj.targetAngle += rotSpeed * dt;
-    }
-
-    m_Obj.prevLMB = lmb;
-    m_Obj.prevRMB = rmb;
-
-    float a = SmoothFactor(smooth, dt);
-    m_Obj.scale = m_Obj.scale + (m_Obj.targetScale - m_Obj.scale) * a;
-    m_Obj.angle = m_Obj.angle + (m_Obj.targetAngle - m_Obj.angle) * a;
-
-    if (m_Obj.x < -0.9f) m_Obj.x = -0.9f;
-    if (m_Obj.x > 0.9f) m_Obj.x = 0.9f;
-    if (m_Obj.y < -0.9f) m_Obj.y = -0.9f;
-    if (m_Obj.y > 0.9f) m_Obj.y = 0.9f;
-}
 
 void Application::RequestStateChange(std::unique_ptr<IGameState> s)
 {

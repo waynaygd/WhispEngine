@@ -3,31 +3,17 @@
 #include <vector>
 #include <string>
 
+#include "ConfigLoader.h"
 #include "Time.h"
 #include "../ecs/World.h"
 #include "../ecs/systems/SystemPipeline.h"
 #include "../render/RenderFactory.h"
 #include "../platform/IWindow.h"
 #include "../game/StateMachine.h"
-#include "ConfigLoader.h"
 
 class IWindow;
 class IRenderAdapter;
 class IGameState;
-
-struct TransformState
-{
-    float x = 0.0f;
-    float y = 0.0f;
-    float scale = 1.0f;
-    float angle = 0.0f;       
-
-    float targetScale = 1.0f;
-    float targetAngle = 0.0f;
-
-    bool prevLMB = false;
-    bool prevRMB = false;
-};
 
 enum class UpdateMode { 
     Variable, 
@@ -43,8 +29,6 @@ public:
     bool Initialize();  
     int Run();
     void Shutdown();
-
-    void UpdateInputAndTransform(IWindow* srcWindow, float dt);
     void SetUpdateMode(UpdateMode m) { m_UpdateMode = m; }
 
     IWindow* GetWindow() { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
@@ -66,8 +50,6 @@ private:
     ecs::Entity SpawnEcsDemoEntity(float x, float y, float scale, float angle, float vx, float vy, float angularVelocity);
     void UpdateEcs(float dt);
     void RenderEcs(IRenderAdapter& renderer);
-
-    TransformState m_Obj;
 
     struct WindowContext
     {

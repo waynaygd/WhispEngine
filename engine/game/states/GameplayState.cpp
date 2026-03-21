@@ -23,7 +23,7 @@ void GameplayState::OnExit(Application& app)
 
 void GameplayState::Update(Application& app, float dt)
 {
-    app.UpdateInputAndTransform(app.GetWindow(), dt);
+    (void)dt;
 
     auto* gw = static_cast<GlfwWindow*>(app.GetWindow());
     GLFWwindow* w = gw->GetGlfwHandle();
