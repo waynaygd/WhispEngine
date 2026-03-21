@@ -87,10 +87,33 @@ static std::string ResolveConfigPath()
     return relativeConfig.string();
 }
 
+void Application::RunEcsBootstrapCheck()
+{
+    Logger::Get().Info("ECS bootstrap: starting entity lifecycle self-check");
+
+    const ecs::Entity first = m_World.CreateEntity();
+    const ecs::Entity second = m_World.CreateEntity();
+    const ecs::Entity third = m_World.CreateEntity();
+
+    Logger::Get().Info("ECS bootstrap: created " + m_World.DebugDescribeEntity(first));
+    Logger::Get().Info("ECS bootstrap: created " + m_World.DebugDescribeEntity(second));
+    Logger::Get().Info("ECS bootstrap: created " + m_World.DebugDescribeEntity(third));
+
+    const bool destroyed = m_World.DestroyEntity(second);
+    Logger::Get().Info(std::string("ECS bootstrap: destroy second entity -> ") + (destroyed ? "ok" : "failed"));
+    Logger::Get().Info("ECS bootstrap: second entity after destroy -> " + m_World.DebugDescribeEntity(second));
+
+    const ecs::Entity recycled = m_World.CreateEntity();
+    Logger::Get().Info("ECS bootstrap: recycled slot into " + m_World.DebugDescribeEntity(recycled));
+    Logger::Get().Info("ECS bootstrap: alive entities=" + std::to_string(m_World.GetAliveCount()) +
+        ", capacity=" + std::to_string(m_World.GetCapacity()));
+}
+
 bool Application::Initialize()
 {
     Logger::Get().Initialize("engine.log");
     Logger::Get().Info("Application Initialize");
+    RunEcsBootstrapCheck();
 
     m_Time.Initialize();
 
@@ -279,6 +302,7 @@ void Application::Shutdown()
         if (wc.renderer) wc.renderer->Shutdown();
 
     m_Windows.clear();
+    m_World.Clear();
     Logger::Get().Shutdown();
 }
 

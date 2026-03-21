@@ -4,6 +4,7 @@
 #include <string>
 
 #include "Time.h"
+#include "../ecs/World.h"
 #include "../render/RenderFactory.h"
 #include "../platform/IWindow.h"
 #include "../game/StateMachine.h"
@@ -45,11 +46,15 @@ public:
     void SetUpdateMode(UpdateMode m) { m_UpdateMode = m; }
 
     IWindow* GetWindow() { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
+    ecs::World& GetWorld() { return m_World; }
+    const ecs::World& GetWorld() const { return m_World; }
 
     void RequestStateChange(std::unique_ptr<IGameState> s);
 
 
 private:
+    void RunEcsBootstrapCheck();
+
     TransformState m_Obj;
 
     struct WindowContext
@@ -64,6 +69,8 @@ private:
     };
 
     std::vector<WindowContext> m_Windows;
+
+    ecs::World m_World;
 
     Time m_Time;
     StateMachine m_StateMachine;

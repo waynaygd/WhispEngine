@@ -2,6 +2,7 @@ add_library(Engine
   core/Application.cpp
   core/Time.cpp
   core/Logger.cpp
+  ecs/World.cpp
   game/StateMachine.cpp
   render/RenderFactory.cpp
   platform/GlfwWindow.cpp
