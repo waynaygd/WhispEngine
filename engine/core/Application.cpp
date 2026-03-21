@@ -2,9 +2,11 @@
 #include "Logger.h"
 #include "ConfigLoader.h"
 
+#include "../ecs/components/BoundsBounceComponent.h"
 #include "../ecs/components/TransformComponent.h"
 #include "../ecs/components/TriangleRenderComponent.h"
 #include "../ecs/components/VelocityComponent.h"
+#include "../ecs/systems/BoundsBounceSystem.h"
 #include "../ecs/systems/MotionSystem.h"
 #include "../platform/GlfwWindow.h"
 #include "../render/IRenderAdapter.h"
@@ -156,34 +158,49 @@ void Application::SetupEcsRuntimeDemo()
 {
     m_EcsSystems.Clear();
     m_EcsSystems.AddSystem<ecs::MotionSystem>();
+    m_EcsSystems.AddSystem<ecs::BoundsBounceSystem>();
 
-    m_EcsDebugEntity = m_World.CreateEntity();
-
-    auto& transform = m_World.AddComponent<ecs::TransformComponent>(m_EcsDebugEntity);
-    transform.x = -0.8f;
-    transform.y = 0.45f;
-    transform.scale = 0.65f;
-    transform.angle = 0.0f;
-
-    auto& velocity = m_World.AddComponent<ecs::VelocityComponent>(m_EcsDebugEntity);
-    velocity.vx = 0.35f;
-    velocity.vy = -0.08f;
-    velocity.angularVelocity = 1.25f;
-
-    m_World.AddComponent<ecs::TriangleRenderComponent>(m_EcsDebugEntity);
+    m_EcsDebugEntities.clear();
+    m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(-0.80f, 0.45f, 0.65f, 0.00f, 0.35f, -0.08f, 1.25f));
+    m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(0.55f, 0.55f, 0.40f, 0.20f, -0.28f, -0.16f, -1.80f));
+    m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(-0.20f, -0.55f, 0.50f, -0.40f, 0.18f, 0.22f, 0.95f));
+    m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(0.72f, -0.22f, 0.30f, 0.00f, -0.20f, 0.14f, 2.40f));
 
     m_EcsDebugLogTimer = 0.0f;
 
     Logger::Get().Info("ECS runtime: motion system registered");
-    Logger::Get().Info("ECS runtime: demo entity created -> " + m_World.DebugDescribeEntity(m_EcsDebugEntity));
-    Logger::Get().Info("ECS runtime: demo entity is now renderable through ECS");
+    Logger::Get().Info("ECS runtime: bounds bounce system registered");
+    Logger::Get().Info("ECS runtime: demo scene created with " + std::to_string(m_EcsDebugEntities.size()) + " ECS entities");
+}
+
+ecs::Entity Application::SpawnEcsDemoEntity(
+    float x, float y, float scale, float angle, float vx, float vy, float angularVelocity)
+{
+    const ecs::Entity entity = m_World.CreateEntity();
+
+    auto& transform = m_World.AddComponent<ecs::TransformComponent>(entity);
+    transform.x = x;
+    transform.y = y;
+    transform.scale = scale;
+    transform.angle = angle;
+
+    auto& velocity = m_World.AddComponent<ecs::VelocityComponent>(entity);
+    velocity.vx = vx;
+    velocity.vy = vy;
+    velocity.angularVelocity = angularVelocity;
+
+    m_World.AddComponent<ecs::TriangleRenderComponent>(entity);
+    m_World.AddComponent<ecs::BoundsBounceComponent>(entity);
+
+    Logger::Get().Info("ECS runtime: spawned demo entity -> " + m_World.DebugDescribeEntity(entity));
+    return entity;
 }
 
 void Application::UpdateEcs(float dt)
 {
     m_EcsSystems.Update(m_World, dt);
 
-    if (!m_World.IsAlive(m_EcsDebugEntity))
+    if (m_EcsDebugEntities.empty())
         return;
 
     m_EcsDebugLogTimer += dt;
@@ -192,16 +209,22 @@ void Application::UpdateEcs(float dt)
 
     m_EcsDebugLogTimer = 0.0f;
 
-    const auto* transform = m_World.GetComponent<ecs::TransformComponent>(m_EcsDebugEntity);
-    const auto* velocity = m_World.GetComponent<ecs::VelocityComponent>(m_EcsDebugEntity);
-    if (transform == nullptr || velocity == nullptr)
-        return;
-
     std::ostringstream ss;
-    ss << "ECS runtime: demo entity position=(" << transform->x << ", " << transform->y
-       << ") angle=" << transform->angle
-       << " velocity=(" << velocity->vx << ", " << velocity->vy
-       << ") angularVelocity=" << velocity->angularVelocity;
+    ss << "ECS runtime: scene snapshot";
+    for (std::size_t i = 0; i < m_EcsDebugEntities.size(); ++i)
+    {
+        const ecs::Entity entity = m_EcsDebugEntities[i];
+        const auto* transform = m_World.GetComponent<ecs::TransformComponent>(entity);
+        const auto* velocity = m_World.GetComponent<ecs::VelocityComponent>(entity);
+        if (transform == nullptr || velocity == nullptr)
+            continue;
+
+        ss << " | e" << i
+           << " pos=(" << transform->x << ", " << transform->y << ")"
+           << " scale=" << transform->scale
+           << " angle=" << transform->angle
+           << " vel=(" << velocity->vx << ", " << velocity->vy << ")";
+    }
     Logger::Get().Info(ss.str());
 }
 

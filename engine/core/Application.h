@@ -56,6 +56,7 @@ public:
 private:
     void RunEcsBootstrapCheck();
     void SetupEcsRuntimeDemo();
+    ecs::Entity SpawnEcsDemoEntity(float x, float y, float scale, float angle, float vx, float vy, float angularVelocity);
     void UpdateEcs(float dt);
     void RenderEcs(IRenderAdapter& renderer);
 
@@ -76,7 +77,7 @@ private:
 
     ecs::World m_World;
     ecs::SystemPipeline m_EcsSystems;
-    ecs::Entity m_EcsDebugEntity;
+    std::vector<ecs::Entity> m_EcsDebugEntities;
     float m_EcsDebugLogTimer = 0.0f;
 
     Time m_Time;
