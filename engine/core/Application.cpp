@@ -196,6 +196,22 @@ ecs::Entity Application::SpawnEcsDemoEntity(
     return entity;
 }
 
+void Application::EnterGameplayScene()
+{
+    Logger::Get().Info("Application: enter gameplay scene -> setup ECS scene");
+    m_World.Clear();
+    SetupEcsRuntimeDemo();
+}
+
+void Application::ExitGameplayScene()
+{
+    Logger::Get().Info("Application: exit gameplay scene -> clear ECS scene");
+    m_EcsSystems.Clear();
+    m_EcsDebugEntities.clear();
+    m_EcsDebugLogTimer = 0.0f;
+    m_World.Clear();
+}
+
 void Application::UpdateEcs(float dt)
 {
     m_EcsSystems.Update(m_World, dt);
@@ -248,7 +264,6 @@ bool Application::Initialize()
     Logger::Get().Initialize("engine.log");
     Logger::Get().Info("Application Initialize");
     RunEcsBootstrapCheck();
-    SetupEcsRuntimeDemo();
 
     m_Time.Initialize();
 
@@ -440,8 +455,7 @@ void Application::Shutdown()
         if (wc.renderer) wc.renderer->Shutdown();
 
     m_Windows.clear();
-    m_EcsSystems.Clear();
-    m_World.Clear();
+    ExitGameplayScene();
     Logger::Get().Shutdown();
 }
 

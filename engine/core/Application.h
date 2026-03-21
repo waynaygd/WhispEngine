@@ -49,6 +49,8 @@ public:
     IWindow* GetWindow() { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
     ecs::World& GetWorld() { return m_World; }
     const ecs::World& GetWorld() const { return m_World; }
+    void EnterGameplayScene();
+    void ExitGameplayScene();
 
     void RequestStateChange(std::unique_ptr<IGameState> s);
 

@@ -7,9 +7,15 @@
 
 void GameplayState::OnEnter(Application& app)
 {
-    (void)app;
+    app.EnterGameplayScene();
     m_PrevEsc = false;
     Logger::Get().Info("GameplayState: OnEnter (ESC -> Menu).");
+}
+
+void GameplayState::OnExit(Application& app)
+{
+    app.ExitGameplayScene();
+    Logger::Get().Info("GameplayState: OnExit");
 }
 
 void GameplayState::Update(Application& app, float dt)
