@@ -2,6 +2,11 @@ add_library(Engine
   core/Application.cpp
   core/Time.cpp
   core/Logger.cpp
+  ecs/World.cpp
+  ecs/systems/BoundsBounceSystem.cpp
+  ecs/systems/MotionSystem.cpp
+  ecs/systems/RenderSystem.cpp
+  ecs/systems/SystemPipeline.cpp
   game/StateMachine.cpp
   render/RenderFactory.cpp
   platform/GlfwWindow.cpp

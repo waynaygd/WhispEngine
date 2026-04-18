@@ -11,6 +11,40 @@ static void SetError(std::string* outError, const std::string& msg)
 	if (outError) *outError = msg;
 }
 
+static void ReadVec3(const nlohmann::json& j, const char* key, ecs::Vec3& outVec)
+{
+    if (!j.contains(key))
+        return;
+
+    const auto& value = j[key];
+    if (value.is_array())
+    {
+        if (value.size() > 0) outVec.x = value[0].get<float>();
+        if (value.size() > 1) outVec.y = value[1].get<float>();
+        if (value.size() > 2) outVec.z = value[2].get<float>();
+        return;
+    }
+
+    if (value.is_number())
+    {
+        outVec.x = value.get<float>();
+        outVec.y = outVec.x;
+        outVec.z = outVec.x;
+    }
+}
+
+static void ReadColor(const nlohmann::json& j, const char* key, ecs::Vec4& outColor)
+{
+    if (!j.contains(key) || !j[key].is_array())
+        return;
+
+    const auto& c = j[key];
+    if (c.size() > 0) outColor.r = c[0].get<float>();
+    if (c.size() > 1) outColor.g = c[1].get<float>();
+    if (c.size() > 2) outColor.b = c[2].get<float>();
+    if (c.size() > 3) outColor.a = c[3].get<float>();
+}
+
 RenderBackend ConfigLoader::ParseBackend(const std::string& s)
 {
     if (s == "DX12" || s == "dx12" || s == "D3D12" || s == "d3d12")
@@ -21,9 +55,22 @@ RenderBackend ConfigLoader::ParseBackend(const std::string& s)
     return RenderBackend::DX12;
 }
 
+ecs::PrimitiveType ConfigLoader::ParsePrimitiveType(const std::string& s)
+{
+    if (s == "line" || s == "Line")
+        return ecs::PrimitiveType::Line;
+    if (s == "quad" || s == "Quad" || s == "square" || s == "Square")
+        return ecs::PrimitiveType::Quad;
+    if (s == "cube" || s == "Cube")
+        return ecs::PrimitiveType::Cube;
+    return ecs::PrimitiveType::Triangle;
+}
+
 bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string* outError)
 {
+    outCfg.activeBackend = RenderBackend::DX12;
     outCfg.windows.clear();
+    outCfg.ecsDemo = EcsDemoConfig{};
 
     std::ifstream f(path);
     if (!f.is_open())
@@ -48,6 +95,8 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
         Logger::Get().Error(ss.str());
         return false;
     }
+
+    outCfg.activeBackend = ParseBackend(j.value("activeRenderer", std::string("DX12")));
 
     if (!j.contains("windows") || !j["windows"].is_array())
     {
@@ -79,6 +128,53 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
         outCfg.windows.push_back(wc);
     }
 
-    Logger::Get().Info("ConfigLoader: loaded " + std::to_string(outCfg.windows.size()) + " windows from config");
+    if (j.contains("ecsDemo") && j["ecsDemo"].is_object())
+    {
+        const auto& demo = j["ecsDemo"];
+        outCfg.ecsDemo.logSnapshots = demo.value("logSnapshots", true);
+
+        if (demo.contains("initialEntities") && demo["initialEntities"].is_array())
+        {
+            for (const auto& je : demo["initialEntities"])
+            {
+                EcsDemoEntityConfig entityCfg;
+                entityCfg.tag = je.value("tag", std::string());
+                entityCfg.primitive = ParsePrimitiveType(je.value("primitive", std::string("triangle")));
+                entityCfg.material = je.value("material", std::string("default"));
+                entityCfg.texture = je.value("texture", std::string());
+                entityCfg.visible = je.value("visible", true);
+                entityCfg.bounce = je.value("bounce", true);
+                ReadColor(je, "color", entityCfg.color);
+                ReadVec3(je, "position", entityCfg.position);
+                ReadVec3(je, "rotation", entityCfg.rotation);
+                ReadVec3(je, "scale", entityCfg.scale);
+                ReadVec3(je, "linearVelocity", entityCfg.linearVelocity);
+                ReadVec3(je, "angularVelocity", entityCfg.angularVelocity);
+
+                if (je.contains("x")) entityCfg.position.x = je.value("x", 0.0f);
+                if (je.contains("y")) entityCfg.position.y = je.value("y", 0.0f);
+                if (je.contains("z")) entityCfg.position.z = je.value("z", 0.0f);
+                if (je.contains("angle")) entityCfg.rotation.z = je.value("angle", 0.0f);
+                if (je.contains("vx")) entityCfg.linearVelocity.x = je.value("vx", 0.0f);
+                if (je.contains("vy")) entityCfg.linearVelocity.y = je.value("vy", 0.0f);
+                if (je.contains("scale") && je["scale"].is_number())
+                {
+                    const float uniformScale = je["scale"].get<float>();
+                    entityCfg.scale.x = uniformScale;
+                    entityCfg.scale.y = uniformScale;
+                    entityCfg.scale.z = 1.0f;
+                }
+                if (je.contains("angularVelocity") && je["angularVelocity"].is_number())
+                    entityCfg.angularVelocity.z = je["angularVelocity"].get<float>();
+
+                outCfg.ecsDemo.initialEntities.push_back(entityCfg);
+            }
+        }
+    }
+
+    Logger::Get().Info(
+        "ConfigLoader: loaded " + std::to_string(outCfg.windows.size()) +
+        " windows from config, active renderer=" + std::string(j.value("activeRenderer", "DX12")) +
+        ", ecs demo entities=" + std::to_string(outCfg.ecsDemo.initialEntities.size()));
     return true;
 }

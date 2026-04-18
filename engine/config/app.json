@@ -1,4 +1,5 @@
 {
+  "activeRenderer": "dx12",
   "windows": [
     {
       "backend": "dx12",
@@ -14,5 +15,66 @@
       "height": 480,
       "clearColor": [ 0.85, 0.25, 0.25, 1 ]
     }
-  ]
+  ],
+  "ecsDemo": {
+    "logSnapshots": true,
+    "initialEntities": [
+      {
+        "tag": "DemoLine",
+        "primitive": "line",
+        "color": [0.94, 0.42, 0.32, 1.0],
+        "visible": true,
+        "bounce": true,
+        "material": "default",
+        "texture": "",
+        "position": [-0.75, 0.45, 0.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [0.70, 0.70, 1.0],
+        "linearVelocity": [0.35, -0.08, 0.0],
+        "angularVelocity": [0.0, 0.0, 1.25]
+      },
+      {
+        "tag": "DemoTriangle",
+        "primitive": "triangle",
+        "color": [0.30, 0.78, 0.44, 1.0],
+        "visible": true,
+        "bounce": true,
+        "material": "default",
+        "texture": "",
+        "position": [0.50, 0.55, 0.0],
+        "rotation": [0.0, 0.0, 0.2],
+        "scale": [0.40, 0.40, 1.0],
+        "linearVelocity": [-0.28, -0.16, 0.0],
+        "angularVelocity": [0.0, 0.0, -1.8]
+      },
+      {
+        "tag": "DemoQuad",
+        "primitive": "quad",
+        "color": [0.26, 0.57, 0.92, 1.0],
+        "visible": true,
+        "bounce": true,
+        "material": "default",
+        "texture": "",
+        "position": [-0.20, -0.50, 0.0],
+        "rotation": [0.0, 0.0, -0.4],
+        "scale": [0.45, 0.45, 1.0],
+        "linearVelocity": [0.18, 0.22, 0.0],
+        "angularVelocity": [0.0, 0.0, 0.95]
+      },
+      {
+        "tag": "DemoCube",
+        "primitive": "cube",
+        "color": [0.95, 0.80, 0.28, 1.0],
+        "visible": true,
+        "bounce": true,
+        "material": "default",
+        "texture": "",
+        "position": [0.68, -0.18, 0.0],
+        "rotation": [0.45, 0.65, 0.0],
+        "scale": [0.30, 0.30, 0.30],
+        "linearVelocity": [-0.20, 0.14, 0.0],
+        "angularVelocity": [0.80, 1.15, 0.60]
+      }
+    ]
+  }
 }

@@ -15,11 +15,15 @@ public:
 	void BeginFrame() override;
 	void Clear(float r, float g, float b, float a) override;
 	void DrawTestTriangle() override;
+	void DrawTestLine() override;
+	void DrawTestQuad() override;
+	void DrawTestCube() override;
 	void EndFrame() override;
 	void Present() override;
 	void Shutdown() override;
 
 	void SetTestTransform(const float* mvp16) override;
+	void SetTestColor(float r, float g, float b, float a) override;
 
 	bool ReloadShaders() override;
 	bool HotReloadShaders() override;
@@ -27,7 +31,7 @@ public:
 private:
 	bool CreateSyncObjects();
 
-	bool CreatePipelineFromModules(VkShaderModule vs, VkShaderModule fs, VkPipeline& outPipeline);
+	bool CreatePipelineFromModules(VkShaderModule vs, VkShaderModule fs, VkPrimitiveTopology topology, VkPipeline& outPipeline);
 
 	VkShaderModule LoadShaderModule(const char* spvPath);
 
@@ -69,6 +73,7 @@ private:
 	VkRenderPass m_RenderPass = VK_NULL_HANDLE;
 	VkPipelineLayout m_PipelineLayout = VK_NULL_HANDLE;
 	VkPipeline m_Pipeline = VK_NULL_HANDLE;
+	VkPipeline m_LinePipeline = VK_NULL_HANDLE;
 
 	std::vector<VkFramebuffer> m_Framebuffers;
 
@@ -86,6 +91,12 @@ private:
 
 	VkBuffer m_VB = VK_NULL_HANDLE;
 	VkDeviceMemory m_VBMem = VK_NULL_HANDLE;
+	VkBuffer m_LineVB = VK_NULL_HANDLE;
+	VkDeviceMemory m_LineVBMem = VK_NULL_HANDLE;
+	VkBuffer m_QuadVB = VK_NULL_HANDLE;
+	VkDeviceMemory m_QuadVBMem = VK_NULL_HANDLE;
+	VkBuffer m_CubeVB = VK_NULL_HANDLE;
+	VkDeviceMemory m_CubeVBMem = VK_NULL_HANDLE;
 
 	float m_PendingMVP[16] = {
 		1,0,0,0,
@@ -93,5 +104,6 @@ private:
 		0,0,1,0,
 		0,0,0,1
 	};
+	float m_PendingColor[4] = { 1,1,1,1 };
 };
 #endif

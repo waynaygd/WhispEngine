@@ -204,8 +204,14 @@ static QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice phys, VkSurfaceKHR 
 
 struct Vertex
 {
-    float pos[2];
+    float pos[3];
     float color[3];
+};
+
+struct PushConstants
+{
+    float mvp[16];
+    float color[4];
 };
 
 static VkVertexInputBindingDescription VertexBinding()
@@ -223,7 +229,7 @@ static std::array<VkVertexInputAttributeDescription, 2> VertexAttributes()
 
     a[0].location = 0;
     a[0].binding = 0;
-    a[0].format = VK_FORMAT_R32G32_SFLOAT;
+    a[0].format = VK_FORMAT_R32G32B32_SFLOAT;
     a[0].offset = offsetof(Vertex, pos);
 
     a[1].location = 1;
@@ -338,7 +344,7 @@ VkShaderModule VkRenderAdapter::LoadShaderModule(const char* spvPath)
 }
 
 
-bool VkRenderAdapter::CreatePipelineFromModules(VkShaderModule vs, VkShaderModule fs, VkPipeline& outPipeline)
+bool VkRenderAdapter::CreatePipelineFromModules(VkShaderModule vs, VkShaderModule fs, VkPrimitiveTopology topology, VkPipeline& outPipeline)
 {
     VkPipelineShaderStageCreateInfo stages[2]{};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -360,7 +366,7 @@ bool VkRenderAdapter::CreatePipelineFromModules(VkShaderModule vs, VkShaderModul
     vi.pVertexAttributeDescriptions = attrs.data();
 
     VkPipelineInputAssemblyStateCreateInfo ia{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
-    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    ia.topology = topology;
     ia.primitiveRestartEnable = VK_FALSE;
 
     VkViewport vp{};
@@ -440,18 +446,25 @@ bool VkRenderAdapter::RecreateGraphicsPipeline()
     }
 
     VkPipeline newPipeline = VK_NULL_HANDLE;
-    bool ok = CreatePipelineFromModules(vs, fs, newPipeline);
+    VkPipeline newTrianglePipeline = VK_NULL_HANDLE;
+    VkPipeline newLinePipeline = VK_NULL_HANDLE;
+    bool ok = CreatePipelineFromModules(vs, fs, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, newTrianglePipeline);
+    if (ok)
+        ok = CreatePipelineFromModules(vs, fs, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, newLinePipeline);
 
     vkDestroyShaderModule(m_Device, fs, nullptr);
     vkDestroyShaderModule(m_Device, vs, nullptr);
 
-    if (!ok || newPipeline == VK_NULL_HANDLE)
+    if (!ok || newTrianglePipeline == VK_NULL_HANDLE || newLinePipeline == VK_NULL_HANDLE)
         return false;
 
     if (m_Pipeline)
         vkDestroyPipeline(m_Device, m_Pipeline, nullptr);
+    if (m_LinePipeline)
+        vkDestroyPipeline(m_Device, m_LinePipeline, nullptr);
 
-    m_Pipeline = newPipeline;
+    m_Pipeline = newTrianglePipeline;
+    m_LinePipeline = newLinePipeline;
     return true;
 }
 
@@ -659,9 +672,9 @@ bool VkRenderAdapter::Initialize(IWindow* window)
             "vkCreateRenderPass failed");
 
         VkPushConstantRange pcr{};
-        pcr.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        pcr.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         pcr.offset = 0;
-        pcr.size = sizeof(float) * 16;
+        pcr.size = sizeof(PushConstants);
 
         VkPipelineLayoutCreateInfo plci{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
         plci.setLayoutCount = 0;
@@ -756,6 +769,10 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         VK_ThrowIfFailed(vkCreateGraphicsPipelines(m_Device, VK_NULL_HANDLE, 1, &gp, nullptr, &m_Pipeline),
             "vkCreateGraphicsPipelines failed");
 
+        ia.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+        VK_ThrowIfFailed(vkCreateGraphicsPipelines(m_Device, VK_NULL_HANDLE, 1, &gp, nullptr, &m_LinePipeline),
+            "vkCreateGraphicsPipelines line failed");
+
         vkDestroyShaderModule(m_Device, vs, nullptr);
         vkDestroyShaderModule(m_Device, fs, nullptr);
 
@@ -790,9 +807,35 @@ bool VkRenderAdapter::Initialize(IWindow* window)
             "vkAllocateCommandBuffers failed");
 
         Vertex verts[3] = {
-            { { 0.0f,  0.5f }, { 1.f, 0.f, 0.f } },
-            { { 0.5f, -0.5f }, { 0.f, 1.f, 0.f } },
-            { {-0.5f, -0.5f }, { 0.f, 0.f, 1.f } },
+            { { 0.0f,  0.5f, 0.0f }, { 1.f, 1.f, 1.f } },
+            { { 0.5f, -0.5f, 0.0f }, { 1.f, 1.f, 1.f } },
+            { {-0.5f, -0.5f, 0.0f }, { 1.f, 1.f, 1.f } },
+        };
+        Vertex lineVerts[2] = {
+            { { -0.5f, 0.0f, 0.0f }, { 1.f, 1.f, 1.f } },
+            { {  0.5f, 0.0f, 0.0f }, { 1.f, 1.f, 1.f } },
+        };
+        Vertex quadVerts[6] = {
+            { { -0.5f,  0.5f, 0.0f }, { 1.f, 1.f, 1.f } },
+            { {  0.5f,  0.5f, 0.0f }, { 1.f, 1.f, 1.f } },
+            { { -0.5f, -0.5f, 0.0f }, { 1.f, 1.f, 1.f } },
+            { { -0.5f, -0.5f, 0.0f }, { 1.f, 1.f, 1.f } },
+            { {  0.5f,  0.5f, 0.0f }, { 1.f, 1.f, 1.f } },
+            { {  0.5f, -0.5f, 0.0f }, { 1.f, 1.f, 1.f } },
+        };
+        Vertex cubeVerts[24] = {
+            { { -0.5f, -0.5f,  0.5f }, { 1.f, 1.f, 1.f } }, { {  0.5f, -0.5f,  0.5f }, { 1.f, 1.f, 1.f } },
+            { {  0.5f, -0.5f,  0.5f }, { 1.f, 1.f, 1.f } }, { {  0.5f,  0.5f,  0.5f }, { 1.f, 1.f, 1.f } },
+            { {  0.5f,  0.5f,  0.5f }, { 1.f, 1.f, 1.f } }, { { -0.5f,  0.5f,  0.5f }, { 1.f, 1.f, 1.f } },
+            { { -0.5f,  0.5f,  0.5f }, { 1.f, 1.f, 1.f } }, { { -0.5f, -0.5f,  0.5f }, { 1.f, 1.f, 1.f } },
+            { { -0.5f, -0.5f, -0.5f }, { 1.f, 1.f, 1.f } }, { {  0.5f, -0.5f, -0.5f }, { 1.f, 1.f, 1.f } },
+            { {  0.5f, -0.5f, -0.5f }, { 1.f, 1.f, 1.f } }, { {  0.5f,  0.5f, -0.5f }, { 1.f, 1.f, 1.f } },
+            { {  0.5f,  0.5f, -0.5f }, { 1.f, 1.f, 1.f } }, { { -0.5f,  0.5f, -0.5f }, { 1.f, 1.f, 1.f } },
+            { { -0.5f,  0.5f, -0.5f }, { 1.f, 1.f, 1.f } }, { { -0.5f, -0.5f, -0.5f }, { 1.f, 1.f, 1.f } },
+            { { -0.5f, -0.5f,  0.5f }, { 1.f, 1.f, 1.f } }, { { -0.5f, -0.5f, -0.5f }, { 1.f, 1.f, 1.f } },
+            { {  0.5f, -0.5f,  0.5f }, { 1.f, 1.f, 1.f } }, { {  0.5f, -0.5f, -0.5f }, { 1.f, 1.f, 1.f } },
+            { {  0.5f,  0.5f,  0.5f }, { 1.f, 1.f, 1.f } }, { {  0.5f,  0.5f, -0.5f }, { 1.f, 1.f, 1.f } },
+            { { -0.5f,  0.5f,  0.5f }, { 1.f, 1.f, 1.f } }, { { -0.5f,  0.5f, -0.5f }, { 1.f, 1.f, 1.f } },
         };
 
         VkBufferCreateInfo bci{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
@@ -817,6 +860,60 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         VK_ThrowIfFailed(vkMapMemory(m_Device, m_VBMem, 0, sizeof(verts), 0, &mapped), "vkMapMemory failed");
         std::memcpy(mapped, verts, sizeof(verts));
         vkUnmapMemory(m_Device, m_VBMem);
+
+        bci.size = sizeof(lineVerts);
+        VK_ThrowIfFailed(vkCreateBuffer(m_Device, &bci, nullptr, &m_LineVB), "vkCreateBuffer line failed");
+        vkGetBufferMemoryRequirements(m_Device, m_LineVB, &mr);
+
+        mai.allocationSize = mr.size;
+        mai.memoryTypeIndex = FindMemoryType(
+            m_Physical,
+            mr.memoryTypeBits,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        VK_ThrowIfFailed(vkAllocateMemory(m_Device, &mai, nullptr, &m_LineVBMem), "vkAllocateMemory line failed");
+        VK_ThrowIfFailed(vkBindBufferMemory(m_Device, m_LineVB, m_LineVBMem, 0), "vkBindBufferMemory line failed");
+
+        mapped = nullptr;
+        VK_ThrowIfFailed(vkMapMemory(m_Device, m_LineVBMem, 0, sizeof(lineVerts), 0, &mapped), "vkMapMemory line failed");
+        std::memcpy(mapped, lineVerts, sizeof(lineVerts));
+        vkUnmapMemory(m_Device, m_LineVBMem);
+
+        bci.size = sizeof(quadVerts);
+        VK_ThrowIfFailed(vkCreateBuffer(m_Device, &bci, nullptr, &m_QuadVB), "vkCreateBuffer quad failed");
+        vkGetBufferMemoryRequirements(m_Device, m_QuadVB, &mr);
+
+        mai.allocationSize = mr.size;
+        mai.memoryTypeIndex = FindMemoryType(
+            m_Physical,
+            mr.memoryTypeBits,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        VK_ThrowIfFailed(vkAllocateMemory(m_Device, &mai, nullptr, &m_QuadVBMem), "vkAllocateMemory quad failed");
+        VK_ThrowIfFailed(vkBindBufferMemory(m_Device, m_QuadVB, m_QuadVBMem, 0), "vkBindBufferMemory quad failed");
+
+        mapped = nullptr;
+        VK_ThrowIfFailed(vkMapMemory(m_Device, m_QuadVBMem, 0, sizeof(quadVerts), 0, &mapped), "vkMapMemory quad failed");
+        std::memcpy(mapped, quadVerts, sizeof(quadVerts));
+        vkUnmapMemory(m_Device, m_QuadVBMem);
+
+        bci.size = sizeof(cubeVerts);
+        VK_ThrowIfFailed(vkCreateBuffer(m_Device, &bci, nullptr, &m_CubeVB), "vkCreateBuffer cube failed");
+        vkGetBufferMemoryRequirements(m_Device, m_CubeVB, &mr);
+
+        mai.allocationSize = mr.size;
+        mai.memoryTypeIndex = FindMemoryType(
+            m_Physical,
+            mr.memoryTypeBits,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        VK_ThrowIfFailed(vkAllocateMemory(m_Device, &mai, nullptr, &m_CubeVBMem), "vkAllocateMemory cube failed");
+        VK_ThrowIfFailed(vkBindBufferMemory(m_Device, m_CubeVB, m_CubeVBMem, 0), "vkBindBufferMemory cube failed");
+
+        mapped = nullptr;
+        VK_ThrowIfFailed(vkMapMemory(m_Device, m_CubeVBMem, 0, sizeof(cubeVerts), 0, &mapped), "vkMapMemory cube failed");
+        std::memcpy(mapped, cubeVerts, sizeof(cubeVerts));
+        vkUnmapMemory(m_Device, m_CubeVBMem);
 
         VkSemaphoreCreateInfo sci2{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
         VkFenceCreateInfo fci{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
@@ -880,23 +977,90 @@ void VkRenderAdapter::Clear(float r, float g, float b, float a)
 
     vkCmdBeginRenderPass(m_CmdBuffers[m_ImageIndex], &rp, VK_SUBPASS_CONTENTS_INLINE);
 
-    vkCmdBindPipeline(m_CmdBuffers[m_ImageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_Pipeline);
 }
 
 void VkRenderAdapter::DrawTestTriangle()
 {
+    PushConstants pc{};
+    std::memcpy(pc.mvp, m_PendingMVP, sizeof(pc.mvp));
+    std::memcpy(pc.color, m_PendingColor, sizeof(pc.color));
+
     vkCmdPushConstants(
         m_CmdBuffers[m_ImageIndex],
         m_PipelineLayout,
-        VK_SHADER_STAGE_VERTEX_BIT,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
         0,
-        sizeof(float) * 16,
-        m_PendingMVP
+        sizeof(PushConstants),
+        &pc
     );
 
     VkDeviceSize offs = 0;
+    vkCmdBindPipeline(m_CmdBuffers[m_ImageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_Pipeline);
     vkCmdBindVertexBuffers(m_CmdBuffers[m_ImageIndex], 0, 1, &m_VB, &offs);
     vkCmdDraw(m_CmdBuffers[m_ImageIndex], 3, 1, 0, 0);
+}
+
+void VkRenderAdapter::DrawTestLine()
+{
+    PushConstants pc{};
+    std::memcpy(pc.mvp, m_PendingMVP, sizeof(pc.mvp));
+    std::memcpy(pc.color, m_PendingColor, sizeof(pc.color));
+
+    vkCmdPushConstants(
+        m_CmdBuffers[m_ImageIndex],
+        m_PipelineLayout,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        0,
+        sizeof(PushConstants),
+        &pc
+    );
+
+    VkDeviceSize offs = 0;
+    vkCmdBindPipeline(m_CmdBuffers[m_ImageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_LinePipeline);
+    vkCmdBindVertexBuffers(m_CmdBuffers[m_ImageIndex], 0, 1, &m_LineVB, &offs);
+    vkCmdDraw(m_CmdBuffers[m_ImageIndex], 2, 1, 0, 0);
+}
+
+void VkRenderAdapter::DrawTestQuad()
+{
+    PushConstants pc{};
+    std::memcpy(pc.mvp, m_PendingMVP, sizeof(pc.mvp));
+    std::memcpy(pc.color, m_PendingColor, sizeof(pc.color));
+
+    vkCmdPushConstants(
+        m_CmdBuffers[m_ImageIndex],
+        m_PipelineLayout,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        0,
+        sizeof(PushConstants),
+        &pc
+    );
+
+    VkDeviceSize offs = 0;
+    vkCmdBindPipeline(m_CmdBuffers[m_ImageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_Pipeline);
+    vkCmdBindVertexBuffers(m_CmdBuffers[m_ImageIndex], 0, 1, &m_QuadVB, &offs);
+    vkCmdDraw(m_CmdBuffers[m_ImageIndex], 6, 1, 0, 0);
+}
+
+void VkRenderAdapter::DrawTestCube()
+{
+    PushConstants pc{};
+    std::memcpy(pc.mvp, m_PendingMVP, sizeof(pc.mvp));
+    std::memcpy(pc.color, m_PendingColor, sizeof(pc.color));
+
+    vkCmdPushConstants(
+        m_CmdBuffers[m_ImageIndex],
+        m_PipelineLayout,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        0,
+        sizeof(PushConstants),
+        &pc
+    );
+
+    VkDeviceSize offs = 0;
+    vkCmdBindPipeline(m_CmdBuffers[m_ImageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_LinePipeline);
+    vkCmdBindVertexBuffers(m_CmdBuffers[m_ImageIndex], 0, 1, &m_CubeVB, &offs);
+    vkCmdDraw(m_CmdBuffers[m_ImageIndex], 24, 1, 0, 0);
 }
 
 void VkRenderAdapter::EndFrame()
@@ -959,6 +1123,21 @@ void VkRenderAdapter::Shutdown()
     m_VB = VK_NULL_HANDLE;
     m_VBMem = VK_NULL_HANDLE;
 
+    if (m_LineVB) vkDestroyBuffer(m_Device, m_LineVB, nullptr);
+    if (m_LineVBMem) vkFreeMemory(m_Device, m_LineVBMem, nullptr);
+    m_LineVB = VK_NULL_HANDLE;
+    m_LineVBMem = VK_NULL_HANDLE;
+
+    if (m_QuadVB) vkDestroyBuffer(m_Device, m_QuadVB, nullptr);
+    if (m_QuadVBMem) vkFreeMemory(m_Device, m_QuadVBMem, nullptr);
+    m_QuadVB = VK_NULL_HANDLE;
+    m_QuadVBMem = VK_NULL_HANDLE;
+
+    if (m_CubeVB) vkDestroyBuffer(m_Device, m_CubeVB, nullptr);
+    if (m_CubeVBMem) vkFreeMemory(m_Device, m_CubeVBMem, nullptr);
+    m_CubeVB = VK_NULL_HANDLE;
+    m_CubeVBMem = VK_NULL_HANDLE;
+
     if (m_CmdPool) vkDestroyCommandPool(m_Device, m_CmdPool, nullptr);
     m_CmdPool = VK_NULL_HANDLE;
 
@@ -966,6 +1145,7 @@ void VkRenderAdapter::Shutdown()
     m_Framebuffers.clear();
 
     if (m_Pipeline) vkDestroyPipeline(m_Device, m_Pipeline, nullptr);
+    if (m_LinePipeline) vkDestroyPipeline(m_Device, m_LinePipeline, nullptr);
     if (m_PipelineLayout) vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
     if (m_RenderPass) vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
 
@@ -989,6 +1169,14 @@ void VkRenderAdapter::Shutdown()
 void VkRenderAdapter::SetTestTransform(const float* mvp16)
 {
     memcpy(m_PendingMVP, mvp16, sizeof(float) * 16);
+}
+
+void VkRenderAdapter::SetTestColor(float r, float g, float b, float a)
+{
+    m_PendingColor[0] = r;
+    m_PendingColor[1] = g;
+    m_PendingColor[2] = b;
+    m_PendingColor[3] = a;
 }
 
 bool VkRenderAdapter::ReloadShaders()

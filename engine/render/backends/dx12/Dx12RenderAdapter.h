@@ -14,11 +14,15 @@ public:
 	void BeginFrame() override;
 	void Clear(float r, float g, float b, float a) override;
 	void DrawTestTriangle() override;
+	void DrawTestLine() override;
+	void DrawTestQuad() override;
+	void DrawTestCube() override;
 	void EndFrame() override;
 	void Present() override;
 	void Shutdown() override;
 
 	void SetTestTransform(const float* mvp16) override;
+	void SetTestColor(float r, float g, float b, float a) override;
 
 private:
 	bool CreateDevice(HWND hwnd);
@@ -32,6 +36,7 @@ private:
 	void MoveToNextFrame();
 
 	static constexpr UINT FrameCount = 2;
+	static constexpr UINT MaxDrawsPerFrame = 64;
 
 	Microsoft::WRL::ComPtr<IDXGIFactory6> m_Factory;
 	Microsoft::WRL::ComPtr<ID3D12Device> m_Device;
@@ -52,18 +57,26 @@ private:
 
 	Microsoft::WRL::ComPtr<ID3D12RootSignature> m_RootSig;
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_Pso;
+	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_LinePso;
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_VB;
 	D3D12_VERTEX_BUFFER_VIEW m_VbView{};
+	Microsoft::WRL::ComPtr<ID3D12Resource> m_LineVB;
+	D3D12_VERTEX_BUFFER_VIEW m_LineVbView{};
+	Microsoft::WRL::ComPtr<ID3D12Resource> m_QuadVB;
+	D3D12_VERTEX_BUFFER_VIEW m_QuadVbView{};
+	Microsoft::WRL::ComPtr<ID3D12Resource> m_CubeVB;
+	D3D12_VERTEX_BUFFER_VIEW m_CubeVbView{};
 
 	float m_ClearColor[4] = { 0.08f, 0.08f, 0.12f, 1.0f };
 
 	UINT m_Width = 1280;
 	UINT m_Height = 720;
 
-	Microsoft::WRL::ComPtr<ID3D12Resource> m_Cb[FrameCount];
-	uint8_t* m_CbMapped[FrameCount] = {};
-	D3D12_GPU_VIRTUAL_ADDRESS m_CbGpu[FrameCount] = {};
+	Microsoft::WRL::ComPtr<ID3D12Resource> m_Cb[FrameCount][MaxDrawsPerFrame];
+	uint8_t* m_CbMapped[FrameCount][MaxDrawsPerFrame] = {};
+	D3D12_GPU_VIRTUAL_ADDRESS m_CbGpu[FrameCount][MaxDrawsPerFrame] = {};
+	UINT m_DrawCbIndex = 0;
 
 	float m_PendingMVP[16] = {
 		1,0,0,0,
@@ -71,5 +84,6 @@ private:
 		0,0,1,0,
 		0,0,0,1
 	};
+	float m_PendingColor[4] = { 1,1,1,1 };
 };
 #endif

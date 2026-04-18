@@ -1,7 +1,14 @@
 #version 450
-layout(location=0) in vec3 vColor;
+
+layout(push_constant) uniform PC
+{
+    mat4 uMVP;
+    vec4 uTint;
+} pc;
+
 layout(location=0) out vec4 outColor;
 
-void main() { 
-	outColor = vec4(vColor, 1.0);
+void main()
+{
+    outColor = pc.uTint;
 }

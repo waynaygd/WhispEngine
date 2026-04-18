@@ -3,7 +3,10 @@
 #include <vector>
 #include <string>
 
+#include "ConfigLoader.h"
 #include "Time.h"
+#include "../ecs/World.h"
+#include "../ecs/systems/RenderSystem.h"
 #include "../render/RenderFactory.h"
 #include "../platform/IWindow.h"
 #include "../game/StateMachine.h"
@@ -11,20 +14,6 @@
 class IWindow;
 class IRenderAdapter;
 class IGameState;
-
-struct TransformState
-{
-    float x = 0.0f;
-    float y = 0.0f;
-    float scale = 1.0f;
-    float angle = 0.0f;       
-
-    float targetScale = 1.0f;
-    float targetAngle = 0.0f;
-
-    bool prevLMB = false;
-    bool prevRMB = false;
-};
 
 enum class UpdateMode { 
     Variable, 
@@ -40,17 +29,26 @@ public:
     bool Initialize();  
     int Run();
     void Shutdown();
-
-    void UpdateInputAndTransform(IWindow* srcWindow, float dt);
     void SetUpdateMode(UpdateMode m) { m_UpdateMode = m; }
 
     IWindow* GetWindow() { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
+    ecs::World& GetWorld() { return m_World; }
+    const ecs::World& GetWorld() const { return m_World; }
+    void EnterGameplayScene();
+    void ExitGameplayScene();
+    ecs::Entity SpawnGameplayEntity();
+    bool DestroyLastGameplayEntity();
+    std::size_t GetGameplayEntityCount() const { return m_EcsDebugEntities.size(); }
 
     void RequestStateChange(std::unique_ptr<IGameState> s);
 
 
 private:
-    TransformState m_Obj;
+    static std::vector<EcsDemoEntityConfig> BuildDefaultEcsDemoEntities();
+    void RunEcsBootstrapCheck();
+    void SetupEcsRuntimeDemo();
+    ecs::Entity SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg);
+    void UpdateEcs(float dt);
 
     struct WindowContext
     {
@@ -64,6 +62,12 @@ private:
     };
 
     std::vector<WindowContext> m_Windows;
+    AppConfig m_Config;
+
+    ecs::World m_World;
+    ecs::RenderSystem* m_RenderSystem = nullptr;
+    std::vector<ecs::Entity> m_EcsDebugEntities;
+    float m_EcsDebugLogTimer = 0.0f;
 
     Time m_Time;
     StateMachine m_StateMachine;
