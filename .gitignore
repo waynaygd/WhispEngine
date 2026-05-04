@@ -29,3 +29,6 @@ compile_commands.json
 *.lib
 *.obj
 *.exp
+
+# Source mesh assets are OBJ files and must remain trackable.
+!engine/assets/models/*.obj

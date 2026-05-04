@@ -3,6 +3,9 @@
 
 #include "../../../core/Logger.h"
 #include "../../../platform/GlfwWindow.h"   
+#include "../../../resources/MeshData.h"
+#include "../../../resources/ShaderResource.h"
+#include "../../../resources/TextureData.h"
 
 #include <GLFW/glfw3.h>
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -15,8 +18,11 @@
 #include "../../../external/d3dx12.h" 
 
 #include <stdexcept>
+#include <string>
 #include <vector>
 #include <fstream>
+#include <functional>
+#include <cstring>
 
 
 static std::vector<uint8_t> ReadFileBinary(const char* path)
@@ -40,6 +46,116 @@ static void ThrowIfFailed(HRESULT hr, const char* msg)
     }
 }
 
+struct Dx12PrimitiveVertex
+{
+    float position[3];
+    float color[3];
+};
+
+struct Dx12TexturedVertex
+{
+    float position[3];
+    float normal[3];
+    float uv[2];
+};
+
+static void CreateUploadBuffer(
+    ID3D12Device* device,
+    const void* srcData,
+    UINT size,
+    Microsoft::WRL::ComPtr<ID3D12Resource>& resource,
+    const char* errorName)
+{
+    D3D12_HEAP_PROPERTIES heapProperties{};
+    heapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+    D3D12_RESOURCE_DESC resourceDesc = CD3DX12_RESOURCE_DESC::Buffer(size);
+    ThrowIfFailed(device->CreateCommittedResource(
+        &heapProperties,
+        D3D12_HEAP_FLAG_NONE,
+        &resourceDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&resource)),
+        errorName);
+
+    CD3DX12_RANGE readRange(0, 0);
+    void* mapped = nullptr;
+    ThrowIfFailed(resource->Map(0, &readRange, &mapped), "DX12 mesh buffer map failed");
+    memcpy(mapped, srcData, size);
+    resource->Unmap(0, nullptr);
+}
+
+static void ExecuteImmediateCommandList(
+    ID3D12Device* device,
+    ID3D12CommandQueue* queue,
+    ID3D12Fence* fence,
+    HANDLE fenceEvent,
+    UINT64& fenceValue,
+    const std::function<void(ID3D12GraphicsCommandList*)>& recorder)
+{
+    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> allocator;
+    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commandList;
+
+    ThrowIfFailed(
+        device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)),
+        "DX12 immediate upload allocator creation failed");
+    ThrowIfFailed(
+        device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)),
+        "DX12 immediate upload command list creation failed");
+
+    recorder(commandList.Get());
+
+    ThrowIfFailed(commandList->Close(), "DX12 immediate upload command list close failed");
+    ID3D12CommandList* commandLists[] = { commandList.Get() };
+    queue->ExecuteCommandLists(1, commandLists);
+
+    const UINT64 fenceToWait = fenceValue;
+    ThrowIfFailed(queue->Signal(fence, fenceToWait), "DX12 immediate upload queue signal failed");
+    ++fenceValue;
+
+    ThrowIfFailed(fence->SetEventOnCompletion(fenceToWait, fenceEvent), "DX12 immediate upload fence completion failed");
+    WaitForSingleObject(fenceEvent, INFINITE);
+}
+
+static Microsoft::WRL::ComPtr<ID3DBlob> CompileHlsl(
+    const std::string& source,
+    const char* sourceName,
+    const char* entryPoint,
+    const char* profile)
+{
+    UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
+#if defined(_DEBUG)
+    flags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+#endif
+
+    Microsoft::WRL::ComPtr<ID3DBlob> bytecode;
+    Microsoft::WRL::ComPtr<ID3DBlob> errors;
+    const HRESULT hr = D3DCompile(
+        source.data(),
+        source.size(),
+        sourceName,
+        nullptr,
+        nullptr,
+        entryPoint,
+        profile,
+        flags,
+        0,
+        &bytecode,
+        &errors);
+
+    if (FAILED(hr))
+    {
+        std::string message = "DX12 shader compile failed";
+        if (errors && errors->GetBufferPointer())
+            message += ": " + std::string(static_cast<const char*>(errors->GetBufferPointer()), errors->GetBufferSize());
+        Logger::Get().Error(message);
+        throw std::runtime_error(message);
+    }
+
+    return bytecode;
+}
+
 void Dx12RenderAdapter::SetTestTransform(const float* mvp16)
 {
     memcpy(m_PendingMVP, mvp16, sizeof(float) * 16);
@@ -51,6 +167,506 @@ void Dx12RenderAdapter::SetTestColor(float r, float g, float b, float a)
     m_PendingColor[1] = g;
     m_PendingColor[2] = b;
     m_PendingColor[3] = a;
+}
+
+RenderMeshHandle Dx12RenderAdapter::UploadMesh(const MeshData& meshData)
+{
+    if (!m_Device)
+    {
+        Logger::Get().Warn("DX12 UploadMesh: device is not initialized");
+        return RenderMeshHandle::Invalid();
+    }
+
+    if (meshData.vertices.empty() || meshData.indices.empty())
+    {
+        Logger::Get().Warn("DX12 UploadMesh: mesh data is empty");
+        return RenderMeshHandle::Invalid();
+    }
+
+    try
+    {
+        std::vector<Dx12TexturedVertex> vertices(meshData.vertices.size());
+        for (std::size_t i = 0; i < meshData.vertices.size(); ++i)
+        {
+            const MeshVertex& source = meshData.vertices[i];
+            Dx12TexturedVertex& destination = vertices[i];
+
+            destination.position[0] = source.position[0];
+            destination.position[1] = source.position[1];
+            destination.position[2] = source.position[2];
+            destination.normal[0] = source.normal[0];
+            destination.normal[1] = source.normal[1];
+            destination.normal[2] = source.normal[2];
+            destination.uv[0] = source.uv[0];
+            destination.uv[1] = source.uv[1];
+        }
+
+        UploadedMesh uploadedMesh;
+        const UINT vertexBufferSize = static_cast<UINT>(vertices.size() * sizeof(Dx12TexturedVertex));
+        const UINT indexBufferSize = static_cast<UINT>(meshData.indices.size() * sizeof(std::uint32_t));
+
+        CreateUploadBuffer(
+            m_Device.Get(),
+            vertices.data(),
+            vertexBufferSize,
+            uploadedMesh.vertexBuffer,
+            "DX12 UploadMesh: create vertex buffer failed");
+
+        CreateUploadBuffer(
+            m_Device.Get(),
+            meshData.indices.data(),
+            indexBufferSize,
+            uploadedMesh.indexBuffer,
+            "DX12 UploadMesh: create index buffer failed");
+
+        uploadedMesh.vertexView.BufferLocation = uploadedMesh.vertexBuffer->GetGPUVirtualAddress();
+        uploadedMesh.vertexView.StrideInBytes = sizeof(Dx12TexturedVertex);
+        uploadedMesh.vertexView.SizeInBytes = vertexBufferSize;
+
+        uploadedMesh.indexView.BufferLocation = uploadedMesh.indexBuffer->GetGPUVirtualAddress();
+        uploadedMesh.indexView.SizeInBytes = indexBufferSize;
+        uploadedMesh.indexView.Format = DXGI_FORMAT_R32_UINT;
+        uploadedMesh.indexCount = static_cast<UINT>(meshData.indices.size());
+
+        const RenderMeshHandle handle{ m_NextMeshHandle++ };
+        m_UploadedMeshes.emplace(handle.value, std::move(uploadedMesh));
+
+        Logger::Get().Info(
+            "DX12 UploadMesh: handle=" + std::to_string(handle.value) +
+            " vertices=" + std::to_string(meshData.vertices.size()) +
+            " indices=" + std::to_string(meshData.indices.size()));
+        return handle;
+    }
+    catch (const std::exception& e)
+    {
+        Logger::Get().Error(std::string("DX12 UploadMesh exception: ") + e.what());
+        return RenderMeshHandle::Invalid();
+    }
+}
+
+void Dx12RenderAdapter::DestroyMesh(RenderMeshHandle handle)
+{
+    if (!handle.IsValid())
+    {
+        Logger::Get().Warn("DX12 DestroyMesh: invalid handle");
+        return;
+    }
+
+    const auto it = m_UploadedMeshes.find(handle.value);
+    if (it == m_UploadedMeshes.end())
+    {
+        Logger::Get().Warn("DX12 DestroyMesh: mesh handle was not found");
+        return;
+    }
+
+    if (m_Device)
+        WaitForGpu();
+
+    m_UploadedMeshes.erase(it);
+    Logger::Get().Info("DX12 DestroyMesh: handle=" + std::to_string(handle.value));
+}
+
+RenderTextureHandle Dx12RenderAdapter::CreateTexture2D(const TextureData& textureData)
+{
+    if (!m_Device || !m_Queue || !m_Fence || !m_FenceEvent)
+    {
+        Logger::Get().Warn("DX12 CreateTexture2D: device is not initialized");
+        return RenderTextureHandle::Invalid();
+    }
+
+    if (!m_SrvHeap)
+    {
+        Logger::Get().Warn("DX12 CreateTexture2D: SRV heap is unavailable");
+        return RenderTextureHandle::Invalid();
+    }
+
+    if (textureData.width <= 0 || textureData.height <= 0 || textureData.channelCount != 4)
+    {
+        Logger::Get().Warn("DX12 CreateTexture2D: expected RGBA8 texture data");
+        return RenderTextureHandle::Invalid();
+    }
+
+    const std::size_t expectedSize =
+        static_cast<std::size_t>(textureData.width) *
+        static_cast<std::size_t>(textureData.height) * 4u;
+    if (textureData.pixels.size() != expectedSize)
+    {
+        Logger::Get().Warn("DX12 CreateTexture2D: pixel data size does not match RGBA8 dimensions");
+        return RenderTextureHandle::Invalid();
+    }
+
+    if (m_FreeTextureDescriptorIndices.empty())
+    {
+        Logger::Get().Warn("DX12 CreateTexture2D: no free SRV descriptors remain");
+        return RenderTextureHandle::Invalid();
+    }
+
+    bool descriptorReserved = false;
+    UINT reservedDescriptorIndex = 0;
+
+    try
+    {
+        UploadedTexture uploadedTexture;
+        uploadedTexture.width = static_cast<UINT>(textureData.width);
+        uploadedTexture.height = static_cast<UINT>(textureData.height);
+        reservedDescriptorIndex = m_FreeTextureDescriptorIndices.back();
+        uploadedTexture.descriptorIndex = reservedDescriptorIndex;
+        m_FreeTextureDescriptorIndices.pop_back();
+        descriptorReserved = true;
+
+        D3D12_RESOURCE_DESC textureDesc{};
+        textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        textureDesc.Width = uploadedTexture.width;
+        textureDesc.Height = uploadedTexture.height;
+        textureDesc.DepthOrArraySize = 1;
+        textureDesc.MipLevels = 1;
+        textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        textureDesc.SampleDesc.Count = 1;
+        textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        D3D12_HEAP_PROPERTIES defaultHeap{};
+        defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+        ThrowIfFailed(
+            m_Device->CreateCommittedResource(
+                &defaultHeap,
+                D3D12_HEAP_FLAG_NONE,
+                &textureDesc,
+                D3D12_RESOURCE_STATE_COPY_DEST,
+                nullptr,
+                IID_PPV_ARGS(&uploadedTexture.texture)),
+            "DX12 CreateTexture2D: texture resource creation failed");
+
+        const UINT64 uploadBufferSize = GetRequiredIntermediateSize(uploadedTexture.texture.Get(), 0, 1);
+        Microsoft::WRL::ComPtr<ID3D12Resource> uploadBuffer;
+        D3D12_HEAP_PROPERTIES uploadHeap{};
+        uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
+        D3D12_RESOURCE_DESC uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
+        ThrowIfFailed(
+            m_Device->CreateCommittedResource(
+                &uploadHeap,
+                D3D12_HEAP_FLAG_NONE,
+                &uploadDesc,
+                D3D12_RESOURCE_STATE_GENERIC_READ,
+                nullptr,
+                IID_PPV_ARGS(&uploadBuffer)),
+            "DX12 CreateTexture2D: upload buffer creation failed");
+
+        D3D12_SUBRESOURCE_DATA subresourceData{};
+        subresourceData.pData = textureData.pixels.data();
+        subresourceData.RowPitch = static_cast<LONG_PTR>(textureData.width * 4);
+        subresourceData.SlicePitch = subresourceData.RowPitch * textureData.height;
+
+        ExecuteImmediateCommandList(
+            m_Device.Get(),
+            m_Queue.Get(),
+            m_Fence.Get(),
+            m_FenceEvent,
+            m_FenceValue,
+            [&](ID3D12GraphicsCommandList* commandList)
+            {
+                UpdateSubresources(commandList, uploadedTexture.texture.Get(), uploadBuffer.Get(), 0, 0, 1, &subresourceData);
+
+                const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+                    uploadedTexture.texture.Get(),
+                    D3D12_RESOURCE_STATE_COPY_DEST,
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                commandList->ResourceBarrier(1, &barrier);
+            });
+
+        uploadedTexture.cpuSrvHandle = m_SrvHeap->GetCPUDescriptorHandleForHeapStart();
+        uploadedTexture.cpuSrvHandle.ptr += static_cast<SIZE_T>(uploadedTexture.descriptorIndex) * m_SrvDescriptorSize;
+        uploadedTexture.gpuSrvHandle = m_SrvHeap->GetGPUDescriptorHandleForHeapStart();
+        uploadedTexture.gpuSrvHandle.ptr += static_cast<UINT64>(uploadedTexture.descriptorIndex) * m_SrvDescriptorSize;
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Texture2D.MipLevels = 1;
+        m_Device->CreateShaderResourceView(uploadedTexture.texture.Get(), &srvDesc, uploadedTexture.cpuSrvHandle);
+
+        const RenderTextureHandle handle{ m_NextTextureHandle++ };
+        m_UploadedTextures.emplace(handle.value, std::move(uploadedTexture));
+
+        Logger::Get().Info(
+            "DX12 CreateTexture2D: handle=" + std::to_string(handle.value) +
+            " size=" + std::to_string(textureData.width) + "x" + std::to_string(textureData.height));
+        return handle;
+    }
+    catch (const std::exception& e)
+    {
+        if (descriptorReserved)
+            m_FreeTextureDescriptorIndices.push_back(reservedDescriptorIndex);
+        Logger::Get().Error(std::string("DX12 CreateTexture2D exception: ") + e.what());
+        return RenderTextureHandle::Invalid();
+    }
+}
+
+void Dx12RenderAdapter::DestroyTexture(RenderTextureHandle handle)
+{
+    if (!handle.IsValid())
+    {
+        Logger::Get().Warn("DX12 DestroyTexture: invalid handle");
+        return;
+    }
+
+    const auto it = m_UploadedTextures.find(handle.value);
+    if (it == m_UploadedTextures.end())
+    {
+        Logger::Get().Warn("DX12 DestroyTexture: texture handle was not found");
+        return;
+    }
+
+    if (m_Device)
+        WaitForGpu();
+
+    if (m_BoundTextureHandle == handle)
+        m_BoundTextureHandle = RenderTextureHandle::Invalid();
+
+    m_FreeTextureDescriptorIndices.push_back(it->second.descriptorIndex);
+    m_UploadedTextures.erase(it);
+    Logger::Get().Info("DX12 DestroyTexture: handle=" + std::to_string(handle.value));
+}
+
+void Dx12RenderAdapter::BindTexture(std::uint32_t slot, RenderTextureHandle handle)
+{
+    if (slot != 0)
+    {
+        Logger::Get().Warn("DX12 BindTexture: only slot 0 is currently supported");
+        return;
+    }
+
+    if (!handle.IsValid())
+    {
+        Logger::Get().Warn("DX12 BindTexture: invalid handle");
+        return;
+    }
+
+    if (m_UploadedTextures.find(handle.value) == m_UploadedTextures.end())
+    {
+        Logger::Get().Warn("DX12 BindTexture: texture handle was not found");
+        return;
+    }
+
+    if (m_BoundTextureHandle != handle)
+    {
+        m_BoundTextureHandle = handle;
+    }
+}
+
+RenderShaderHandle Dx12RenderAdapter::CreateShaderProgram(const ShaderResource& shaderResource)
+{
+    if (!m_Device)
+    {
+        Logger::Get().Warn("DX12 CreateShaderProgram: device is not initialized");
+        return RenderShaderHandle::Invalid();
+    }
+
+    if (shaderResource.language != "hlsl")
+    {
+        Logger::Get().Warn("DX12 CreateShaderProgram: only HLSL source is supported");
+        return RenderShaderHandle::Invalid();
+    }
+
+    if (shaderResource.vertexSource.empty() || shaderResource.fragmentSource.empty())
+    {
+        Logger::Get().Warn("DX12 CreateShaderProgram: shader source is empty");
+        return RenderShaderHandle::Invalid();
+    }
+
+    try
+    {
+        UploadedShader uploadedShader;
+        const auto vs = CompileHlsl(shaderResource.vertexSource, shaderResource.vertexPath.c_str(), "VSMain", "vs_5_1");
+        const auto ps = CompileHlsl(shaderResource.fragmentSource, shaderResource.fragmentPath.c_str(), "PSMain", "ps_5_1");
+
+        CD3DX12_DESCRIPTOR_RANGE descriptorRange;
+        descriptorRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+
+        D3D12_ROOT_PARAMETER rootParameters[2]{};
+        rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        rootParameters[0].Descriptor.ShaderRegister = 0;
+        rootParameters[0].Descriptor.RegisterSpace = 0;
+        rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParameters[1].DescriptorTable.NumDescriptorRanges = 1;
+        rootParameters[1].DescriptorTable.pDescriptorRanges = &descriptorRange;
+        rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+        CD3DX12_STATIC_SAMPLER_DESC staticSampler(0, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
+        staticSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        staticSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        staticSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+
+        D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc{};
+        rootSignatureDesc.NumParameters = _countof(rootParameters);
+        rootSignatureDesc.pParameters = rootParameters;
+        rootSignatureDesc.NumStaticSamplers = 1;
+        rootSignatureDesc.pStaticSamplers = &staticSampler;
+        rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+        Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSignature;
+        Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
+        ThrowIfFailed(
+            D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &serializedRootSignature, &errorBlob),
+            "DX12 CreateShaderProgram: root signature serialization failed");
+        ThrowIfFailed(
+            m_Device->CreateRootSignature(
+                0,
+                serializedRootSignature->GetBufferPointer(),
+                serializedRootSignature->GetBufferSize(),
+                IID_PPV_ARGS(&uploadedShader.rootSignature)),
+            "DX12 CreateShaderProgram: root signature creation failed");
+
+        D3D12_INPUT_ELEMENT_DESC layout[] = {
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        };
+
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
+        psoDesc.InputLayout = { layout, _countof(layout) };
+        psoDesc.pRootSignature = uploadedShader.rootSignature.Get();
+        psoDesc.VS = { vs->GetBufferPointer(), vs->GetBufferSize() };
+        psoDesc.PS = { ps->GetBufferPointer(), ps->GetBufferSize() };
+        psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+        psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+        psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+        psoDesc.DepthStencilState.DepthEnable = TRUE;
+        psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+        psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+        psoDesc.DepthStencilState.StencilEnable = FALSE;
+        psoDesc.SampleMask = UINT_MAX;
+        psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        psoDesc.NumRenderTargets = 1;
+        psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+        psoDesc.SampleDesc.Count = 1;
+
+        ThrowIfFailed(
+            m_Device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&uploadedShader.pipelineState)),
+            "DX12 CreateShaderProgram: pipeline creation failed");
+
+        const RenderShaderHandle handle{ m_NextShaderHandle++ };
+        m_UploadedShaders.emplace(handle.value, std::move(uploadedShader));
+        Logger::Get().Info("DX12 CreateShaderProgram: handle=" + std::to_string(handle.value) + " name=" + shaderResource.name);
+        return handle;
+    }
+    catch (const std::exception& e)
+    {
+        Logger::Get().Error(std::string("DX12 CreateShaderProgram exception: ") + e.what());
+        return RenderShaderHandle::Invalid();
+    }
+}
+
+void Dx12RenderAdapter::DestroyShader(RenderShaderHandle handle)
+{
+    if (!handle.IsValid())
+    {
+        Logger::Get().Warn("DX12 DestroyShader: invalid handle");
+        return;
+    }
+
+    const auto it = m_UploadedShaders.find(handle.value);
+    if (it == m_UploadedShaders.end())
+    {
+        Logger::Get().Warn("DX12 DestroyShader: shader handle was not found");
+        return;
+    }
+
+    if (m_Device)
+        WaitForGpu();
+
+    if (m_BoundShaderHandle == handle)
+        m_BoundShaderHandle = RenderShaderHandle::Invalid();
+
+    m_UploadedShaders.erase(it);
+    Logger::Get().Info("DX12 DestroyShader: handle=" + std::to_string(handle.value));
+}
+
+void Dx12RenderAdapter::BindShader(RenderShaderHandle handle)
+{
+    if (!handle.IsValid())
+    {
+        Logger::Get().Warn("DX12 BindShader: invalid handle");
+        return;
+    }
+
+    if (m_UploadedShaders.find(handle.value) == m_UploadedShaders.end())
+    {
+        Logger::Get().Warn("DX12 BindShader: shader handle was not found");
+        return;
+    }
+
+    if (m_BoundShaderHandle != handle)
+    {
+        m_BoundShaderHandle = handle;
+    }
+}
+
+void Dx12RenderAdapter::DrawMesh(RenderMeshHandle handle)
+{
+    if (!handle.IsValid())
+    {
+        Logger::Get().Warn("DX12 DrawMesh: invalid handle");
+        return;
+    }
+
+    const auto it = m_UploadedMeshes.find(handle.value);
+    if (it == m_UploadedMeshes.end())
+    {
+        Logger::Get().Warn("DX12 DrawMesh: mesh handle was not found");
+        return;
+    }
+
+    if (!m_BoundShaderHandle.IsValid())
+    {
+        Logger::Get().Warn("DX12 DrawMesh: no shader is currently bound");
+        return;
+    }
+
+    const auto shaderIt = m_UploadedShaders.find(m_BoundShaderHandle.value);
+    if (shaderIt == m_UploadedShaders.end())
+    {
+        Logger::Get().Warn("DX12 DrawMesh: bound shader handle was not found");
+        return;
+    }
+
+    if (!m_BoundTextureHandle.IsValid())
+    {
+        Logger::Get().Warn("DX12 DrawMesh: no texture is currently bound");
+        return;
+    }
+
+    const auto textureIt = m_UploadedTextures.find(m_BoundTextureHandle.value);
+    if (textureIt == m_UploadedTextures.end())
+    {
+        Logger::Get().Warn("DX12 DrawMesh: bound texture handle was not found");
+        return;
+    }
+
+    struct alignas(256) CB { float mvp[16]; float color[4]; };
+    CB cb{};
+    memcpy(cb.mvp, m_PendingMVP, sizeof(cb.mvp));
+    memcpy(cb.color, m_PendingColor, sizeof(cb.color));
+
+    const UINT cbSlot = (m_DrawCbIndex < MaxDrawsPerFrame) ? m_DrawCbIndex : (MaxDrawsPerFrame - 1);
+    memcpy(m_CbMapped[m_FrameIndex][cbSlot], &cb, sizeof(CB));
+
+    ID3D12DescriptorHeap* descriptorHeaps[] = { m_SrvHeap.Get() };
+    m_CmdList->SetDescriptorHeaps(1, descriptorHeaps);
+    m_CmdList->SetGraphicsRootSignature(shaderIt->second.rootSignature.Get());
+    m_CmdList->SetPipelineState(shaderIt->second.pipelineState.Get());
+    m_CmdList->SetGraphicsRootConstantBufferView(0, m_CbGpu[m_FrameIndex][cbSlot]);
+    m_CmdList->SetGraphicsRootDescriptorTable(1, textureIt->second.gpuSrvHandle);
+    m_CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    m_CmdList->IASetVertexBuffers(0, 1, &it->second.vertexView);
+    m_CmdList->IASetIndexBuffer(&it->second.indexView);
+    m_CmdList->DrawIndexedInstanced(it->second.indexCount, 1, 0, 0, 0);
+
+    if (m_DrawCbIndex < MaxDrawsPerFrame)
+        ++m_DrawCbIndex;
 }
 
 bool Dx12RenderAdapter::Initialize(IWindow* window)
@@ -70,6 +686,7 @@ bool Dx12RenderAdapter::Initialize(IWindow* window)
         if (!CreateCommandObjects()) return false;
         if (!CreateSwapchain(hwnd)) return false;
         if (!CreateRtvHeapAndTargets()) return false;
+        if (!CreateDepthResources()) return false;
         if (!CreateSyncObjects()) return false;
         if (!CreatePipelineAndAssets()) return false;
 
@@ -170,6 +787,51 @@ bool Dx12RenderAdapter::CreateRtvHeapAndTargets()
     return true;
 }
 
+bool Dx12RenderAdapter::CreateDepthResources()
+{
+    D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
+    heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+    heapDesc.NumDescriptors = 1;
+    heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+    ThrowIfFailed(m_Device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_DsvHeap)), "CreateDescriptorHeap DSV failed");
+    m_DsvSize = m_Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+
+    D3D12_RESOURCE_DESC depthDesc{};
+    depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    depthDesc.Width = m_Width;
+    depthDesc.Height = m_Height;
+    depthDesc.DepthOrArraySize = 1;
+    depthDesc.MipLevels = 1;
+    depthDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    depthDesc.SampleDesc.Count = 1;
+    depthDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    depthDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+    D3D12_CLEAR_VALUE clearValue{};
+    clearValue.Format = DXGI_FORMAT_D32_FLOAT;
+    clearValue.DepthStencil.Depth = 1.0f;
+    clearValue.DepthStencil.Stencil = 0;
+
+    D3D12_HEAP_PROPERTIES heapProps{};
+    heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+    ThrowIfFailed(
+        m_Device->CreateCommittedResource(
+            &heapProps,
+            D3D12_HEAP_FLAG_NONE,
+            &depthDesc,
+            D3D12_RESOURCE_STATE_DEPTH_WRITE,
+            &clearValue,
+            IID_PPV_ARGS(&m_Depth)),
+        "CreateCommittedResource depth failed");
+
+    D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
+    dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
+    m_Device->CreateDepthStencilView(m_Depth.Get(), &dsvDesc, m_DsvHeap->GetCPUDescriptorHandleForHeapStart());
+    return true;
+}
+
 bool Dx12RenderAdapter::CreateSyncObjects()
 {
     ThrowIfFailed(m_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_Fence)), "CreateFence failed");
@@ -235,6 +897,19 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
     D3D12_GRAPHICS_PIPELINE_STATE_DESC linePso = pso;
     linePso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
     ThrowIfFailed(m_Device->CreateGraphicsPipelineState(&linePso, IID_PPV_ARGS(&m_LinePso)), "CreateGraphicsPipelineState line failed");
+
+    D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
+    srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    srvHeapDesc.NumDescriptors = MaxTextures;
+    srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    ThrowIfFailed(
+        m_Device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&m_SrvHeap)),
+        "CreateDescriptorHeap SRV failed");
+    m_SrvDescriptorSize = m_Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    m_FreeTextureDescriptorIndices.clear();
+    m_FreeTextureDescriptorIndices.reserve(MaxTextures);
+    for (UINT descriptorIndex = 0; descriptorIndex < MaxTextures; ++descriptorIndex)
+        m_FreeTextureDescriptorIndices.push_back(MaxTextures - 1 - descriptorIndex);
 
     struct Vtx { float x, y, z; float r, g, b; };
     Vtx tri[3] = {
@@ -378,8 +1053,10 @@ void Dx12RenderAdapter::Clear(float r, float g, float b, float a)
     D3D12_CPU_DESCRIPTOR_HANDLE rtv = m_RtvHeap->GetCPUDescriptorHandleForHeapStart();
     rtv.ptr += (SIZE_T)m_FrameIndex * m_RtvSize;
 
-    m_CmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+    D3D12_CPU_DESCRIPTOR_HANDLE dsv = m_DsvHeap->GetCPUDescriptorHandleForHeapStart();
+    m_CmdList->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
     m_CmdList->ClearRenderTargetView(rtv, m_ClearColor, 0, nullptr);
+    m_CmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 }
 
 void Dx12RenderAdapter::DrawTestTriangle()
@@ -543,11 +1220,20 @@ void Dx12RenderAdapter::Shutdown()
         }
     }
 
+    m_UploadedMeshes.clear();
+    m_UploadedTextures.clear();
+    m_UploadedShaders.clear();
+    m_FreeTextureDescriptorIndices.clear();
+    m_BoundShaderHandle = RenderShaderHandle::Invalid();
+    m_BoundTextureHandle = RenderTextureHandle::Invalid();
     m_VB.Reset();
     m_LineVB.Reset();
     m_QuadVB.Reset();
     m_CubeVB.Reset();
     for (UINT i = 0; i < FrameCount; ++i) m_Rt[i].Reset();
+    m_Depth.Reset();
+    m_DsvHeap.Reset();
+    m_SrvHeap.Reset();
     m_RtvHeap.Reset();
     m_Swapchain.Reset();
     m_CmdList.Reset();

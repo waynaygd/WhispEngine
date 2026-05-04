@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <string>
 #include <vector>
 
@@ -18,10 +19,11 @@ struct WindowConfig
 struct EcsDemoEntityConfig
 {
     std::string tag;
-    ecs::PrimitiveType primitive = ecs::PrimitiveType::Triangle;
-    ecs::Vec4 color{};
-    std::string material = "default";
-    std::string texture;
+    std::string meshPath;
+    std::string texturePath;
+    std::string shaderPath;
+    std::string materialPath;
+    std::array<float, 4> materialTint = { 1.0f, 1.0f, 1.0f, 1.0f };
     bool visible = true;
     bool bounce = true;
     ecs::Vec3 position{};
@@ -34,6 +36,7 @@ struct EcsDemoEntityConfig
 struct EcsDemoConfig
 {
     bool logSnapshots = true;
+    std::string sceneFile;
     std::vector<EcsDemoEntityConfig> initialEntities;
 };
 
@@ -51,5 +54,4 @@ public:
 
 private:
     static RenderBackend ParseBackend(const std::string& s);
-    static ecs::PrimitiveType ParsePrimitiveType(const std::string& s);
 };
