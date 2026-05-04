@@ -1,0 +1,6 @@
+{
+  "name": "AfricanHeadMaterial",
+  "shaderPath": "dx12/textured.hlsl",
+  "texturePath": "textures/african_head_diffuse.dds",
+  "baseColor": [1.0, 1.0, 1.0, 1.0]
+}

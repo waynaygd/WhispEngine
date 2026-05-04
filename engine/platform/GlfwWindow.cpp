@@ -10,6 +10,18 @@
 
 static int g_GlfwRefCount = 0;
 
+namespace
+{
+void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset)
+{
+    (void)xoffset;
+
+    auto* owner = static_cast<GlfwWindow*>(glfwGetWindowUserPointer(window));
+    if (owner != nullptr)
+        owner->AddScrollDeltaY(yoffset);
+}
+}
+
 GlfwWindow::~GlfwWindow()
 {
     if (m_Window)
@@ -52,6 +64,9 @@ bool GlfwWindow::Create(int width, int height, const std::string& title)
         return false;
     }
 
+    glfwSetWindowUserPointer(m_Window, this);
+    glfwSetScrollCallback(m_Window, ScrollCallback);
+
     return true;
 }
 
@@ -77,5 +92,17 @@ void* GlfwWindow::GetNativeHandle() const
 void GlfwWindow::SetTitle(const char* title)
 {
     glfwSetWindowTitle(m_Window, title);
+}
+
+double GlfwWindow::ConsumeScrollDeltaY()
+{
+    const double delta = m_PendingScrollDeltaY;
+    m_PendingScrollDeltaY = 0.0;
+    return delta;
+}
+
+void GlfwWindow::AddScrollDeltaY(double delta)
+{
+    m_PendingScrollDeltaY += delta;
 }
 

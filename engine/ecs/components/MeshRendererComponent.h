@@ -1,26 +1,15 @@
 #pragma once
 
 #include "../Component.h"
-#include "../MathTypes.h"
-
 #include <string>
 
 namespace ecs
 {
-enum class PrimitiveType
-{
-    Line,
-    Triangle,
-    Quad,
-    Cube
-};
-
 struct MeshRendererComponent : Component
 {
-    PrimitiveType primitive = PrimitiveType::Triangle;
-    Vec4 color{};
-    std::string material = "default";
-    std::string texture;
+    std::string meshPath;
+    std::string texturePath;
+    std::string shaderPath;
     bool visible = true;
 };
 }

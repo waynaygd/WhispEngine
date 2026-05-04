@@ -15,9 +15,12 @@ public:
     void* GetNativeHandle() const override;
 
     GLFWwindow* GetGlfwHandle() const { return m_Window; }
+    double ConsumeScrollDeltaY();
+    void AddScrollDeltaY(double delta);
 
     void SetTitle(const char* title) override;
 
 private:
     GLFWwindow* m_Window = nullptr;
+    double m_PendingScrollDeltaY = 0.0;
 };

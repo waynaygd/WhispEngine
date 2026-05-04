@@ -33,16 +33,14 @@ static void ReadVec3(const nlohmann::json& j, const char* key, ecs::Vec3& outVec
     }
 }
 
-static void ReadColor(const nlohmann::json& j, const char* key, ecs::Vec4& outColor)
+static void ReadColor4(const nlohmann::json& j, const char* key, std::array<float, 4>& outColor)
 {
     if (!j.contains(key) || !j[key].is_array())
         return;
 
-    const auto& c = j[key];
-    if (c.size() > 0) outColor.r = c[0].get<float>();
-    if (c.size() > 1) outColor.g = c[1].get<float>();
-    if (c.size() > 2) outColor.b = c[2].get<float>();
-    if (c.size() > 3) outColor.a = c[3].get<float>();
+    const auto& value = j[key];
+    for (std::size_t i = 0; i < value.size() && i < outColor.size(); ++i)
+        outColor[i] = value[i].get<float>();
 }
 
 RenderBackend ConfigLoader::ParseBackend(const std::string& s)
@@ -54,18 +52,6 @@ RenderBackend ConfigLoader::ParseBackend(const std::string& s)
 
     return RenderBackend::DX12;
 }
-
-ecs::PrimitiveType ConfigLoader::ParsePrimitiveType(const std::string& s)
-{
-    if (s == "line" || s == "Line")
-        return ecs::PrimitiveType::Line;
-    if (s == "quad" || s == "Quad" || s == "square" || s == "Square")
-        return ecs::PrimitiveType::Quad;
-    if (s == "cube" || s == "Cube")
-        return ecs::PrimitiveType::Cube;
-    return ecs::PrimitiveType::Triangle;
-}
-
 bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string* outError)
 {
     outCfg.activeBackend = RenderBackend::DX12;
@@ -132,6 +118,7 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
     {
         const auto& demo = j["ecsDemo"];
         outCfg.ecsDemo.logSnapshots = demo.value("logSnapshots", true);
+        outCfg.ecsDemo.sceneFile = demo.value("sceneFile", std::string());
 
         if (demo.contains("initialEntities") && demo["initialEntities"].is_array())
         {
@@ -139,12 +126,13 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
             {
                 EcsDemoEntityConfig entityCfg;
                 entityCfg.tag = je.value("tag", std::string());
-                entityCfg.primitive = ParsePrimitiveType(je.value("primitive", std::string("triangle")));
-                entityCfg.material = je.value("material", std::string("default"));
-                entityCfg.texture = je.value("texture", std::string());
+                entityCfg.meshPath = je.value("meshPath", std::string());
+                entityCfg.texturePath = je.value("texturePath", std::string());
+                entityCfg.shaderPath = je.value("shaderPath", std::string());
+                entityCfg.materialPath = je.value("materialPath", std::string());
+                ReadColor4(je, "color", entityCfg.materialTint);
                 entityCfg.visible = je.value("visible", true);
                 entityCfg.bounce = je.value("bounce", true);
-                ReadColor(je, "color", entityCfg.color);
                 ReadVec3(je, "position", entityCfg.position);
                 ReadVec3(je, "rotation", entityCfg.rotation);
                 ReadVec3(je, "scale", entityCfg.scale);

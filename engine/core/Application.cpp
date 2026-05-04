@@ -1,8 +1,11 @@
 #include "Application.h"
+#include "AssetDependencyValidation.h"
+#include "AssetPaths.h"
 #include "Logger.h"
 #include "ConfigLoader.h"
 
 #include "../ecs/components/BoundsBounceComponent.h"
+#include "../ecs/components/MaterialComponent.h"
 #include "../ecs/components/MeshRendererComponent.h"
 #include "../ecs/components/TagComponent.h"
 #include "../ecs/components/TransformComponent.h"
@@ -11,13 +14,18 @@
 #include "../ecs/systems/MotionSystem.h"
 #include "../platform/GlfwWindow.h"
 #include "../render/IRenderAdapter.h"
+#include "../resources/ResourceManager.h"
+#include "../scene/SceneSerializer.h"
 #include <GLFW/glfw3.h>
 
 #include "../game/states/LoadingState.h"
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <array>
 #include <sstream>
+#include <unordered_set>
 
 Application::Application() = default;
 Application::~Application() = default;
@@ -63,11 +71,16 @@ static std::string ResolveConfigPath()
     const fs::path relativeConfig = fs::path("engine") / "config" / "app.json";
     const fs::path cwd = fs::current_path();
 
-    for (fs::path probe = cwd.parent_path(); !probe.empty(); probe = probe.parent_path())
+    for (fs::path probe = cwd; !probe.empty(); )
     {
         const fs::path candidate = probe / relativeConfig;
         if (fs::exists(candidate))
             return candidate.string();
+
+        if (!probe.has_parent_path() || probe == probe.parent_path())
+            break;
+
+        probe = probe.parent_path();
     }
 
     const fs::path localCandidate = cwd / relativeConfig;
@@ -77,56 +90,172 @@ static std::string ResolveConfigPath()
     return relativeConfig.string();
 }
 
-static const char* PrimitiveTypeToString(ecs::PrimitiveType primitive)
+static bool HasNonDefaultTint(const std::array<float, 4>& tint)
 {
-    switch (primitive)
+    return tint[0] != 1.0f || tint[1] != 1.0f || tint[2] != 1.0f || tint[3] != 1.0f;
+}
+
+static float Dot(const ecs::Vec3& lhs, const ecs::Vec3& rhs)
+{
+    return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
+}
+
+static ecs::Vec3 Cross(const ecs::Vec3& lhs, const ecs::Vec3& rhs)
+{
+    return ecs::Vec3{
+        lhs.y * rhs.z - lhs.z * rhs.y,
+        lhs.z * rhs.x - lhs.x * rhs.z,
+        lhs.x * rhs.y - lhs.y * rhs.x
+    };
+}
+
+static float Length(const ecs::Vec3& vector)
+{
+    return std::sqrt(Dot(vector, vector));
+}
+
+static ecs::Vec3 Normalize(const ecs::Vec3& vector)
+{
+    const float length = Length(vector);
+    if (length <= 0.0001f)
+        return ecs::Vec3{};
+
+    const float invLength = 1.0f / length;
+    return ecs::Vec3{ vector.x * invLength, vector.y * invLength, vector.z * invLength };
+}
+
+static ecs::Vec3 Add(const ecs::Vec3& lhs, const ecs::Vec3& rhs)
+{
+    return ecs::Vec3{ lhs.x + rhs.x, lhs.y + rhs.y, lhs.z + rhs.z };
+}
+
+static ecs::Vec3 Scale(const ecs::Vec3& vector, float scalar)
+{
+    return ecs::Vec3{ vector.x * scalar, vector.y * scalar, vector.z * scalar };
+}
+
+static ecs::Vec3 BuildCameraForward(float yaw, float pitch)
+{
+    const float cosPitch = std::cos(pitch);
+    return Normalize(ecs::Vec3{
+        std::sin(yaw) * cosPitch,
+        std::sin(pitch),
+        std::cos(yaw) * cosPitch
+    });
+}
+
+constexpr float kMaxCameraPitch = 1.55334306f;
+constexpr float kFallbackAspectRatio = 16.0f / 9.0f;
+
+void Application::RunResourceBootstrapCheck()
+{
+    if (m_ResourceManager == nullptr)
+        return;
+
+    Logger::Get().Info("Resource bootstrap: starting CPU-side resource loading self-check");
+
+    const auto mesh = m_ResourceManager->Load<MeshResource>("models/validation_triangle.obj");
+    if (mesh != nullptr)
     {
-    case ecs::PrimitiveType::Line:     return "Line";
-    case ecs::PrimitiveType::Triangle: return "Triangle";
-    case ecs::PrimitiveType::Quad:     return "Quad";
-    case ecs::PrimitiveType::Cube:     return "Cube";
-    default:                           return "Unknown";
+        Logger::Get().Info(
+            "Resource bootstrap: mesh key=" + mesh->GetKey() +
+            " loaded=" + std::string(mesh->IsLoaded() ? "true" : "false") +
+            " fallback=" + std::string(mesh->UsesFallback() ? "true" : "false"));
     }
+
+    const auto texture = m_ResourceManager->Load<TextureResource>("textures/validation_checker.png");
+    if (texture != nullptr)
+    {
+        Logger::Get().Info(
+            "Resource bootstrap: texture key=" + texture->GetKey() +
+            " loaded=" + std::string(texture->IsLoaded() ? "true" : "false") +
+            " fallback=" + std::string(texture->UsesFallback() ? "true" : "false"));
+    }
+
+    const auto shader = m_ResourceManager->Load<ShaderResource>("dx12/textured.hlsl");
+    if (shader != nullptr)
+    {
+        Logger::Get().Info(
+            "Resource bootstrap: shader key=" + shader->GetKey() +
+            " loaded=" + std::string(shader->IsLoaded() ? "true" : "false") +
+            " fallback=" + std::string(shader->UsesFallback() ? "true" : "false"));
+    }
+
+    const auto material = m_ResourceManager->Load<MaterialResource>("materials/validation_checker.material.json");
+    if (material != nullptr)
+    {
+        Logger::Get().Info(
+            "Resource bootstrap: material key=" + material->GetKey() +
+            " loaded=" + std::string(material->IsLoaded() ? "true" : "false") +
+            " fallback=" + std::string(material->UsesFallback() ? "true" : "false"));
+    }
+}
+
+void Application::PreloadSceneResourcesAsync(const std::vector<EcsDemoEntityConfig>& entities)
+{
+    if (m_ResourceManager == nullptr)
+        return;
+
+    std::unordered_set<std::string> meshKeys;
+    std::unordered_set<std::string> textureKeys;
+    std::unordered_set<std::string> shaderKeys;
+    std::unordered_set<std::string> materialKeys;
+
+    for (const auto& entity : entities)
+    {
+        const std::string meshKey = AssetPaths::NormalizeAssetKey(entity.meshPath);
+        if (!meshKey.empty() && meshKeys.insert(meshKey).second)
+            (void)m_ResourceManager->LoadAsync<MeshResource>(meshKey);
+
+        const std::string materialKey = AssetPaths::NormalizeAssetKey(entity.materialPath);
+        if (!materialKey.empty() && materialKeys.insert(materialKey).second)
+            (void)m_ResourceManager->LoadAsync<MaterialResource>(materialKey);
+
+        const std::string textureKey = AssetPaths::NormalizeAssetKey(entity.texturePath);
+        if (!textureKey.empty() && textureKeys.insert(textureKey).second)
+            (void)m_ResourceManager->LoadAsync<TextureResource>(textureKey);
+
+        const std::string shaderKey = AssetPaths::NormalizeShaderKey(entity.shaderPath);
+        if (!shaderKey.empty() && shaderKeys.insert(shaderKey).second)
+            (void)m_ResourceManager->Load<ShaderResource>(shaderKey);
+    }
+
+    Logger::Get().Info(
+        "Application: preloading scene resources async mesh=" + std::to_string(meshKeys.size()) +
+        " texture=" + std::to_string(textureKeys.size()) +
+        " shader=" + std::to_string(shaderKeys.size()) +
+        " material=" + std::to_string(materialKeys.size()));
 }
 
 std::vector<EcsDemoEntityConfig> Application::BuildDefaultEcsDemoEntities()
 {
-    std::vector<EcsDemoEntityConfig> entities(4);
+    std::vector<EcsDemoEntityConfig> entities(3);
 
-    entities[0].tag = "DemoLine";
-    entities[0].primitive = ecs::PrimitiveType::Line;
-    entities[0].color = ecs::Vec4{ 0.94f, 0.42f, 0.32f, 1.0f };
-    entities[0].position = ecs::Vec3{ -0.75f, 0.45f, 0.0f };
-    entities[0].scale = ecs::Vec3{ 0.70f, 0.70f, 1.0f };
-    entities[0].linearVelocity = ecs::Vec3{ 0.35f, -0.08f, 0.0f };
-    entities[0].angularVelocity = ecs::Vec3{ 0.0f, 0.0f, 1.25f };
+    entities[0].tag = "AfricanHead_Center";
+    entities[0].meshPath = "models/african_head.obj";
+    entities[0].materialPath = "materials/african_head.material.json";
+    entities[0].position = ecs::Vec3{ 0.0f, 0.05f, 0.0f };
+    entities[0].rotation = ecs::Vec3{ 0.0f, 3.1415926f, 0.0f };
+    entities[0].scale = ecs::Vec3{ 0.68f, 0.68f, 0.68f };
+    entities[0].bounce = false;
 
-    entities[1].tag = "DemoTriangle";
-    entities[1].primitive = ecs::PrimitiveType::Triangle;
-    entities[1].color = ecs::Vec4{ 0.30f, 0.78f, 0.44f, 1.0f };
-    entities[1].position = ecs::Vec3{ 0.50f, 0.55f, 0.0f };
-    entities[1].rotation = ecs::Vec3{ 0.0f, 0.0f, 0.20f };
-    entities[1].scale = ecs::Vec3{ 0.40f, 0.40f, 1.0f };
-    entities[1].linearVelocity = ecs::Vec3{ -0.28f, -0.16f, 0.0f };
-    entities[1].angularVelocity = ecs::Vec3{ 0.0f, 0.0f, -1.80f };
+    entities[1].tag = "AfricanHead_Left";
+    entities[1].meshPath = "models/african_head.obj";
+    entities[1].materialPath = "materials/african_head.material.json";
+    entities[1].materialTint = { 0.80f, 0.88f, 1.0f, 1.0f };
+    entities[1].position = ecs::Vec3{ -0.60f, -0.10f, 0.0f };
+    entities[1].rotation = ecs::Vec3{ 0.0f, 2.72f, 0.0f };
+    entities[1].scale = ecs::Vec3{ 0.32f, 0.32f, 0.32f };
+    entities[1].bounce = false;
 
-    entities[2].tag = "DemoQuad";
-    entities[2].primitive = ecs::PrimitiveType::Quad;
-    entities[2].color = ecs::Vec4{ 0.26f, 0.57f, 0.92f, 1.0f };
-    entities[2].position = ecs::Vec3{ -0.20f, -0.50f, 0.0f };
-    entities[2].rotation = ecs::Vec3{ 0.0f, 0.0f, -0.40f };
-    entities[2].scale = ecs::Vec3{ 0.45f, 0.45f, 1.0f };
-    entities[2].linearVelocity = ecs::Vec3{ 0.18f, 0.22f, 0.0f };
-    entities[2].angularVelocity = ecs::Vec3{ 0.0f, 0.0f, 0.95f };
-
-    entities[3].tag = "DemoCube";
-    entities[3].primitive = ecs::PrimitiveType::Cube;
-    entities[3].color = ecs::Vec4{ 0.95f, 0.80f, 0.28f, 1.0f };
-    entities[3].position = ecs::Vec3{ 0.68f, -0.18f, 0.0f };
-    entities[3].rotation = ecs::Vec3{ 0.45f, 0.65f, 0.00f };
-    entities[3].scale = ecs::Vec3{ 0.30f, 0.30f, 0.30f };
-    entities[3].linearVelocity = ecs::Vec3{ -0.20f, 0.14f, 0.0f };
-    entities[3].angularVelocity = ecs::Vec3{ 0.80f, 1.15f, 0.60f };
+    entities[2].tag = "AfricanHead_Right";
+    entities[2].meshPath = "models/african_head.obj";
+    entities[2].materialPath = "materials/african_head.material.json";
+    entities[2].materialTint = { 1.0f, 0.90f, 0.82f, 1.0f };
+    entities[2].position = ecs::Vec3{ 0.60f, -0.10f, 0.0f };
+    entities[2].rotation = ecs::Vec3{ 0.0f, 3.56f, 0.0f };
+    entities[2].scale = ecs::Vec3{ 0.32f, 0.32f, 0.32f };
+    entities[2].bounce = false;
 
     return entities;
 }
@@ -174,11 +303,12 @@ void Application::RunEcsBootstrapCheck()
     Logger::Get().Info(std::string("ECS bootstrap: first tag -> ") + firstTag.name);
 
     auto& firstMeshRenderer = m_World.AddComponent<ecs::MeshRendererComponent>(first);
-    firstMeshRenderer.primitive = ecs::PrimitiveType::Triangle;
-    firstMeshRenderer.color = ecs::Vec4{ 0.85f, 0.25f, 0.25f, 1.0f };
+    firstMeshRenderer.meshPath = "models/validation_triangle.obj";
+    auto& firstMaterial = m_World.AddComponent<ecs::MaterialComponent>(first);
+    firstMaterial.materialPath = "materials/validation_checker.material.json";
     Logger::Get().Info(
-        std::string("ECS bootstrap: first mesh renderer primitive -> ") +
-        PrimitiveTypeToString(firstMeshRenderer.primitive));
+        "ECS bootstrap: first mesh renderer asset refs -> mesh=" + firstMeshRenderer.meshPath +
+        " material=" + firstMaterial.materialPath);
 
     auto& recycledTransform = m_World.AddComponent<ecs::TransformComponent>(recycled);
     recycledTransform.position = ecs::Vec3{ -2.0f, 3.0f, 0.0f };
@@ -220,14 +350,27 @@ void Application::SetupEcsRuntimeDemo()
     m_World.AddSystem<ecs::MotionSystem>();
     m_World.AddSystem<ecs::BoundsBounceSystem>();
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
+    m_RenderSystem->SetResourceManager(m_ResourceManager.get());
 
     m_EcsDebugEntities.clear();
     const std::vector<EcsDemoEntityConfig> entities =
         m_Config.ecsDemo.initialEntities.empty() ? BuildDefaultEcsDemoEntities() : m_Config.ecsDemo.initialEntities;
+    PreloadSceneResourcesAsync(entities);
 
     for (const auto& entityCfg : entities)
     {
         m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(entityCfg));
+    }
+
+    if (m_ResourceManager != nullptr)
+    {
+        m_ResourceManager->WatchForHotReload<MeshResource>("models/african_head.obj");
+        m_ResourceManager->WatchForHotReload<TextureResource>("textures/african_head_diffuse.dds");
+        m_ResourceManager->WatchForHotReload<MaterialResource>("materials/african_head.material.json");
+        m_ResourceManager->WatchForHotReload<MeshResource>("models/validation_cube.obj");
+        m_ResourceManager->WatchForHotReload<TextureResource>("textures/validation_checker.png");
+        m_ResourceManager->WatchForHotReload<ShaderResource>("dx12/textured.hlsl");
+        m_ResourceManager->WatchForHotReload<MaterialResource>("materials/validation_checker.material.json");
     }
 
     m_EcsDebugLogTimer = 0.0f;
@@ -236,6 +379,126 @@ void Application::SetupEcsRuntimeDemo()
     Logger::Get().Info("ECS runtime: bounds bounce system registered");
     Logger::Get().Info("ECS runtime: demo scene created with " + std::to_string(m_EcsDebugEntities.size()) + " ECS entities");
     Logger::Get().Info("ECS runtime: render system registered");
+
+    std::string saveError;
+    const auto snapshotPath = AssetPaths::ResolveAssetOutputPath("scenes/pz3_runtime_snapshot.json");
+    if (!SceneSerializer::SaveWorld(snapshotPath, m_World, &saveError) && !saveError.empty())
+        Logger::Get().Warn(saveError);
+}
+
+void Application::InitializeConfigHotReload()
+{
+    std::error_code ec;
+    m_HasConfigWatch = false;
+    m_HasSceneWatch = false;
+
+    if (!m_ConfigWatchPath.empty() && std::filesystem::exists(m_ConfigWatchPath, ec))
+    {
+        m_ConfigWriteTime = std::filesystem::last_write_time(m_ConfigWatchPath, ec);
+        m_HasConfigWatch = !static_cast<bool>(ec);
+    }
+
+    m_SceneWatchPath.clear();
+    if (!m_Config.ecsDemo.sceneFile.empty())
+    {
+        m_SceneWatchPath = AssetPaths::ResolveAssetPath(m_Config.ecsDemo.sceneFile);
+        if (!m_SceneWatchPath.empty() && std::filesystem::exists(m_SceneWatchPath, ec))
+        {
+            m_SceneWriteTime = std::filesystem::last_write_time(m_SceneWatchPath, ec);
+            m_HasSceneWatch = !static_cast<bool>(ec);
+        }
+    }
+}
+
+bool Application::ReloadSceneFromCurrentConfig(const char* reason)
+{
+    if (m_Config.ecsDemo.sceneFile.empty())
+    {
+        SetupEcsRuntimeDemo();
+        Logger::Get().Info(std::string("Application: rebuilt ECS demo from config entities because ") + reason);
+        return true;
+    }
+
+    std::string sceneError;
+    std::vector<EcsDemoEntityConfig> sceneEntities;
+    const auto scenePath = AssetPaths::ResolveAssetPath(m_Config.ecsDemo.sceneFile);
+    if (!SceneSerializer::LoadEntityConfigs(scenePath, sceneEntities, &sceneError))
+    {
+        if (!sceneError.empty())
+            Logger::Get().Warn(sceneError);
+        return false;
+    }
+
+    m_Config.ecsDemo.initialEntities = std::move(sceneEntities);
+    SetupEcsRuntimeDemo();
+    Logger::Get().Info(std::string("Application: hot-reloaded ECS scene because ") + reason);
+    return true;
+}
+
+void Application::PollConfigHotReload()
+{
+    std::error_code ec;
+
+    if (m_HasConfigWatch && std::filesystem::exists(m_ConfigWatchPath, ec))
+    {
+        const auto currentWriteTime = std::filesystem::last_write_time(m_ConfigWatchPath, ec);
+        if (!ec && currentWriteTime > m_ConfigWriteTime)
+        {
+            m_ConfigWriteTime = currentWriteTime;
+
+            AppConfig reloadedConfig;
+            std::string configError;
+            if (ConfigLoader::Load(m_ConfigWatchPath.string(), reloadedConfig, &configError))
+            {
+                if (reloadedConfig.activeBackend != m_Config.activeBackend)
+                {
+                    Logger::Get().Warn(
+                        "Application: active renderer change detected in app.json. Runtime backend switch is deferred until restart.");
+                    reloadedConfig.activeBackend = m_Config.activeBackend;
+                }
+
+                for (auto& wc : m_Windows)
+                {
+                    for (const auto& windowCfg : reloadedConfig.windows)
+                    {
+                        if (windowCfg.backend != wc.backend)
+                            continue;
+
+                        wc.baseTitle = windowCfg.title + " | " + BackendToString(wc.backend);
+                        wc.clear[0] = windowCfg.clear[0];
+                        wc.clear[1] = windowCfg.clear[1];
+                        wc.clear[2] = windowCfg.clear[2];
+                        wc.clear[3] = windowCfg.clear[3];
+                        break;
+                    }
+                }
+
+                const bool sceneSourceChanged = reloadedConfig.ecsDemo.sceneFile != m_Config.ecsDemo.sceneFile;
+                const bool rebuildFromConfigEntities = reloadedConfig.ecsDemo.sceneFile.empty();
+                m_Config = std::move(reloadedConfig);
+                InitializeConfigHotReload();
+                Logger::Get().Info("Application: hot-reloaded app config");
+
+                if (sceneSourceChanged || rebuildFromConfigEntities)
+                    (void)ReloadSceneFromCurrentConfig("app config changed");
+            }
+            else if (!configError.empty())
+            {
+                Logger::Get().Warn(configError);
+            }
+        }
+    }
+
+    if (m_HasSceneWatch && std::filesystem::exists(m_SceneWatchPath, ec))
+    {
+        const auto currentWriteTime = std::filesystem::last_write_time(m_SceneWatchPath, ec);
+        if (!ec && currentWriteTime > m_SceneWriteTime)
+        {
+            m_SceneWriteTime = currentWriteTime;
+            (void)ReloadSceneFromCurrentConfig("scene file changed");
+            InitializeConfigHotReload();
+        }
+    }
 }
 
 ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg)
@@ -256,11 +519,21 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     tag.name = entityCfg.tag.empty() ? ("DemoEntity_" + std::to_string(entityOrdinal)) : entityCfg.tag;
 
     auto& meshRenderer = m_World.AddComponent<ecs::MeshRendererComponent>(entity);
-    meshRenderer.primitive = entityCfg.primitive;
-    meshRenderer.color = entityCfg.color;
-    meshRenderer.material = entityCfg.material;
-    meshRenderer.texture = entityCfg.texture;
+    meshRenderer.meshPath = entityCfg.meshPath;
     meshRenderer.visible = entityCfg.visible;
+
+    if (!entityCfg.materialPath.empty() ||
+        !entityCfg.texturePath.empty() ||
+        !entityCfg.shaderPath.empty() ||
+        HasNonDefaultTint(entityCfg.materialTint))
+    {
+        auto& material = m_World.AddComponent<ecs::MaterialComponent>(entity);
+        material.materialPath = entityCfg.materialPath;
+        material.texturePath = entityCfg.texturePath;
+        material.shaderPath = entityCfg.shaderPath;
+        for (std::size_t i = 0; i < entityCfg.materialTint.size(); ++i)
+            material.tint[i] = entityCfg.materialTint[i];
+    }
 
     if (entityCfg.bounce)
         m_World.AddComponent<ecs::BoundsBounceComponent>(entity);
@@ -268,9 +541,10 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     std::ostringstream ss;
     ss << "ECS runtime: spawned demo entity -> " << m_World.DebugDescribeEntity(entity)
        << " tag=" << tag.name
-       << " primitive=" << PrimitiveTypeToString(meshRenderer.primitive)
-       << " color=(" << meshRenderer.color.r << ", " << meshRenderer.color.g
-       << ", " << meshRenderer.color.b << ", " << meshRenderer.color.a << ")";
+       << " mesh=" << meshRenderer.meshPath
+       << " material=" << entityCfg.materialPath
+       << " texture=" << entityCfg.texturePath
+       << " shader=" << entityCfg.shaderPath;
     Logger::Get().Info(ss.str());
     return entity;
 }
@@ -285,6 +559,140 @@ void Application::ExitGameplayScene()
     Logger::Get().Info("Application: exit gameplay scene");
 }
 
+void Application::UpdateCameraController(float dt)
+{
+    auto* primary = dynamic_cast<GlfwWindow*>(GetWindow());
+    if (primary == nullptr)
+        return;
+
+    GLFWwindow* window = primary->GetGlfwHandle();
+    if (window == nullptr)
+        return;
+
+    const double scrollDeltaY = primary->ConsumeScrollDeltaY();
+    const bool focused = glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE;
+    const bool rightMouseDown =
+        focused && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+
+    if (rightMouseDown && !m_Camera.previousRightMouseDown)
+    {
+        glfwGetCursorPos(window, &m_Camera.cursorXBeforeCapture, &m_Camera.cursorYBeforeCapture);
+
+        int width = 0;
+        int height = 0;
+        glfwGetWindowSize(window, &width, &height);
+        const double centerX = static_cast<double>(width) * 0.5;
+        const double centerY = static_cast<double>(height) * 0.5;
+
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        if (glfwRawMouseMotionSupported())
+            glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+
+        glfwSetCursorPos(window, centerX, centerY);
+        m_Camera.lastMouseX = centerX;
+        m_Camera.lastMouseY = centerY;
+        m_Camera.controlsActive = true;
+    }
+    else if ((!rightMouseDown || !focused) && m_Camera.controlsActive)
+    {
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        if (glfwRawMouseMotionSupported())
+            glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_FALSE);
+
+        glfwSetCursorPos(window, m_Camera.cursorXBeforeCapture, m_Camera.cursorYBeforeCapture);
+        m_Camera.controlsActive = false;
+    }
+
+    m_Camera.previousRightMouseDown = rightMouseDown;
+
+    if (!m_Camera.controlsActive)
+        return;
+
+    if (std::abs(scrollDeltaY) > 0.001)
+    {
+        const float speedMultiplier =
+            std::pow(m_Camera.scrollSpeedStepMultiplier, static_cast<float>(scrollDeltaY));
+        m_Camera.moveSpeed = std::clamp(
+            m_Camera.moveSpeed * speedMultiplier,
+            m_Camera.minMoveSpeed,
+            m_Camera.maxMoveSpeed);
+    }
+
+    double mouseX = 0.0;
+    double mouseY = 0.0;
+    glfwGetCursorPos(window, &mouseX, &mouseY);
+
+    const float deltaX = static_cast<float>(mouseX - m_Camera.lastMouseX);
+    const float deltaY = static_cast<float>(mouseY - m_Camera.lastMouseY);
+    m_Camera.lastMouseX = mouseX;
+    m_Camera.lastMouseY = mouseY;
+
+    m_Camera.yaw += deltaX * m_Camera.mouseSensitivity;
+    m_Camera.pitch = std::clamp(
+        m_Camera.pitch - deltaY * m_Camera.mouseSensitivity,
+        -kMaxCameraPitch,
+        kMaxCameraPitch);
+
+    const ecs::Vec3 worldUp{ 0.0f, 1.0f, 0.0f };
+    const ecs::Vec3 forward = BuildCameraForward(m_Camera.yaw, m_Camera.pitch);
+    const ecs::Vec3 right = Normalize(Cross(worldUp, forward));
+
+    ecs::Vec3 movement{};
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        movement = Add(movement, forward);
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        movement = Add(movement, Scale(forward, -1.0f));
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        movement = Add(movement, right);
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        movement = Add(movement, Scale(right, -1.0f));
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+        movement = Add(movement, worldUp);
+
+    const bool ctrlDown =
+        glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+        glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+    if (ctrlDown)
+        movement = Add(movement, Scale(worldUp, -1.0f));
+
+    if (Length(movement) <= 0.0001f)
+        return;
+
+    float speed = m_Camera.moveSpeed;
+    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
+        speed *= m_Camera.boostMultiplier;
+
+    m_Camera.position = Add(
+        m_Camera.position,
+        Scale(Normalize(movement), speed * dt));
+}
+
+void Application::UpdateRenderSystemCamera(IWindow* window)
+{
+    if (m_RenderSystem == nullptr || window == nullptr)
+        return;
+
+    auto* glfwWindow = dynamic_cast<GlfwWindow*>(window);
+    if (glfwWindow == nullptr || glfwWindow->GetGlfwHandle() == nullptr)
+        return;
+
+    int framebufferWidth = 0;
+    int framebufferHeight = 0;
+    glfwGetFramebufferSize(glfwWindow->GetGlfwHandle(), &framebufferWidth, &framebufferHeight);
+
+    const float aspectRatio =
+        framebufferHeight > 0
+            ? static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight)
+            : kFallbackAspectRatio;
+
+    m_RenderSystem->SetCameraTransform(m_Camera.position, m_Camera.yaw, m_Camera.pitch);
+    m_RenderSystem->SetCameraProjection(
+        m_Camera.verticalFovRadians,
+        aspectRatio,
+        m_Camera.nearPlane,
+        m_Camera.farPlane);
+}
+
 ecs::Entity Application::SpawnGameplayEntity()
 {
     struct SpawnPreset
@@ -294,48 +702,28 @@ ecs::Entity Application::SpawnGameplayEntity()
         float sx;
         float sy;
         float sz;
-        float rx;
-        float ry;
-        float rz;
-        float vx;
-        float vy;
-        float vrx;
-        float vry;
-        float vrz;
-        ecs::PrimitiveType primitive;
+        float yaw;
     };
 
     static constexpr std::array<SpawnPreset, 6> presets =
     {{
-        { -0.65f,  0.15f, 0.32f, 0.32f, 1.0f, 0.0f, 0.0f,  0.15f,  0.42f,  0.21f, 0.0f, 0.0f,  1.70f, ecs::PrimitiveType::Triangle },
-        {  0.68f,  0.05f, 0.28f, 0.28f, 1.0f, 0.0f, 0.0f, -0.35f, -0.36f,  0.18f, 0.0f, 0.0f, -1.45f, ecs::PrimitiveType::Quad },
-        { -0.15f,  0.72f, 0.50f, 0.50f, 1.0f, 0.0f, 0.0f,  0.00f,  0.17f, -0.33f, 0.0f, 0.0f,  2.15f, ecs::PrimitiveType::Line },
-        {  0.12f, -0.68f, 0.28f, 0.28f, 0.28f, 0.35f, 0.55f,  0.40f, -0.24f,  0.29f, 0.65f, 1.15f, -2.30f, ecs::PrimitiveType::Cube },
-        { -0.78f, -0.12f, 0.26f, 0.26f, 1.0f, 0.0f, 0.0f, -0.20f,  0.48f, -0.12f, 0.0f, 0.0f,  1.25f, ecs::PrimitiveType::Triangle },
-        {  0.78f, -0.58f, 0.30f, 0.30f, 1.0f, 0.0f, 0.0f,  0.55f, -0.31f,  0.27f, 0.0f, 0.0f,  1.95f, ecs::PrimitiveType::Quad },
+        { -0.65f,  0.15f, 0.30f, 0.30f, 0.30f, 2.84f },
+        {  0.68f,  0.05f, 0.30f, 0.30f, 0.30f, 3.46f },
+        { -0.15f,  0.72f, 0.26f, 0.26f, 0.26f, 3.14f },
+        {  0.12f, -0.68f, 0.28f, 0.28f, 0.28f, 3.66f },
+        { -0.78f, -0.12f, 0.24f, 0.24f, 0.24f, 2.58f },
+        {  0.78f, -0.58f, 0.24f, 0.24f, 0.24f, 3.72f },
     }};
 
     const SpawnPreset& preset = presets[m_EcsDebugEntities.size() % presets.size()];
     EcsDemoEntityConfig entityCfg;
     entityCfg.tag = "SpawnedEntity_" + std::to_string(m_EcsDebugEntities.size());
-    entityCfg.primitive = preset.primitive;
     entityCfg.position = ecs::Vec3{ preset.x, preset.y, 0.0f };
-    entityCfg.rotation = ecs::Vec3{ preset.rx, preset.ry, preset.rz };
+    entityCfg.rotation = ecs::Vec3{ 0.0f, preset.yaw, 0.0f };
     entityCfg.scale = ecs::Vec3{ preset.sx, preset.sy, preset.sz };
-    entityCfg.linearVelocity = ecs::Vec3{ preset.vx, preset.vy, 0.0f };
-    entityCfg.angularVelocity = ecs::Vec3{ preset.vrx, preset.vry, preset.vrz };
-
-    static constexpr float palette[][4] =
-    {
-        { 0.94f, 0.42f, 0.32f, 1.0f },
-        { 0.30f, 0.78f, 0.44f, 1.0f },
-        { 0.26f, 0.57f, 0.92f, 1.0f },
-        { 0.95f, 0.80f, 0.28f, 1.0f },
-        { 0.71f, 0.38f, 0.88f, 1.0f },
-        { 0.22f, 0.82f, 0.83f, 1.0f },
-    };
-    const auto& color = palette[m_EcsDebugEntities.size() % (sizeof(palette) / sizeof(palette[0]))];
-    entityCfg.color = ecs::Vec4{ color[0], color[1], color[2], color[3] };
+    entityCfg.meshPath = "models/african_head.obj";
+    entityCfg.materialPath = "materials/african_head.material.json";
+    entityCfg.bounce = false;
 
     const ecs::Entity entity = SpawnEcsDemoEntity(entityCfg);
 
@@ -391,6 +779,7 @@ void Application::UpdateEcs(float dt)
         const auto* transform = m_World.GetComponent<ecs::TransformComponent>(entity);
         const auto* velocity = m_World.GetComponent<ecs::VelocityComponent>(entity);
         const auto* meshRenderer = m_World.GetComponent<ecs::MeshRendererComponent>(entity);
+        const auto* material = m_World.GetComponent<ecs::MaterialComponent>(entity);
         if (transform == nullptr || velocity == nullptr || meshRenderer == nullptr)
             continue;
 
@@ -400,7 +789,8 @@ void Application::UpdateEcs(float dt)
            << " scale=(" << transform->scale.x << ", " << transform->scale.y << ", " << transform->scale.z << ")"
            << " rot=(" << transform->rotation.x << ", " << transform->rotation.y << ", " << transform->rotation.z << ")"
            << " vel=(" << velocity->linear.x << ", " << velocity->linear.y << ", " << velocity->linear.z << ")"
-           << " primitive=" << PrimitiveTypeToString(meshRenderer->primitive);
+           << " mesh=" << meshRenderer->meshPath
+           << " material=" << (material != nullptr ? material->materialPath : "<direct>");
     }
     Logger::Get().Info(ss.str());
 }
@@ -409,17 +799,34 @@ bool Application::Initialize()
 {
     Logger::Get().Initialize("engine.log");
     Logger::Get().Info("Application Initialize");
+
+    if (!ValidateAssetDependencyAvailability())
+        return false;
+
+    m_ResourceManager = std::make_unique<ResourceManager>();
+    RunResourceBootstrapCheck();
+
     RunEcsBootstrapCheck();
 
     m_Time.Initialize();
 
-    const std::string configPath = ResolveConfigPath();
-    Logger::Get().Info("Application: using config file: " + configPath);
+    m_ConfigWatchPath = ResolveConfigPath();
+    Logger::Get().Info("Application: using config file: " + m_ConfigWatchPath.string());
 
     m_Config = AppConfig{};
     m_Config.ecsDemo.initialEntities = BuildDefaultEcsDemoEntities();
 
-    const bool configLoaded = ConfigLoader::Load(configPath, m_Config);
+    const bool configLoaded = ConfigLoader::Load(m_ConfigWatchPath.string(), m_Config);
+    if (!m_Config.ecsDemo.sceneFile.empty())
+    {
+        std::string sceneError;
+        std::vector<EcsDemoEntityConfig> sceneEntities;
+        const auto scenePath = AssetPaths::ResolveAssetPath(m_Config.ecsDemo.sceneFile);
+        if (SceneSerializer::LoadEntityConfigs(scenePath, sceneEntities, &sceneError))
+            m_Config.ecsDemo.initialEntities = std::move(sceneEntities);
+        else if (!sceneError.empty())
+            Logger::Get().Warn(sceneError);
+    }
 
     WindowConfig selectedWindow = BuildDefaultWindowConfig(m_Config.activeBackend);
     bool foundWindowConfig = false;
@@ -474,6 +881,7 @@ bool Application::Initialize()
 
     m_Windows.push_back(std::move(ctx));
     SetupEcsRuntimeDemo();
+    InitializeConfigHotReload();
 
     m_IsRunning = true;
 
@@ -520,6 +928,13 @@ int Application::Run()
         if (!anyAlive) break;
 
         float dt = m_Time.Tick();
+        if (m_ResourceManager != nullptr)
+        {
+            m_ResourceManager->PollAsyncLoads();
+            m_ResourceManager->PollHotReload();
+        }
+        PollConfigHotReload();
+        UpdateCameraController(dt);
 
         if (m_UpdateMode == UpdateMode::Fixed)
         {
@@ -581,7 +996,10 @@ int Application::Run()
             wc.renderer->Clear(wc.clear[0], wc.clear[1], wc.clear[2], wc.clear[3]);
 
             if (m_RenderSystem != nullptr)
+            {
                 m_RenderSystem->SetRenderAdapter(wc.renderer.get());
+                UpdateRenderSystemCamera(wc.window.get());
+            }
 
             m_World.UpdateSystems(dt);
             UpdateEcs(dt);
@@ -600,10 +1018,29 @@ int Application::Run()
 
 void Application::Shutdown()
 {
+    if (auto* primary = dynamic_cast<GlfwWindow*>(GetWindow()))
+    {
+        if (GLFWwindow* window = primary->GetGlfwHandle(); window != nullptr)
+        {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            if (glfwRawMouseMotionSupported())
+                glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_FALSE);
+        }
+    }
+
+    m_Camera.controlsActive = false;
+    m_Camera.previousRightMouseDown = false;
+
+    if (m_RenderSystem != nullptr)
+        m_RenderSystem->ReleaseGpuResources();
+
     for (auto& wc : m_Windows)
+    {
         if (wc.renderer) wc.renderer->Shutdown();
+    }
 
     m_Windows.clear();
+    m_ResourceManager.reset();
     m_World.ClearSystems();
     m_RenderSystem = nullptr;
     m_EcsDebugEntities.clear();
