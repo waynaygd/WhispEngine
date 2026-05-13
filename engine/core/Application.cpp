@@ -407,7 +407,12 @@ void Application::SetupEcsRuntimeDemo()
         m_Config.physics.linearDamping,
         m_Config.physics.substeps,
         m_Config.physics.restitution,
-        m_Config.physics.friction);
+        m_Config.physics.friction,
+        m_Config.physics.solverIterations,
+        m_Config.physics.sphereMaxSpeed,
+        m_Config.physics.spherePenetrationEpsilon,
+        m_Config.physics.sphereVelocityEpsilon,
+        m_Config.physics.dynamicBoxSphereCorrectionPercent);
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
     m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled);
@@ -677,10 +682,12 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
 
     if (tag.name == "RollingSphere")
     {
-        rigidbody.mass = 0.70f;
-        rigidbody.linearDampingMultiplier = 0.0f;
-        collider.friction = 0.08f;
-        collider.restitution = 0.03f;
+        const bool arcadeProfile = (m_Config.physics.rollingSphereProfile == "arcade");
+        rigidbody.mass = arcadeProfile ? 0.62f : 0.70f;
+        rigidbody.linearDampingMultiplier = arcadeProfile ? 0.0f : 0.10f;
+        rigidbody.useAdvancedSphereStabilization = true;
+        collider.friction = arcadeProfile ? 0.04f : 0.08f;
+        collider.restitution = arcadeProfile ? 0.02f : 0.03f;
     }
 
     std::ostringstream ss;
