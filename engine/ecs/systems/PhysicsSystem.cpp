@@ -253,6 +253,33 @@ void PhysicsSystem::Update(World& world, float dt)
             if (invMassB > 0.0f)
                 b.transform->position = Sub(b.transform->position, Scale(correction, invMassB));
 
+            // Keep dynamic spheres on the surface of static boxes to avoid deep embedding
+            // on sloped ramps when frame time spikes.
+            if (contactType == ContactType::BoxSphere && singleStaticContact)
+            {
+                BodyRef* dynamicBody = invMassA > 0.0f ? &a : &b;
+                BodyRef* staticBody = invMassA > 0.0f ? &b : &a;
+                if (dynamicBody->collider->type == ColliderType::Sphere && staticBody->collider->type == ColliderType::Box)
+                {
+                    const float radius = SphereRadius(*dynamicBody->collider);
+                    const float skin = 0.001f;
+                    const Vec3 staticCenter = Add(staticBody->transform->position, staticBody->collider->offset);
+                    const BoxAxes staticAxes = BuildBoxAxes(staticBody->transform->rotation);
+                    const Vec3 dynCenter = Add(dynamicBody->transform->position, dynamicBody->collider->offset);
+                    const Vec3 toDyn = Sub(dynCenter, staticCenter);
+                    const float lx = Dot(toDyn, staticAxes.xAxis);
+                    const float ly = Dot(toDyn, staticAxes.yAxis);
+                    const float lz = Dot(toDyn, staticAxes.zAxis);
+                    const Vec3 half = staticBody->collider->halfExtents;
+                    const float clx = Clamp(lx, -half.x, half.x);
+                    const float cly = Clamp(ly, -half.y, half.y);
+                    const float clz = Clamp(lz, -half.z, half.z);
+                    Vec3 closestPoint = Add(Add(Add(staticCenter, Scale(staticAxes.xAxis, clx)), Scale(staticAxes.yAxis, cly)), Scale(staticAxes.zAxis, clz));
+                    const Vec3 snappedCenter = Add(closestPoint, Scale(normal, radius + skin));
+                    dynamicBody->transform->position = Sub(snappedCenter, dynamicBody->collider->offset);
+                }
+            }
+
             const float restitution = (a.collider->restitution + b.collider->restitution) > 0.0f
                 ? (a.collider->restitution + b.collider->restitution) * 0.5f
                 : m_DefaultRestitution;
