@@ -11,6 +11,8 @@
 #include "../render/RenderFactory.h"
 #include "../platform/IWindow.h"
 #include "../game/StateMachine.h"
+#include "../ecs/events/EventBus.h"
+#include "../platform/InputManager.h"
 
 class IWindow;
 class IRenderAdapter;
@@ -41,6 +43,7 @@ public:
     void EnterGameplayScene();
     void ExitGameplayScene();
     ecs::Entity SpawnGameplayEntity();
+    ecs::Entity SpawnPhysicsProjectile();
     bool DestroyLastGameplayEntity();
     std::size_t GetGameplayEntityCount() const { return m_EcsDebugEntities.size(); }
     bool IsCameraControlActive() const { return m_Camera.controlsActive; }
@@ -113,6 +116,8 @@ private:
     Time m_Time;
     StateMachine m_StateMachine;
     CameraControllerState m_Camera;
+    ecs::EventBus m_EventBus;
+    InputManager m_InputManager;
 
     UpdateMode m_UpdateMode = UpdateMode::Variable;
 

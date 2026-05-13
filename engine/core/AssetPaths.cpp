@@ -196,4 +196,42 @@ std::filesystem::path ResolveShaderPath(const std::filesystem::path& relativePat
 
     return NormalizeIfExists(shaderRoot / std::filesystem::path(key));
 }
+
+std::string ToUtf8String(const std::filesystem::path& path)
+{
+#if defined(_WIN32)
+    const std::wstring wide = path.native();
+    if (wide.empty())
+        return {};
+
+    const int requiredSize = WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        wide.c_str(),
+        static_cast<int>(wide.size()),
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
+    if (requiredSize <= 0)
+        return {};
+
+    std::string utf8(static_cast<std::size_t>(requiredSize), '\0');
+    const int convertedSize = WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        wide.c_str(),
+        static_cast<int>(wide.size()),
+        utf8.data(),
+        requiredSize,
+        nullptr,
+        nullptr);
+    if (convertedSize <= 0)
+        return {};
+
+    return utf8;
+#else
+    return path.string();
+#endif
+}
 }

@@ -1,11 +1,13 @@
 #include "TextureLoader.h"
 
+#include "../../core/AssetPaths.h"
 #include "../../core/Logger.h"
 
 #include <stb_image.h>
 
 #include <array>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -453,12 +455,27 @@ ResourceLoadResult<TextureResource> TextureLoader::Load(const std::string& norma
     int height = 0;
     int sourceChannelCount = 0;
 
-    unsigned char* pixels = stbi_load(
+    unsigned char* pixels = nullptr;
+#if defined(_WIN32)
+    FILE* file = _wfopen(resolvedPath.c_str(), L"rb");
+    if (file != nullptr)
+    {
+        pixels = stbi_load_from_file(
+            file,
+            &width,
+            &height,
+            &sourceChannelCount,
+            4);
+        std::fclose(file);
+    }
+#else
+    pixels = stbi_load(
         resolvedPath.string().c_str(),
         &width,
         &height,
         &sourceChannelCount,
         4);
+#endif
 
     if (pixels == nullptr)
     {

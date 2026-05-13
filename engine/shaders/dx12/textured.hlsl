@@ -30,7 +30,7 @@ VSOut VSMain(VSIn input)
 
 float4 PSMain(VSOut input) : SV_Target
 {
-    //return gTexture.Sample(gSampler, input.uv) * gTint;
-    //return gTexture.Sample(gSampler, input.uv);
-    return float4(0.0, 1.0, 0.0, 1.0);
+    const float4 sampled = gTexture.Sample(gSampler, input.uv);
+    const float3 color = sampled.rgb * gTint.rgb;
+    return float4(color, 1.0);
 }

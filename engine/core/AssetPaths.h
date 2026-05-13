@@ -13,4 +13,5 @@ std::string NormalizeShaderKey(const std::filesystem::path& path);
 std::filesystem::path ResolveAssetPath(const std::filesystem::path& relativePath);
 std::filesystem::path ResolveAssetOutputPath(const std::filesystem::path& relativePath);
 std::filesystem::path ResolveShaderPath(const std::filesystem::path& relativePath);
+std::string ToUtf8String(const std::filesystem::path& path);
 }

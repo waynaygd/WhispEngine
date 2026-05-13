@@ -5,13 +5,15 @@
 #include "ConfigLoader.h"
 
 #include "../ecs/components/BoundsBounceComponent.h"
+#include "../ecs/components/ColliderComponent.h"
+#include "../ecs/components/RigidbodyComponent.h"
 #include "../ecs/components/MaterialComponent.h"
 #include "../ecs/components/MeshRendererComponent.h"
 #include "../ecs/components/TagComponent.h"
 #include "../ecs/components/TransformComponent.h"
 #include "../ecs/components/VelocityComponent.h"
 #include "../ecs/systems/BoundsBounceSystem.h"
-#include "../ecs/systems/MotionSystem.h"
+#include "../ecs/systems/PhysicsSystem.h"
 #include "../platform/GlfwWindow.h"
 #include "../render/IRenderAdapter.h"
 #include "../resources/ResourceManager.h"
@@ -229,33 +231,41 @@ void Application::PreloadSceneResourcesAsync(const std::vector<EcsDemoEntityConf
 
 std::vector<EcsDemoEntityConfig> Application::BuildDefaultEcsDemoEntities()
 {
-    std::vector<EcsDemoEntityConfig> entities(3);
+    std::vector<EcsDemoEntityConfig> entities(4);
 
-    entities[0].tag = "AfricanHead_Center";
-    entities[0].meshPath = "models/african_head.obj";
-    entities[0].materialPath = "materials/african_head.material.json";
-    entities[0].position = ecs::Vec3{ 0.0f, 0.05f, 0.0f };
-    entities[0].rotation = ecs::Vec3{ 0.0f, 3.1415926f, 0.0f };
-    entities[0].scale = ecs::Vec3{ 0.68f, 0.68f, 0.68f };
+    entities[0].tag = "GroundPlane";
+    entities[0].meshPath = "models/validation_cube.obj";
+    entities[0].materialPath = "materials/validation_checker.material.json";
+    entities[0].position = ecs::Vec3{ 0.0f, -1.0f, 0.0f };
+    entities[0].scale = ecs::Vec3{ 8.0f, 0.05f, 8.0f };
     entities[0].bounce = false;
+    entities[0].linearVelocity = ecs::Vec3{};
 
-    entities[1].tag = "AfricanHead_Left";
+    entities[1].tag = "AfricanHead_Center";
     entities[1].meshPath = "models/african_head.obj";
     entities[1].materialPath = "materials/african_head.material.json";
-    entities[1].materialTint = { 0.80f, 0.88f, 1.0f, 1.0f };
-    entities[1].position = ecs::Vec3{ -0.60f, -0.10f, 0.0f };
-    entities[1].rotation = ecs::Vec3{ 0.0f, 2.72f, 0.0f };
-    entities[1].scale = ecs::Vec3{ 0.32f, 0.32f, 0.32f };
+    entities[1].position = ecs::Vec3{ 0.0f, 1.1f, 0.0f };
+    entities[1].rotation = ecs::Vec3{ 0.0f, 3.1415926f, 0.0f };
+    entities[1].scale = ecs::Vec3{ 0.68f, 0.68f, 0.68f };
     entities[1].bounce = false;
 
-    entities[2].tag = "AfricanHead_Right";
+    entities[2].tag = "AfricanHead_Left";
     entities[2].meshPath = "models/african_head.obj";
     entities[2].materialPath = "materials/african_head.material.json";
-    entities[2].materialTint = { 1.0f, 0.90f, 0.82f, 1.0f };
-    entities[2].position = ecs::Vec3{ 0.60f, -0.10f, 0.0f };
-    entities[2].rotation = ecs::Vec3{ 0.0f, 3.56f, 0.0f };
+    entities[2].materialTint = { 0.80f, 0.88f, 1.0f, 1.0f };
+    entities[2].position = ecs::Vec3{ -0.60f, 0.9f, 0.0f };
+    entities[2].rotation = ecs::Vec3{ 0.0f, 2.72f, 0.0f };
     entities[2].scale = ecs::Vec3{ 0.32f, 0.32f, 0.32f };
     entities[2].bounce = false;
+
+    entities[3].tag = "AfricanHead_Right";
+    entities[3].meshPath = "models/african_head.obj";
+    entities[3].materialPath = "materials/african_head.material.json";
+    entities[3].materialTint = { 1.0f, 0.90f, 0.82f, 1.0f };
+    entities[3].position = ecs::Vec3{ 0.60f, 0.9f, 0.0f };
+    entities[3].rotation = ecs::Vec3{ 0.0f, 3.56f, 0.0f };
+    entities[3].scale = ecs::Vec3{ 0.32f, 0.32f, 0.32f };
+    entities[3].bounce = false;
 
     return entities;
 }
@@ -347,7 +357,7 @@ void Application::RunEcsBootstrapCheck()
 void Application::SetupEcsRuntimeDemo()
 {
     m_World.ClearSystems();
-    m_World.AddSystem<ecs::MotionSystem>();
+    m_World.AddSystem<ecs::PhysicsSystem>(&m_EventBus);
     m_World.AddSystem<ecs::BoundsBounceSystem>();
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
@@ -375,7 +385,7 @@ void Application::SetupEcsRuntimeDemo()
 
     m_EcsDebugLogTimer = 0.0f;
 
-    Logger::Get().Info("ECS runtime: motion system registered");
+    Logger::Get().Info("ECS runtime: physics system registered (motion system disabled to avoid double integration)");
     Logger::Get().Info("ECS runtime: bounds bounce system registered");
     Logger::Get().Info("ECS runtime: demo scene created with " + std::to_string(m_EcsDebugEntities.size()) + " ECS entities");
     Logger::Get().Info("ECS runtime: render system registered");
@@ -414,7 +424,21 @@ bool Application::ReloadSceneFromCurrentConfig(const char* reason)
 {
     if (m_Config.ecsDemo.sceneFile.empty())
     {
-        SetupEcsRuntimeDemo();
+        if (auto* primary = dynamic_cast<GlfwWindow*>(GetWindow()))
+    {
+        m_InputManager.SetWindow(primary->GetGlfwHandle());
+        m_InputManager.BindAction("MoveForward", GLFW_KEY_W);
+        m_InputManager.BindAction("MoveBackward", GLFW_KEY_S);
+        m_InputManager.BindAction("MoveLeft", GLFW_KEY_A);
+        m_InputManager.BindAction("MoveRight", GLFW_KEY_D);
+        m_InputManager.BindAction("MoveUp", GLFW_KEY_SPACE);
+        m_InputManager.BindAction("MoveDown", GLFW_KEY_LEFT_CONTROL);
+        m_EventBus.SubscribeCollision([](const ecs::CollisionEvent& e){
+            Logger::Get().Info("Collision event: " + std::to_string(e.a.index) + " <-> " + std::to_string(e.b.index));
+        });
+    }
+
+    SetupEcsRuntimeDemo();
         Logger::Get().Info(std::string("Application: rebuilt ECS demo from config entities because ") + reason);
         return true;
     }
@@ -538,6 +562,18 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     if (entityCfg.bounce)
         m_World.AddComponent<ecs::BoundsBounceComponent>(entity);
 
+    auto& rigidbody = m_World.AddComponent<ecs::RigidbodyComponent>(entity);
+    rigidbody.useGravity = true;
+    rigidbody.mass = 1.0f;
+    rigidbody.isStatic = tag.name == "GroundPlane";
+    rigidbody.velocity = entityCfg.linearVelocity;
+    auto& collider = m_World.AddComponent<ecs::ColliderComponent>(entity);
+    collider.type = ecs::ColliderType::Box;
+    if (meshRenderer.meshPath.find("african_head") != std::string::npos)
+        collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.24f, entityCfg.scale.y * 0.48f, entityCfg.scale.z * 0.24f };
+    else
+        collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
+
     std::ostringstream ss;
     ss << "ECS runtime: spawned demo entity -> " << m_World.DebugDescribeEntity(entity)
        << " tag=" << tag.name
@@ -547,6 +583,28 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
        << " shader=" << entityCfg.shaderPath;
     Logger::Get().Info(ss.str());
     return entity;
+}
+
+ecs::Entity Application::SpawnPhysicsProjectile()
+{
+    EcsDemoEntityConfig projectileCfg;
+    projectileCfg.tag = "Projectile_" + std::to_string(m_EcsDebugEntities.size());
+    projectileCfg.meshPath = "models/validation_cube.obj";
+    projectileCfg.materialPath = "materials/validation_checker.material.json";
+    projectileCfg.scale = ecs::Vec3{ 0.15f, 0.15f, 0.15f };
+
+    const ecs::Vec3 forward = BuildCameraForward(m_Camera.yaw, m_Camera.pitch);
+    projectileCfg.position = Add(m_Camera.position, Scale(forward, 0.35f));
+    projectileCfg.linearVelocity = Scale(forward, 8.0f);
+
+    const ecs::Entity projectile = SpawnEcsDemoEntity(projectileCfg);
+    m_EcsDebugEntities.push_back(projectile);
+
+    if (auto* rb = m_World.GetComponent<ecs::RigidbodyComponent>(projectile))
+        rb->velocity = projectileCfg.linearVelocity;
+
+    Logger::Get().Info("Gameplay: F detected -> spawned projectile entity");
+    return projectile;
 }
 
 void Application::EnterGameplayScene()
@@ -646,13 +704,15 @@ void Application::UpdateCameraController(float dt)
         movement = Add(movement, right);
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
         movement = Add(movement, Scale(right, -1.0f));
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS ||
+        glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
         movement = Add(movement, worldUp);
 
-    const bool ctrlDown =
+    const bool downPressed =
+        glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS ||
         glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
         glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
-    if (ctrlDown)
+    if (downPressed)
         movement = Add(movement, Scale(worldUp, -1.0f));
 
     if (Length(movement) <= 0.0001f)
