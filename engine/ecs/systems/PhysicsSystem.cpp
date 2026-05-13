@@ -26,15 +26,19 @@ void PhysicsSystem::Update(World& world, float dt)
 {
     constexpr float gravity = 9.81f;
     constexpr float linearDamping = 0.985f;
+    const int substeps = dt > 0.016f ? 3 : 2;
+    const float stepDt = dt / static_cast<float>(substeps);
+    for (int step = 0; step < substeps; ++step)
+    {
     world.ForEach<TransformComponent, RigidbodyComponent>([&](Entity, TransformComponent& t, RigidbodyComponent& rb){
-        if (rb.isStatic) return;
-        if (rb.useGravity) rb.velocity.y -= gravity * dt;
+        if (rb.isStatic || !rb.simulatePhysics) return;
+        if (rb.useGravity) rb.velocity.y -= gravity * stepDt;
         rb.velocity.x *= linearDamping;
         rb.velocity.z *= linearDamping;
         if (Abs(rb.velocity.x) < 0.0005f) rb.velocity.x = 0.0f;
         if (Abs(rb.velocity.z) < 0.0005f) rb.velocity.z = 0.0f;
-        rb.velocity = Add(rb.velocity, Scale(rb.acceleration, dt));
-        t.position = Add(t.position, Scale(rb.velocity, dt));
+        rb.velocity = Add(rb.velocity, Scale(rb.acceleration, stepDt));
+        t.position = Add(t.position, Scale(rb.velocity, stepDt));
     });
 
     std::vector<BodyRef> bodies;
@@ -50,6 +54,9 @@ void PhysicsSystem::Update(World& world, float dt)
         {
             BodyRef& a = bodies[i];
             BodyRef& b = bodies[j];
+            if ((!a.rigidbody->simulatePhysics && !a.rigidbody->isStatic) ||
+                (!b.rigidbody->simulatePhysics && !b.rigidbody->isStatic))
+                continue;
             if (a.rigidbody->isStatic && b.rigidbody->isStatic)
                 continue;
 
@@ -108,6 +115,6 @@ void PhysicsSystem::Update(World& world, float dt)
             }
             if (m_EventBus) m_EventBus->PublishCollision(CollisionEvent{ a.entity, b.entity });
         }
-    }
+    }}
 }
 }
