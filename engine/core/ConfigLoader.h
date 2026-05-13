@@ -56,6 +56,11 @@ struct AppConfig
         int substeps = 2;
         float restitution = 0.05f;
         float friction = 0.85f;
+        int solverIterations = 4;
+        float sphereMaxSpeed = 9.0f;
+        float spherePenetrationEpsilon = 0.0005f;
+        float sphereVelocityEpsilon = 0.05f;
+        float dynamicBoxSphereCorrectionPercent = 1.0f;
     };
 
     RenderBackend activeBackend = RenderBackend::DX12;

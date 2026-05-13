@@ -26,6 +26,11 @@
     "linearDamping": 0.985,
     "substeps": 3,
     "restitution": 0.05,
-    "friction": 0.85
+    "friction": 0.85,
+    "solverIterations": 4,
+    "sphereMaxSpeed": 9.0,
+    "spherePenetrationEpsilon": 0.0005,
+    "sphereVelocityEpsilon": 0.05,
+    "dynamicBoxSphereCorrectionPercent": 1.0
   }
 }

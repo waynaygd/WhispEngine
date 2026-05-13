@@ -407,7 +407,12 @@ void Application::SetupEcsRuntimeDemo()
         m_Config.physics.linearDamping,
         m_Config.physics.substeps,
         m_Config.physics.restitution,
-        m_Config.physics.friction);
+        m_Config.physics.friction,
+        m_Config.physics.solverIterations,
+        m_Config.physics.sphereMaxSpeed,
+        m_Config.physics.spherePenetrationEpsilon,
+        m_Config.physics.sphereVelocityEpsilon,
+        m_Config.physics.dynamicBoxSphereCorrectionPercent);
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
     m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled);

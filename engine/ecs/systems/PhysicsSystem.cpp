@@ -118,7 +118,7 @@ void PhysicsSystem::Update(World& world, float dt)
     const int substeps = std::max(configuredSubsteps, std::min(dynamicSubsteps, 64));
     const float stepDt = dt / static_cast<float>(substeps);
     const float dampingPerStep = std::pow(std::max(m_LinearDamping, 0.0f), stepDt * 60.0f);
-    const int solverIterations = 4;
+    const int solverIterations = std::max(m_SolverIterations, 1);
     std::vector<BodyRef> bodies;
     bodies.reserve(128);
     world.ForEach<ColliderComponent, TransformComponent, RigidbodyComponent>([&](Entity e, ColliderComponent& c, TransformComponent& t, RigidbodyComponent& rb){
@@ -293,7 +293,7 @@ void PhysicsSystem::Update(World& world, float dt)
             const bool singleStaticContact = (invMassA == 0.0f) != (invMassB == 0.0f);
             const bool dynamicBoxSphere = (contactType == ContactType::BoxSphere) && !singleStaticContact;
             const float slop = dynamicBoxSphere ? 0.0f : (singleStaticContact ? 0.0005f : 0.0025f);
-            const float percent = dynamicBoxSphere ? 1.0f : (singleStaticContact ? 0.9f : 0.65f);
+            const float percent = dynamicBoxSphere ? m_DynamicBoxSphereCorrectionPercent : (singleStaticContact ? 0.9f : 0.65f);
             const float correctionScale = std::max(minPen - slop, 0.0f) * percent / invMassSum;
             const Vec3 correction = Scale(sep, correctionScale / (minPen > 0.0f ? minPen : 1.0f));
             if (invMassA > 0.0f)
@@ -500,16 +500,16 @@ void PhysicsSystem::Update(World& world, float dt)
             }
         }
 
-        if (bestPen > 0.0005f)
+        if (bestPen > m_SpherePenetrationEpsilon)
         {
             sphereCenter = Add(sphereCenter, Scale(bestNormal, bestPen + 0.001f));
             sphereBody.transform->position = Sub(sphereCenter, sphereBody.collider->offset);
             const float vn = Dot(sphereBody.rigidbody->velocity, bestNormal);
-            if (vn < -0.05f)
+            if (vn < -m_SphereVelocityEpsilon)
                 sphereBody.rigidbody->velocity = Sub(sphereBody.rigidbody->velocity, Scale(bestNormal, vn));
         }
 
-        const float maxSphereSpeed = 9.0f;
+        const float maxSphereSpeed = std::max(m_SphereMaxSpeed, 0.1f);
         const float speedSq = LengthSq(sphereBody.rigidbody->velocity);
         if (speedSq > maxSphereSpeed * maxSphereSpeed)
         {

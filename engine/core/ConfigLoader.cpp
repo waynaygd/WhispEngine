@@ -177,6 +177,11 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
         outCfg.physics.substeps = physics.value("substeps", outCfg.physics.substeps);
         outCfg.physics.restitution = physics.value("restitution", outCfg.physics.restitution);
         outCfg.physics.friction = physics.value("friction", outCfg.physics.friction);
+        outCfg.physics.solverIterations = physics.value("solverIterations", outCfg.physics.solverIterations);
+        outCfg.physics.sphereMaxSpeed = physics.value("sphereMaxSpeed", outCfg.physics.sphereMaxSpeed);
+        outCfg.physics.spherePenetrationEpsilon = physics.value("spherePenetrationEpsilon", outCfg.physics.spherePenetrationEpsilon);
+        outCfg.physics.sphereVelocityEpsilon = physics.value("sphereVelocityEpsilon", outCfg.physics.sphereVelocityEpsilon);
+        outCfg.physics.dynamicBoxSphereCorrectionPercent = physics.value("dynamicBoxSphereCorrectionPercent", outCfg.physics.dynamicBoxSphereCorrectionPercent);
     }
 
     Logger::Get().Info(
