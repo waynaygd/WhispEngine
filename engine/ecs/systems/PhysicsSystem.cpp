@@ -129,8 +129,9 @@ void PhysicsSystem::Update(World& world, float dt)
     world.ForEach<TransformComponent, RigidbodyComponent>([&](Entity, TransformComponent& t, RigidbodyComponent& rb){
         if (rb.isStatic || !rb.simulatePhysics) return;
         if (rb.useGravity) rb.velocity.y -= gravity * stepDt;
-        rb.velocity.x *= dampingPerStep;
-        rb.velocity.z *= dampingPerStep;
+        const float bodyDamping = std::pow(dampingPerStep, std::max(rb.linearDampingMultiplier, 0.0f));
+        rb.velocity.x *= bodyDamping;
+        rb.velocity.z *= bodyDamping;
         if (Abs(rb.velocity.x) < 0.0005f) rb.velocity.x = 0.0f;
         if (Abs(rb.velocity.z) < 0.0005f) rb.velocity.z = 0.0f;
         rb.velocity = Add(rb.velocity, Scale(rb.acceleration, stepDt));
@@ -327,9 +328,11 @@ void PhysicsSystem::Update(World& world, float dt)
             const float restitution = (a.collider->restitution + b.collider->restitution) > 0.0f
                 ? (a.collider->restitution + b.collider->restitution) * 0.5f
                 : m_DefaultRestitution;
-            const float friction = (a.collider->friction + b.collider->friction) > 0.0f
+            float friction = (a.collider->friction + b.collider->friction) > 0.0f
                 ? (a.collider->friction + b.collider->friction) * 0.5f
                 : m_DefaultFriction;
+            if (contactType == ContactType::BoxSphere)
+                friction *= 0.45f;
             const Vec3 rv = Sub(a.rigidbody->velocity, b.rigidbody->velocity);
             const float velAlongNormal = Dot(rv, normal);
             if (velAlongNormal < 0.0f)
