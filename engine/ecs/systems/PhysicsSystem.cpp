@@ -291,8 +291,9 @@ void PhysicsSystem::Update(World& world, float dt)
                 continue;
 
             const bool singleStaticContact = (invMassA == 0.0f) != (invMassB == 0.0f);
-            const float slop = singleStaticContact ? 0.0005f : 0.0025f;
-            const float percent = singleStaticContact ? 0.9f : 0.65f;
+            const bool dynamicBoxSphere = (contactType == ContactType::BoxSphere) && !singleStaticContact;
+            const float slop = dynamicBoxSphere ? 0.0f : (singleStaticContact ? 0.0005f : 0.0025f);
+            const float percent = dynamicBoxSphere ? 1.0f : (singleStaticContact ? 0.9f : 0.65f);
             const float correctionScale = std::max(minPen - slop, 0.0f) * percent / invMassSum;
             const Vec3 correction = Scale(sep, correctionScale / (minPen > 0.0f ? minPen : 1.0f));
             if (invMassA > 0.0f)
@@ -464,12 +465,12 @@ void PhysicsSystem::Update(World& world, float dt)
             }
         }
 
-        if (bestPen > 0.0f)
+        if (bestPen > 0.0005f)
         {
             sphereCenter = Add(sphereCenter, Scale(bestNormal, bestPen + 0.001f));
             sphereBody.transform->position = Sub(sphereCenter, sphereBody.collider->offset);
             const float vn = Dot(sphereBody.rigidbody->velocity, bestNormal);
-            if (vn < 0.0f)
+            if (vn < -0.05f)
                 sphereBody.rigidbody->velocity = Sub(sphereBody.rigidbody->velocity, Scale(bestNormal, vn));
         }
 
