@@ -301,6 +301,41 @@ void PhysicsSystem::Update(World& world, float dt)
             if (invMassB > 0.0f)
                 b.transform->position = Sub(b.transform->position, Scale(correction, invMassB));
 
+            // Extra depenetration for dynamic box-sphere contacts to avoid
+            // persistent interpenetration ("sphere absorbing cubes").
+            if (dynamicBoxSphere)
+            {
+                BodyRef* sphereBody = (a.collider->type == ColliderType::Sphere) ? &a : &b;
+                BodyRef* boxBody = (a.collider->type == ColliderType::Box) ? &a : &b;
+                const float radius = SphereRadius(*sphereBody->collider);
+                const Vec3 boxCenter = Add(boxBody->transform->position, boxBody->collider->offset);
+                const BoxAxes boxAxes = BuildBoxAxes(boxBody->transform->rotation);
+                const Vec3 sphereCenter = Add(sphereBody->transform->position, sphereBody->collider->offset);
+                const Vec3 toSphere = Sub(sphereCenter, boxCenter);
+                const float lx = Dot(toSphere, boxAxes.xAxis);
+                const float ly = Dot(toSphere, boxAxes.yAxis);
+                const float lz = Dot(toSphere, boxAxes.zAxis);
+                const Vec3 half = boxBody->collider->halfExtents;
+                const float clx = Clamp(lx, -half.x, half.x);
+                const float cly = Clamp(ly, -half.y, half.y);
+                const float clz = Clamp(lz, -half.z, half.z);
+                const Vec3 closestPoint = Add(Add(Add(boxCenter, Scale(boxAxes.xAxis, clx)), Scale(boxAxes.yAxis, cly)), Scale(boxAxes.zAxis, clz));
+                const Vec3 delta = Sub(sphereCenter, closestPoint);
+                const float distSq = LengthSq(delta);
+                if (distSq < radius * radius)
+                {
+                    const float distance = std::sqrt(std::max(distSq, 0.0f));
+                    const Vec3 outNormal = (distance > 0.000001f) ? Scale(delta, 1.0f / distance) : normal;
+                    const float extraPen = radius - distance + 0.001f;
+                    const float moveSphere = invMassA > invMassB ? 0.35f : 0.65f;
+                    const float moveBox = 1.0f - moveSphere;
+                    if (!sphereBody->rigidbody->isStatic)
+                        sphereBody->transform->position = Add(sphereBody->transform->position, Scale(outNormal, extraPen * moveSphere));
+                    if (!boxBody->rigidbody->isStatic)
+                        boxBody->transform->position = Sub(boxBody->transform->position, Scale(outNormal, extraPen * moveBox));
+                }
+            }
+
             // Keep dynamic spheres on the surface of static boxes to avoid deep embedding
             // on sloped ramps when frame time spikes.
             if (contactType == ContactType::BoxSphere && singleStaticContact)
