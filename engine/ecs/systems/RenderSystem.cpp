@@ -2,6 +2,7 @@
 
 #include "../World.h"
 #include "../components/MaterialComponent.h"
+#include "../components/ColliderComponent.h"
 #include "../components/MeshRendererComponent.h"
 #include "../components/TransformComponent.h"
 #include "../../core/AssetPaths.h"
@@ -343,6 +344,47 @@ void RenderSystem::Update(World& world, float dt)
                 meshRenderer,
                 world.GetComponent<MaterialComponent>(entity));
         });
+
+    if (!m_DebugCollidersEnabled)
+        return;
+
+    world.ForEach<TransformComponent, ColliderComponent>(
+        [&](Entity, TransformComponent& transform, ColliderComponent& collider)
+        {
+            float mvp[16];
+            TransformComponent debugTransform = transform;
+            debugTransform.position.x += collider.offset.x;
+            debugTransform.position.y += collider.offset.y;
+            debugTransform.position.z += collider.offset.z;
+            // Box colliders can be oriented; keep rotation for box debug draw.
+            if (collider.type == ColliderType::Sphere)
+            {
+                const float radius = std::max(collider.halfExtents.x, std::max(collider.halfExtents.y, collider.halfExtents.z));
+                debugTransform.scale = ecs::Vec3{ radius * 2.0f, radius * 2.0f, radius * 2.0f };
+            }
+            else
+            {
+                // Box colliders can be oriented; keep rotation for box debug draw.
+                debugTransform.scale = ecs::Vec3{
+                    collider.halfExtents.x * 2.0f,
+                    collider.halfExtents.y * 2.0f,
+                    collider.halfExtents.z * 2.0f
+                };
+            }
+            BuildMvp(
+                mvp,
+                debugTransform,
+                m_CameraPosition,
+                m_CameraYaw,
+                m_CameraPitch,
+                m_CameraVerticalFovRadians,
+                m_CameraAspectRatio,
+                m_CameraNearPlane,
+                m_CameraFarPlane);
+            m_Renderer->SetTestTransform(mvp);
+            m_Renderer->SetTestColor(0.1f, 1.0f, 0.1f, 1.0f);
+            m_Renderer->DrawTestCube();
+        });
 }
 
 bool RenderSystem::TryDrawResourceMesh(
@@ -388,17 +430,27 @@ bool RenderSystem::TryDrawResourceMesh(
         }
     }
 
-    if (texturePath.empty() || shaderPath.empty())
+    if (shaderPath.empty())
         return false;
 
     const std::string meshKey = AssetPaths::NormalizeAssetKey(meshRenderer.meshPath);
-    const std::string textureKey = AssetPaths::NormalizeAssetKey(texturePath);
     const std::string shaderKey = AssetPaths::NormalizeShaderKey(shaderPath);
-    if (meshKey.empty() || textureKey.empty() || shaderKey.empty())
+    if (meshKey.empty() || shaderKey.empty())
         return false;
 
     const RenderMeshHandle meshHandle = GetOrUploadMesh(meshKey);
-    const RenderTextureHandle textureHandle = GetOrCreateTexture(textureKey);
+    RenderTextureHandle textureHandle = RenderTextureHandle::Invalid();
+    if (!texturePath.empty())
+    {
+        const std::string textureKey = AssetPaths::NormalizeAssetKey(texturePath);
+        if (textureKey.empty())
+            return false;
+        textureHandle = GetOrCreateTexture(textureKey);
+    }
+    else
+    {
+        textureHandle = GetOrCreateTexture("defaults/texture");
+    }
     const RenderShaderHandle shaderHandle = GetOrCreateShader(shaderKey);
     if (!meshHandle.IsValid() || !textureHandle.IsValid() || !shaderHandle.IsValid())
         return false;

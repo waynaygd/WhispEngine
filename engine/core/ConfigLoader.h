@@ -31,6 +31,13 @@ struct EcsDemoEntityConfig
     ecs::Vec3 scale{ 0.4f, 0.4f, 1.0f };
     ecs::Vec3 linearVelocity{};
     ecs::Vec3 angularVelocity{};
+    ecs::Vec3 colliderHalfExtents{};
+    ecs::Vec3 colliderOffset{};
+    std::string colliderType = "box";
+    bool colliderManual = false;
+    bool simulatePhysics = true;
+    bool isStatic = false;
+    bool useGravity = true;
 };
 
 struct EcsDemoConfig
@@ -42,9 +49,25 @@ struct EcsDemoConfig
 
 struct AppConfig
 {
+    struct PhysicsConfig
+    {
+        float gravity = 9.81f;
+        float linearDamping = 0.985f;
+        int substeps = 2;
+        float restitution = 0.05f;
+        float friction = 0.85f;
+        int solverIterations = 4;
+        float sphereMaxSpeed = 9.0f;
+        float spherePenetrationEpsilon = 0.0005f;
+        float sphereVelocityEpsilon = 0.05f;
+        float dynamicBoxSphereCorrectionPercent = 1.0f;
+        std::string rollingSphereProfile = "stable";
+    };
+
     RenderBackend activeBackend = RenderBackend::DX12;
     std::vector<WindowConfig> windows;
     EcsDemoConfig ecsDemo;
+    PhysicsConfig physics;
 };
 
 class ConfigLoader

@@ -138,6 +138,13 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
                 ReadVec3(je, "scale", entityCfg.scale);
                 ReadVec3(je, "linearVelocity", entityCfg.linearVelocity);
                 ReadVec3(je, "angularVelocity", entityCfg.angularVelocity);
+                ReadVec3(je, "colliderHalfExtents", entityCfg.colliderHalfExtents);
+                ReadVec3(je, "colliderOffset", entityCfg.colliderOffset);
+                entityCfg.colliderType = je.value("colliderType", std::string("box"));
+                entityCfg.colliderManual = je.value("colliderManual", false);
+                entityCfg.simulatePhysics = je.value("simulatePhysics", true);
+                entityCfg.isStatic = je.value("isStatic", false);
+                entityCfg.useGravity = je.value("useGravity", true);
 
                 if (je.contains("x")) entityCfg.position.x = je.value("x", 0.0f);
                 if (je.contains("y")) entityCfg.position.y = je.value("y", 0.0f);
@@ -154,10 +161,28 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
                 }
                 if (je.contains("angularVelocity") && je["angularVelocity"].is_number())
                     entityCfg.angularVelocity.z = je["angularVelocity"].get<float>();
+                if (je.contains("colliderHalfExtents") || je.contains("colliderOffset"))
+                    entityCfg.colliderManual = true;
 
                 outCfg.ecsDemo.initialEntities.push_back(entityCfg);
             }
         }
+    }
+
+    if (j.contains("physics") && j["physics"].is_object())
+    {
+        const auto& physics = j["physics"];
+        outCfg.physics.gravity = physics.value("gravity", outCfg.physics.gravity);
+        outCfg.physics.linearDamping = physics.value("linearDamping", outCfg.physics.linearDamping);
+        outCfg.physics.substeps = physics.value("substeps", outCfg.physics.substeps);
+        outCfg.physics.restitution = physics.value("restitution", outCfg.physics.restitution);
+        outCfg.physics.friction = physics.value("friction", outCfg.physics.friction);
+        outCfg.physics.solverIterations = physics.value("solverIterations", outCfg.physics.solverIterations);
+        outCfg.physics.sphereMaxSpeed = physics.value("sphereMaxSpeed", outCfg.physics.sphereMaxSpeed);
+        outCfg.physics.spherePenetrationEpsilon = physics.value("spherePenetrationEpsilon", outCfg.physics.spherePenetrationEpsilon);
+        outCfg.physics.sphereVelocityEpsilon = physics.value("sphereVelocityEpsilon", outCfg.physics.sphereVelocityEpsilon);
+        outCfg.physics.dynamicBoxSphereCorrectionPercent = physics.value("dynamicBoxSphereCorrectionPercent", outCfg.physics.dynamicBoxSphereCorrectionPercent);
+        outCfg.physics.rollingSphereProfile = physics.value("rollingSphereProfile", outCfg.physics.rollingSphereProfile);
     }
 
     Logger::Get().Info(

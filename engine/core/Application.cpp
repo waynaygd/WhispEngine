@@ -5,13 +5,15 @@
 #include "ConfigLoader.h"
 
 #include "../ecs/components/BoundsBounceComponent.h"
+#include "../ecs/components/ColliderComponent.h"
+#include "../ecs/components/RigidbodyComponent.h"
 #include "../ecs/components/MaterialComponent.h"
 #include "../ecs/components/MeshRendererComponent.h"
 #include "../ecs/components/TagComponent.h"
 #include "../ecs/components/TransformComponent.h"
 #include "../ecs/components/VelocityComponent.h"
 #include "../ecs/systems/BoundsBounceSystem.h"
-#include "../ecs/systems/MotionSystem.h"
+#include "../ecs/systems/PhysicsSystem.h"
 #include "../platform/GlfwWindow.h"
 #include "../render/IRenderAdapter.h"
 #include "../resources/ResourceManager.h"
@@ -93,6 +95,50 @@ static std::string ResolveConfigPath()
 static bool HasNonDefaultTint(const std::array<float, 4>& tint)
 {
     return tint[0] != 1.0f || tint[1] != 1.0f || tint[2] != 1.0f || tint[3] != 1.0f;
+}
+
+static bool TryBuildMeshCollider(
+    ResourceManager* resourceManager,
+    const std::string& meshPath,
+    const ecs::Vec3& scale,
+    ecs::Vec3& outHalfExtents,
+    ecs::Vec3& outOffset)
+{
+    if (resourceManager == nullptr)
+        return false;
+    const std::string meshKey = AssetPaths::NormalizeAssetKey(meshPath);
+    if (meshKey.empty())
+        return false;
+    const auto meshResource = resourceManager->Load<MeshResource>(meshKey);
+    if (meshResource == nullptr || !meshResource->IsUsable())
+        return false;
+    const auto& vertices = meshResource->GetData().meshData.vertices;
+    if (vertices.empty())
+        return false;
+
+    ecs::Vec3 minV{ vertices[0].position[0], vertices[0].position[1], vertices[0].position[2] };
+    ecs::Vec3 maxV = minV;
+    for (const auto& v : vertices)
+    {
+        if (v.position[0] < minV.x) minV.x = v.position[0];
+        if (v.position[1] < minV.y) minV.y = v.position[1];
+        if (v.position[2] < minV.z) minV.z = v.position[2];
+        if (v.position[0] > maxV.x) maxV.x = v.position[0];
+        if (v.position[1] > maxV.y) maxV.y = v.position[1];
+        if (v.position[2] > maxV.z) maxV.z = v.position[2];
+    }
+
+    outHalfExtents = ecs::Vec3{
+        (maxV.x - minV.x) * 0.5f * scale.x,
+        (maxV.y - minV.y) * 0.5f * scale.y,
+        (maxV.z - minV.z) * 0.5f * scale.z
+    };
+    outOffset = ecs::Vec3{
+        (maxV.x + minV.x) * 0.5f * scale.x,
+        (maxV.y + minV.y) * 0.5f * scale.y,
+        (maxV.z + minV.z) * 0.5f * scale.z
+    };
+    return true;
 }
 
 static float Dot(const ecs::Vec3& lhs, const ecs::Vec3& rhs)
@@ -229,33 +275,41 @@ void Application::PreloadSceneResourcesAsync(const std::vector<EcsDemoEntityConf
 
 std::vector<EcsDemoEntityConfig> Application::BuildDefaultEcsDemoEntities()
 {
-    std::vector<EcsDemoEntityConfig> entities(3);
+    std::vector<EcsDemoEntityConfig> entities(4);
 
-    entities[0].tag = "AfricanHead_Center";
-    entities[0].meshPath = "models/african_head.obj";
-    entities[0].materialPath = "materials/african_head.material.json";
-    entities[0].position = ecs::Vec3{ 0.0f, 0.05f, 0.0f };
-    entities[0].rotation = ecs::Vec3{ 0.0f, 3.1415926f, 0.0f };
-    entities[0].scale = ecs::Vec3{ 0.68f, 0.68f, 0.68f };
+    entities[0].tag = "GroundPlane";
+    entities[0].meshPath = "models/validation_cube.obj";
+    entities[0].materialPath = "materials/white.material.json";
+    entities[0].position = ecs::Vec3{ 0.0f, -1.0f, 0.0f };
+    entities[0].scale = ecs::Vec3{ 8.0f, 0.05f, 8.0f };
     entities[0].bounce = false;
+    entities[0].linearVelocity = ecs::Vec3{};
 
-    entities[1].tag = "AfricanHead_Left";
+    entities[1].tag = "AfricanHead_Center";
     entities[1].meshPath = "models/african_head.obj";
     entities[1].materialPath = "materials/african_head.material.json";
-    entities[1].materialTint = { 0.80f, 0.88f, 1.0f, 1.0f };
-    entities[1].position = ecs::Vec3{ -0.60f, -0.10f, 0.0f };
-    entities[1].rotation = ecs::Vec3{ 0.0f, 2.72f, 0.0f };
-    entities[1].scale = ecs::Vec3{ 0.32f, 0.32f, 0.32f };
+    entities[1].position = ecs::Vec3{ 0.0f, 1.1f, 0.0f };
+    entities[1].rotation = ecs::Vec3{ 0.0f, 3.1415926f, 0.0f };
+    entities[1].scale = ecs::Vec3{ 0.68f, 0.68f, 0.68f };
     entities[1].bounce = false;
 
-    entities[2].tag = "AfricanHead_Right";
+    entities[2].tag = "AfricanHead_Left";
     entities[2].meshPath = "models/african_head.obj";
     entities[2].materialPath = "materials/african_head.material.json";
-    entities[2].materialTint = { 1.0f, 0.90f, 0.82f, 1.0f };
-    entities[2].position = ecs::Vec3{ 0.60f, -0.10f, 0.0f };
-    entities[2].rotation = ecs::Vec3{ 0.0f, 3.56f, 0.0f };
+    entities[2].materialTint = { 0.80f, 0.88f, 1.0f, 1.0f };
+    entities[2].position = ecs::Vec3{ -0.60f, 0.9f, 0.0f };
+    entities[2].rotation = ecs::Vec3{ 0.0f, 2.72f, 0.0f };
     entities[2].scale = ecs::Vec3{ 0.32f, 0.32f, 0.32f };
     entities[2].bounce = false;
+
+    entities[3].tag = "AfricanHead_Right";
+    entities[3].meshPath = "models/african_head.obj";
+    entities[3].materialPath = "materials/african_head.material.json";
+    entities[3].materialTint = { 1.0f, 0.90f, 0.82f, 1.0f };
+    entities[3].position = ecs::Vec3{ 0.60f, 0.9f, 0.0f };
+    entities[3].rotation = ecs::Vec3{ 0.0f, 3.56f, 0.0f };
+    entities[3].scale = ecs::Vec3{ 0.32f, 0.32f, 0.32f };
+    entities[3].bounce = false;
 
     return entities;
 }
@@ -347,10 +401,21 @@ void Application::RunEcsBootstrapCheck()
 void Application::SetupEcsRuntimeDemo()
 {
     m_World.ClearSystems();
-    m_World.AddSystem<ecs::MotionSystem>();
-    m_World.AddSystem<ecs::BoundsBounceSystem>();
+    m_World.AddSystem<ecs::PhysicsSystem>(
+        &m_EventBus,
+        m_Config.physics.gravity,
+        m_Config.physics.linearDamping,
+        m_Config.physics.substeps,
+        m_Config.physics.restitution,
+        m_Config.physics.friction,
+        m_Config.physics.solverIterations,
+        m_Config.physics.sphereMaxSpeed,
+        m_Config.physics.spherePenetrationEpsilon,
+        m_Config.physics.sphereVelocityEpsilon,
+        m_Config.physics.dynamicBoxSphereCorrectionPercent);
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
+    m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled);
 
     m_EcsDebugEntities.clear();
     const std::vector<EcsDemoEntityConfig> entities =
@@ -360,6 +425,26 @@ void Application::SetupEcsRuntimeDemo()
     for (const auto& entityCfg : entities)
     {
         m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(entityCfg));
+    }
+
+    // Small cube pyramid for interactive shooting tests.
+    for (int layer = 0; layer < 4; ++layer)
+    {
+        const int count = 4 - layer;
+        for (int i = 0; i < count; ++i)
+        {
+            EcsDemoEntityConfig cubeCfg;
+            cubeCfg.tag = "PyramidCube_" + std::to_string(layer) + "_" + std::to_string(i);
+            cubeCfg.meshPath = "models/validation_cube.obj";
+            cubeCfg.materialPath = "materials/blue.material.json";
+            cubeCfg.scale = ecs::Vec3{ 0.18f, 0.18f, 0.18f };
+            cubeCfg.position = ecs::Vec3{
+                -0.35f + static_cast<float>(i) * 0.20f + static_cast<float>(layer) * 0.10f,
+                -0.92f + static_cast<float>(layer) * 0.22f,
+                0.45f
+            };
+            m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(cubeCfg));
+        }
     }
 
     if (m_ResourceManager != nullptr)
@@ -375,8 +460,7 @@ void Application::SetupEcsRuntimeDemo()
 
     m_EcsDebugLogTimer = 0.0f;
 
-    Logger::Get().Info("ECS runtime: motion system registered");
-    Logger::Get().Info("ECS runtime: bounds bounce system registered");
+    Logger::Get().Info("ECS runtime: physics system registered (motion system disabled to avoid double integration)");
     Logger::Get().Info("ECS runtime: demo scene created with " + std::to_string(m_EcsDebugEntities.size()) + " ECS entities");
     Logger::Get().Info("ECS runtime: render system registered");
 
@@ -433,6 +517,27 @@ bool Application::ReloadSceneFromCurrentConfig(const char* reason)
     SetupEcsRuntimeDemo();
     Logger::Get().Info(std::string("Application: hot-reloaded ECS scene because ") + reason);
     return true;
+}
+
+void Application::ConfigureInputBindings()
+{
+    auto* primary = dynamic_cast<GlfwWindow*>(GetWindow());
+    if (primary == nullptr)
+        return;
+
+    m_InputManager.SetWindow(primary->GetGlfwHandle());
+    m_InputManager.BindAction("EnterGameplay", GLFW_KEY_ENTER);
+    m_InputManager.BindAction("MoveForward", GLFW_KEY_W);
+    m_InputManager.BindAction("MoveBackward", GLFW_KEY_S);
+    m_InputManager.BindAction("MoveLeft", GLFW_KEY_A);
+    m_InputManager.BindAction("MoveRight", GLFW_KEY_D);
+    m_InputManager.BindAction("MoveUp", GLFW_KEY_SPACE);
+    m_InputManager.BindAction("MoveDown", GLFW_KEY_LEFT_CONTROL);
+    m_InputManager.BindAction("PauseToMenu", GLFW_KEY_ESCAPE);
+    m_InputManager.BindAction("SpawnEntity", GLFW_KEY_SPACE);
+    m_InputManager.BindAction("DestroyEntity", GLFW_KEY_BACKSPACE);
+    m_InputManager.BindAction("FireProjectile", GLFW_KEY_F);
+    m_InputManager.BindAction("ToggleDebugColliders", GLFW_KEY_F3);
 }
 
 void Application::PollConfigHotReload()
@@ -538,6 +643,53 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     if (entityCfg.bounce)
         m_World.AddComponent<ecs::BoundsBounceComponent>(entity);
 
+    auto& rigidbody = m_World.AddComponent<ecs::RigidbodyComponent>(entity);
+    rigidbody.useGravity = entityCfg.useGravity;
+    rigidbody.mass = 1.0f;
+    rigidbody.isStatic = entityCfg.isStatic || tag.name == "GroundPlane";
+    rigidbody.simulatePhysics = entityCfg.simulatePhysics;
+    rigidbody.velocity = entityCfg.linearVelocity;
+    auto& collider = m_World.AddComponent<ecs::ColliderComponent>(entity);
+    collider.type = (entityCfg.colliderType == "sphere" || entityCfg.colliderType == "Sphere")
+        ? ecs::ColliderType::Sphere
+        : ecs::ColliderType::Box;
+    collider.autoFitFromMesh = !entityCfg.colliderManual;
+    collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
+    collider.offset = ecs::Vec3{};
+    if (!entityCfg.colliderManual)
+    {
+        ecs::Vec3 halfExtents{};
+        ecs::Vec3 offset{};
+        if (TryBuildMeshCollider(m_ResourceManager.get(), meshRenderer.meshPath, entityCfg.scale, halfExtents, offset))
+        {
+            collider.halfExtents = halfExtents;
+            collider.offset = offset;
+            if (meshRenderer.meshPath.find("african_head") != std::string::npos)
+            {
+                collider.halfExtents.x *= 1.08f;
+                collider.halfExtents.y *= 1.10f;
+                collider.halfExtents.z *= 1.18f;
+                collider.offset.y += collider.halfExtents.y * 0.04f;
+            }
+        }
+    }
+    if (entityCfg.colliderManual)
+    {
+        collider.halfExtents = entityCfg.colliderHalfExtents;
+        collider.offset = entityCfg.colliderOffset;
+        collider.autoFitFromMesh = false;
+    }
+
+    if (tag.name == "RollingSphere")
+    {
+        const bool arcadeProfile = (m_Config.physics.rollingSphereProfile == "arcade");
+        rigidbody.mass = arcadeProfile ? 0.62f : 0.70f;
+        rigidbody.linearDampingMultiplier = arcadeProfile ? 0.0f : 0.10f;
+        rigidbody.useAdvancedSphereStabilization = true;
+        collider.friction = arcadeProfile ? 0.04f : 0.08f;
+        collider.restitution = arcadeProfile ? 0.02f : 0.03f;
+    }
+
     std::ostringstream ss;
     ss << "ECS runtime: spawned demo entity -> " << m_World.DebugDescribeEntity(entity)
        << " tag=" << tag.name
@@ -547,6 +699,36 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
        << " shader=" << entityCfg.shaderPath;
     Logger::Get().Info(ss.str());
     return entity;
+}
+
+ecs::Entity Application::SpawnPhysicsProjectile()
+{
+    EcsDemoEntityConfig projectileCfg;
+    projectileCfg.tag = "Projectile_" + std::to_string(m_EcsDebugEntities.size());
+    projectileCfg.meshPath = "models/validation_cube.obj";
+    projectileCfg.materialPath = "materials/blue.material.json";
+    projectileCfg.scale = ecs::Vec3{ 0.15f, 0.15f, 0.15f };
+
+    const ecs::Vec3 forward = BuildCameraForward(m_Camera.yaw, m_Camera.pitch);
+    projectileCfg.position = m_Camera.position;
+    projectileCfg.linearVelocity = Scale(forward, 14.0f);
+
+    const ecs::Entity projectile = SpawnEcsDemoEntity(projectileCfg);
+    m_EcsDebugEntities.push_back(projectile);
+
+    if (auto* rb = m_World.GetComponent<ecs::RigidbodyComponent>(projectile))
+    {
+        rb->velocity = projectileCfg.linearVelocity;
+        rb->mass = 2.0f;
+    }
+    if (auto* collider = m_World.GetComponent<ecs::ColliderComponent>(projectile))
+    {
+        collider->friction = 0.25f;
+        collider->restitution = 0.10f;
+    }
+
+    Logger::Get().Info("Gameplay: F detected -> spawned projectile entity");
+    return projectile;
 }
 
 void Application::EnterGameplayScene()
@@ -646,13 +828,15 @@ void Application::UpdateCameraController(float dt)
         movement = Add(movement, right);
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
         movement = Add(movement, Scale(right, -1.0f));
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS ||
+        glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
         movement = Add(movement, worldUp);
 
-    const bool ctrlDown =
+    const bool downPressed =
+        glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS ||
         glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
         glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
-    if (ctrlDown)
+    if (downPressed)
         movement = Add(movement, Scale(worldUp, -1.0f));
 
     if (Length(movement) <= 0.0001f)
@@ -754,6 +938,19 @@ bool Application::DestroyLastGameplayEntity()
 
     Logger::Get().Info("ECS runtime: gameplay destroy requested, but scene is already empty");
     return false;
+}
+
+void Application::ToggleDebugColliders()
+{
+    m_DebugCollidersEnabled = !m_DebugCollidersEnabled;
+    if (m_RenderSystem != nullptr)
+        m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled);
+    Logger::Get().Info(std::string("Application: debug colliders ") + (m_DebugCollidersEnabled ? "enabled" : "disabled"));
+}
+
+bool Application::IsInputActionActive(const std::string& action) const
+{
+    return m_InputManager.IsActionActive(action);
 }
 
 void Application::UpdateEcs(float dt)
@@ -880,6 +1077,13 @@ bool Application::Initialize()
         return false;
 
     m_Windows.push_back(std::move(ctx));
+    ConfigureInputBindings();
+    m_EventBus.SubscribeCollision([](const ecs::CollisionEvent& e){
+        static int collisionLogCounter = 0;
+        ++collisionLogCounter;
+        if ((collisionLogCounter % 30) == 0)
+            Logger::Get().Info("Collision event(sampled): " + std::to_string(e.a.index) + " <-> " + std::to_string(e.b.index));
+    });
     SetupEcsRuntimeDemo();
     InitializeConfigHotReload();
 
@@ -932,6 +1136,27 @@ int Application::Run()
         {
             m_ResourceManager->PollAsyncLoads();
             m_ResourceManager->PollHotReload();
+            m_World.ForEach<ecs::ColliderComponent, ecs::MeshRendererComponent, ecs::TransformComponent>(
+                [&](ecs::Entity, ecs::ColliderComponent& collider, ecs::MeshRendererComponent& meshRenderer, ecs::TransformComponent& transform)
+                {
+                    if (!collider.autoFitFromMesh)
+                        return;
+                    ecs::Vec3 halfExtents{};
+                    ecs::Vec3 offset{};
+                    if (TryBuildMeshCollider(m_ResourceManager.get(), meshRenderer.meshPath, transform.scale, halfExtents, offset))
+                    {
+                        collider.halfExtents = halfExtents;
+                        collider.offset = offset;
+                        if (meshRenderer.meshPath.find("african_head") != std::string::npos)
+                        {
+                            collider.halfExtents.x *= 1.08f;
+                            collider.halfExtents.y *= 1.10f;
+                            collider.halfExtents.z *= 1.18f;
+                            collider.offset.y += collider.halfExtents.y * 0.04f;
+                        }
+                        collider.autoFitFromMesh = false;
+                    }
+                });
         }
         PollConfigHotReload();
         UpdateCameraController(dt);

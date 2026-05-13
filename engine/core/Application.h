@@ -11,6 +11,8 @@
 #include "../render/RenderFactory.h"
 #include "../platform/IWindow.h"
 #include "../game/StateMachine.h"
+#include "../ecs/events/EventBus.h"
+#include "../platform/InputManager.h"
 
 class IWindow;
 class IRenderAdapter;
@@ -41,9 +43,12 @@ public:
     void EnterGameplayScene();
     void ExitGameplayScene();
     ecs::Entity SpawnGameplayEntity();
+    ecs::Entity SpawnPhysicsProjectile();
     bool DestroyLastGameplayEntity();
     std::size_t GetGameplayEntityCount() const { return m_EcsDebugEntities.size(); }
     bool IsCameraControlActive() const { return m_Camera.controlsActive; }
+    void ToggleDebugColliders();
+    bool IsInputActionActive(const std::string& action) const;
 
     void RequestStateChange(std::unique_ptr<IGameState> s);
 
@@ -57,6 +62,7 @@ private:
     void InitializeConfigHotReload();
     void PollConfigHotReload();
     bool ReloadSceneFromCurrentConfig(const char* reason);
+    void ConfigureInputBindings();
     ecs::Entity SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg);
     void UpdateEcs(float dt);
     void UpdateCameraController(float dt);
@@ -113,6 +119,9 @@ private:
     Time m_Time;
     StateMachine m_StateMachine;
     CameraControllerState m_Camera;
+    bool m_DebugCollidersEnabled = false;
+    ecs::EventBus m_EventBus;
+    InputManager m_InputManager;
 
     UpdateMode m_UpdateMode = UpdateMode::Variable;
 
