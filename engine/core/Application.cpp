@@ -502,6 +502,11 @@ bool Application::ReloadSceneFromCurrentConfig(const char* reason)
         m_InputManager.BindAction("MoveRight", GLFW_KEY_D);
         m_InputManager.BindAction("MoveUp", GLFW_KEY_SPACE);
         m_InputManager.BindAction("MoveDown", GLFW_KEY_LEFT_CONTROL);
+        m_InputManager.BindAction("PauseToMenu", GLFW_KEY_ESCAPE);
+        m_InputManager.BindAction("SpawnEntity", GLFW_KEY_SPACE);
+        m_InputManager.BindAction("DestroyEntity", GLFW_KEY_BACKSPACE);
+        m_InputManager.BindAction("FireProjectile", GLFW_KEY_F);
+        m_InputManager.BindAction("ToggleDebugColliders", GLFW_KEY_F3);
         m_EventBus.SubscribeCollision([](const ecs::CollisionEvent& e){
             Logger::Get().Info("Collision event: " + std::to_string(e.a.index) + " <-> " + std::to_string(e.b.index));
         });
@@ -912,7 +917,12 @@ void Application::ToggleDebugColliders()
     m_DebugCollidersEnabled = !m_DebugCollidersEnabled;
     if (m_RenderSystem != nullptr)
         m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled);
-    Logger::Get().Info(std::string("Debug colliders: ") + (m_DebugCollidersEnabled ? "enabled" : "disabled"));
+    Logger::Get().Info(std::string("Application: debug colliders ") + (m_DebugCollidersEnabled ? "enabled" : "disabled"));
+}
+
+bool Application::IsInputActionActive(const std::string& action) const
+{
+    return m_InputManager.IsActionActive(action);
 }
 
 void Application::UpdateEcs(float dt)

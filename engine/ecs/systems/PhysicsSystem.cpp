@@ -15,6 +15,24 @@ static Vec3 Scale(const Vec3&v,float s){return {v.x*s,v.y*s,v.z*s};}
 static float Dot(const Vec3&a,const Vec3&b){return a.x*b.x+a.y*b.y+a.z*b.z;}
 static float Abs(float v){ return v >= 0.0f ? v : -v; }
 static float Sign(float v){ return v >= 0.0f ? 1.0f : -1.0f; }
+static float Clamp(float value, float minValue, float maxValue)
+{
+    return std::max(minValue, std::min(value, maxValue));
+}
+static float LengthSq(const Vec3& v){ return Dot(v, v); }
+static float Length(const Vec3& v){ return std::sqrt(LengthSq(v)); }
+static Vec3 NormalizeSafe(const Vec3& v)
+{
+    const float len = Length(v);
+    if (len <= 0.000001f)
+        return Vec3{ 0.0f, 1.0f, 0.0f };
+    const float inv = 1.0f / len;
+    return Scale(v, inv);
+}
+static float SphereRadius(const ecs::ColliderComponent& c)
+{
+    return std::max(c.halfExtents.x, std::max(c.halfExtents.y, c.halfExtents.z));
+}
 static Vec3 RotatedAabbHalfExtents(const Vec3& localHalf, const Vec3& rot)
 {
     const float cx = std::cos(rot.x), sx = std::sin(rot.x);
@@ -41,6 +59,14 @@ struct BodyRef
     ecs::TransformComponent* transform = nullptr;
     ecs::ColliderComponent* collider = nullptr;
     ecs::RigidbodyComponent* rigidbody = nullptr;
+};
+
+enum class ContactType
+{
+    None,
+    BoxBox,
+    SphereSphere,
+    BoxSphere
 };
 }
 
@@ -72,8 +98,7 @@ void PhysicsSystem::Update(World& world, float dt)
     std::vector<BodyRef> bodies;
     bodies.reserve(128);
     world.ForEach<ColliderComponent, TransformComponent, RigidbodyComponent>([&](Entity e, ColliderComponent& c, TransformComponent& t, RigidbodyComponent& rb){
-        if (c.type == ColliderType::Box)
-            bodies.push_back(BodyRef{ e, &t, &c, &rb });
+        bodies.push_back(BodyRef{ e, &t, &c, &rb });
     });
 
     for (std::size_t i = 0; i < bodies.size(); ++i)
@@ -93,20 +118,87 @@ void PhysicsSystem::Update(World& world, float dt)
             Vec3 d = Sub(ac, bc);
             const Vec3 aHalf = RotatedAabbHalfExtents(a.collider->halfExtents, a.transform->rotation);
             const Vec3 bHalf = RotatedAabbHalfExtents(b.collider->halfExtents, b.transform->rotation);
-            float ox = (aHalf.x + bHalf.x) - Abs(d.x);
-            float oy = (aHalf.y + bHalf.y) - Abs(d.y);
-            float oz = (aHalf.z + bHalf.z) - Abs(d.z);
-            if (ox <= 0 || oy <= 0 || oz <= 0)
-                continue;
+            float minPen = 0.0f;
+            int axis = 1;
+            Vec3 normal{ 0.0f, 1.0f, 0.0f };
+            ContactType contactType = ContactType::None;
 
-            float minPen = ox; int axis = 0;
-            if (oy < minPen) { minPen = oy; axis = 1; }
-            if (oz < minPen) { minPen = oz; axis = 2; }
+            if (a.collider->type == ColliderType::Box && b.collider->type == ColliderType::Box)
+            {
+                float ox = (aHalf.x + bHalf.x) - Abs(d.x);
+                float oy = (aHalf.y + bHalf.y) - Abs(d.y);
+                float oz = (aHalf.z + bHalf.z) - Abs(d.z);
+                if (ox <= 0 || oy <= 0 || oz <= 0)
+                    continue;
+                minPen = ox; axis = 0;
+                if (oy < minPen) { minPen = oy; axis = 1; }
+                if (oz < minPen) { minPen = oz; axis = 2; }
+                if (axis == 0) normal = Vec3{ (d.x >= 0.0f) ? 1.0f : -1.0f, 0.0f, 0.0f };
+                if (axis == 1) normal = Vec3{ 0.0f, (d.y >= 0.0f) ? 1.0f : -1.0f, 0.0f };
+                if (axis == 2) normal = Vec3{ 0.0f, 0.0f, (d.z >= 0.0f) ? 1.0f : -1.0f };
+                contactType = ContactType::BoxBox;
+            }
+            else if (a.collider->type == ColliderType::Sphere && b.collider->type == ColliderType::Sphere)
+            {
+                const float ra = SphereRadius(*a.collider);
+                const float rb = SphereRadius(*b.collider);
+                const float distSq = LengthSq(d);
+                const float radiusSum = ra + rb;
+                if (distSq >= radiusSum * radiusSum)
+                    continue;
+                const float distance = std::sqrt(std::max(distSq, 0.0f));
+                normal = (distance > 0.000001f) ? Scale(d, 1.0f / distance) : Vec3{ 1.0f, 0.0f, 0.0f };
+                minPen = radiusSum - distance;
+                contactType = ContactType::SphereSphere;
+            }
+            else
+            {
+                BodyRef* box = &a;
+                BodyRef* sphere = &b;
+                Vec3 boxCenter = ac;
+                Vec3 sphereCenter = bc;
+                Vec3 boxHalf = aHalf;
+                if (a.collider->type == ColliderType::Sphere)
+                {
+                    box = &b;
+                    sphere = &a;
+                    boxCenter = bc;
+                    sphereCenter = ac;
+                    boxHalf = bHalf;
+                }
+                const float radius = SphereRadius(*sphere->collider);
+                Vec3 closest{
+                    Clamp(sphereCenter.x, boxCenter.x - boxHalf.x, boxCenter.x + boxHalf.x),
+                    Clamp(sphereCenter.y, boxCenter.y - boxHalf.y, boxCenter.y + boxHalf.y),
+                    Clamp(sphereCenter.z, boxCenter.z - boxHalf.z, boxCenter.z + boxHalf.z)
+                };
+                Vec3 delta = Sub(sphereCenter, closest);
+                const float distSq = LengthSq(delta);
+                if (distSq > radius * radius)
+                    continue;
+                const float distance = std::sqrt(std::max(distSq, 0.0f));
+                if (distance > 0.000001f)
+                {
+                    normal = NormalizeSafe(delta);
+                    minPen = radius - distance;
+                }
+                else
+                {
+                    const Vec3 local = Sub(sphereCenter, boxCenter);
+                    const float px = boxHalf.x - Abs(local.x);
+                    const float py = boxHalf.y - Abs(local.y);
+                    const float pz = boxHalf.z - Abs(local.z);
+                    minPen = std::max(0.0f, radius + std::min(px, std::min(py, pz)));
+                    if (px <= py && px <= pz) normal = Vec3{ (local.x >= 0.0f) ? 1.0f : -1.0f, 0.0f, 0.0f };
+                    else if (py <= pz) normal = Vec3{ 0.0f, (local.y >= 0.0f) ? 1.0f : -1.0f, 0.0f };
+                    else normal = Vec3{ 0.0f, 0.0f, (local.z >= 0.0f) ? 1.0f : -1.0f };
+                }
+                if (a.collider->type == ColliderType::Sphere)
+                    normal = Scale(normal, -1.0f);
+                contactType = ContactType::BoxSphere;
+            }
 
-            Vec3 sep{};
-            if (axis == 0) sep.x = d.x >= 0 ? minPen : -minPen;
-            if (axis == 1) sep.y = d.y >= 0 ? minPen : -minPen;
-            if (axis == 2) sep.z = d.z >= 0 ? minPen : -minPen;
+            Vec3 sep = Scale(normal, minPen);
 
             const float invMassA = (a.rigidbody->isStatic || a.rigidbody->mass <= 0.0001f) ? 0.0f : (1.0f / a.rigidbody->mass);
             const float invMassB = (b.rigidbody->isStatic || b.rigidbody->mass <= 0.0001f) ? 0.0f : (1.0f / b.rigidbody->mass);
@@ -129,10 +221,6 @@ void PhysicsSystem::Update(World& world, float dt)
             const float friction = (a.collider->friction + b.collider->friction) > 0.0f
                 ? (a.collider->friction + b.collider->friction) * 0.5f
                 : m_DefaultFriction;
-            Vec3 normal{};
-            if (axis == 0) normal.x = (d.x >= 0.0f) ? 1.0f : -1.0f;
-            if (axis == 1) normal.y = (d.y >= 0.0f) ? 1.0f : -1.0f;
-            if (axis == 2) normal.z = (d.z >= 0.0f) ? 1.0f : -1.0f;
             const Vec3 rv = Sub(a.rigidbody->velocity, b.rigidbody->velocity);
             const float velAlongNormal = Dot(rv, normal);
             if (velAlongNormal < 0.0f)
@@ -165,7 +253,7 @@ void PhysicsSystem::Update(World& world, float dt)
             // Simple center-of-mass support check for tower-like tipping:
             // when an object stands on another and its projected center leaves support footprint,
             // add lateral velocity so it starts falling off the edge.
-            if (axis == 1)
+            if (contactType == ContactType::BoxBox && axis == 1)
             {
                 BodyRef* top = nullptr;
                 BodyRef* bottom = nullptr;

@@ -48,6 +48,7 @@ public:
     std::size_t GetGameplayEntityCount() const { return m_EcsDebugEntities.size(); }
     bool IsCameraControlActive() const { return m_Camera.controlsActive; }
     void ToggleDebugColliders();
+    bool IsInputActionActive(const std::string& action) const;
 
     void RequestStateChange(std::unique_ptr<IGameState> s);
 
