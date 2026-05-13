@@ -240,7 +240,7 @@ std::vector<EcsDemoEntityConfig> Application::BuildDefaultEcsDemoEntities()
     entities[0].position = ecs::Vec3{ 0.0f, -1.2f, 0.0f };
     entities[0].scale = ecs::Vec3{ 8.0f, 0.3f, 8.0f };
     entities[0].bounce = false;
-    entities[0].velocity = ecs::Vec3{};
+    entities[0].linearVelocity = ecs::Vec3{};
 
     entities[1].tag = "AfricanHead_Center";
     entities[1].meshPath = "models/african_head.obj";
@@ -593,13 +593,13 @@ ecs::Entity Application::SpawnPhysicsProjectile()
 
     const ecs::Vec3 forward = BuildCameraForward(m_Camera.yaw, m_Camera.pitch);
     projectileCfg.position = Add(m_Camera.position, Scale(forward, 0.75f));
-    projectileCfg.velocity = Scale(forward, 8.0f);
+    projectileCfg.linearVelocity = Scale(forward, 8.0f);
 
     const ecs::Entity projectile = SpawnEcsDemoEntity(projectileCfg);
     m_EcsDebugEntities.push_back(projectile);
 
     if (auto* rb = m_World.GetComponent<ecs::RigidbodyComponent>(projectile))
-        rb->velocity = projectileCfg.velocity;
+        rb->velocity = projectileCfg.linearVelocity;
 
     Logger::Get().Info("Gameplay: F detected -> spawned projectile entity");
     return projectile;
