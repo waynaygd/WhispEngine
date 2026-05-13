@@ -596,7 +596,7 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     collider.type = ecs::ColliderType::Box;
     collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
     collider.offset = ecs::Vec3{};
-    if (m_ResourceManager != nullptr)
+    if (!entityCfg.colliderManual && m_ResourceManager != nullptr)
     {
         const std::string meshKey = AssetPaths::NormalizeAssetKey(meshRenderer.meshPath);
         if (!meshKey.empty())
@@ -652,6 +652,11 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
                 }
             }
         }
+    }
+    if (entityCfg.colliderManual)
+    {
+        collider.halfExtents = entityCfg.colliderHalfExtents;
+        collider.offset = entityCfg.colliderOffset;
     }
 
     std::ostringstream ss;

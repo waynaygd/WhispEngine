@@ -12,6 +12,26 @@ static Vec3 Add(const Vec3&a,const Vec3&b){return {a.x+b.x,a.y+b.y,a.z+b.z};}
 static Vec3 Sub(const Vec3&a,const Vec3&b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
 static Vec3 Scale(const Vec3&v,float s){return {v.x*s,v.y*s,v.z*s};}
 static float Abs(float v){ return v >= 0.0f ? v : -v; }
+static Vec3 RotatedAabbHalfExtents(const Vec3& localHalf, const Vec3& rot)
+{
+    const float cx = std::cos(rot.x), sx = std::sin(rot.x);
+    const float cy = std::cos(rot.y), sy = std::sin(rot.y);
+    const float cz = std::cos(rot.z), sz = std::sin(rot.z);
+    const float r00 = cz * cy;
+    const float r01 = cz * sy * sx - sz * cx;
+    const float r02 = cz * sy * cx + sz * sx;
+    const float r10 = sz * cy;
+    const float r11 = sz * sy * sx + cz * cx;
+    const float r12 = sz * sy * cx - cz * sx;
+    const float r20 = -sy;
+    const float r21 = cy * sx;
+    const float r22 = cy * cx;
+    return Vec3{
+        Abs(r00) * localHalf.x + Abs(r01) * localHalf.y + Abs(r02) * localHalf.z,
+        Abs(r10) * localHalf.x + Abs(r11) * localHalf.y + Abs(r12) * localHalf.z,
+        Abs(r20) * localHalf.x + Abs(r21) * localHalf.y + Abs(r22) * localHalf.z
+    };
+}
 struct BodyRef
 {
     ecs::Entity entity{};
@@ -63,9 +83,11 @@ void PhysicsSystem::Update(World& world, float dt)
             Vec3 ac = Add(a.transform->position, a.collider->offset);
             Vec3 bc = Add(b.transform->position, b.collider->offset);
             Vec3 d = Sub(ac, bc);
-            float ox = (a.collider->halfExtents.x + b.collider->halfExtents.x) - Abs(d.x);
-            float oy = (a.collider->halfExtents.y + b.collider->halfExtents.y) - Abs(d.y);
-            float oz = (a.collider->halfExtents.z + b.collider->halfExtents.z) - Abs(d.z);
+            const Vec3 aHalf = RotatedAabbHalfExtents(a.collider->halfExtents, a.transform->rotation);
+            const Vec3 bHalf = RotatedAabbHalfExtents(b.collider->halfExtents, b.transform->rotation);
+            float ox = (aHalf.x + bHalf.x) - Abs(d.x);
+            float oy = (aHalf.y + bHalf.y) - Abs(d.y);
+            float oz = (aHalf.z + bHalf.z) - Abs(d.z);
             if (ox <= 0 || oy <= 0 || oz <= 0)
                 continue;
 

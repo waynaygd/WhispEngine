@@ -138,6 +138,9 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
                 ReadVec3(je, "scale", entityCfg.scale);
                 ReadVec3(je, "linearVelocity", entityCfg.linearVelocity);
                 ReadVec3(je, "angularVelocity", entityCfg.angularVelocity);
+                ReadVec3(je, "colliderHalfExtents", entityCfg.colliderHalfExtents);
+                ReadVec3(je, "colliderOffset", entityCfg.colliderOffset);
+                entityCfg.colliderManual = je.value("colliderManual", false);
 
                 if (je.contains("x")) entityCfg.position.x = je.value("x", 0.0f);
                 if (je.contains("y")) entityCfg.position.y = je.value("y", 0.0f);
@@ -154,6 +157,8 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
                 }
                 if (je.contains("angularVelocity") && je["angularVelocity"].is_number())
                     entityCfg.angularVelocity.z = je["angularVelocity"].get<float>();
+                if (je.contains("colliderHalfExtents") || je.contains("colliderOffset"))
+                    entityCfg.colliderManual = true;
 
                 outCfg.ecsDemo.initialEntities.push_back(entityCfg);
             }

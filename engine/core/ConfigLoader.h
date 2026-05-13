@@ -31,6 +31,9 @@ struct EcsDemoEntityConfig
     ecs::Vec3 scale{ 0.4f, 0.4f, 1.0f };
     ecs::Vec3 linearVelocity{};
     ecs::Vec3 angularVelocity{};
+    ecs::Vec3 colliderHalfExtents{};
+    ecs::Vec3 colliderOffset{};
+    bool colliderManual = false;
 };
 
 struct EcsDemoConfig

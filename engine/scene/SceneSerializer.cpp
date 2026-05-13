@@ -57,6 +57,12 @@ nlohmann::json EntityToJson(const EcsDemoEntityConfig& entity)
     json["scale"] = Vec3ToJson(entity.scale);
     json["linearVelocity"] = Vec3ToJson(entity.linearVelocity);
     json["angularVelocity"] = Vec3ToJson(entity.angularVelocity);
+    json["colliderManual"] = entity.colliderManual;
+    if (entity.colliderManual)
+    {
+        json["colliderHalfExtents"] = Vec3ToJson(entity.colliderHalfExtents);
+        json["colliderOffset"] = Vec3ToJson(entity.colliderOffset);
+    }
     return json;
 }
 
@@ -81,6 +87,10 @@ EcsDemoEntityConfig EntityFromJson(const nlohmann::json& json)
     ReadVec3(json, "scale", entity.scale);
     ReadVec3(json, "linearVelocity", entity.linearVelocity);
     ReadVec3(json, "angularVelocity", entity.angularVelocity);
+    ReadVec3(json, "colliderHalfExtents", entity.colliderHalfExtents);
+    ReadVec3(json, "colliderOffset", entity.colliderOffset);
+    entity.colliderManual = json.value("colliderManual", false) ||
+        json.contains("colliderHalfExtents") || json.contains("colliderOffset");
     return entity;
 }
 }
