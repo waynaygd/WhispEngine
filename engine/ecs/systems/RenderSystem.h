@@ -34,6 +34,7 @@ public:
     void SetCameraTransform(const Vec3& position, float yawRadians, float pitchRadians);
     void SetCameraProjection(float verticalFovRadians, float aspectRatio, float nearPlane, float farPlane);
     void SetResourceManager(ResourceManager* resourceManager) { m_ResourceManager = resourceManager; }
+    void SetDebugCollidersEnabled(bool enabled) { m_DebugCollidersEnabled = enabled; }
     void ReleaseGpuResources();
 
 private:
@@ -70,5 +71,6 @@ private:
     std::unordered_set<std::string> m_LoggedMeshReuseKeys;
     std::unordered_set<std::string> m_LoggedTextureReuseKeys;
     std::unordered_set<std::string> m_LoggedShaderReuseKeys;
+    bool m_DebugCollidersEnabled = false;
 };
 }

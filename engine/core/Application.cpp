@@ -366,6 +366,7 @@ void Application::SetupEcsRuntimeDemo()
         m_Config.physics.friction);
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
+    m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled);
 
     m_EcsDebugEntities.clear();
     const std::vector<EcsDemoEntityConfig> entities =
@@ -884,6 +885,14 @@ bool Application::DestroyLastGameplayEntity()
 
     Logger::Get().Info("ECS runtime: gameplay destroy requested, but scene is already empty");
     return false;
+}
+
+void Application::ToggleDebugColliders()
+{
+    m_DebugCollidersEnabled = !m_DebugCollidersEnabled;
+    if (m_RenderSystem != nullptr)
+        m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled);
+    Logger::Get().Info(std::string("Debug colliders: ") + (m_DebugCollidersEnabled ? "enabled" : "disabled"));
 }
 
 void Application::UpdateEcs(float dt)

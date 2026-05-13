@@ -47,6 +47,7 @@ public:
     bool DestroyLastGameplayEntity();
     std::size_t GetGameplayEntityCount() const { return m_EcsDebugEntities.size(); }
     bool IsCameraControlActive() const { return m_Camera.controlsActive; }
+    void ToggleDebugColliders();
 
     void RequestStateChange(std::unique_ptr<IGameState> s);
 
@@ -116,6 +117,7 @@ private:
     Time m_Time;
     StateMachine m_StateMachine;
     CameraControllerState m_Camera;
+    bool m_DebugCollidersEnabled = false;
     ecs::EventBus m_EventBus;
     InputManager m_InputManager;
 

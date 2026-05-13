@@ -2,6 +2,7 @@
 
 #include "../World.h"
 #include "../components/MaterialComponent.h"
+#include "../components/ColliderComponent.h"
 #include "../components/MeshRendererComponent.h"
 #include "../components/TransformComponent.h"
 #include "../../core/AssetPaths.h"
@@ -342,6 +343,37 @@ void RenderSystem::Update(World& world, float dt)
                 transform,
                 meshRenderer,
                 world.GetComponent<MaterialComponent>(entity));
+        });
+
+    if (!m_DebugCollidersEnabled)
+        return;
+
+    world.ForEach<TransformComponent, ColliderComponent>(
+        [&](Entity, TransformComponent& transform, ColliderComponent& collider)
+        {
+            float mvp[16];
+            TransformComponent debugTransform = transform;
+            debugTransform.position.x += collider.offset.x;
+            debugTransform.position.y += collider.offset.y;
+            debugTransform.position.z += collider.offset.z;
+            debugTransform.scale = ecs::Vec3{
+                collider.halfExtents.x * 2.0f,
+                collider.halfExtents.y * 2.0f,
+                collider.halfExtents.z * 2.0f
+            };
+            BuildMvp(
+                mvp,
+                debugTransform,
+                m_CameraPosition,
+                m_CameraYaw,
+                m_CameraPitch,
+                m_CameraVerticalFovRadians,
+                m_CameraAspectRatio,
+                m_CameraNearPlane,
+                m_CameraFarPlane);
+            m_Renderer->SetTestTransform(mvp);
+            m_Renderer->SetTestColor(0.1f, 1.0f, 0.1f, 1.0f);
+            m_Renderer->DrawTestCube();
         });
 }
 

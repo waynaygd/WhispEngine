@@ -16,4 +16,5 @@ private:
     bool m_PrevSpace = false;
     bool m_PrevBackspace = false;
     bool m_PrevF = false;
+    bool m_PrevF2 = false;
 };
