@@ -235,7 +235,7 @@ std::vector<EcsDemoEntityConfig> Application::BuildDefaultEcsDemoEntities()
 
     entities[0].tag = "GroundPlane";
     entities[0].meshPath = "models/validation_cube.obj";
-    entities[0].materialPath = "materials/validation_checker.material.json";
+    entities[0].materialPath = "materials/white.material.json";
     entities[0].position = ecs::Vec3{ 0.0f, -1.2f, 0.0f };
     entities[0].scale = ecs::Vec3{ 8.0f, 0.3f, 8.0f };
     entities[0].bounce = false;
@@ -243,7 +243,7 @@ std::vector<EcsDemoEntityConfig> Application::BuildDefaultEcsDemoEntities()
 
     entities[1].tag = "AfricanHead_Center";
     entities[1].meshPath = "models/african_head.obj";
-    entities[1].materialPath = "materials/validation_checker.material.json";
+    entities[1].materialPath = "materials/african_head.material.json";
     entities[1].position = ecs::Vec3{ 0.0f, 1.1f, 0.0f };
     entities[1].rotation = ecs::Vec3{ 0.0f, 3.1415926f, 0.0f };
     entities[1].scale = ecs::Vec3{ 0.68f, 0.68f, 0.68f };
@@ -251,7 +251,7 @@ std::vector<EcsDemoEntityConfig> Application::BuildDefaultEcsDemoEntities()
 
     entities[2].tag = "AfricanHead_Left";
     entities[2].meshPath = "models/african_head.obj";
-    entities[2].materialPath = "materials/validation_checker.material.json";
+    entities[2].materialPath = "materials/african_head.material.json";
     entities[2].materialTint = { 0.80f, 0.88f, 1.0f, 1.0f };
     entities[2].position = ecs::Vec3{ -0.60f, 0.9f, 0.0f };
     entities[2].rotation = ecs::Vec3{ 0.0f, 2.72f, 0.0f };
@@ -260,7 +260,7 @@ std::vector<EcsDemoEntityConfig> Application::BuildDefaultEcsDemoEntities()
 
     entities[3].tag = "AfricanHead_Right";
     entities[3].meshPath = "models/african_head.obj";
-    entities[3].materialPath = "materials/validation_checker.material.json";
+    entities[3].materialPath = "materials/african_head.material.json";
     entities[3].materialTint = { 1.0f, 0.90f, 0.82f, 1.0f };
     entities[3].position = ecs::Vec3{ 0.60f, 0.9f, 0.0f };
     entities[3].rotation = ecs::Vec3{ 0.0f, 3.56f, 0.0f };
@@ -569,7 +569,10 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     rigidbody.velocity = entityCfg.linearVelocity;
     auto& collider = m_World.AddComponent<ecs::ColliderComponent>(entity);
     collider.type = ecs::ColliderType::Box;
-    collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
+    if (meshRenderer.meshPath.find("african_head") != std::string::npos)
+        collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.20f, entityCfg.scale.y * 0.28f, entityCfg.scale.z * 0.20f };
+    else
+        collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
 
     std::ostringstream ss;
     ss << "ECS runtime: spawned demo entity -> " << m_World.DebugDescribeEntity(entity)
@@ -587,7 +590,7 @@ ecs::Entity Application::SpawnPhysicsProjectile()
     EcsDemoEntityConfig projectileCfg;
     projectileCfg.tag = "Projectile_" + std::to_string(m_EcsDebugEntities.size());
     projectileCfg.meshPath = "models/validation_cube.obj";
-    projectileCfg.materialPath = "materials/validation_checker.material.json";
+    projectileCfg.materialPath = "materials/white.material.json";
     projectileCfg.scale = ecs::Vec3{ 0.15f, 0.15f, 0.15f };
 
     const ecs::Vec3 forward = BuildCameraForward(m_Camera.yaw, m_Camera.pitch);

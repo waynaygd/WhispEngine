@@ -1,0 +1,6 @@
+{
+  "name": "WhiteMaterial",
+  "shaderPath": "dx12/textured.hlsl",
+  "texturePath": "textures/white.ppm",
+  "baseColor": [1.0, 1.0, 1.0, 1.0]
+}
