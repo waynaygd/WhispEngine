@@ -640,6 +640,17 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
                         localCenter.y * entityCfg.scale.y,
                         localCenter.z * entityCfg.scale.z
                     };
+
+                    if (meshRenderer.meshPath.find("african_head") != std::string::npos)
+                    {
+                        // Inflate head collider so it is noticeably volumetric and avoids facial clipping into plane.
+                        collider.halfExtents.x *= 1.15f;
+                        collider.halfExtents.y *= 1.18f;
+                        collider.halfExtents.z *= 1.35f;
+                        if (collider.halfExtents.z < collider.halfExtents.x * 0.85f)
+                            collider.halfExtents.z = collider.halfExtents.x * 0.85f;
+                        collider.offset.y += collider.halfExtents.y * 0.08f;
+                    }
                 }
             }
         }
