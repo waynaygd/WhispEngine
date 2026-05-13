@@ -13,6 +13,7 @@ static Vec3 Add(const Vec3&a,const Vec3&b){return {a.x+b.x,a.y+b.y,a.z+b.z};}
 static Vec3 Sub(const Vec3&a,const Vec3&b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
 static Vec3 Scale(const Vec3&v,float s){return {v.x*s,v.y*s,v.z*s};}
 static float Dot(const Vec3&a,const Vec3&b){return a.x*b.x+a.y*b.y+a.z*b.z;}
+static Vec3 Cross(const Vec3&a,const Vec3&b){return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};}
 static float Abs(float v){ return v >= 0.0f ? v : -v; }
 static float Sign(float v){ return v >= 0.0f ? 1.0f : -1.0f; }
 static float Clamp(float value, float minValue, float maxValue)
@@ -162,15 +163,32 @@ void PhysicsSystem::Update(World& world, float dt)
 
             if (a.collider->type == ColliderType::Box && b.collider->type == ColliderType::Box)
             {
-                const Vec3 candidateAxes[] = {
-                    NormalizeSafe(axesA.xAxis), NormalizeSafe(axesA.yAxis), NormalizeSafe(axesA.zAxis),
-                    NormalizeSafe(axesB.xAxis), NormalizeSafe(axesB.yAxis), NormalizeSafe(axesB.zAxis)
-                };
+                Vec3 candidateAxes[15];
+                int axisCount = 0;
+                candidateAxes[axisCount++] = NormalizeSafe(axesA.xAxis);
+                candidateAxes[axisCount++] = NormalizeSafe(axesA.yAxis);
+                candidateAxes[axisCount++] = NormalizeSafe(axesA.zAxis);
+                candidateAxes[axisCount++] = NormalizeSafe(axesB.xAxis);
+                candidateAxes[axisCount++] = NormalizeSafe(axesB.yAxis);
+                candidateAxes[axisCount++] = NormalizeSafe(axesB.zAxis);
+
+                const Vec3 axesALocal[] = { axesA.xAxis, axesA.yAxis, axesA.zAxis };
+                const Vec3 axesBLocal[] = { axesB.xAxis, axesB.yAxis, axesB.zAxis };
+                for (const Vec3& axA : axesALocal)
+                {
+                    for (const Vec3& axB : axesBLocal)
+                    {
+                        const Vec3 crossAxis = Cross(axA, axB);
+                        if (LengthSq(crossAxis) > 0.000001f)
+                            candidateAxes[axisCount++] = NormalizeSafe(crossAxis);
+                    }
+                }
 
                 minPen = 1.0e9f;
                 bool separated = false;
-                for (const Vec3& testAxis : candidateAxes)
+                for (int idx = 0; idx < axisCount; ++idx)
                 {
+                    const Vec3& testAxis = candidateAxes[idx];
                     const float dist = Abs(Dot(d, testAxis));
                     const float ra = ProjectedObbRadius(a.collider->halfExtents, axesA, testAxis);
                     const float rb = ProjectedObbRadius(b.collider->halfExtents, axesB, testAxis);
@@ -280,28 +298,29 @@ void PhysicsSystem::Update(World& world, float dt)
 
             // Keep dynamic spheres on the surface of static boxes to avoid deep embedding
             // on sloped ramps when frame time spikes.
-            if (contactType == ContactType::BoxSphere && singleStaticContact)
+            if (contactType == ContactType::BoxSphere)
             {
-                BodyRef* dynamicBody = invMassA > 0.0f ? &a : &b;
-                BodyRef* staticBody = invMassA > 0.0f ? &b : &a;
-                if (dynamicBody->collider->type == ColliderType::Sphere && staticBody->collider->type == ColliderType::Box)
+                BodyRef* sphereBody = (a.collider->type == ColliderType::Sphere) ? &a : &b;
+                BodyRef* boxBody = (a.collider->type == ColliderType::Box) ? &a : &b;
+                if ((sphereBody->rigidbody->mass > 0.0f) && !sphereBody->rigidbody->isStatic)
                 {
-                    const float radius = SphereRadius(*dynamicBody->collider);
-                    const float skin = 0.001f;
-                    const Vec3 staticCenter = Add(staticBody->transform->position, staticBody->collider->offset);
-                    const BoxAxes staticAxes = BuildBoxAxes(staticBody->transform->rotation);
-                    const Vec3 dynCenter = Add(dynamicBody->transform->position, dynamicBody->collider->offset);
-                    const Vec3 toDyn = Sub(dynCenter, staticCenter);
-                    const float lx = Dot(toDyn, staticAxes.xAxis);
-                    const float ly = Dot(toDyn, staticAxes.yAxis);
-                    const float lz = Dot(toDyn, staticAxes.zAxis);
-                    const Vec3 half = staticBody->collider->halfExtents;
+                    const float radius = SphereRadius(*sphereBody->collider);
+                    const float skin = 0.002f;
+                    const Vec3 boxCenter = Add(boxBody->transform->position, boxBody->collider->offset);
+                    const BoxAxes boxAxes = BuildBoxAxes(boxBody->transform->rotation);
+                    const Vec3 sphereCenter = Add(sphereBody->transform->position, sphereBody->collider->offset);
+                    const Vec3 toSphere = Sub(sphereCenter, boxCenter);
+                    const float lx = Dot(toSphere, boxAxes.xAxis);
+                    const float ly = Dot(toSphere, boxAxes.yAxis);
+                    const float lz = Dot(toSphere, boxAxes.zAxis);
+                    const Vec3 half = boxBody->collider->halfExtents;
                     const float clx = Clamp(lx, -half.x, half.x);
                     const float cly = Clamp(ly, -half.y, half.y);
                     const float clz = Clamp(lz, -half.z, half.z);
-                    Vec3 closestPoint = Add(Add(Add(staticCenter, Scale(staticAxes.xAxis, clx)), Scale(staticAxes.yAxis, cly)), Scale(staticAxes.zAxis, clz));
-                    const Vec3 snappedCenter = Add(closestPoint, Scale(normal, radius + skin));
-                    dynamicBody->transform->position = Sub(snappedCenter, dynamicBody->collider->offset);
+                    const Vec3 closestPoint = Add(Add(Add(boxCenter, Scale(boxAxes.xAxis, clx)), Scale(boxAxes.yAxis, cly)), Scale(boxAxes.zAxis, clz));
+                    const Vec3 outNormal = (a.collider->type == ColliderType::Sphere) ? Scale(normal, -1.0f) : normal;
+                    const Vec3 snappedCenter = Add(closestPoint, Scale(outNormal, radius + skin));
+                    sphereBody->transform->position = Sub(snappedCenter, sphereBody->collider->offset);
                 }
             }
 
