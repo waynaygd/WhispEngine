@@ -48,7 +48,7 @@ private:
 	void MoveToNextFrame();
 
 	static constexpr UINT FrameCount = 2;
-	static constexpr UINT MaxDrawsPerFrame = 64;
+    static constexpr UINT MaxDrawsPerFrame = 2048;
 
 	struct UploadedMesh
 	{

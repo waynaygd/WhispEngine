@@ -97,6 +97,50 @@ static bool HasNonDefaultTint(const std::array<float, 4>& tint)
     return tint[0] != 1.0f || tint[1] != 1.0f || tint[2] != 1.0f || tint[3] != 1.0f;
 }
 
+static bool TryBuildMeshCollider(
+    ResourceManager* resourceManager,
+    const std::string& meshPath,
+    const ecs::Vec3& scale,
+    ecs::Vec3& outHalfExtents,
+    ecs::Vec3& outOffset)
+{
+    if (resourceManager == nullptr)
+        return false;
+    const std::string meshKey = AssetPaths::NormalizeAssetKey(meshPath);
+    if (meshKey.empty())
+        return false;
+    const auto meshResource = resourceManager->Load<MeshResource>(meshKey);
+    if (meshResource == nullptr || !meshResource->IsUsable())
+        return false;
+    const auto& vertices = meshResource->GetData().meshData.vertices;
+    if (vertices.empty())
+        return false;
+
+    ecs::Vec3 minV{ vertices[0].position[0], vertices[0].position[1], vertices[0].position[2] };
+    ecs::Vec3 maxV = minV;
+    for (const auto& v : vertices)
+    {
+        if (v.position[0] < minV.x) minV.x = v.position[0];
+        if (v.position[1] < minV.y) minV.y = v.position[1];
+        if (v.position[2] < minV.z) minV.z = v.position[2];
+        if (v.position[0] > maxV.x) maxV.x = v.position[0];
+        if (v.position[1] > maxV.y) maxV.y = v.position[1];
+        if (v.position[2] > maxV.z) maxV.z = v.position[2];
+    }
+
+    outHalfExtents = ecs::Vec3{
+        (maxV.x - minV.x) * 0.5f * scale.x,
+        (maxV.y - minV.y) * 0.5f * scale.y,
+        (maxV.z - minV.z) * 0.5f * scale.z
+    };
+    outOffset = ecs::Vec3{
+        (maxV.x + minV.x) * 0.5f * scale.x,
+        (maxV.y + minV.y) * 0.5f * scale.y,
+        (maxV.z + minV.z) * 0.5f * scale.z
+    };
+    return true;
+}
+
 static float Dot(const ecs::Vec3& lhs, const ecs::Vec3& rhs)
 {
     return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
@@ -594,62 +638,23 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     rigidbody.velocity = entityCfg.linearVelocity;
     auto& collider = m_World.AddComponent<ecs::ColliderComponent>(entity);
     collider.type = ecs::ColliderType::Box;
+    collider.autoFitFromMesh = !entityCfg.colliderManual;
     collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
     collider.offset = ecs::Vec3{};
-    if (!entityCfg.colliderManual && m_ResourceManager != nullptr)
+    if (!entityCfg.colliderManual)
     {
-        const std::string meshKey = AssetPaths::NormalizeAssetKey(meshRenderer.meshPath);
-        if (!meshKey.empty())
+        ecs::Vec3 halfExtents{};
+        ecs::Vec3 offset{};
+        if (TryBuildMeshCollider(m_ResourceManager.get(), meshRenderer.meshPath, entityCfg.scale, halfExtents, offset))
         {
-            const auto meshResource = m_ResourceManager->Load<MeshResource>(meshKey);
-            if (meshResource != nullptr && meshResource->IsUsable())
+            collider.halfExtents = halfExtents;
+            collider.offset = offset;
+            if (meshRenderer.meshPath.find("african_head") != std::string::npos)
             {
-                const auto& vertices = meshResource->GetData().meshData.vertices;
-                if (!vertices.empty())
-                {
-                    ecs::Vec3 minV{ vertices[0].position[0], vertices[0].position[1], vertices[0].position[2] };
-                    ecs::Vec3 maxV = minV;
-                    for (const auto& v : vertices)
-                    {
-                        if (v.position[0] < minV.x) minV.x = v.position[0];
-                        if (v.position[1] < minV.y) minV.y = v.position[1];
-                        if (v.position[2] < minV.z) minV.z = v.position[2];
-                        if (v.position[0] > maxV.x) maxV.x = v.position[0];
-                        if (v.position[1] > maxV.y) maxV.y = v.position[1];
-                        if (v.position[2] > maxV.z) maxV.z = v.position[2];
-                    }
-
-                    const ecs::Vec3 localHalf{
-                        (maxV.x - minV.x) * 0.5f,
-                        (maxV.y - minV.y) * 0.5f,
-                        (maxV.z - minV.z) * 0.5f
-                    };
-                    const ecs::Vec3 localCenter{
-                        (maxV.x + minV.x) * 0.5f,
-                        (maxV.y + minV.y) * 0.5f,
-                        (maxV.z + minV.z) * 0.5f
-                    };
-
-                    collider.halfExtents = ecs::Vec3{
-                        localHalf.x * entityCfg.scale.x,
-                        localHalf.y * entityCfg.scale.y,
-                        localHalf.z * entityCfg.scale.z
-                    };
-                    collider.offset = ecs::Vec3{
-                        localCenter.x * entityCfg.scale.x,
-                        localCenter.y * entityCfg.scale.y,
-                        localCenter.z * entityCfg.scale.z
-                    };
-
-                    if (meshRenderer.meshPath.find("african_head") != std::string::npos)
-                    {
-                        // Keep anisotropic shape (parallelepiped), only small per-axis padding.
-                        collider.halfExtents.x *= 1.08f;
-                        collider.halfExtents.y *= 1.10f;
-                        collider.halfExtents.z *= 1.18f;
-                        collider.offset.y += collider.halfExtents.y * 0.04f;
-                    }
-                }
+                collider.halfExtents.x *= 1.08f;
+                collider.halfExtents.y *= 1.10f;
+                collider.halfExtents.z *= 1.18f;
+                collider.offset.y += collider.halfExtents.y * 0.04f;
             }
         }
     }
@@ -657,6 +662,7 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     {
         collider.halfExtents = entityCfg.colliderHalfExtents;
         collider.offset = entityCfg.colliderOffset;
+        collider.autoFitFromMesh = false;
     }
 
     std::ostringstream ss;
@@ -1085,6 +1091,27 @@ int Application::Run()
         {
             m_ResourceManager->PollAsyncLoads();
             m_ResourceManager->PollHotReload();
+            m_World.ForEach<ecs::ColliderComponent, ecs::MeshRendererComponent, ecs::TransformComponent>(
+                [&](ecs::Entity, ecs::ColliderComponent& collider, ecs::MeshRendererComponent& meshRenderer, ecs::TransformComponent& transform)
+                {
+                    if (!collider.autoFitFromMesh)
+                        return;
+                    ecs::Vec3 halfExtents{};
+                    ecs::Vec3 offset{};
+                    if (TryBuildMeshCollider(m_ResourceManager.get(), meshRenderer.meshPath, transform.scale, halfExtents, offset))
+                    {
+                        collider.halfExtents = halfExtents;
+                        collider.offset = offset;
+                        if (meshRenderer.meshPath.find("african_head") != std::string::npos)
+                        {
+                            collider.halfExtents.x *= 1.08f;
+                            collider.halfExtents.y *= 1.10f;
+                            collider.halfExtents.z *= 1.18f;
+                            collider.offset.y += collider.halfExtents.y * 0.04f;
+                        }
+                        collider.autoFitFromMesh = false;
+                    }
+                });
         }
         PollConfigHotReload();
         UpdateCameraController(dt);
