@@ -5,6 +5,8 @@
 #include "ConfigLoader.h"
 
 #include "../ecs/components/BoundsBounceComponent.h"
+#include "../ecs/components/ColliderComponent.h"
+#include "../ecs/components/RigidbodyComponent.h"
 #include "../ecs/components/MaterialComponent.h"
 #include "../ecs/components/MeshRendererComponent.h"
 #include "../ecs/components/TagComponent.h"
@@ -12,6 +14,7 @@
 #include "../ecs/components/VelocityComponent.h"
 #include "../ecs/systems/BoundsBounceSystem.h"
 #include "../ecs/systems/MotionSystem.h"
+#include "../ecs/systems/PhysicsSystem.h"
 #include "../platform/GlfwWindow.h"
 #include "../render/IRenderAdapter.h"
 #include "../resources/ResourceManager.h"
@@ -348,6 +351,7 @@ void Application::SetupEcsRuntimeDemo()
 {
     m_World.ClearSystems();
     m_World.AddSystem<ecs::MotionSystem>();
+    m_World.AddSystem<ecs::PhysicsSystem>(&m_EventBus);
     m_World.AddSystem<ecs::BoundsBounceSystem>();
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
@@ -414,7 +418,21 @@ bool Application::ReloadSceneFromCurrentConfig(const char* reason)
 {
     if (m_Config.ecsDemo.sceneFile.empty())
     {
-        SetupEcsRuntimeDemo();
+        if (auto* primary = dynamic_cast<GlfwWindow*>(GetWindow()))
+    {
+        m_InputManager.SetWindow(primary->GetGlfwHandle());
+        m_InputManager.BindAction("MoveForward", GLFW_KEY_W);
+        m_InputManager.BindAction("MoveBackward", GLFW_KEY_S);
+        m_InputManager.BindAction("MoveLeft", GLFW_KEY_A);
+        m_InputManager.BindAction("MoveRight", GLFW_KEY_D);
+        m_InputManager.BindAction("MoveUp", GLFW_KEY_SPACE);
+        m_InputManager.BindAction("MoveDown", GLFW_KEY_LEFT_CONTROL);
+        m_EventBus.SubscribeCollision([](const ecs::CollisionEvent& e){
+            Logger::Get().Info("Collision event: " + std::to_string(e.a.index) + " <-> " + std::to_string(e.b.index));
+        });
+    }
+
+    SetupEcsRuntimeDemo();
         Logger::Get().Info(std::string("Application: rebuilt ECS demo from config entities because ") + reason);
         return true;
     }
@@ -537,6 +555,13 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
 
     if (entityCfg.bounce)
         m_World.AddComponent<ecs::BoundsBounceComponent>(entity);
+
+    auto& rigidbody = m_World.AddComponent<ecs::RigidbodyComponent>(entity);
+    rigidbody.useGravity = true;
+    rigidbody.mass = 1.0f;
+    auto& collider = m_World.AddComponent<ecs::ColliderComponent>(entity);
+    collider.type = ecs::ColliderType::Box;
+    collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
 
     std::ostringstream ss;
     ss << "ECS runtime: spawned demo entity -> " << m_World.DebugDescribeEntity(entity)

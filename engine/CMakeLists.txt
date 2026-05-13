@@ -10,6 +10,7 @@ add_library(Engine
   ecs/World.cpp
   ecs/systems/BoundsBounceSystem.cpp
   ecs/systems/MotionSystem.cpp
+  ecs/systems/PhysicsSystem.cpp
   ecs/systems/RenderSystem.cpp
   ecs/systems/SystemPipeline.cpp
   game/StateMachine.cpp
@@ -21,6 +22,7 @@ add_library(Engine
   scene/SceneSerializer.cpp
   render/RenderFactory.cpp
   platform/GlfwWindow.cpp
+  platform/InputManager.cpp
 )
 
 target_sources(Engine PRIVATE

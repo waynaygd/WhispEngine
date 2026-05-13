@@ -11,6 +11,8 @@
 #include "../render/RenderFactory.h"
 #include "../platform/IWindow.h"
 #include "../game/StateMachine.h"
+#include "../ecs/events/EventBus.h"
+#include "../platform/InputManager.h"
 
 class IWindow;
 class IRenderAdapter;
@@ -113,6 +115,8 @@ private:
     Time m_Time;
     StateMachine m_StateMachine;
     CameraControllerState m_Camera;
+    ecs::EventBus m_EventBus;
+    InputManager m_InputManager;
 
     UpdateMode m_UpdateMode = UpdateMode::Variable;
 
