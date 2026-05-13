@@ -78,8 +78,8 @@
       "meshPath": "models/validation_sphere.obj",
       "materialPath": "materials/blue.material.json",
       "position": [
-        -1.35,
-        1.95,
+        0.9,
+        3.2,
         -1.4
       ],
       "rotation": [
@@ -101,9 +101,9 @@
       "colliderType": "sphere",
       "colliderManual": true,
       "colliderHalfExtents": [
-        0.14,
-        0.14,
-        0.14
+        0.28,
+        0.28,
+        0.28
       ],
       "colliderOffset": [
         0.0,

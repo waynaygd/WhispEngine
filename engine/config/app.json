@@ -26,6 +26,12 @@
     "linearDamping": 0.985,
     "substeps": 3,
     "restitution": 0.05,
-    "friction": 0.85
+    "friction": 0.85,
+    "solverIterations": 3,
+    "sphereMaxSpeed": 12.0,
+    "spherePenetrationEpsilon": 0.0005,
+    "sphereVelocityEpsilon": 0.03,
+    "dynamicBoxSphereCorrectionPercent": 0.75,
+    "rollingSphereProfile": "arcade"
   }
 }

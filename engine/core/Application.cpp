@@ -407,7 +407,12 @@ void Application::SetupEcsRuntimeDemo()
         m_Config.physics.linearDamping,
         m_Config.physics.substeps,
         m_Config.physics.restitution,
-        m_Config.physics.friction);
+        m_Config.physics.friction,
+        m_Config.physics.solverIterations,
+        m_Config.physics.sphereMaxSpeed,
+        m_Config.physics.spherePenetrationEpsilon,
+        m_Config.physics.sphereVelocityEpsilon,
+        m_Config.physics.dynamicBoxSphereCorrectionPercent);
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
     m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled);
@@ -675,6 +680,16 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
         collider.autoFitFromMesh = false;
     }
 
+    if (tag.name == "RollingSphere")
+    {
+        const bool arcadeProfile = (m_Config.physics.rollingSphereProfile == "arcade");
+        rigidbody.mass = arcadeProfile ? 0.62f : 0.70f;
+        rigidbody.linearDampingMultiplier = arcadeProfile ? 0.0f : 0.10f;
+        rigidbody.useAdvancedSphereStabilization = true;
+        collider.friction = arcadeProfile ? 0.04f : 0.08f;
+        collider.restitution = arcadeProfile ? 0.02f : 0.03f;
+    }
+
     std::ostringstream ss;
     ss << "ECS runtime: spawned demo entity -> " << m_World.DebugDescribeEntity(entity)
        << " tag=" << tag.name
@@ -696,13 +711,21 @@ ecs::Entity Application::SpawnPhysicsProjectile()
 
     const ecs::Vec3 forward = BuildCameraForward(m_Camera.yaw, m_Camera.pitch);
     projectileCfg.position = m_Camera.position;
-    projectileCfg.linearVelocity = Scale(forward, 8.0f);
+    projectileCfg.linearVelocity = Scale(forward, 14.0f);
 
     const ecs::Entity projectile = SpawnEcsDemoEntity(projectileCfg);
     m_EcsDebugEntities.push_back(projectile);
 
     if (auto* rb = m_World.GetComponent<ecs::RigidbodyComponent>(projectile))
+    {
         rb->velocity = projectileCfg.linearVelocity;
+        rb->mass = 2.0f;
+    }
+    if (auto* collider = m_World.GetComponent<ecs::ColliderComponent>(projectile))
+    {
+        collider->friction = 0.25f;
+        collider->restitution = 0.10f;
+    }
 
     Logger::Get().Info("Gameplay: F detected -> spawned projectile entity");
     return projectile;

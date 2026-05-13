@@ -5,6 +5,10 @@
 #include "../components/TransformComponent.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -13,6 +17,7 @@ static Vec3 Add(const Vec3&a,const Vec3&b){return {a.x+b.x,a.y+b.y,a.z+b.z};}
 static Vec3 Sub(const Vec3&a,const Vec3&b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
 static Vec3 Scale(const Vec3&v,float s){return {v.x*s,v.y*s,v.z*s};}
 static float Dot(const Vec3&a,const Vec3&b){return a.x*b.x+a.y*b.y+a.z*b.z;}
+static Vec3 Cross(const Vec3&a,const Vec3&b){return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};}
 static float Abs(float v){ return v >= 0.0f ? v : -v; }
 static float Sign(float v){ return v >= 0.0f ? 1.0f : -1.0f; }
 static float Clamp(float value, float minValue, float maxValue)
@@ -32,6 +37,31 @@ static Vec3 NormalizeSafe(const Vec3& v)
 static float SphereRadius(const ecs::ColliderComponent& c)
 {
     return std::max(c.halfExtents.x, std::max(c.halfExtents.y, c.halfExtents.z));
+}
+static float BoundingRadius(const ecs::ColliderComponent& c)
+{
+    if (c.type == ecs::ColliderType::Sphere)
+        return SphereRadius(c);
+    return std::sqrt(c.halfExtents.x * c.halfExtents.x +
+                     c.halfExtents.y * c.halfExtents.y +
+                     c.halfExtents.z * c.halfExtents.z);
+}
+static int CellCoord(float v, float cellSize)
+{
+    return static_cast<int>(std::floor(v / cellSize));
+}
+static std::uint64_t CellKey(int x, int y, int z)
+{
+    const std::uint64_t ux = static_cast<std::uint32_t>(x) & 0x1fffffu;
+    const std::uint64_t uy = static_cast<std::uint32_t>(y) & 0x1fffffu;
+    const std::uint64_t uz = static_cast<std::uint32_t>(z) & 0x1fffffu;
+    return (ux << 42) | (uy << 21) | uz;
+}
+static std::uint64_t PairKey(std::size_t a, std::size_t b)
+{
+    const std::uint64_t lo = static_cast<std::uint64_t>(std::min(a, b));
+    const std::uint64_t hi = static_cast<std::uint64_t>(std::max(a, b));
+    return (hi << 32) ^ lo;
 }
 static Vec3 RotatedAabbHalfExtents(const Vec3& localHalf, const Vec3& rot)
 {
@@ -79,6 +109,13 @@ static BoxAxes BuildBoxAxes(const Vec3& rot)
         Vec3{ r02, r12, r22 }
     };
 }
+static float ProjectedObbRadius(const Vec3& half, const BoxAxes& axes, const Vec3& axis)
+{
+    return Abs(Dot(axis, axes.xAxis)) * half.x +
+           Abs(Dot(axis, axes.yAxis)) * half.y +
+           Abs(Dot(axis, axes.zAxis)) * half.z;
+}
+
 struct BodyRef
 {
     ecs::Entity entity{};
@@ -104,12 +141,13 @@ void PhysicsSystem::Update(World& world, float dt)
     if (dt > 0.05f)
         dt = 0.05f;
     const float gravity = m_Gravity;
-    const float linearDamping = m_LinearDamping;
     const float baseStep = 1.0f / 240.0f;
     const int dynamicSubsteps = static_cast<int>(std::ceil(dt / baseStep));
     const int configuredSubsteps = m_Substeps > 0 ? m_Substeps : 1;
     const int substeps = std::max(configuredSubsteps, std::min(dynamicSubsteps, 64));
     const float stepDt = dt / static_cast<float>(substeps);
+    const float dampingPerStep = std::pow(std::max(m_LinearDamping, 0.0f), stepDt * 60.0f);
+    const int solverIterations = std::max(m_SolverIterations, 1);
     std::vector<BodyRef> bodies;
     bodies.reserve(128);
     world.ForEach<ColliderComponent, TransformComponent, RigidbodyComponent>([&](Entity e, ColliderComponent& c, TransformComponent& t, RigidbodyComponent& rb){
@@ -121,18 +159,113 @@ void PhysicsSystem::Update(World& world, float dt)
     world.ForEach<TransformComponent, RigidbodyComponent>([&](Entity, TransformComponent& t, RigidbodyComponent& rb){
         if (rb.isStatic || !rb.simulatePhysics) return;
         if (rb.useGravity) rb.velocity.y -= gravity * stepDt;
-        rb.velocity.x *= linearDamping;
-        rb.velocity.z *= linearDamping;
+        const float bodyDamping = std::pow(dampingPerStep, std::max(rb.linearDampingMultiplier, 0.0f));
+        rb.velocity.x *= bodyDamping;
+        rb.velocity.z *= bodyDamping;
         if (Abs(rb.velocity.x) < 0.0005f) rb.velocity.x = 0.0f;
         if (Abs(rb.velocity.z) < 0.0005f) rb.velocity.z = 0.0f;
         rb.velocity = Add(rb.velocity, Scale(rb.acceleration, stepDt));
         t.position = Add(t.position, Scale(rb.velocity, stepDt));
     });
 
+    std::vector<std::pair<std::size_t, std::size_t>> candidatePairs;
+    candidatePairs.reserve(bodies.size() * 3);
+    std::unordered_set<std::uint64_t> pairDedup;
+    pairDedup.reserve(bodies.size() * 8);
+    std::unordered_map<std::uint64_t, std::vector<std::size_t>> grid;
+    grid.reserve(bodies.size() * 2);
+    std::vector<std::size_t> dynamicBodies;
+    std::vector<std::size_t> staticBoxes;
+    dynamicBodies.reserve(bodies.size());
+    staticBoxes.reserve(16);
+    const float cellSize = 0.6f;
     for (std::size_t i = 0; i < bodies.size(); ++i)
     {
-        for (std::size_t j = i + 1; j < bodies.size(); ++j)
+        const BodyRef& body = bodies[i];
+        if ((!body.rigidbody->simulatePhysics && !body.rigidbody->isStatic))
+            continue;
+        if (!body.rigidbody->isStatic)
+            dynamicBodies.push_back(i);
+        else if (body.collider->type == ColliderType::Box)
+            staticBoxes.push_back(i);
+        const Vec3 c = Add(body.transform->position, body.collider->offset);
+        const int cx = CellCoord(c.x, cellSize);
+        const int cy = CellCoord(c.y, cellSize);
+        const int cz = CellCoord(c.z, cellSize);
+        grid[CellKey(cx, cy, cz)].push_back(i);
+    }
+
+    // Always test dynamic bodies against static boxes (plane/ramp support)
+    // to avoid broadphase misses for large static colliders occupying many cells.
+    for (const std::size_t i : dynamicBodies)
+    {
+        const BodyRef& a = bodies[i];
+        const Vec3 ac = Add(a.transform->position, a.collider->offset);
+        for (const std::size_t j : staticBoxes)
         {
+            if (i == j)
+                continue;
+            const std::uint64_t pkey = PairKey(i, j);
+            if (!pairDedup.insert(pkey).second)
+                continue;
+            const BodyRef& b = bodies[j];
+            const Vec3 bc = Add(b.transform->position, b.collider->offset);
+            const Vec3 d = Sub(ac, bc);
+            const float ra = BoundingRadius(*a.collider);
+            const float rb = BoundingRadius(*b.collider);
+            const float broadphasePad = 0.10f;
+            const float range = ra + rb + broadphasePad;
+            if (LengthSq(d) <= range * range)
+                candidatePairs.emplace_back(std::min(i, j), std::max(i, j));
+        }
+    }
+
+    for (std::size_t i = 0; i < bodies.size(); ++i)
+    {
+        const BodyRef& a = bodies[i];
+        if ((!a.rigidbody->simulatePhysics && !a.rigidbody->isStatic))
+            continue;
+        const Vec3 ac = Add(a.transform->position, a.collider->offset);
+        const int cx = CellCoord(ac.x, cellSize);
+        const int cy = CellCoord(ac.y, cellSize);
+        const int cz = CellCoord(ac.z, cellSize);
+        for (int ox = -1; ox <= 1; ++ox)
+        for (int oy = -1; oy <= 1; ++oy)
+        for (int oz = -1; oz <= 1; ++oz)
+        {
+            const auto it = grid.find(CellKey(cx + ox, cy + oy, cz + oz));
+            if (it == grid.end())
+                continue;
+            for (const std::size_t j : it->second)
+            {
+                if (i >= j)
+                    continue;
+                const BodyRef& b = bodies[j];
+                if ((!b.rigidbody->simulatePhysics && !b.rigidbody->isStatic))
+                    continue;
+                if (a.rigidbody->isStatic && b.rigidbody->isStatic)
+                    continue;
+                const std::uint64_t pkey = PairKey(i, j);
+                if (!pairDedup.insert(pkey).second)
+                    continue;
+                const Vec3 bc = Add(b.transform->position, b.collider->offset);
+                const Vec3 d = Sub(ac, bc);
+                const float ra = BoundingRadius(*a.collider);
+                const float rb = BoundingRadius(*b.collider);
+                const float broadphasePad = 0.05f;
+                const float range = ra + rb + broadphasePad;
+                if (LengthSq(d) <= range * range)
+                    candidatePairs.emplace_back(i, j);
+            }
+        }
+    }
+
+    for (int iter = 0; iter < solverIterations; ++iter)
+    {
+    for (const auto& pair : candidatePairs)
+    {
+            const std::size_t i = pair.first;
+            const std::size_t j = pair.second;
             BodyRef& a = bodies[i];
             BodyRef& b = bodies[j];
             if ((!a.rigidbody->simulatePhysics && !a.rigidbody->isStatic) ||
@@ -146,6 +279,8 @@ void PhysicsSystem::Update(World& world, float dt)
             Vec3 d = Sub(ac, bc);
             const Vec3 aHalf = RotatedAabbHalfExtents(a.collider->halfExtents, a.transform->rotation);
             const Vec3 bHalf = RotatedAabbHalfExtents(b.collider->halfExtents, b.transform->rotation);
+            const BoxAxes axesA = BuildBoxAxes(a.transform->rotation);
+            const BoxAxes axesB = BuildBoxAxes(b.transform->rotation);
             float minPen = 0.0f;
             int axis = 1;
             Vec3 normal{ 0.0f, 1.0f, 0.0f };
@@ -153,17 +288,50 @@ void PhysicsSystem::Update(World& world, float dt)
 
             if (a.collider->type == ColliderType::Box && b.collider->type == ColliderType::Box)
             {
-                float ox = (aHalf.x + bHalf.x) - Abs(d.x);
-                float oy = (aHalf.y + bHalf.y) - Abs(d.y);
-                float oz = (aHalf.z + bHalf.z) - Abs(d.z);
-                if (ox <= 0 || oy <= 0 || oz <= 0)
+                Vec3 candidateAxes[15];
+                int axisCount = 0;
+                candidateAxes[axisCount++] = NormalizeSafe(axesA.xAxis);
+                candidateAxes[axisCount++] = NormalizeSafe(axesA.yAxis);
+                candidateAxes[axisCount++] = NormalizeSafe(axesA.zAxis);
+                candidateAxes[axisCount++] = NormalizeSafe(axesB.xAxis);
+                candidateAxes[axisCount++] = NormalizeSafe(axesB.yAxis);
+                candidateAxes[axisCount++] = NormalizeSafe(axesB.zAxis);
+
+                const Vec3 axesALocal[] = { axesA.xAxis, axesA.yAxis, axesA.zAxis };
+                const Vec3 axesBLocal[] = { axesB.xAxis, axesB.yAxis, axesB.zAxis };
+                for (const Vec3& axA : axesALocal)
+                {
+                    for (const Vec3& axB : axesBLocal)
+                    {
+                        const Vec3 crossAxis = Cross(axA, axB);
+                        if (LengthSq(crossAxis) > 0.000001f)
+                            candidateAxes[axisCount++] = NormalizeSafe(crossAxis);
+                    }
+                }
+
+                minPen = 1.0e9f;
+                bool separated = false;
+                for (int idx = 0; idx < axisCount; ++idx)
+                {
+                    const Vec3& testAxis = candidateAxes[idx];
+                    const float dist = Abs(Dot(d, testAxis));
+                    const float ra = ProjectedObbRadius(a.collider->halfExtents, axesA, testAxis);
+                    const float rb = ProjectedObbRadius(b.collider->halfExtents, axesB, testAxis);
+                    const float overlap = (ra + rb) - dist;
+                    if (overlap <= 0.0f)
+                    {
+                        separated = true;
+                        break;
+                    }
+                    if (overlap < minPen)
+                    {
+                        minPen = overlap;
+                        normal = (Dot(d, testAxis) >= 0.0f) ? testAxis : Scale(testAxis, -1.0f);
+                    }
+                }
+                if (separated)
                     continue;
-                minPen = ox; axis = 0;
-                if (oy < minPen) { minPen = oy; axis = 1; }
-                if (oz < minPen) { minPen = oz; axis = 2; }
-                if (axis == 0) normal = Vec3{ (d.x >= 0.0f) ? 1.0f : -1.0f, 0.0f, 0.0f };
-                if (axis == 1) normal = Vec3{ 0.0f, (d.y >= 0.0f) ? 1.0f : -1.0f, 0.0f };
-                if (axis == 2) normal = Vec3{ 0.0f, 0.0f, (d.z >= 0.0f) ? 1.0f : -1.0f };
+                axis = 1;
                 contactType = ContactType::BoxBox;
             }
             else if (a.collider->type == ColliderType::Sphere && b.collider->type == ColliderType::Sphere)
@@ -244,8 +412,9 @@ void PhysicsSystem::Update(World& world, float dt)
                 continue;
 
             const bool singleStaticContact = (invMassA == 0.0f) != (invMassB == 0.0f);
-            const float slop = singleStaticContact ? 0.0f : 0.001f;
-            const float percent = singleStaticContact ? 1.0f : 0.8f;
+            const bool dynamicBoxSphere = (contactType == ContactType::BoxSphere) && !singleStaticContact;
+            const float slop = dynamicBoxSphere ? 0.0f : (singleStaticContact ? 0.0005f : 0.0025f);
+            const float percent = dynamicBoxSphere ? m_DynamicBoxSphereCorrectionPercent : (singleStaticContact ? 0.9f : 0.65f);
             const float correctionScale = std::max(minPen - slop, 0.0f) * percent / invMassSum;
             const Vec3 correction = Scale(sep, correctionScale / (minPen > 0.0f ? minPen : 1.0f));
             if (invMassA > 0.0f)
@@ -253,12 +422,81 @@ void PhysicsSystem::Update(World& world, float dt)
             if (invMassB > 0.0f)
                 b.transform->position = Sub(b.transform->position, Scale(correction, invMassB));
 
+            // Extra depenetration for dynamic box-sphere contacts to avoid
+            // persistent interpenetration ("sphere absorbing cubes").
+            if (dynamicBoxSphere)
+            {
+                BodyRef* sphereBody = (a.collider->type == ColliderType::Sphere) ? &a : &b;
+                BodyRef* boxBody = (a.collider->type == ColliderType::Box) ? &a : &b;
+                if (sphereBody->rigidbody->useAdvancedSphereStabilization)
+                {
+                    const float radius = SphereRadius(*sphereBody->collider);
+                    const Vec3 boxCenter = Add(boxBody->transform->position, boxBody->collider->offset);
+                    const BoxAxes boxAxes = BuildBoxAxes(boxBody->transform->rotation);
+                    const Vec3 sphereCenter = Add(sphereBody->transform->position, sphereBody->collider->offset);
+                    const Vec3 toSphere = Sub(sphereCenter, boxCenter);
+                    const float lx = Dot(toSphere, boxAxes.xAxis);
+                    const float ly = Dot(toSphere, boxAxes.yAxis);
+                    const float lz = Dot(toSphere, boxAxes.zAxis);
+                    const Vec3 half = boxBody->collider->halfExtents;
+                    const float clx = Clamp(lx, -half.x, half.x);
+                    const float cly = Clamp(ly, -half.y, half.y);
+                    const float clz = Clamp(lz, -half.z, half.z);
+                    const Vec3 closestPoint = Add(Add(Add(boxCenter, Scale(boxAxes.xAxis, clx)), Scale(boxAxes.yAxis, cly)), Scale(boxAxes.zAxis, clz));
+                    const Vec3 delta = Sub(sphereCenter, closestPoint);
+                    const float distSq = LengthSq(delta);
+                    if (distSq < radius * radius)
+                    {
+                        const float distance = std::sqrt(std::max(distSq, 0.0f));
+                        const Vec3 outNormal = (distance > 0.000001f) ? Scale(delta, 1.0f / distance) : normal;
+                        const float extraPen = radius - distance + 0.001f;
+                        // For gameplay feel, do not "catapult" nearby cubes by splitting
+                        // dynamic box-sphere extra depenetration. Move sphere only.
+                        const float moveSphere = 1.0f;
+                        const float moveBox = 0.0f;
+                        if (!sphereBody->rigidbody->isStatic)
+                            sphereBody->transform->position = Add(sphereBody->transform->position, Scale(outNormal, extraPen * moveSphere));
+                        if (!boxBody->rigidbody->isStatic)
+                            boxBody->transform->position = Sub(boxBody->transform->position, Scale(outNormal, extraPen * moveBox));
+                    }
+                }
+            }
+
+            // Keep dynamic spheres on the surface of static boxes to avoid deep embedding
+            // on sloped ramps when frame time spikes.
+            if (contactType == ContactType::BoxSphere && singleStaticContact)
+            {
+                BodyRef* sphereBody = (a.collider->type == ColliderType::Sphere) ? &a : &b;
+                BodyRef* boxBody = (a.collider->type == ColliderType::Box) ? &a : &b;
+                if ((sphereBody->rigidbody->mass > 0.0f) && !sphereBody->rigidbody->isStatic)
+                {
+                    const float radius = SphereRadius(*sphereBody->collider);
+                    const float skin = 0.002f;
+                    const Vec3 boxCenter = Add(boxBody->transform->position, boxBody->collider->offset);
+                    const BoxAxes boxAxes = BuildBoxAxes(boxBody->transform->rotation);
+                    const Vec3 sphereCenter = Add(sphereBody->transform->position, sphereBody->collider->offset);
+                    const Vec3 toSphere = Sub(sphereCenter, boxCenter);
+                    const float lx = Dot(toSphere, boxAxes.xAxis);
+                    const float ly = Dot(toSphere, boxAxes.yAxis);
+                    const float lz = Dot(toSphere, boxAxes.zAxis);
+                    const Vec3 half = boxBody->collider->halfExtents;
+                    const float clx = Clamp(lx, -half.x, half.x);
+                    const float cly = Clamp(ly, -half.y, half.y);
+                    const float clz = Clamp(lz, -half.z, half.z);
+                    const Vec3 closestPoint = Add(Add(Add(boxCenter, Scale(boxAxes.xAxis, clx)), Scale(boxAxes.yAxis, cly)), Scale(boxAxes.zAxis, clz));
+                    const Vec3 snappedCenter = Add(closestPoint, Scale(normal, radius + skin));
+                    sphereBody->transform->position = Sub(snappedCenter, sphereBody->collider->offset);
+                }
+            }
+
             const float restitution = (a.collider->restitution + b.collider->restitution) > 0.0f
                 ? (a.collider->restitution + b.collider->restitution) * 0.5f
                 : m_DefaultRestitution;
-            const float friction = (a.collider->friction + b.collider->friction) > 0.0f
+            float friction = (a.collider->friction + b.collider->friction) > 0.0f
                 ? (a.collider->friction + b.collider->friction) * 0.5f
                 : m_DefaultFriction;
+            if (contactType == ContactType::BoxSphere)
+                friction *= 0.18f;
             const Vec3 rv = Sub(a.rigidbody->velocity, b.rigidbody->velocity);
             const float velAlongNormal = Dot(rv, normal);
             if (velAlongNormal < 0.0f)
@@ -279,7 +517,8 @@ void PhysicsSystem::Update(World& world, float dt)
                 const float invTangentLen = 1.0f / std::sqrt(tangentLenSq);
                 tangent = Scale(tangent, invTangentLen);
                 const float jt = -Dot(rvAfter, tangent) / invMassSum;
-                const float maxFriction = friction * minPen * 25.0f;
+                const float normalImpulseMag = std::max(-(1.0f + restitution) * velAlongNormal / invMassSum, 0.0f);
+                const float maxFriction = friction * normalImpulseMag;
                 const float clampedJt = std::max(-maxFriction, std::min(jt, maxFriction));
                 const Vec3 frictionImpulse = Scale(tangent, clampedJt);
                 if (invMassA > 0.0f)
@@ -337,7 +576,72 @@ void PhysicsSystem::Update(World& world, float dt)
                 }
             }
             if (m_EventBus) m_EventBus->PublishCollision(CollisionEvent{ a.entity, b.entity });
-        }
     }}
+    }
+
+    // Post-solve sphere stabilization against static boxes:
+    // keeps dynamic spheres from slowly sinking through support surfaces
+    // and limits extreme push velocities from dense cube impacts.
+    for (BodyRef& sphereBody : bodies)
+    {
+        if (sphereBody.collider->type != ColliderType::Sphere ||
+            sphereBody.rigidbody->isStatic ||
+            !sphereBody.rigidbody->simulatePhysics ||
+            !sphereBody.rigidbody->useAdvancedSphereStabilization)
+            continue;
+
+        const float radius = SphereRadius(*sphereBody.collider);
+        Vec3 sphereCenter = Add(sphereBody.transform->position, sphereBody.collider->offset);
+        float bestPen = 0.0f;
+        Vec3 bestNormal{ 0.0f, 1.0f, 0.0f };
+
+        for (BodyRef& boxBody : bodies)
+        {
+            if (boxBody.collider->type != ColliderType::Box || !boxBody.rigidbody->isStatic)
+                continue;
+
+            const Vec3 boxCenter = Add(boxBody.transform->position, boxBody.collider->offset);
+            const BoxAxes boxAxes = BuildBoxAxes(boxBody.transform->rotation);
+            const Vec3 toSphere = Sub(sphereCenter, boxCenter);
+            const float lx = Dot(toSphere, boxAxes.xAxis);
+            const float ly = Dot(toSphere, boxAxes.yAxis);
+            const float lz = Dot(toSphere, boxAxes.zAxis);
+            const Vec3 half = boxBody.collider->halfExtents;
+            const float clx = Clamp(lx, -half.x, half.x);
+            const float cly = Clamp(ly, -half.y, half.y);
+            const float clz = Clamp(lz, -half.z, half.z);
+            const Vec3 closestPoint = Add(Add(Add(boxCenter, Scale(boxAxes.xAxis, clx)), Scale(boxAxes.yAxis, cly)), Scale(boxAxes.zAxis, clz));
+            const Vec3 delta = Sub(sphereCenter, closestPoint);
+            const float distSq = LengthSq(delta);
+            if (distSq >= radius * radius)
+                continue;
+
+            const float distance = std::sqrt(std::max(distSq, 0.0f));
+            const Vec3 pushNormal = (distance > 0.000001f) ? Scale(delta, 1.0f / distance) : Vec3{ 0.0f, 1.0f, 0.0f };
+            const float penetration = radius - distance;
+            if (penetration > bestPen)
+            {
+                bestPen = penetration;
+                bestNormal = pushNormal;
+            }
+        }
+
+        if (bestPen > m_SpherePenetrationEpsilon)
+        {
+            sphereCenter = Add(sphereCenter, Scale(bestNormal, bestPen + 0.001f));
+            sphereBody.transform->position = Sub(sphereCenter, sphereBody.collider->offset);
+            const float vn = Dot(sphereBody.rigidbody->velocity, bestNormal);
+            if (vn < -m_SphereVelocityEpsilon)
+                sphereBody.rigidbody->velocity = Sub(sphereBody.rigidbody->velocity, Scale(bestNormal, vn));
+        }
+
+        const float maxSphereSpeed = std::max(m_SphereMaxSpeed, 0.1f);
+        const float speedSq = LengthSq(sphereBody.rigidbody->velocity);
+        if (speedSq > maxSphereSpeed * maxSphereSpeed)
+        {
+            const float invSpeed = 1.0f / std::sqrt(speedSq);
+            sphereBody.rigidbody->velocity = Scale(sphereBody.rigidbody->velocity, maxSphereSpeed * invSpeed);
+        }
+    }
 }
 }
