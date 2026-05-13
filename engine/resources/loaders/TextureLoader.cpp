@@ -1,5 +1,6 @@
 #include "TextureLoader.h"
 
+#include "../../core/AssetPaths.h"
 #include "../../core/Logger.h"
 
 #include <stb_image.h>
@@ -453,8 +454,9 @@ ResourceLoadResult<TextureResource> TextureLoader::Load(const std::string& norma
     int height = 0;
     int sourceChannelCount = 0;
 
+    const std::string resolvedPathUtf8 = AssetPaths::ToUtf8String(resolvedPath);
     unsigned char* pixels = stbi_load(
-        resolvedPath.string().c_str(),
+        resolvedPathUtf8.c_str(),
         &width,
         &height,
         &sourceChannelCount,

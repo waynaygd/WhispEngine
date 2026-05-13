@@ -193,7 +193,8 @@ ResourceLoadResult<MeshResource> MeshLoader::Load(const std::string& normalizedK
         aiProcess_ImproveCacheLocality |
         aiProcess_FlipUVs;
 
-    const aiScene* scene = importer.ReadFile(resolvedPath.string(), flags);
+    const std::string resolvedPathUtf8 = AssetPaths::ToUtf8String(resolvedPath);
+    const aiScene* scene = importer.ReadFile(resolvedPathUtf8.c_str(), flags);
     if (scene == nullptr)
     {
         result.errorMessage = importer.GetErrorString();
