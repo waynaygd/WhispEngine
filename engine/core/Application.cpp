@@ -371,6 +371,26 @@ void Application::SetupEcsRuntimeDemo()
         m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(entityCfg));
     }
 
+    // Small cube pyramid for interactive shooting tests.
+    for (int layer = 0; layer < 4; ++layer)
+    {
+        const int count = 4 - layer;
+        for (int i = 0; i < count; ++i)
+        {
+            EcsDemoEntityConfig cubeCfg;
+            cubeCfg.tag = "PyramidCube_" + std::to_string(layer) + "_" + std::to_string(i);
+            cubeCfg.meshPath = "models/validation_cube.obj";
+            cubeCfg.materialPath = "materials/blue.material.json";
+            cubeCfg.scale = ecs::Vec3{ 0.18f, 0.18f, 0.18f };
+            cubeCfg.position = ecs::Vec3{
+                -0.35f + static_cast<float>(i) * 0.20f + static_cast<float>(layer) * 0.10f,
+                -0.92f + static_cast<float>(layer) * 0.22f,
+                0.45f
+            };
+            m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(cubeCfg));
+        }
+    }
+
     if (m_ResourceManager != nullptr)
     {
         m_ResourceManager->WatchForHotReload<MeshResource>("models/african_head.obj");
@@ -568,9 +588,12 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     auto& collider = m_World.AddComponent<ecs::ColliderComponent>(entity);
     collider.type = ecs::ColliderType::Box;
     if (tag.name == "GroundPlane")
-        collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, 0.15f, entityCfg.scale.z * 0.5f };
+        collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
     else if (meshRenderer.meshPath.find("african_head") != std::string::npos)
-        collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.30f, entityCfg.scale.y * 0.62f, entityCfg.scale.z * 0.30f };
+    {
+        collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.30f, entityCfg.scale.y * 0.70f, entityCfg.scale.z * 0.30f };
+        collider.offset.y = entityCfg.scale.y * 0.18f;
+    }
     else
         collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
 

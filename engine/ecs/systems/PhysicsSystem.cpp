@@ -81,9 +81,31 @@ void PhysicsSystem::Update(World& world, float dt)
                 b.transform->position = Sub(b.transform->position, Scale(sep, 0.5f));
             }
 
-            if (axis == 0) { a.rigidbody->velocity.x = 0.0f; b.rigidbody->velocity.x = 0.0f; }
-            if (axis == 1) { a.rigidbody->velocity.y = 0.0f; b.rigidbody->velocity.y = 0.0f; }
-            if (axis == 2) { a.rigidbody->velocity.z = 0.0f; b.rigidbody->velocity.z = 0.0f; }
+            const float restitution = (a.collider->restitution + b.collider->restitution) * 0.5f;
+            const float friction = (a.collider->friction + b.collider->friction) * 0.5f;
+            if (axis == 0)
+            {
+                const float va = a.rigidbody->velocity.x;
+                const float vb = b.rigidbody->velocity.x;
+                a.rigidbody->velocity.x = vb * restitution;
+                b.rigidbody->velocity.x = va * restitution;
+            }
+            if (axis == 1)
+            {
+                a.rigidbody->velocity.y = 0.0f;
+                b.rigidbody->velocity.y = 0.0f;
+                a.rigidbody->velocity.x *= friction;
+                a.rigidbody->velocity.z *= friction;
+                b.rigidbody->velocity.x *= friction;
+                b.rigidbody->velocity.z *= friction;
+            }
+            if (axis == 2)
+            {
+                const float va = a.rigidbody->velocity.z;
+                const float vb = b.rigidbody->velocity.z;
+                a.rigidbody->velocity.z = vb * restitution;
+                b.rigidbody->velocity.z = va * restitution;
+            }
             if (m_EventBus) m_EventBus->PublishCollision(CollisionEvent{ a.entity, b.entity });
         }
     }
