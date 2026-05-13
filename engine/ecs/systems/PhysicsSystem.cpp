@@ -329,8 +329,10 @@ void PhysicsSystem::Update(World& world, float dt)
                         const float distance = std::sqrt(std::max(distSq, 0.0f));
                         const Vec3 outNormal = (distance > 0.000001f) ? Scale(delta, 1.0f / distance) : normal;
                         const float extraPen = radius - distance + 0.001f;
-                        const float moveSphere = invMassA > invMassB ? 0.35f : 0.65f;
-                        const float moveBox = 1.0f - moveSphere;
+                        // For gameplay feel, do not "catapult" nearby cubes by splitting
+                        // dynamic box-sphere extra depenetration. Move sphere only.
+                        const float moveSphere = 1.0f;
+                        const float moveBox = 0.0f;
                         if (!sphereBody->rigidbody->isStatic)
                             sphereBody->transform->position = Add(sphereBody->transform->position, Scale(outNormal, extraPen * moveSphere));
                         if (!boxBody->rigidbody->isStatic)
