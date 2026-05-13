@@ -160,6 +160,16 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
         }
     }
 
+    if (j.contains("physics") && j["physics"].is_object())
+    {
+        const auto& physics = j["physics"];
+        outCfg.physics.gravity = physics.value("gravity", outCfg.physics.gravity);
+        outCfg.physics.linearDamping = physics.value("linearDamping", outCfg.physics.linearDamping);
+        outCfg.physics.substeps = physics.value("substeps", outCfg.physics.substeps);
+        outCfg.physics.restitution = physics.value("restitution", outCfg.physics.restitution);
+        outCfg.physics.friction = physics.value("friction", outCfg.physics.friction);
+    }
+
     Logger::Get().Info(
         "ConfigLoader: loaded " + std::to_string(outCfg.windows.size()) +
         " windows from config, active renderer=" + std::string(j.value("activeRenderer", "DX12")) +

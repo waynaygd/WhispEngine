@@ -357,7 +357,13 @@ void Application::RunEcsBootstrapCheck()
 void Application::SetupEcsRuntimeDemo()
 {
     m_World.ClearSystems();
-    m_World.AddSystem<ecs::PhysicsSystem>(&m_EventBus);
+    m_World.AddSystem<ecs::PhysicsSystem>(
+        &m_EventBus,
+        m_Config.physics.gravity,
+        m_Config.physics.linearDamping,
+        m_Config.physics.substeps,
+        m_Config.physics.restitution,
+        m_Config.physics.friction);
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
 

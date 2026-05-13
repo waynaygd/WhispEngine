@@ -20,5 +20,12 @@
     "logSnapshots": true,
     "sceneFile": "scenes/pz3_demo_scene.json",
     "initialEntities": []
+  },
+  "physics": {
+    "gravity": 9.81,
+    "linearDamping": 0.985,
+    "substeps": 3,
+    "restitution": 0.05,
+    "friction": 0.85
   }
 }

@@ -24,9 +24,9 @@ struct BodyRef
 namespace ecs {
 void PhysicsSystem::Update(World& world, float dt)
 {
-    constexpr float gravity = 9.81f;
-    constexpr float linearDamping = 0.985f;
-    const int substeps = dt > 0.016f ? 3 : 2;
+    const float gravity = m_Gravity;
+    const float linearDamping = m_LinearDamping;
+    const int substeps = m_Substeps > 0 ? m_Substeps : 1;
     const float stepDt = dt / static_cast<float>(substeps);
     for (int step = 0; step < substeps; ++step)
     {
@@ -88,8 +88,12 @@ void PhysicsSystem::Update(World& world, float dt)
                 b.transform->position = Sub(b.transform->position, Scale(sep, 0.5f));
             }
 
-            const float restitution = (a.collider->restitution + b.collider->restitution) * 0.5f;
-            const float friction = (a.collider->friction + b.collider->friction) * 0.5f;
+            const float restitution = (a.collider->restitution + b.collider->restitution) > 0.0f
+                ? (a.collider->restitution + b.collider->restitution) * 0.5f
+                : m_DefaultRestitution;
+            const float friction = (a.collider->friction + b.collider->friction) > 0.0f
+                ? (a.collider->friction + b.collider->friction) * 0.5f
+                : m_DefaultFriction;
             if (axis == 0)
             {
                 const float va = a.rigidbody->velocity.x;

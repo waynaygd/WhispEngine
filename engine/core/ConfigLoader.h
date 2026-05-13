@@ -42,9 +42,19 @@ struct EcsDemoConfig
 
 struct AppConfig
 {
+    struct PhysicsConfig
+    {
+        float gravity = 9.81f;
+        float linearDamping = 0.985f;
+        int substeps = 2;
+        float restitution = 0.05f;
+        float friction = 0.85f;
+    };
+
     RenderBackend activeBackend = RenderBackend::DX12;
     std::vector<WindowConfig> windows;
     EcsDemoConfig ecsDemo;
+    PhysicsConfig physics;
 };
 
 class ConfigLoader
