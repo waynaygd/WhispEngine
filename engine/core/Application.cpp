@@ -678,8 +678,8 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     if (tag.name == "RollingSphere")
     {
         rigidbody.mass = 0.70f;
-        rigidbody.linearDampingMultiplier = 0.10f;
-        collider.friction = 0.22f;
+        rigidbody.linearDampingMultiplier = 0.0f;
+        collider.friction = 0.08f;
         collider.restitution = 0.03f;
     }
 

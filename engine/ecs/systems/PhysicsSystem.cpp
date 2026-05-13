@@ -299,7 +299,7 @@ void PhysicsSystem::Update(World& world, float dt)
 
             // Keep dynamic spheres on the surface of static boxes to avoid deep embedding
             // on sloped ramps when frame time spikes.
-            if (contactType == ContactType::BoxSphere)
+            if (contactType == ContactType::BoxSphere && singleStaticContact)
             {
                 BodyRef* sphereBody = (a.collider->type == ColliderType::Sphere) ? &a : &b;
                 BodyRef* boxBody = (a.collider->type == ColliderType::Box) ? &a : &b;
@@ -319,8 +319,7 @@ void PhysicsSystem::Update(World& world, float dt)
                     const float cly = Clamp(ly, -half.y, half.y);
                     const float clz = Clamp(lz, -half.z, half.z);
                     const Vec3 closestPoint = Add(Add(Add(boxCenter, Scale(boxAxes.xAxis, clx)), Scale(boxAxes.yAxis, cly)), Scale(boxAxes.zAxis, clz));
-                    const Vec3 outNormal = (a.collider->type == ColliderType::Sphere) ? Scale(normal, -1.0f) : normal;
-                    const Vec3 snappedCenter = Add(closestPoint, Scale(outNormal, radius + skin));
+                    const Vec3 snappedCenter = Add(closestPoint, Scale(normal, radius + skin));
                     sphereBody->transform->position = Sub(snappedCenter, sphereBody->collider->offset);
                 }
             }
@@ -332,7 +331,7 @@ void PhysicsSystem::Update(World& world, float dt)
                 ? (a.collider->friction + b.collider->friction) * 0.5f
                 : m_DefaultFriction;
             if (contactType == ContactType::BoxSphere)
-                friction *= 0.45f;
+                friction *= 0.18f;
             const Vec3 rv = Sub(a.rigidbody->velocity, b.rigidbody->velocity);
             const float velAlongNormal = Dot(rv, normal);
             if (velAlongNormal < 0.0f)
