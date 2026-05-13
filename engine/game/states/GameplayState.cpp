@@ -12,8 +12,9 @@ void GameplayState::OnEnter(Application& app)
     m_PrevEsc = false;
     m_PrevSpace = false;
     m_PrevBackspace = false;
+    m_PrevF = false;
     Logger::Get().Info(
-        "GameplayState: OnEnter (ESC -> Menu, SPACE -> spawn ECS entity when camera look is inactive, BACKSPACE -> destroy ECS entity).");
+        "GameplayState: OnEnter (ESC -> Menu, SPACE -> spawn ECS entity, F -> fire projectile, BACKSPACE -> destroy ECS entity).");
 }
 
 void GameplayState::OnExit(Application& app)
@@ -32,6 +33,7 @@ void GameplayState::Update(Application& app, float dt)
     const bool esc = glfwGetKey(w, GLFW_KEY_ESCAPE) == GLFW_PRESS;
     const bool rawSpace = glfwGetKey(w, GLFW_KEY_SPACE) == GLFW_PRESS;
     const bool backspace = glfwGetKey(w, GLFW_KEY_BACKSPACE) == GLFW_PRESS;
+    const bool fire = glfwGetKey(w, GLFW_KEY_F) == GLFW_PRESS;
     const bool space = !app.IsCameraControlActive() && rawSpace;
 
     if (esc && !m_PrevEsc)
@@ -56,9 +58,13 @@ void GameplayState::Update(Application& app, float dt)
             std::to_string(app.GetGameplayEntityCount()));
     }
 
+    if (fire && !m_PrevF)
+        app.SpawnPhysicsProjectile();
+
     m_PrevEsc = esc;
     m_PrevSpace = rawSpace;
     m_PrevBackspace = backspace;
+    m_PrevF = fire;
 }
 
 

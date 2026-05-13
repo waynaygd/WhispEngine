@@ -232,33 +232,41 @@ void Application::PreloadSceneResourcesAsync(const std::vector<EcsDemoEntityConf
 
 std::vector<EcsDemoEntityConfig> Application::BuildDefaultEcsDemoEntities()
 {
-    std::vector<EcsDemoEntityConfig> entities(3);
+    std::vector<EcsDemoEntityConfig> entities(4);
 
-    entities[0].tag = "AfricanHead_Center";
-    entities[0].meshPath = "models/african_head.obj";
-    entities[0].materialPath = "materials/african_head.material.json";
-    entities[0].position = ecs::Vec3{ 0.0f, 0.05f, 0.0f };
-    entities[0].rotation = ecs::Vec3{ 0.0f, 3.1415926f, 0.0f };
-    entities[0].scale = ecs::Vec3{ 0.68f, 0.68f, 0.68f };
+    entities[0].tag = "GroundPlane";
+    entities[0].meshPath = "models/validation_cube.obj";
+    entities[0].materialPath = "materials/validation_checker.material.json";
+    entities[0].position = ecs::Vec3{ 0.0f, -1.2f, 0.0f };
+    entities[0].scale = ecs::Vec3{ 8.0f, 0.3f, 8.0f };
     entities[0].bounce = false;
+    entities[0].velocity = ecs::Vec3{};
 
-    entities[1].tag = "AfricanHead_Left";
+    entities[1].tag = "AfricanHead_Center";
     entities[1].meshPath = "models/african_head.obj";
     entities[1].materialPath = "materials/african_head.material.json";
-    entities[1].materialTint = { 0.80f, 0.88f, 1.0f, 1.0f };
-    entities[1].position = ecs::Vec3{ -0.60f, -0.10f, 0.0f };
-    entities[1].rotation = ecs::Vec3{ 0.0f, 2.72f, 0.0f };
-    entities[1].scale = ecs::Vec3{ 0.32f, 0.32f, 0.32f };
+    entities[1].position = ecs::Vec3{ 0.0f, 1.1f, 0.0f };
+    entities[1].rotation = ecs::Vec3{ 0.0f, 3.1415926f, 0.0f };
+    entities[1].scale = ecs::Vec3{ 0.68f, 0.68f, 0.68f };
     entities[1].bounce = false;
 
-    entities[2].tag = "AfricanHead_Right";
+    entities[2].tag = "AfricanHead_Left";
     entities[2].meshPath = "models/african_head.obj";
     entities[2].materialPath = "materials/african_head.material.json";
-    entities[2].materialTint = { 1.0f, 0.90f, 0.82f, 1.0f };
-    entities[2].position = ecs::Vec3{ 0.60f, -0.10f, 0.0f };
-    entities[2].rotation = ecs::Vec3{ 0.0f, 3.56f, 0.0f };
+    entities[2].materialTint = { 0.80f, 0.88f, 1.0f, 1.0f };
+    entities[2].position = ecs::Vec3{ -0.60f, 0.9f, 0.0f };
+    entities[2].rotation = ecs::Vec3{ 0.0f, 2.72f, 0.0f };
     entities[2].scale = ecs::Vec3{ 0.32f, 0.32f, 0.32f };
     entities[2].bounce = false;
+
+    entities[3].tag = "AfricanHead_Right";
+    entities[3].meshPath = "models/african_head.obj";
+    entities[3].materialPath = "materials/african_head.material.json";
+    entities[3].materialTint = { 1.0f, 0.90f, 0.82f, 1.0f };
+    entities[3].position = ecs::Vec3{ 0.60f, 0.9f, 0.0f };
+    entities[3].rotation = ecs::Vec3{ 0.0f, 3.56f, 0.0f };
+    entities[3].scale = ecs::Vec3{ 0.32f, 0.32f, 0.32f };
+    entities[3].bounce = false;
 
     return entities;
 }
@@ -559,6 +567,7 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     auto& rigidbody = m_World.AddComponent<ecs::RigidbodyComponent>(entity);
     rigidbody.useGravity = true;
     rigidbody.mass = 1.0f;
+    rigidbody.isStatic = tag.name == "GroundPlane";
     auto& collider = m_World.AddComponent<ecs::ColliderComponent>(entity);
     collider.type = ecs::ColliderType::Box;
     collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
@@ -572,6 +581,28 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
        << " shader=" << entityCfg.shaderPath;
     Logger::Get().Info(ss.str());
     return entity;
+}
+
+ecs::Entity Application::SpawnPhysicsProjectile()
+{
+    EcsDemoEntityConfig projectileCfg;
+    projectileCfg.tag = "Projectile_" + std::to_string(m_EcsDebugEntities.size());
+    projectileCfg.meshPath = "models/validation_cube.obj";
+    projectileCfg.materialPath = "materials/validation_checker.material.json";
+    projectileCfg.scale = ecs::Vec3{ 0.15f, 0.15f, 0.15f };
+
+    const ecs::Vec3 forward = BuildCameraForward(m_Camera.yaw, m_Camera.pitch);
+    projectileCfg.position = Add(m_Camera.position, Scale(forward, 0.75f));
+    projectileCfg.velocity = Scale(forward, 8.0f);
+
+    const ecs::Entity projectile = SpawnEcsDemoEntity(projectileCfg);
+    m_EcsDebugEntities.push_back(projectile);
+
+    if (auto* rb = m_World.GetComponent<ecs::RigidbodyComponent>(projectile))
+        rb->velocity = projectileCfg.velocity;
+
+    Logger::Get().Info("Gameplay: F detected -> spawned projectile entity");
+    return projectile;
 }
 
 void Application::EnterGameplayScene()

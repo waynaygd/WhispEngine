@@ -43,6 +43,7 @@ public:
     void EnterGameplayScene();
     void ExitGameplayScene();
     ecs::Entity SpawnGameplayEntity();
+    ecs::Entity SpawnPhysicsProjectile();
     bool DestroyLastGameplayEntity();
     std::size_t GetGameplayEntityCount() const { return m_EcsDebugEntities.size(); }
     bool IsCameraControlActive() const { return m_Camera.controlsActive; }
