@@ -1,45 +1,208 @@
 {
-  "version": 1,
+  "version": 3,
   "entities": [
     {
       "tag": "GroundPlane",
       "meshPath": "models/validation_cube.obj",
       "materialPath": "materials/white.material.json",
-      "color": [1.0, 1.0, 1.0, 1.0],
-      "position": [0.0, -1.0, 0.0],
-      "rotation": [0.0, 0.0, 0.0],
-      "scale": [8.0, 0.05, 8.0],
-      "bounce": false
+      "position": [
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        10.0,
+        0.2,
+        10.0
+      ],
+      "bounce": false,
+      "colliderType": "box",
+      "colliderManual": true,
+      "colliderHalfExtents": [
+        5.0,
+        0.1,
+        5.0
+      ],
+      "colliderOffset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "isStatic": true,
+      "simulatePhysics": false,
+      "useGravity": false
+    },
+    {
+      "tag": "RampPlane45",
+      "meshPath": "models/validation_cube.obj",
+      "materialPath": "materials/validation_checker.material.json",
+      "position": [
+        0.0,
+        0.5,
+        -1.4
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.7853982
+      ],
+      "scale": [
+        4.0,
+        0.2,
+        2.0
+      ],
+      "bounce": false,
+      "colliderType": "box",
+      "colliderManual": true,
+      "colliderHalfExtents": [
+        2.0,
+        0.1,
+        1.0
+      ],
+      "colliderOffset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "isStatic": true,
+      "simulatePhysics": false,
+      "useGravity": false
+    },
+    {
+      "tag": "RollingSphere",
+      "meshPath": "models/validation_sphere.obj",
+      "materialPath": "materials/blue.material.json",
+      "position": [
+        0.9,
+        3.2,
+        -1.4
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.28,
+        0.28,
+        0.28
+      ],
+      "linearVelocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "bounce": true,
+      "colliderType": "sphere",
+      "colliderManual": true,
+      "colliderHalfExtents": [
+        0.28,
+        0.28,
+        0.28
+      ],
+      "colliderOffset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "isStatic": false,
+      "simulatePhysics": true,
+      "useGravity": true
     },
     {
       "tag": "AfricanHead_Center",
       "meshPath": "models/african_head.obj",
       "materialPath": "materials/african_head.material.json",
-      "color": [1.0, 1.0, 1.0, 1.0],
-      "position": [0.0, 1.1, 0.0],
-      "rotation": [0.0, 3.1415926, 0.0],
-      "scale": [0.68, 0.68, 0.68],
-      "bounce": false
+      "color": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "position": [
+        0.0,
+        1.1,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        3.1415926,
+        0.0
+      ],
+      "scale": [
+        0.68,
+        0.68,
+        0.68
+      ],
+      "bounce": false,
+      "isStatic": true,
+      "simulatePhysics": false,
+      "useGravity": false
     },
     {
       "tag": "AfricanHead_Left",
       "meshPath": "models/african_head.obj",
       "materialPath": "materials/african_head.material.json",
-      "color": [0.80, 0.88, 1.0, 1.0],
-      "position": [-0.60, 0.9, 0.0],
-      "rotation": [0.0, 2.72, 0.0],
-      "scale": [0.32, 0.32, 0.32],
-      "bounce": false
+      "color": [
+        0.8,
+        0.88,
+        1.0,
+        1.0
+      ],
+      "position": [
+        -0.6,
+        0.9,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        2.72,
+        0.0
+      ],
+      "scale": [
+        0.32,
+        0.32,
+        0.32
+      ],
+      "bounce": false,
+      "isStatic": true,
+      "simulatePhysics": false,
+      "useGravity": false
     },
     {
       "tag": "AfricanHead_Right",
       "meshPath": "models/african_head.obj",
       "materialPath": "materials/african_head.material.json",
-      "color": [1.0, 0.90, 0.82, 1.0],
-      "position": [0.60, 0.9, 0.0],
-      "rotation": [0.0, 3.56, 0.0],
-      "scale": [0.32, 0.32, 0.32],
-      "bounce": false
+      "color": [
+        1.0,
+        0.9,
+        0.82,
+        1.0
+      ],
+      "position": [
+        0.6,
+        0.9,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        3.56,
+        0.0
+      ],
+      "scale": [
+        0.32,
+        0.32,
+        0.32
+      ],
+      "bounce": false,
+      "isStatic": true,
+      "simulatePhysics": false,
+      "useGravity": false
     }
   ]
 }

@@ -493,21 +493,7 @@ bool Application::ReloadSceneFromCurrentConfig(const char* reason)
 {
     if (m_Config.ecsDemo.sceneFile.empty())
     {
-        if (auto* primary = dynamic_cast<GlfwWindow*>(GetWindow()))
-    {
-        m_InputManager.SetWindow(primary->GetGlfwHandle());
-        m_InputManager.BindAction("MoveForward", GLFW_KEY_W);
-        m_InputManager.BindAction("MoveBackward", GLFW_KEY_S);
-        m_InputManager.BindAction("MoveLeft", GLFW_KEY_A);
-        m_InputManager.BindAction("MoveRight", GLFW_KEY_D);
-        m_InputManager.BindAction("MoveUp", GLFW_KEY_SPACE);
-        m_InputManager.BindAction("MoveDown", GLFW_KEY_LEFT_CONTROL);
-        m_EventBus.SubscribeCollision([](const ecs::CollisionEvent& e){
-            Logger::Get().Info("Collision event: " + std::to_string(e.a.index) + " <-> " + std::to_string(e.b.index));
-        });
-    }
-
-    SetupEcsRuntimeDemo();
+        SetupEcsRuntimeDemo();
         Logger::Get().Info(std::string("Application: rebuilt ECS demo from config entities because ") + reason);
         return true;
     }
@@ -526,6 +512,27 @@ bool Application::ReloadSceneFromCurrentConfig(const char* reason)
     SetupEcsRuntimeDemo();
     Logger::Get().Info(std::string("Application: hot-reloaded ECS scene because ") + reason);
     return true;
+}
+
+void Application::ConfigureInputBindings()
+{
+    auto* primary = dynamic_cast<GlfwWindow*>(GetWindow());
+    if (primary == nullptr)
+        return;
+
+    m_InputManager.SetWindow(primary->GetGlfwHandle());
+    m_InputManager.BindAction("EnterGameplay", GLFW_KEY_ENTER);
+    m_InputManager.BindAction("MoveForward", GLFW_KEY_W);
+    m_InputManager.BindAction("MoveBackward", GLFW_KEY_S);
+    m_InputManager.BindAction("MoveLeft", GLFW_KEY_A);
+    m_InputManager.BindAction("MoveRight", GLFW_KEY_D);
+    m_InputManager.BindAction("MoveUp", GLFW_KEY_SPACE);
+    m_InputManager.BindAction("MoveDown", GLFW_KEY_LEFT_CONTROL);
+    m_InputManager.BindAction("PauseToMenu", GLFW_KEY_ESCAPE);
+    m_InputManager.BindAction("SpawnEntity", GLFW_KEY_SPACE);
+    m_InputManager.BindAction("DestroyEntity", GLFW_KEY_BACKSPACE);
+    m_InputManager.BindAction("FireProjectile", GLFW_KEY_F);
+    m_InputManager.BindAction("ToggleDebugColliders", GLFW_KEY_F3);
 }
 
 void Application::PollConfigHotReload()
@@ -632,12 +639,15 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
         m_World.AddComponent<ecs::BoundsBounceComponent>(entity);
 
     auto& rigidbody = m_World.AddComponent<ecs::RigidbodyComponent>(entity);
-    rigidbody.useGravity = true;
+    rigidbody.useGravity = entityCfg.useGravity;
     rigidbody.mass = 1.0f;
-    rigidbody.isStatic = tag.name == "GroundPlane";
+    rigidbody.isStatic = entityCfg.isStatic || tag.name == "GroundPlane";
+    rigidbody.simulatePhysics = entityCfg.simulatePhysics;
     rigidbody.velocity = entityCfg.linearVelocity;
     auto& collider = m_World.AddComponent<ecs::ColliderComponent>(entity);
-    collider.type = ecs::ColliderType::Box;
+    collider.type = (entityCfg.colliderType == "sphere" || entityCfg.colliderType == "Sphere")
+        ? ecs::ColliderType::Sphere
+        : ecs::ColliderType::Box;
     collider.autoFitFromMesh = !entityCfg.colliderManual;
     collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
     collider.offset = ecs::Vec3{};
@@ -665,6 +675,14 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
         collider.autoFitFromMesh = false;
     }
 
+    if (tag.name == "RollingSphere")
+    {
+        rigidbody.mass = 0.70f;
+        rigidbody.linearDampingMultiplier = 0.0f;
+        collider.friction = 0.08f;
+        collider.restitution = 0.03f;
+    }
+
     std::ostringstream ss;
     ss << "ECS runtime: spawned demo entity -> " << m_World.DebugDescribeEntity(entity)
        << " tag=" << tag.name
@@ -686,13 +704,21 @@ ecs::Entity Application::SpawnPhysicsProjectile()
 
     const ecs::Vec3 forward = BuildCameraForward(m_Camera.yaw, m_Camera.pitch);
     projectileCfg.position = m_Camera.position;
-    projectileCfg.linearVelocity = Scale(forward, 8.0f);
+    projectileCfg.linearVelocity = Scale(forward, 14.0f);
 
     const ecs::Entity projectile = SpawnEcsDemoEntity(projectileCfg);
     m_EcsDebugEntities.push_back(projectile);
 
     if (auto* rb = m_World.GetComponent<ecs::RigidbodyComponent>(projectile))
+    {
         rb->velocity = projectileCfg.linearVelocity;
+        rb->mass = 2.0f;
+    }
+    if (auto* collider = m_World.GetComponent<ecs::ColliderComponent>(projectile))
+    {
+        collider->friction = 0.25f;
+        collider->restitution = 0.10f;
+    }
 
     Logger::Get().Info("Gameplay: F detected -> spawned projectile entity");
     return projectile;
@@ -912,7 +938,12 @@ void Application::ToggleDebugColliders()
     m_DebugCollidersEnabled = !m_DebugCollidersEnabled;
     if (m_RenderSystem != nullptr)
         m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled);
-    Logger::Get().Info(std::string("Debug colliders: ") + (m_DebugCollidersEnabled ? "enabled" : "disabled"));
+    Logger::Get().Info(std::string("Application: debug colliders ") + (m_DebugCollidersEnabled ? "enabled" : "disabled"));
+}
+
+bool Application::IsInputActionActive(const std::string& action) const
+{
+    return m_InputManager.IsActionActive(action);
 }
 
 void Application::UpdateEcs(float dt)
@@ -1039,6 +1070,13 @@ bool Application::Initialize()
         return false;
 
     m_Windows.push_back(std::move(ctx));
+    ConfigureInputBindings();
+    m_EventBus.SubscribeCollision([](const ecs::CollisionEvent& e){
+        static int collisionLogCounter = 0;
+        ++collisionLogCounter;
+        if ((collisionLogCounter % 30) == 0)
+            Logger::Get().Info("Collision event(sampled): " + std::to_string(e.a.index) + " <-> " + std::to_string(e.b.index));
+    });
     SetupEcsRuntimeDemo();
     InitializeConfigHotReload();
 

@@ -140,7 +140,11 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
                 ReadVec3(je, "angularVelocity", entityCfg.angularVelocity);
                 ReadVec3(je, "colliderHalfExtents", entityCfg.colliderHalfExtents);
                 ReadVec3(je, "colliderOffset", entityCfg.colliderOffset);
+                entityCfg.colliderType = je.value("colliderType", std::string("box"));
                 entityCfg.colliderManual = je.value("colliderManual", false);
+                entityCfg.simulatePhysics = je.value("simulatePhysics", true);
+                entityCfg.isStatic = je.value("isStatic", false);
+                entityCfg.useGravity = je.value("useGravity", true);
 
                 if (je.contains("x")) entityCfg.position.x = je.value("x", 0.0f);
                 if (je.contains("y")) entityCfg.position.y = je.value("y", 0.0f);

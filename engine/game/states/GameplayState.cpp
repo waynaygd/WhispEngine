@@ -1,8 +1,6 @@
 #include "GameplayState.h"
 #include "../../core/Logger.h"
 #include "../../core/Application.h"
-#include "../../platform/GlfwWindow.h"
-#include <GLFW/glfw3.h>
 #include <string>
 #include "MenuState.h"
 
@@ -13,7 +11,7 @@ void GameplayState::OnEnter(Application& app)
     m_PrevSpace = false;
     m_PrevBackspace = false;
     m_PrevF = false;
-    m_PrevF2 = false;
+    m_PrevF3 = false;
     Logger::Get().Info(
         "GameplayState: OnEnter (ESC -> Menu, SPACE -> spawn ECS entity, F -> fire projectile, BACKSPACE -> destroy ECS entity).");
 }
@@ -28,14 +26,11 @@ void GameplayState::Update(Application& app, float dt)
 {
     (void)dt;
 
-    auto* gw = static_cast<GlfwWindow*>(app.GetWindow());
-    GLFWwindow* w = gw->GetGlfwHandle();
-
-    const bool esc = glfwGetKey(w, GLFW_KEY_ESCAPE) == GLFW_PRESS;
-    const bool rawSpace = glfwGetKey(w, GLFW_KEY_SPACE) == GLFW_PRESS;
-    const bool backspace = glfwGetKey(w, GLFW_KEY_BACKSPACE) == GLFW_PRESS;
-    const bool fire = glfwGetKey(w, GLFW_KEY_F) == GLFW_PRESS;
-    const bool debugF2 = glfwGetKey(w, GLFW_KEY_F2) == GLFW_PRESS;
+    const bool esc = app.IsInputActionActive("PauseToMenu");
+    const bool rawSpace = app.IsInputActionActive("SpawnEntity");
+    const bool backspace = app.IsInputActionActive("DestroyEntity");
+    const bool fire = app.IsInputActionActive("FireProjectile");
+    const bool debugF3 = app.IsInputActionActive("ToggleDebugColliders");
     const bool space = !app.IsCameraControlActive() && rawSpace;
 
     if (esc && !m_PrevEsc)
@@ -62,14 +57,14 @@ void GameplayState::Update(Application& app, float dt)
 
     if (fire && !m_PrevF)
         app.SpawnPhysicsProjectile();
-    if (debugF2 && !m_PrevF2)
+    if (debugF3 && !m_PrevF3)
         app.ToggleDebugColliders();
 
     m_PrevEsc = esc;
     m_PrevSpace = rawSpace;
     m_PrevBackspace = backspace;
     m_PrevF = fire;
-    m_PrevF2 = debugF2;
+    m_PrevF3 = debugF3;
 }
 
 
