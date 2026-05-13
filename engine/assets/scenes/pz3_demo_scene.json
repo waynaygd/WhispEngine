@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "entities": [
     {
       "tag": "GroundPlane",
@@ -9,14 +9,69 @@
       "position": [0.0, -1.0, 0.0],
       "rotation": [0.0, 0.0, 0.0],
       "scale": [8.0, 0.05, 8.0],
-      "bounce": false
+      "bounce": false,
+      "colliderManual": true,
+      "colliderHalfExtents": [4.0, 0.03, 4.0],
+      "colliderOffset": [0.0, 0.0, 0.0]
+    },
+    {
+      "tag": "StackCube_A",
+      "meshPath": "models/validation_cube.obj",
+      "materialPath": "materials/blue.material.json",
+      "position": [-1.2, 0.2, 0.0],
+      "rotation": [0.0, 0.0, 0.0],
+      "scale": [0.35, 0.35, 0.35],
+      "linearVelocity": [0.0, 0.0, 0.0],
+      "bounce": true,
+      "colliderManual": true,
+      "colliderHalfExtents": [0.175, 0.175, 0.175],
+      "colliderOffset": [0.0, 0.0, 0.0]
+    },
+    {
+      "tag": "StackCube_B",
+      "meshPath": "models/validation_cube.obj",
+      "materialPath": "materials/blue.material.json",
+      "position": [-1.2, 0.65, 0.0],
+      "rotation": [0.0, 0.0, 0.0],
+      "scale": [0.35, 0.35, 0.35],
+      "linearVelocity": [0.0, 0.0, 0.0],
+      "bounce": true,
+      "colliderManual": true,
+      "colliderHalfExtents": [0.175, 0.175, 0.175],
+      "colliderOffset": [0.0, 0.0, 0.0]
+    },
+    {
+      "tag": "StackCube_C",
+      "meshPath": "models/validation_cube.obj",
+      "materialPath": "materials/blue.material.json",
+      "position": [-1.2, 1.1, 0.0],
+      "rotation": [0.0, 0.0, 0.0],
+      "scale": [0.35, 0.35, 0.35],
+      "linearVelocity": [0.0, 0.0, 0.0],
+      "bounce": true,
+      "colliderManual": true,
+      "colliderHalfExtents": [0.175, 0.175, 0.175],
+      "colliderOffset": [0.0, 0.0, 0.0]
+    },
+    {
+      "tag": "PusherCube",
+      "meshPath": "models/validation_cube.obj",
+      "materialPath": "materials/validation_checker.material.json",
+      "position": [1.8, 0.25, 0.0],
+      "rotation": [0.0, 0.0, 0.0],
+      "scale": [0.5, 0.5, 0.5],
+      "linearVelocity": [-1.7, 0.0, 0.0],
+      "bounce": true,
+      "colliderManual": true,
+      "colliderHalfExtents": [0.25, 0.25, 0.25],
+      "colliderOffset": [0.0, 0.0, 0.0]
     },
     {
       "tag": "AfricanHead_Center",
       "meshPath": "models/african_head.obj",
       "materialPath": "materials/african_head.material.json",
       "color": [1.0, 1.0, 1.0, 1.0],
-      "position": [0.0, 1.1, 0.0],
+      "position": [0.0, 1.1, -1.4],
       "rotation": [0.0, 3.1415926, 0.0],
       "scale": [0.68, 0.68, 0.68],
       "bounce": false
@@ -26,7 +81,7 @@
       "meshPath": "models/african_head.obj",
       "materialPath": "materials/african_head.material.json",
       "color": [0.80, 0.88, 1.0, 1.0],
-      "position": [-0.60, 0.9, 0.0],
+      "position": [-0.60, 0.9, -2.0],
       "rotation": [0.0, 2.72, 0.0],
       "scale": [0.32, 0.32, 0.32],
       "bounce": false
@@ -36,7 +91,7 @@
       "meshPath": "models/african_head.obj",
       "materialPath": "materials/african_head.material.json",
       "color": [1.0, 0.90, 0.82, 1.0],
-      "position": [0.60, 0.9, 0.0],
+      "position": [0.60, 0.9, -2.0],
       "rotation": [0.0, 3.56, 0.0],
       "scale": [0.32, 0.32, 0.32],
       "bounce": false
