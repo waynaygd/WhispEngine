@@ -118,6 +118,7 @@ void PhysicsSystem::Update(World& world, float dt)
     const int substeps = std::max(configuredSubsteps, std::min(dynamicSubsteps, 64));
     const float stepDt = dt / static_cast<float>(substeps);
     const float dampingPerStep = std::pow(std::max(m_LinearDamping, 0.0f), stepDt * 60.0f);
+    const int solverIterations = 8;
     std::vector<BodyRef> bodies;
     bodies.reserve(128);
     world.ForEach<ColliderComponent, TransformComponent, RigidbodyComponent>([&](Entity e, ColliderComponent& c, TransformComponent& t, RigidbodyComponent& rb){
@@ -138,6 +139,8 @@ void PhysicsSystem::Update(World& world, float dt)
         t.position = Add(t.position, Scale(rb.velocity, stepDt));
     });
 
+    for (int iter = 0; iter < solverIterations; ++iter)
+    {
     for (std::size_t i = 0; i < bodies.size(); ++i)
     {
         for (std::size_t j = i + 1; j < bodies.size(); ++j)
@@ -288,8 +291,8 @@ void PhysicsSystem::Update(World& world, float dt)
                 continue;
 
             const bool singleStaticContact = (invMassA == 0.0f) != (invMassB == 0.0f);
-            const float slop = singleStaticContact ? 0.0f : 0.001f;
-            const float percent = singleStaticContact ? 1.0f : 0.8f;
+            const float slop = singleStaticContact ? 0.0005f : 0.0025f;
+            const float percent = singleStaticContact ? 0.9f : 0.65f;
             const float correctionScale = std::max(minPen - slop, 0.0f) * percent / invMassSum;
             const Vec3 correction = Scale(sep, correctionScale / (minPen > 0.0f ? minPen : 1.0f));
             if (invMassA > 0.0f)
@@ -352,7 +355,8 @@ void PhysicsSystem::Update(World& world, float dt)
                 const float invTangentLen = 1.0f / std::sqrt(tangentLenSq);
                 tangent = Scale(tangent, invTangentLen);
                 const float jt = -Dot(rvAfter, tangent) / invMassSum;
-                const float maxFriction = friction * minPen * 25.0f;
+                const float normalImpulseMag = std::max(-(1.0f + restitution) * velAlongNormal / invMassSum, 0.0f);
+                const float maxFriction = friction * normalImpulseMag;
                 const float clampedJt = std::max(-maxFriction, std::min(jt, maxFriction));
                 const Vec3 frictionImpulse = Scale(tangent, clampedJt);
                 if (invMassA > 0.0f)
@@ -412,5 +416,6 @@ void PhysicsSystem::Update(World& world, float dt)
             if (m_EventBus) m_EventBus->PublishCollision(CollisionEvent{ a.entity, b.entity });
         }
     }}
+    }
 }
 }
