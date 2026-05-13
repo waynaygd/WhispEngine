@@ -351,15 +351,15 @@ void RenderSystem::Update(World& world, float dt)
     world.ForEach<TransformComponent, ColliderComponent>(
         [&](Entity, TransformComponent& transform, ColliderComponent& collider)
         {
+            if (collider.type == ColliderType::Sphere)
+                return; // avoid misleading cube proxy for sphere collider debug
+
             float mvp[16];
             TransformComponent debugTransform = transform;
             debugTransform.position.x += collider.offset.x;
             debugTransform.position.y += collider.offset.y;
             debugTransform.position.z += collider.offset.z;
             // Box colliders can be oriented; keep rotation for box debug draw.
-            // Sphere collider debug still uses test cube as a visual proxy for now.
-            if (collider.type != ColliderType::Box)
-                debugTransform.rotation = ecs::Vec3{};
             debugTransform.scale = ecs::Vec3{
                 collider.halfExtents.x * 2.0f,
                 collider.halfExtents.y * 2.0f,
