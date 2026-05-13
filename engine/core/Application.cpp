@@ -701,13 +701,15 @@ void Application::UpdateCameraController(float dt)
         movement = Add(movement, right);
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
         movement = Add(movement, Scale(right, -1.0f));
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS ||
+        glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
         movement = Add(movement, worldUp);
 
-    const bool ctrlDown =
+    const bool downPressed =
+        glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS ||
         glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
         glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
-    if (ctrlDown)
+    if (downPressed)
         movement = Add(movement, Scale(worldUp, -1.0f));
 
     if (Length(movement) <= 0.0001f)
