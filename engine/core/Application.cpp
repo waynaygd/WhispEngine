@@ -13,7 +13,6 @@
 #include "../ecs/components/TransformComponent.h"
 #include "../ecs/components/VelocityComponent.h"
 #include "../ecs/systems/BoundsBounceSystem.h"
-#include "../ecs/systems/MotionSystem.h"
 #include "../ecs/systems/PhysicsSystem.h"
 #include "../platform/GlfwWindow.h"
 #include "../render/IRenderAdapter.h"
@@ -244,7 +243,7 @@ std::vector<EcsDemoEntityConfig> Application::BuildDefaultEcsDemoEntities()
 
     entities[1].tag = "AfricanHead_Center";
     entities[1].meshPath = "models/african_head.obj";
-    entities[1].materialPath = "materials/african_head.material.json";
+    entities[1].materialPath = "materials/validation_checker.material.json";
     entities[1].position = ecs::Vec3{ 0.0f, 1.1f, 0.0f };
     entities[1].rotation = ecs::Vec3{ 0.0f, 3.1415926f, 0.0f };
     entities[1].scale = ecs::Vec3{ 0.68f, 0.68f, 0.68f };
@@ -252,7 +251,7 @@ std::vector<EcsDemoEntityConfig> Application::BuildDefaultEcsDemoEntities()
 
     entities[2].tag = "AfricanHead_Left";
     entities[2].meshPath = "models/african_head.obj";
-    entities[2].materialPath = "materials/african_head.material.json";
+    entities[2].materialPath = "materials/validation_checker.material.json";
     entities[2].materialTint = { 0.80f, 0.88f, 1.0f, 1.0f };
     entities[2].position = ecs::Vec3{ -0.60f, 0.9f, 0.0f };
     entities[2].rotation = ecs::Vec3{ 0.0f, 2.72f, 0.0f };
@@ -261,7 +260,7 @@ std::vector<EcsDemoEntityConfig> Application::BuildDefaultEcsDemoEntities()
 
     entities[3].tag = "AfricanHead_Right";
     entities[3].meshPath = "models/african_head.obj";
-    entities[3].materialPath = "materials/african_head.material.json";
+    entities[3].materialPath = "materials/validation_checker.material.json";
     entities[3].materialTint = { 1.0f, 0.90f, 0.82f, 1.0f };
     entities[3].position = ecs::Vec3{ 0.60f, 0.9f, 0.0f };
     entities[3].rotation = ecs::Vec3{ 0.0f, 3.56f, 0.0f };
@@ -358,7 +357,6 @@ void Application::RunEcsBootstrapCheck()
 void Application::SetupEcsRuntimeDemo()
 {
     m_World.ClearSystems();
-    m_World.AddSystem<ecs::MotionSystem>();
     m_World.AddSystem<ecs::PhysicsSystem>(&m_EventBus);
     m_World.AddSystem<ecs::BoundsBounceSystem>();
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
@@ -387,7 +385,7 @@ void Application::SetupEcsRuntimeDemo()
 
     m_EcsDebugLogTimer = 0.0f;
 
-    Logger::Get().Info("ECS runtime: motion system registered");
+    Logger::Get().Info("ECS runtime: physics system registered (motion system disabled to avoid double integration)");
     Logger::Get().Info("ECS runtime: bounds bounce system registered");
     Logger::Get().Info("ECS runtime: demo scene created with " + std::to_string(m_EcsDebugEntities.size()) + " ECS entities");
     Logger::Get().Info("ECS runtime: render system registered");
@@ -568,6 +566,7 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     rigidbody.useGravity = true;
     rigidbody.mass = 1.0f;
     rigidbody.isStatic = tag.name == "GroundPlane";
+    rigidbody.velocity = entityCfg.linearVelocity;
     auto& collider = m_World.AddComponent<ecs::ColliderComponent>(entity);
     collider.type = ecs::ColliderType::Box;
     collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
