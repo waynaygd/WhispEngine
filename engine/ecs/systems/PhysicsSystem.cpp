@@ -101,12 +101,14 @@ void PhysicsSystem::Update(World& world, float dt)
 {
     if (dt <= 0.0f)
         return;
+    if (dt > 0.05f)
+        dt = 0.05f;
     const float gravity = m_Gravity;
     const float linearDamping = m_LinearDamping;
-    const float baseStep = 1.0f / 120.0f;
+    const float baseStep = 1.0f / 240.0f;
     const int dynamicSubsteps = static_cast<int>(std::ceil(dt / baseStep));
     const int configuredSubsteps = m_Substeps > 0 ? m_Substeps : 1;
-    const int substeps = std::max(configuredSubsteps, std::min(dynamicSubsteps, 16));
+    const int substeps = std::max(configuredSubsteps, std::min(dynamicSubsteps, 64));
     const float stepDt = dt / static_cast<float>(substeps);
     std::vector<BodyRef> bodies;
     bodies.reserve(128);
