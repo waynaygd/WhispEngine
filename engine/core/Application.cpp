@@ -675,6 +675,13 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
         collider.autoFitFromMesh = false;
     }
 
+    if (tag.name == "RollingSphere")
+    {
+        rigidbody.mass = 0.65f;
+        collider.friction = 0.22f;
+        collider.restitution = 0.03f;
+    }
+
     std::ostringstream ss;
     ss << "ECS runtime: spawned demo entity -> " << m_World.DebugDescribeEntity(entity)
        << " tag=" << tag.name
@@ -705,6 +712,11 @@ ecs::Entity Application::SpawnPhysicsProjectile()
     {
         rb->velocity = projectileCfg.linearVelocity;
         rb->mass = 2.0f;
+    }
+    if (auto* collider = m_World.GetComponent<ecs::ColliderComponent>(projectile))
+    {
+        collider->friction = 0.25f;
+        collider->restitution = 0.10f;
     }
 
     Logger::Get().Info("Gameplay: F detected -> spawned projectile entity");
