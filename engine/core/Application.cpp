@@ -644,7 +644,9 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     rigidbody.isStatic = tag.name == "GroundPlane";
     rigidbody.velocity = entityCfg.linearVelocity;
     auto& collider = m_World.AddComponent<ecs::ColliderComponent>(entity);
-    collider.type = ecs::ColliderType::Box;
+    collider.type = (entityCfg.colliderType == "sphere" || entityCfg.colliderType == "Sphere")
+        ? ecs::ColliderType::Sphere
+        : ecs::ColliderType::Box;
     collider.autoFitFromMesh = !entityCfg.colliderManual;
     collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
     collider.offset = ecs::Vec3{};
@@ -1053,7 +1055,10 @@ bool Application::Initialize()
     m_Windows.push_back(std::move(ctx));
     ConfigureInputBindings();
     m_EventBus.SubscribeCollision([](const ecs::CollisionEvent& e){
-        Logger::Get().Info("Collision event: " + std::to_string(e.a.index) + " <-> " + std::to_string(e.b.index));
+        static int collisionLogCounter = 0;
+        ++collisionLogCounter;
+        if ((collisionLogCounter % 30) == 0)
+            Logger::Get().Info("Collision event(sampled): " + std::to_string(e.a.index) + " <-> " + std::to_string(e.b.index));
     });
     SetupEcsRuntimeDemo();
     InitializeConfigHotReload();

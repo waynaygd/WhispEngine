@@ -33,6 +33,7 @@ struct EcsDemoEntityConfig
     ecs::Vec3 angularVelocity{};
     ecs::Vec3 colliderHalfExtents{};
     ecs::Vec3 colliderOffset{};
+    std::string colliderType = "box";
     bool colliderManual = false;
 };
 

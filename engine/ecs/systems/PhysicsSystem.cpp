@@ -82,6 +82,12 @@ void PhysicsSystem::Update(World& world, float dt)
     const int configuredSubsteps = m_Substeps > 0 ? m_Substeps : 1;
     const int substeps = std::max(configuredSubsteps, std::min(dynamicSubsteps, 16));
     const float stepDt = dt / static_cast<float>(substeps);
+    std::vector<BodyRef> bodies;
+    bodies.reserve(128);
+    world.ForEach<ColliderComponent, TransformComponent, RigidbodyComponent>([&](Entity e, ColliderComponent& c, TransformComponent& t, RigidbodyComponent& rb){
+        bodies.push_back(BodyRef{ e, &t, &c, &rb });
+    });
+
     for (int step = 0; step < substeps; ++step)
     {
     world.ForEach<TransformComponent, RigidbodyComponent>([&](Entity, TransformComponent& t, RigidbodyComponent& rb){
@@ -93,12 +99,6 @@ void PhysicsSystem::Update(World& world, float dt)
         if (Abs(rb.velocity.z) < 0.0005f) rb.velocity.z = 0.0f;
         rb.velocity = Add(rb.velocity, Scale(rb.acceleration, stepDt));
         t.position = Add(t.position, Scale(rb.velocity, stepDt));
-    });
-
-    std::vector<BodyRef> bodies;
-    bodies.reserve(128);
-    world.ForEach<ColliderComponent, TransformComponent, RigidbodyComponent>([&](Entity e, ColliderComponent& c, TransformComponent& t, RigidbodyComponent& rb){
-        bodies.push_back(BodyRef{ e, &t, &c, &rb });
     });
 
     for (std::size_t i = 0; i < bodies.size(); ++i)
