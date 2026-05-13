@@ -5,6 +5,9 @@
 #include "../components/TransformComponent.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -42,6 +45,23 @@ static float BoundingRadius(const ecs::ColliderComponent& c)
     return std::sqrt(c.halfExtents.x * c.halfExtents.x +
                      c.halfExtents.y * c.halfExtents.y +
                      c.halfExtents.z * c.halfExtents.z);
+}
+static int CellCoord(float v, float cellSize)
+{
+    return static_cast<int>(std::floor(v / cellSize));
+}
+static std::uint64_t CellKey(int x, int y, int z)
+{
+    const std::uint64_t ux = static_cast<std::uint32_t>(x) & 0x1fffffu;
+    const std::uint64_t uy = static_cast<std::uint32_t>(y) & 0x1fffffu;
+    const std::uint64_t uz = static_cast<std::uint32_t>(z) & 0x1fffffu;
+    return (ux << 42) | (uy << 21) | uz;
+}
+static std::uint64_t PairKey(std::size_t a, std::size_t b)
+{
+    const std::uint64_t lo = static_cast<std::uint64_t>(std::min(a, b));
+    const std::uint64_t hi = static_cast<std::uint64_t>(std::max(a, b));
+    return (hi << 32) ^ lo;
 }
 static Vec3 RotatedAabbHalfExtents(const Vec3& localHalf, const Vec3& rot)
 {
@@ -149,29 +169,61 @@ void PhysicsSystem::Update(World& world, float dt)
     });
 
     std::vector<std::pair<std::size_t, std::size_t>> candidatePairs;
-    candidatePairs.reserve(bodies.size() * 2);
+    candidatePairs.reserve(bodies.size() * 3);
+    std::unordered_set<std::uint64_t> pairDedup;
+    pairDedup.reserve(bodies.size() * 8);
+    std::unordered_map<std::uint64_t, std::vector<std::size_t>> grid;
+    grid.reserve(bodies.size() * 2);
+    const float cellSize = 0.6f;
+    for (std::size_t i = 0; i < bodies.size(); ++i)
+    {
+        const BodyRef& body = bodies[i];
+        if ((!body.rigidbody->simulatePhysics && !body.rigidbody->isStatic))
+            continue;
+        const Vec3 c = Add(body.transform->position, body.collider->offset);
+        const int cx = CellCoord(c.x, cellSize);
+        const int cy = CellCoord(c.y, cellSize);
+        const int cz = CellCoord(c.z, cellSize);
+        grid[CellKey(cx, cy, cz)].push_back(i);
+    }
+
     for (std::size_t i = 0; i < bodies.size(); ++i)
     {
         const BodyRef& a = bodies[i];
         if ((!a.rigidbody->simulatePhysics && !a.rigidbody->isStatic))
             continue;
-        for (std::size_t j = i + 1; j < bodies.size(); ++j)
+        const Vec3 ac = Add(a.transform->position, a.collider->offset);
+        const int cx = CellCoord(ac.x, cellSize);
+        const int cy = CellCoord(ac.y, cellSize);
+        const int cz = CellCoord(ac.z, cellSize);
+        for (int ox = -1; ox <= 1; ++ox)
+        for (int oy = -1; oy <= 1; ++oy)
+        for (int oz = -1; oz <= 1; ++oz)
         {
-            const BodyRef& b = bodies[j];
-            if ((!b.rigidbody->simulatePhysics && !b.rigidbody->isStatic))
+            const auto it = grid.find(CellKey(cx + ox, cy + oy, cz + oz));
+            if (it == grid.end())
                 continue;
-            if (a.rigidbody->isStatic && b.rigidbody->isStatic)
-                continue;
-
-            const Vec3 ac = Add(a.transform->position, a.collider->offset);
-            const Vec3 bc = Add(b.transform->position, b.collider->offset);
-            const Vec3 d = Sub(ac, bc);
-            const float ra = BoundingRadius(*a.collider);
-            const float rb = BoundingRadius(*b.collider);
-            const float broadphasePad = 0.05f;
-            const float range = ra + rb + broadphasePad;
-            if (LengthSq(d) <= range * range)
-                candidatePairs.emplace_back(i, j);
+            for (const std::size_t j : it->second)
+            {
+                if (i >= j)
+                    continue;
+                const BodyRef& b = bodies[j];
+                if ((!b.rigidbody->simulatePhysics && !b.rigidbody->isStatic))
+                    continue;
+                if (a.rigidbody->isStatic && b.rigidbody->isStatic)
+                    continue;
+                const std::uint64_t pkey = PairKey(i, j);
+                if (!pairDedup.insert(pkey).second)
+                    continue;
+                const Vec3 bc = Add(b.transform->position, b.collider->offset);
+                const Vec3 d = Sub(ac, bc);
+                const float ra = BoundingRadius(*a.collider);
+                const float rb = BoundingRadius(*b.collider);
+                const float broadphasePad = 0.05f;
+                const float range = ra + rb + broadphasePad;
+                if (LengthSq(d) <= range * range)
+                    candidatePairs.emplace_back(i, j);
+            }
         }
     }
 
