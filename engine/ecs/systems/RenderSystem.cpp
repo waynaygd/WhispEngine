@@ -356,6 +356,8 @@ void RenderSystem::Update(World& world, float dt)
             debugTransform.position.x += collider.offset.x;
             debugTransform.position.y += collider.offset.y;
             debugTransform.position.z += collider.offset.z;
+            // Collider is AABB in world axes, so debug box should not inherit entity rotation.
+            debugTransform.rotation = ecs::Vec3{};
             debugTransform.scale = ecs::Vec3{
                 collider.halfExtents.x * 2.0f,
                 collider.halfExtents.y * 2.0f,

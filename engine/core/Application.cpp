@@ -643,13 +643,11 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
 
                     if (meshRenderer.meshPath.find("african_head") != std::string::npos)
                     {
-                        // Inflate head collider so it is noticeably volumetric and avoids facial clipping into plane.
-                        collider.halfExtents.x *= 1.15f;
-                        collider.halfExtents.y *= 1.18f;
-                        collider.halfExtents.z *= 1.35f;
-                        if (collider.halfExtents.z < collider.halfExtents.x * 0.85f)
-                            collider.halfExtents.z = collider.halfExtents.x * 0.85f;
-                        collider.offset.y += collider.halfExtents.y * 0.08f;
+                        // Keep anisotropic shape (parallelepiped), only small per-axis padding.
+                        collider.halfExtents.x *= 1.08f;
+                        collider.halfExtents.y *= 1.10f;
+                        collider.halfExtents.z *= 1.18f;
+                        collider.offset.y += collider.halfExtents.y * 0.04f;
                     }
                 }
             }
