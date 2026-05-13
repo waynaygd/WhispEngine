@@ -174,17 +174,50 @@ void PhysicsSystem::Update(World& world, float dt)
     pairDedup.reserve(bodies.size() * 8);
     std::unordered_map<std::uint64_t, std::vector<std::size_t>> grid;
     grid.reserve(bodies.size() * 2);
+    std::vector<std::size_t> dynamicBodies;
+    std::vector<std::size_t> staticBoxes;
+    dynamicBodies.reserve(bodies.size());
+    staticBoxes.reserve(16);
     const float cellSize = 0.6f;
     for (std::size_t i = 0; i < bodies.size(); ++i)
     {
         const BodyRef& body = bodies[i];
         if ((!body.rigidbody->simulatePhysics && !body.rigidbody->isStatic))
             continue;
+        if (!body.rigidbody->isStatic)
+            dynamicBodies.push_back(i);
+        else if (body.collider->type == ColliderType::Box)
+            staticBoxes.push_back(i);
         const Vec3 c = Add(body.transform->position, body.collider->offset);
         const int cx = CellCoord(c.x, cellSize);
         const int cy = CellCoord(c.y, cellSize);
         const int cz = CellCoord(c.z, cellSize);
         grid[CellKey(cx, cy, cz)].push_back(i);
+    }
+
+    // Always test dynamic bodies against static boxes (plane/ramp support)
+    // to avoid broadphase misses for large static colliders occupying many cells.
+    for (const std::size_t i : dynamicBodies)
+    {
+        const BodyRef& a = bodies[i];
+        const Vec3 ac = Add(a.transform->position, a.collider->offset);
+        for (const std::size_t j : staticBoxes)
+        {
+            if (i == j)
+                continue;
+            const std::uint64_t pkey = PairKey(i, j);
+            if (!pairDedup.insert(pkey).second)
+                continue;
+            const BodyRef& b = bodies[j];
+            const Vec3 bc = Add(b.transform->position, b.collider->offset);
+            const Vec3 d = Sub(ac, bc);
+            const float ra = BoundingRadius(*a.collider);
+            const float rb = BoundingRadius(*b.collider);
+            const float broadphasePad = 0.10f;
+            const float range = ra + rb + broadphasePad;
+            if (LengthSq(d) <= range * range)
+                candidatePairs.emplace_back(std::min(i, j), std::max(i, j));
+        }
     }
 
     for (std::size_t i = 0; i < bodies.size(); ++i)
