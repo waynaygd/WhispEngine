@@ -14,6 +14,7 @@ static Vec3 Sub(const Vec3&a,const Vec3&b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
 static Vec3 Scale(const Vec3&v,float s){return {v.x*s,v.y*s,v.z*s};}
 static float Dot(const Vec3&a,const Vec3&b){return a.x*b.x+a.y*b.y+a.z*b.z;}
 static float Abs(float v){ return v >= 0.0f ? v : -v; }
+static float Sign(float v){ return v >= 0.0f ? 1.0f : -1.0f; }
 static Vec3 RotatedAabbHalfExtents(const Vec3& localHalf, const Vec3& rot)
 {
     const float cx = std::cos(rot.x), sx = std::sin(rot.x);
@@ -159,6 +160,42 @@ void PhysicsSystem::Update(World& world, float dt)
                     a.rigidbody->velocity = Add(a.rigidbody->velocity, Scale(frictionImpulse, invMassA));
                 if (invMassB > 0.0f)
                     b.rigidbody->velocity = Sub(b.rigidbody->velocity, Scale(frictionImpulse, invMassB));
+            }
+
+            // Simple center-of-mass support check for tower-like tipping:
+            // when an object stands on another and its projected center leaves support footprint,
+            // add lateral velocity so it starts falling off the edge.
+            if (axis == 1)
+            {
+                BodyRef* top = nullptr;
+                BodyRef* bottom = nullptr;
+                Vec3 topHalf{};
+                Vec3 bottomHalf{};
+                if (a.transform->position.y >= b.transform->position.y)
+                {
+                    top = &a; bottom = &b; topHalf = aHalf; bottomHalf = bHalf;
+                }
+                else
+                {
+                    top = &b; bottom = &a; topHalf = bHalf; bottomHalf = aHalf;
+                }
+
+                if (!top->rigidbody->isStatic && top->rigidbody->simulatePhysics)
+                {
+                    const Vec3 topCenter = Add(top->transform->position, top->collider->offset);
+                    const Vec3 bottomCenter = Add(bottom->transform->position, bottom->collider->offset);
+                    const float dx = topCenter.x - bottomCenter.x;
+                    const float dz = topCenter.z - bottomCenter.z;
+                    const float supportMarginX = std::max(bottomHalf.x - topHalf.x * 0.5f, 0.0f);
+                    const float supportMarginZ = std::max(bottomHalf.z - topHalf.z * 0.5f, 0.0f);
+                    const float overhangX = Abs(dx) - supportMarginX;
+                    const float overhangZ = Abs(dz) - supportMarginZ;
+                    const float tipStrength = 2.25f;
+                    if (overhangX > 0.0f)
+                        top->rigidbody->velocity.x += Sign(dx) * std::min(overhangX * tipStrength, 4.0f) * stepDt;
+                    if (overhangZ > 0.0f)
+                        top->rigidbody->velocity.z += Sign(dz) * std::min(overhangZ * tipStrength, 4.0f) * stepDt;
+                }
             }
             if (m_EventBus) m_EventBus->PublishCollision(CollisionEvent{ a.entity, b.entity });
         }
