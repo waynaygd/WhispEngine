@@ -593,16 +593,56 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     rigidbody.velocity = entityCfg.linearVelocity;
     auto& collider = m_World.AddComponent<ecs::ColliderComponent>(entity);
     collider.type = ecs::ColliderType::Box;
-    if (tag.name == "GroundPlane")
-        collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
-    else if (meshRenderer.meshPath.find("african_head") != std::string::npos)
+    collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
+    collider.offset = ecs::Vec3{};
+    if (m_ResourceManager != nullptr)
     {
-        collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.28f, entityCfg.scale.y * 0.58f, entityCfg.scale.z * 0.28f };
-        // Lift collider slightly relative to model pivot so neck does not sink through the plane.
-        collider.offset.y = -entityCfg.scale.y * 0.12f;
+        const std::string meshKey = AssetPaths::NormalizeAssetKey(meshRenderer.meshPath);
+        if (!meshKey.empty())
+        {
+            const auto meshResource = m_ResourceManager->Load<MeshResource>(meshKey);
+            if (meshResource != nullptr && meshResource->IsUsable())
+            {
+                const auto& vertices = meshResource->GetData().meshData.vertices;
+                if (!vertices.empty())
+                {
+                    ecs::Vec3 minV{ vertices[0].position[0], vertices[0].position[1], vertices[0].position[2] };
+                    ecs::Vec3 maxV = minV;
+                    for (const auto& v : vertices)
+                    {
+                        if (v.position[0] < minV.x) minV.x = v.position[0];
+                        if (v.position[1] < minV.y) minV.y = v.position[1];
+                        if (v.position[2] < minV.z) minV.z = v.position[2];
+                        if (v.position[0] > maxV.x) maxV.x = v.position[0];
+                        if (v.position[1] > maxV.y) maxV.y = v.position[1];
+                        if (v.position[2] > maxV.z) maxV.z = v.position[2];
+                    }
+
+                    const ecs::Vec3 localHalf{
+                        (maxV.x - minV.x) * 0.5f,
+                        (maxV.y - minV.y) * 0.5f,
+                        (maxV.z - minV.z) * 0.5f
+                    };
+                    const ecs::Vec3 localCenter{
+                        (maxV.x + minV.x) * 0.5f,
+                        (maxV.y + minV.y) * 0.5f,
+                        (maxV.z + minV.z) * 0.5f
+                    };
+
+                    collider.halfExtents = ecs::Vec3{
+                        localHalf.x * entityCfg.scale.x,
+                        localHalf.y * entityCfg.scale.y,
+                        localHalf.z * entityCfg.scale.z
+                    };
+                    collider.offset = ecs::Vec3{
+                        localCenter.x * entityCfg.scale.x,
+                        localCenter.y * entityCfg.scale.y,
+                        localCenter.z * entityCfg.scale.z
+                    };
+                }
+            }
+        }
     }
-    else
-        collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
 
     std::ostringstream ss;
     ss << "ECS runtime: spawned demo entity -> " << m_World.DebugDescribeEntity(entity)
