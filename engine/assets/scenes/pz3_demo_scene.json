@@ -43,7 +43,7 @@
       "materialPath": "materials/validation_checker.material.json",
       "position": [
         0.0,
-        -0.35,
+        0.5,
         -1.4
       ],
       "rotation": [
@@ -78,8 +78,8 @@
       "meshPath": "models/validation_sphere.obj",
       "materialPath": "materials/blue.material.json",
       "position": [
-        -1.15,
-        0.95,
+        -1.35,
+        1.95,
         -1.4
       ],
       "rotation": [
@@ -93,7 +93,7 @@
         0.28
       ],
       "linearVelocity": [
-        0.2,
+        0.0,
         0.0,
         0.0
       ],
