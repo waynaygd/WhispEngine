@@ -682,11 +682,12 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
 
     if (tag.name == "RollingSphere")
     {
-        rigidbody.mass = 0.70f;
-        rigidbody.linearDampingMultiplier = 0.0f;
+        const bool arcadeProfile = (m_Config.physics.rollingSphereProfile == "arcade");
+        rigidbody.mass = arcadeProfile ? 0.62f : 0.70f;
+        rigidbody.linearDampingMultiplier = arcadeProfile ? 0.0f : 0.10f;
         rigidbody.useAdvancedSphereStabilization = true;
-        collider.friction = 0.08f;
-        collider.restitution = 0.03f;
+        collider.friction = arcadeProfile ? 0.04f : 0.08f;
+        collider.restitution = arcadeProfile ? 0.02f : 0.03f;
     }
 
     std::ostringstream ss;

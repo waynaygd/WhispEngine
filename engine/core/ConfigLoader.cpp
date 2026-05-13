@@ -182,6 +182,7 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
         outCfg.physics.spherePenetrationEpsilon = physics.value("spherePenetrationEpsilon", outCfg.physics.spherePenetrationEpsilon);
         outCfg.physics.sphereVelocityEpsilon = physics.value("sphereVelocityEpsilon", outCfg.physics.sphereVelocityEpsilon);
         outCfg.physics.dynamicBoxSphereCorrectionPercent = physics.value("dynamicBoxSphereCorrectionPercent", outCfg.physics.dynamicBoxSphereCorrectionPercent);
+        outCfg.physics.rollingSphereProfile = physics.value("rollingSphereProfile", outCfg.physics.rollingSphereProfile);
     }
 
     Logger::Get().Info(

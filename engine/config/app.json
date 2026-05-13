@@ -31,6 +31,7 @@
     "sphereMaxSpeed": 12.0,
     "spherePenetrationEpsilon": 0.0005,
     "sphereVelocityEpsilon": 0.03,
-    "dynamicBoxSphereCorrectionPercent": 0.75
+    "dynamicBoxSphereCorrectionPercent": 0.75,
+    "rollingSphereProfile": "arcade"
   }
 }

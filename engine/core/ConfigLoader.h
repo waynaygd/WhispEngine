@@ -61,6 +61,7 @@ struct AppConfig
         float spherePenetrationEpsilon = 0.0005f;
         float sphereVelocityEpsilon = 0.05f;
         float dynamicBoxSphereCorrectionPercent = 1.0f;
+        std::string rollingSphereProfile = "stable";
     };
 
     RenderBackend activeBackend = RenderBackend::DX12;
