@@ -5,6 +5,7 @@
 #include "../components/TransformComponent.h"
 #include <algorithm>
 #include <cmath>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -33,6 +34,14 @@ static Vec3 NormalizeSafe(const Vec3& v)
 static float SphereRadius(const ecs::ColliderComponent& c)
 {
     return std::max(c.halfExtents.x, std::max(c.halfExtents.y, c.halfExtents.z));
+}
+static float BoundingRadius(const ecs::ColliderComponent& c)
+{
+    if (c.type == ecs::ColliderType::Sphere)
+        return SphereRadius(c);
+    return std::sqrt(c.halfExtents.x * c.halfExtents.x +
+                     c.halfExtents.y * c.halfExtents.y +
+                     c.halfExtents.z * c.halfExtents.z);
 }
 static Vec3 RotatedAabbHalfExtents(const Vec3& localHalf, const Vec3& rot)
 {
@@ -139,12 +148,39 @@ void PhysicsSystem::Update(World& world, float dt)
         t.position = Add(t.position, Scale(rb.velocity, stepDt));
     });
 
-    for (int iter = 0; iter < solverIterations; ++iter)
-    {
+    std::vector<std::pair<std::size_t, std::size_t>> candidatePairs;
+    candidatePairs.reserve(bodies.size() * 2);
     for (std::size_t i = 0; i < bodies.size(); ++i)
     {
+        const BodyRef& a = bodies[i];
+        if ((!a.rigidbody->simulatePhysics && !a.rigidbody->isStatic))
+            continue;
         for (std::size_t j = i + 1; j < bodies.size(); ++j)
         {
+            const BodyRef& b = bodies[j];
+            if ((!b.rigidbody->simulatePhysics && !b.rigidbody->isStatic))
+                continue;
+            if (a.rigidbody->isStatic && b.rigidbody->isStatic)
+                continue;
+
+            const Vec3 ac = Add(a.transform->position, a.collider->offset);
+            const Vec3 bc = Add(b.transform->position, b.collider->offset);
+            const Vec3 d = Sub(ac, bc);
+            const float ra = BoundingRadius(*a.collider);
+            const float rb = BoundingRadius(*b.collider);
+            const float broadphasePad = 0.05f;
+            const float range = ra + rb + broadphasePad;
+            if (LengthSq(d) <= range * range)
+                candidatePairs.emplace_back(i, j);
+        }
+    }
+
+    for (int iter = 0; iter < solverIterations; ++iter)
+    {
+    for (const auto& pair : candidatePairs)
+    {
+            const std::size_t i = pair.first;
+            const std::size_t j = pair.second;
             BodyRef& a = bodies[i];
             BodyRef& b = bodies[j];
             if ((!a.rigidbody->simulatePhysics && !a.rigidbody->isStatic) ||
@@ -455,7 +491,6 @@ void PhysicsSystem::Update(World& world, float dt)
                 }
             }
             if (m_EventBus) m_EventBus->PublishCollision(CollisionEvent{ a.entity, b.entity });
-        }
     }}
     }
 
