@@ -27,10 +27,10 @@
     "substeps": 3,
     "restitution": 0.05,
     "friction": 0.85,
-    "solverIterations": 6,
-    "sphereMaxSpeed": 7.0,
-    "spherePenetrationEpsilon": 0.0015,
-    "sphereVelocityEpsilon": 0.12,
-    "dynamicBoxSphereCorrectionPercent": 1.2
+    "solverIterations": 3,
+    "sphereMaxSpeed": 12.0,
+    "spherePenetrationEpsilon": 0.0005,
+    "sphereVelocityEpsilon": 0.03,
+    "dynamicBoxSphereCorrectionPercent": 0.75
   }
 }

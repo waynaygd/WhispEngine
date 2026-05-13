@@ -280,10 +280,6 @@ void PhysicsSystem::Update(World& world, float dt)
                 contactType = ContactType::BoxSphere;
             }
 
-            const Vec3 approachVelocity = Sub(a.rigidbody->velocity, b.rigidbody->velocity);
-            if (Dot(approachVelocity, normal) > 0.0f)
-                normal = Scale(normal, -1.0f);
-
             Vec3 sep = Scale(normal, minPen);
             if (minPen <= 0.0f)
                 continue;
