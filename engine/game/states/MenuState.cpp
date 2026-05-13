@@ -17,7 +17,7 @@ void MenuState::Update(Application& app, float)
     auto* gw = static_cast<GlfwWindow*>(app.GetWindow());
     GLFWwindow* w = gw->GetGlfwHandle();
 
-    const bool enterMain = glfwGetKey(w, GLFW_KEY_ENTER) == GLFW_PRESS;
+    const bool enterMain = app.IsInputActionActive("EnterGameplay") || glfwGetKey(w, GLFW_KEY_ENTER) == GLFW_PRESS;
     const bool enterKP = glfwGetKey(w, GLFW_KEY_KP_ENTER) == GLFW_PRESS;
     const bool enter = enterMain || enterKP;
 

@@ -62,6 +62,7 @@ private:
     void InitializeConfigHotReload();
     void PollConfigHotReload();
     bool ReloadSceneFromCurrentConfig(const char* reason);
+    void ConfigureInputBindings();
     ecs::Entity SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg);
     void UpdateEcs(float dt);
     void UpdateCameraController(float dt);

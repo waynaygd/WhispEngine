@@ -493,26 +493,7 @@ bool Application::ReloadSceneFromCurrentConfig(const char* reason)
 {
     if (m_Config.ecsDemo.sceneFile.empty())
     {
-        if (auto* primary = dynamic_cast<GlfwWindow*>(GetWindow()))
-    {
-        m_InputManager.SetWindow(primary->GetGlfwHandle());
-        m_InputManager.BindAction("MoveForward", GLFW_KEY_W);
-        m_InputManager.BindAction("MoveBackward", GLFW_KEY_S);
-        m_InputManager.BindAction("MoveLeft", GLFW_KEY_A);
-        m_InputManager.BindAction("MoveRight", GLFW_KEY_D);
-        m_InputManager.BindAction("MoveUp", GLFW_KEY_SPACE);
-        m_InputManager.BindAction("MoveDown", GLFW_KEY_LEFT_CONTROL);
-        m_InputManager.BindAction("PauseToMenu", GLFW_KEY_ESCAPE);
-        m_InputManager.BindAction("SpawnEntity", GLFW_KEY_SPACE);
-        m_InputManager.BindAction("DestroyEntity", GLFW_KEY_BACKSPACE);
-        m_InputManager.BindAction("FireProjectile", GLFW_KEY_F);
-        m_InputManager.BindAction("ToggleDebugColliders", GLFW_KEY_F3);
-        m_EventBus.SubscribeCollision([](const ecs::CollisionEvent& e){
-            Logger::Get().Info("Collision event: " + std::to_string(e.a.index) + " <-> " + std::to_string(e.b.index));
-        });
-    }
-
-    SetupEcsRuntimeDemo();
+        SetupEcsRuntimeDemo();
         Logger::Get().Info(std::string("Application: rebuilt ECS demo from config entities because ") + reason);
         return true;
     }
@@ -531,6 +512,27 @@ bool Application::ReloadSceneFromCurrentConfig(const char* reason)
     SetupEcsRuntimeDemo();
     Logger::Get().Info(std::string("Application: hot-reloaded ECS scene because ") + reason);
     return true;
+}
+
+void Application::ConfigureInputBindings()
+{
+    auto* primary = dynamic_cast<GlfwWindow*>(GetWindow());
+    if (primary == nullptr)
+        return;
+
+    m_InputManager.SetWindow(primary->GetGlfwHandle());
+    m_InputManager.BindAction("EnterGameplay", GLFW_KEY_ENTER);
+    m_InputManager.BindAction("MoveForward", GLFW_KEY_W);
+    m_InputManager.BindAction("MoveBackward", GLFW_KEY_S);
+    m_InputManager.BindAction("MoveLeft", GLFW_KEY_A);
+    m_InputManager.BindAction("MoveRight", GLFW_KEY_D);
+    m_InputManager.BindAction("MoveUp", GLFW_KEY_SPACE);
+    m_InputManager.BindAction("MoveDown", GLFW_KEY_LEFT_CONTROL);
+    m_InputManager.BindAction("PauseToMenu", GLFW_KEY_ESCAPE);
+    m_InputManager.BindAction("SpawnEntity", GLFW_KEY_SPACE);
+    m_InputManager.BindAction("DestroyEntity", GLFW_KEY_BACKSPACE);
+    m_InputManager.BindAction("FireProjectile", GLFW_KEY_F);
+    m_InputManager.BindAction("ToggleDebugColliders", GLFW_KEY_F3);
 }
 
 void Application::PollConfigHotReload()
@@ -1049,6 +1051,10 @@ bool Application::Initialize()
         return false;
 
     m_Windows.push_back(std::move(ctx));
+    ConfigureInputBindings();
+    m_EventBus.SubscribeCollision([](const ecs::CollisionEvent& e){
+        Logger::Get().Info("Collision event: " + std::to_string(e.a.index) + " <-> " + std::to_string(e.b.index));
+    });
     SetupEcsRuntimeDemo();
     InitializeConfigHotReload();
 
