@@ -79,6 +79,13 @@ static BoxAxes BuildBoxAxes(const Vec3& rot)
         Vec3{ r02, r12, r22 }
     };
 }
+static float ProjectedObbRadius(const Vec3& half, const BoxAxes& axes, const Vec3& axis)
+{
+    return Abs(Dot(axis, axes.xAxis)) * half.x +
+           Abs(Dot(axis, axes.yAxis)) * half.y +
+           Abs(Dot(axis, axes.zAxis)) * half.z;
+}
+
 struct BodyRef
 {
     ecs::Entity entity{};
@@ -146,6 +153,8 @@ void PhysicsSystem::Update(World& world, float dt)
             Vec3 d = Sub(ac, bc);
             const Vec3 aHalf = RotatedAabbHalfExtents(a.collider->halfExtents, a.transform->rotation);
             const Vec3 bHalf = RotatedAabbHalfExtents(b.collider->halfExtents, b.transform->rotation);
+            const BoxAxes axesA = BuildBoxAxes(a.transform->rotation);
+            const BoxAxes axesB = BuildBoxAxes(b.transform->rotation);
             float minPen = 0.0f;
             int axis = 1;
             Vec3 normal{ 0.0f, 1.0f, 0.0f };
@@ -153,17 +162,33 @@ void PhysicsSystem::Update(World& world, float dt)
 
             if (a.collider->type == ColliderType::Box && b.collider->type == ColliderType::Box)
             {
-                float ox = (aHalf.x + bHalf.x) - Abs(d.x);
-                float oy = (aHalf.y + bHalf.y) - Abs(d.y);
-                float oz = (aHalf.z + bHalf.z) - Abs(d.z);
-                if (ox <= 0 || oy <= 0 || oz <= 0)
+                const Vec3 candidateAxes[] = {
+                    NormalizeSafe(axesA.xAxis), NormalizeSafe(axesA.yAxis), NormalizeSafe(axesA.zAxis),
+                    NormalizeSafe(axesB.xAxis), NormalizeSafe(axesB.yAxis), NormalizeSafe(axesB.zAxis)
+                };
+
+                minPen = 1.0e9f;
+                bool separated = false;
+                for (const Vec3& testAxis : candidateAxes)
+                {
+                    const float dist = Abs(Dot(d, testAxis));
+                    const float ra = ProjectedObbRadius(a.collider->halfExtents, axesA, testAxis);
+                    const float rb = ProjectedObbRadius(b.collider->halfExtents, axesB, testAxis);
+                    const float overlap = (ra + rb) - dist;
+                    if (overlap <= 0.0f)
+                    {
+                        separated = true;
+                        break;
+                    }
+                    if (overlap < minPen)
+                    {
+                        minPen = overlap;
+                        normal = (Dot(d, testAxis) >= 0.0f) ? testAxis : Scale(testAxis, -1.0f);
+                    }
+                }
+                if (separated)
                     continue;
-                minPen = ox; axis = 0;
-                if (oy < minPen) { minPen = oy; axis = 1; }
-                if (oz < minPen) { minPen = oz; axis = 2; }
-                if (axis == 0) normal = Vec3{ (d.x >= 0.0f) ? 1.0f : -1.0f, 0.0f, 0.0f };
-                if (axis == 1) normal = Vec3{ 0.0f, (d.y >= 0.0f) ? 1.0f : -1.0f, 0.0f };
-                if (axis == 2) normal = Vec3{ 0.0f, 0.0f, (d.z >= 0.0f) ? 1.0f : -1.0f };
+                axis = 1;
                 contactType = ContactType::BoxBox;
             }
             else if (a.collider->type == ColliderType::Sphere && b.collider->type == ColliderType::Sphere)
