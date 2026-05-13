@@ -591,8 +591,9 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
         collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
     else if (meshRenderer.meshPath.find("african_head") != std::string::npos)
     {
-        collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.30f, entityCfg.scale.y * 0.70f, entityCfg.scale.z * 0.30f };
-        collider.offset.y = entityCfg.scale.y * 0.18f;
+        collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.28f, entityCfg.scale.y * 0.58f, entityCfg.scale.z * 0.28f };
+        // Lift collider slightly relative to model pivot so neck does not sink through the plane.
+        collider.offset.y = -entityCfg.scale.y * 0.12f;
     }
     else
         collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
