@@ -59,6 +59,9 @@ nlohmann::json EntityToJson(const EcsDemoEntityConfig& entity)
     json["angularVelocity"] = Vec3ToJson(entity.angularVelocity);
     json["colliderManual"] = entity.colliderManual;
     json["colliderType"] = entity.colliderType;
+    json["simulatePhysics"] = entity.simulatePhysics;
+    json["isStatic"] = entity.isStatic;
+    json["useGravity"] = entity.useGravity;
     if (entity.colliderManual)
     {
         json["colliderHalfExtents"] = Vec3ToJson(entity.colliderHalfExtents);
@@ -93,6 +96,9 @@ EcsDemoEntityConfig EntityFromJson(const nlohmann::json& json)
     entity.colliderType = json.value("colliderType", std::string("box"));
     entity.colliderManual = json.value("colliderManual", false) ||
         json.contains("colliderHalfExtents") || json.contains("colliderOffset");
+    entity.simulatePhysics = json.value("simulatePhysics", true);
+    entity.isStatic = json.value("isStatic", false);
+    entity.useGravity = json.value("useGravity", true);
     return entity;
 }
 }

@@ -639,9 +639,10 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
         m_World.AddComponent<ecs::BoundsBounceComponent>(entity);
 
     auto& rigidbody = m_World.AddComponent<ecs::RigidbodyComponent>(entity);
-    rigidbody.useGravity = true;
+    rigidbody.useGravity = entityCfg.useGravity;
     rigidbody.mass = 1.0f;
-    rigidbody.isStatic = tag.name == "GroundPlane";
+    rigidbody.isStatic = entityCfg.isStatic || tag.name == "GroundPlane";
+    rigidbody.simulatePhysics = entityCfg.simulatePhysics;
     rigidbody.velocity = entityCfg.linearVelocity;
     auto& collider = m_World.AddComponent<ecs::ColliderComponent>(entity);
     collider.type = (entityCfg.colliderType == "sphere" || entityCfg.colliderType == "Sphere")

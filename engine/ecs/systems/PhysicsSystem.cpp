@@ -53,6 +53,32 @@ static Vec3 RotatedAabbHalfExtents(const Vec3& localHalf, const Vec3& rot)
         Abs(r20) * localHalf.x + Abs(r21) * localHalf.y + Abs(r22) * localHalf.z
     };
 }
+struct BoxAxes
+{
+    Vec3 xAxis;
+    Vec3 yAxis;
+    Vec3 zAxis;
+};
+static BoxAxes BuildBoxAxes(const Vec3& rot)
+{
+    const float cx = std::cos(rot.x), sx = std::sin(rot.x);
+    const float cy = std::cos(rot.y), sy = std::sin(rot.y);
+    const float cz = std::cos(rot.z), sz = std::sin(rot.z);
+    const float r00 = cz * cy;
+    const float r01 = cz * sy * sx - sz * cx;
+    const float r02 = cz * sy * cx + sz * sx;
+    const float r10 = sz * cy;
+    const float r11 = sz * sy * sx + cz * cx;
+    const float r12 = sz * sy * cx - cz * sx;
+    const float r20 = -sy;
+    const float r21 = cy * sx;
+    const float r22 = cy * cx;
+    return BoxAxes{
+        Vec3{ r00, r10, r20 },
+        Vec3{ r01, r11, r21 },
+        Vec3{ r02, r12, r22 }
+    };
+}
 struct BodyRef
 {
     ecs::Entity entity{};
@@ -157,21 +183,29 @@ void PhysicsSystem::Update(World& world, float dt)
                 BodyRef* sphere = &b;
                 Vec3 boxCenter = ac;
                 Vec3 sphereCenter = bc;
-                Vec3 boxHalf = aHalf;
+                Vec3 boxHalf = box->collider->halfExtents;
                 if (a.collider->type == ColliderType::Sphere)
                 {
                     box = &b;
                     sphere = &a;
                     boxCenter = bc;
                     sphereCenter = ac;
-                    boxHalf = bHalf;
+                    boxHalf = box->collider->halfExtents;
                 }
                 const float radius = SphereRadius(*sphere->collider);
-                Vec3 closest{
-                    Clamp(sphereCenter.x, boxCenter.x - boxHalf.x, boxCenter.x + boxHalf.x),
-                    Clamp(sphereCenter.y, boxCenter.y - boxHalf.y, boxCenter.y + boxHalf.y),
-                    Clamp(sphereCenter.z, boxCenter.z - boxHalf.z, boxCenter.z + boxHalf.z)
-                };
+                const BoxAxes axes = BuildBoxAxes(box->transform->rotation);
+                const Vec3 boxToSphere = Sub(sphereCenter, boxCenter);
+                const float localX = Dot(boxToSphere, axes.xAxis);
+                const float localY = Dot(boxToSphere, axes.yAxis);
+                const float localZ = Dot(boxToSphere, axes.zAxis);
+                const float clampedX = Clamp(localX, -boxHalf.x, boxHalf.x);
+                const float clampedY = Clamp(localY, -boxHalf.y, boxHalf.y);
+                const float clampedZ = Clamp(localZ, -boxHalf.z, boxHalf.z);
+                Vec3 closest = Add(
+                    Add(
+                        Add(boxCenter, Scale(axes.xAxis, clampedX)),
+                        Scale(axes.yAxis, clampedY)),
+                    Scale(axes.zAxis, clampedZ));
                 Vec3 delta = Sub(sphereCenter, closest);
                 const float distSq = LengthSq(delta);
                 if (distSq > radius * radius)

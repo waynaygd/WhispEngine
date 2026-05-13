@@ -35,6 +35,9 @@ struct EcsDemoEntityConfig
     ecs::Vec3 colliderOffset{};
     std::string colliderType = "box";
     bool colliderManual = false;
+    bool simulatePhysics = true;
+    bool isStatic = false;
+    bool useGravity = true;
 };
 
 struct EcsDemoConfig
