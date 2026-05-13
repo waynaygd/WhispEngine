@@ -218,14 +218,13 @@ void PhysicsSystem::Update(World& world, float dt)
                 }
                 else
                 {
-                    const Vec3 local = Sub(sphereCenter, boxCenter);
-                    const float px = boxHalf.x - Abs(local.x);
-                    const float py = boxHalf.y - Abs(local.y);
-                    const float pz = boxHalf.z - Abs(local.z);
+                    const float px = boxHalf.x - Abs(localX);
+                    const float py = boxHalf.y - Abs(localY);
+                    const float pz = boxHalf.z - Abs(localZ);
                     minPen = std::max(0.0f, radius + std::min(px, std::min(py, pz)));
-                    if (px <= py && px <= pz) normal = Vec3{ (local.x >= 0.0f) ? 1.0f : -1.0f, 0.0f, 0.0f };
-                    else if (py <= pz) normal = Vec3{ 0.0f, (local.y >= 0.0f) ? 1.0f : -1.0f, 0.0f };
-                    else normal = Vec3{ 0.0f, 0.0f, (local.z >= 0.0f) ? 1.0f : -1.0f };
+                    if (px <= py && px <= pz) normal = Scale(axes.xAxis, (localX >= 0.0f) ? 1.0f : -1.0f);
+                    else if (py <= pz) normal = Scale(axes.yAxis, (localY >= 0.0f) ? 1.0f : -1.0f);
+                    else normal = Scale(axes.zAxis, (localZ >= 0.0f) ? 1.0f : -1.0f);
                 }
                 if (a.collider->type == ColliderType::Sphere)
                     normal = Scale(normal, -1.0f);
