@@ -232,6 +232,8 @@ void PhysicsSystem::Update(World& world, float dt)
             }
 
             Vec3 sep = Scale(normal, minPen);
+            if (minPen <= 0.0f)
+                continue;
 
             const float invMassA = (a.rigidbody->isStatic || a.rigidbody->mass <= 0.0001f) ? 0.0f : (1.0f / a.rigidbody->mass);
             const float invMassB = (b.rigidbody->isStatic || b.rigidbody->mass <= 0.0001f) ? 0.0f : (1.0f / b.rigidbody->mass);
@@ -239,8 +241,9 @@ void PhysicsSystem::Update(World& world, float dt)
             if (invMassSum <= 0.0f)
                 continue;
 
-            const float slop = 0.001f;
-            const float percent = 0.8f;
+            const bool singleStaticContact = (invMassA == 0.0f) != (invMassB == 0.0f);
+            const float slop = singleStaticContact ? 0.0f : 0.001f;
+            const float percent = singleStaticContact ? 1.0f : 0.8f;
             const float correctionScale = std::max(minPen - slop, 0.0f) * percent / invMassSum;
             const Vec3 correction = Scale(sep, correctionScale / (minPen > 0.0f ? minPen : 1.0f));
             if (invMassA > 0.0f)
@@ -281,6 +284,19 @@ void PhysicsSystem::Update(World& world, float dt)
                     a.rigidbody->velocity = Add(a.rigidbody->velocity, Scale(frictionImpulse, invMassA));
                 if (invMassB > 0.0f)
                     b.rigidbody->velocity = Sub(b.rigidbody->velocity, Scale(frictionImpulse, invMassB));
+            }
+
+            if (invMassA > 0.0f && invMassB == 0.0f)
+            {
+                const float vnA = Dot(a.rigidbody->velocity, normal);
+                if (vnA < 0.0f)
+                    a.rigidbody->velocity = Sub(a.rigidbody->velocity, Scale(normal, vnA));
+            }
+            else if (invMassB > 0.0f && invMassA == 0.0f)
+            {
+                const float vnB = Dot(b.rigidbody->velocity, normal);
+                if (vnB > 0.0f)
+                    b.rigidbody->velocity = Sub(b.rigidbody->velocity, Scale(normal, vnB));
             }
 
             // Simple center-of-mass support check for tower-like tipping:
