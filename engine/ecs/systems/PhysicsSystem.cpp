@@ -118,7 +118,7 @@ void PhysicsSystem::Update(World& world, float dt)
     const int substeps = std::max(configuredSubsteps, std::min(dynamicSubsteps, 64));
     const float stepDt = dt / static_cast<float>(substeps);
     const float dampingPerStep = std::pow(std::max(m_LinearDamping, 0.0f), stepDt * 60.0f);
-    const int solverIterations = 8;
+    const int solverIterations = 4;
     std::vector<BodyRef> bodies;
     bodies.reserve(128);
     world.ForEach<ColliderComponent, TransformComponent, RigidbodyComponent>([&](Entity e, ColliderComponent& c, TransformComponent& t, RigidbodyComponent& rb){
@@ -416,6 +416,70 @@ void PhysicsSystem::Update(World& world, float dt)
             if (m_EventBus) m_EventBus->PublishCollision(CollisionEvent{ a.entity, b.entity });
         }
     }}
+    }
+
+    // Post-solve sphere stabilization against static boxes:
+    // keeps dynamic spheres from slowly sinking through support surfaces
+    // and limits extreme push velocities from dense cube impacts.
+    for (BodyRef& sphereBody : bodies)
+    {
+        if (sphereBody.collider->type != ColliderType::Sphere ||
+            sphereBody.rigidbody->isStatic ||
+            !sphereBody.rigidbody->simulatePhysics)
+            continue;
+
+        const float radius = SphereRadius(*sphereBody.collider);
+        Vec3 sphereCenter = Add(sphereBody.transform->position, sphereBody.collider->offset);
+        float bestPen = 0.0f;
+        Vec3 bestNormal{ 0.0f, 1.0f, 0.0f };
+
+        for (BodyRef& boxBody : bodies)
+        {
+            if (boxBody.collider->type != ColliderType::Box || !boxBody.rigidbody->isStatic)
+                continue;
+
+            const Vec3 boxCenter = Add(boxBody.transform->position, boxBody.collider->offset);
+            const BoxAxes boxAxes = BuildBoxAxes(boxBody.transform->rotation);
+            const Vec3 toSphere = Sub(sphereCenter, boxCenter);
+            const float lx = Dot(toSphere, boxAxes.xAxis);
+            const float ly = Dot(toSphere, boxAxes.yAxis);
+            const float lz = Dot(toSphere, boxAxes.zAxis);
+            const Vec3 half = boxBody.collider->halfExtents;
+            const float clx = Clamp(lx, -half.x, half.x);
+            const float cly = Clamp(ly, -half.y, half.y);
+            const float clz = Clamp(lz, -half.z, half.z);
+            const Vec3 closestPoint = Add(Add(Add(boxCenter, Scale(boxAxes.xAxis, clx)), Scale(boxAxes.yAxis, cly)), Scale(boxAxes.zAxis, clz));
+            const Vec3 delta = Sub(sphereCenter, closestPoint);
+            const float distSq = LengthSq(delta);
+            if (distSq >= radius * radius)
+                continue;
+
+            const float distance = std::sqrt(std::max(distSq, 0.0f));
+            const Vec3 pushNormal = (distance > 0.000001f) ? Scale(delta, 1.0f / distance) : Vec3{ 0.0f, 1.0f, 0.0f };
+            const float penetration = radius - distance;
+            if (penetration > bestPen)
+            {
+                bestPen = penetration;
+                bestNormal = pushNormal;
+            }
+        }
+
+        if (bestPen > 0.0f)
+        {
+            sphereCenter = Add(sphereCenter, Scale(bestNormal, bestPen + 0.001f));
+            sphereBody.transform->position = Sub(sphereCenter, sphereBody.collider->offset);
+            const float vn = Dot(sphereBody.rigidbody->velocity, bestNormal);
+            if (vn < 0.0f)
+                sphereBody.rigidbody->velocity = Sub(sphereBody.rigidbody->velocity, Scale(bestNormal, vn));
+        }
+
+        const float maxSphereSpeed = 9.0f;
+        const float speedSq = LengthSq(sphereBody.rigidbody->velocity);
+        if (speedSq > maxSphereSpeed * maxSphereSpeed)
+        {
+            const float invSpeed = 1.0f / std::sqrt(speedSq);
+            sphereBody.rigidbody->velocity = Scale(sphereBody.rigidbody->velocity, maxSphereSpeed * invSpeed);
+        }
     }
 }
 }
