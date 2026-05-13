@@ -520,8 +520,8 @@ TextureResource TextureLoader::CreateDefault()
     texture.textureData.height = 1;
     texture.textureData.sourceChannelCount = 4;
     texture.textureData.channelCount = 4;
-    texture.textureData.pixels = { 255, 0, 255, 255 };
-    texture.fallbackPixel = { 255, 0, 255, 255 };
+    texture.textureData.pixels = { 255, 255, 255, 255 };
+    texture.fallbackPixel = { 255, 255, 255, 255 };
     texture.placeholder = true;
     return texture;
 }

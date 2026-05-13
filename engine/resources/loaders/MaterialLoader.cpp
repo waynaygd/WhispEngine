@@ -37,7 +37,7 @@ ResourceLoadResult<MaterialResource> MaterialLoader::Load(const std::string& nor
     material.name = json.value("name", resolvedPath.stem().string());
     material.sourcePath = normalizedKey;
     material.shaderPath = json.value("shaderPath", std::string("dx12/textured.hlsl"));
-    material.texturePath = json.value("texturePath", std::string("textures/validation_checker.png"));
+    material.texturePath = json.value("texturePath", std::string());
     if (json.contains("baseColor") && json["baseColor"].is_array())
     {
         const auto& color = json["baseColor"];
@@ -62,7 +62,7 @@ MaterialResource MaterialLoader::CreateDefault()
     material.name = "DefaultMaterial";
     material.sourcePath = "defaults/material";
     material.shaderPath = "dx12/textured.hlsl";
-    material.texturePath = "textures/validation_checker.png";
+    material.texturePath.clear();
     material.placeholder = true;
     return material;
 }

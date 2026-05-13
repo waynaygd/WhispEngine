@@ -235,7 +235,7 @@ std::vector<EcsDemoEntityConfig> Application::BuildDefaultEcsDemoEntities()
 
     entities[0].tag = "GroundPlane";
     entities[0].meshPath = "models/validation_cube.obj";
-    entities[0].materialPath = "materials/validation_checker.material.json";
+    entities[0].materialPath = "materials/white.material.json";
     entities[0].position = ecs::Vec3{ 0.0f, -1.0f, 0.0f };
     entities[0].scale = ecs::Vec3{ 8.0f, 0.05f, 8.0f };
     entities[0].bounce = false;
@@ -358,7 +358,6 @@ void Application::SetupEcsRuntimeDemo()
 {
     m_World.ClearSystems();
     m_World.AddSystem<ecs::PhysicsSystem>(&m_EventBus);
-    m_World.AddSystem<ecs::BoundsBounceSystem>();
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
 
@@ -386,7 +385,6 @@ void Application::SetupEcsRuntimeDemo()
     m_EcsDebugLogTimer = 0.0f;
 
     Logger::Get().Info("ECS runtime: physics system registered (motion system disabled to avoid double integration)");
-    Logger::Get().Info("ECS runtime: bounds bounce system registered");
     Logger::Get().Info("ECS runtime: demo scene created with " + std::to_string(m_EcsDebugEntities.size()) + " ECS entities");
     Logger::Get().Info("ECS runtime: render system registered");
 
@@ -569,8 +567,10 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     rigidbody.velocity = entityCfg.linearVelocity;
     auto& collider = m_World.AddComponent<ecs::ColliderComponent>(entity);
     collider.type = ecs::ColliderType::Box;
-    if (meshRenderer.meshPath.find("african_head") != std::string::npos)
-        collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.24f, entityCfg.scale.y * 0.48f, entityCfg.scale.z * 0.24f };
+    if (tag.name == "GroundPlane")
+        collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, 0.15f, entityCfg.scale.z * 0.5f };
+    else if (meshRenderer.meshPath.find("african_head") != std::string::npos)
+        collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.30f, entityCfg.scale.y * 0.62f, entityCfg.scale.z * 0.30f };
     else
         collider.halfExtents = ecs::Vec3{ entityCfg.scale.x * 0.5f, entityCfg.scale.y * 0.5f, entityCfg.scale.z * 0.5f };
 
@@ -590,11 +590,11 @@ ecs::Entity Application::SpawnPhysicsProjectile()
     EcsDemoEntityConfig projectileCfg;
     projectileCfg.tag = "Projectile_" + std::to_string(m_EcsDebugEntities.size());
     projectileCfg.meshPath = "models/validation_cube.obj";
-    projectileCfg.materialPath = "materials/validation_checker.material.json";
+    projectileCfg.materialPath = "materials/blue.material.json";
     projectileCfg.scale = ecs::Vec3{ 0.15f, 0.15f, 0.15f };
 
     const ecs::Vec3 forward = BuildCameraForward(m_Camera.yaw, m_Camera.pitch);
-    projectileCfg.position = Add(m_Camera.position, Scale(forward, 0.35f));
+    projectileCfg.position = m_Camera.position;
     projectileCfg.linearVelocity = Scale(forward, 8.0f);
 
     const ecs::Entity projectile = SpawnEcsDemoEntity(projectileCfg);

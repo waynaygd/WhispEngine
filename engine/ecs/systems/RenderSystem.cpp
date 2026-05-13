@@ -388,17 +388,27 @@ bool RenderSystem::TryDrawResourceMesh(
         }
     }
 
-    if (texturePath.empty() || shaderPath.empty())
+    if (shaderPath.empty())
         return false;
 
     const std::string meshKey = AssetPaths::NormalizeAssetKey(meshRenderer.meshPath);
-    const std::string textureKey = AssetPaths::NormalizeAssetKey(texturePath);
     const std::string shaderKey = AssetPaths::NormalizeShaderKey(shaderPath);
-    if (meshKey.empty() || textureKey.empty() || shaderKey.empty())
+    if (meshKey.empty() || shaderKey.empty())
         return false;
 
     const RenderMeshHandle meshHandle = GetOrUploadMesh(meshKey);
-    const RenderTextureHandle textureHandle = GetOrCreateTexture(textureKey);
+    RenderTextureHandle textureHandle = RenderTextureHandle::Invalid();
+    if (!texturePath.empty())
+    {
+        const std::string textureKey = AssetPaths::NormalizeAssetKey(texturePath);
+        if (textureKey.empty())
+            return false;
+        textureHandle = GetOrCreateTexture(textureKey);
+    }
+    else
+    {
+        textureHandle = GetOrCreateTexture("defaults/texture");
+    }
     const RenderShaderHandle shaderHandle = GetOrCreateShader(shaderKey);
     if (!meshHandle.IsValid() || !textureHandle.IsValid() || !shaderHandle.IsValid())
         return false;
