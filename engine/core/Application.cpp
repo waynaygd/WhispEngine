@@ -684,6 +684,7 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     {
         rigidbody.mass = 0.70f;
         rigidbody.linearDampingMultiplier = 0.0f;
+        rigidbody.useAdvancedSphereStabilization = true;
         collider.friction = 0.08f;
         collider.restitution = 0.03f;
     }
