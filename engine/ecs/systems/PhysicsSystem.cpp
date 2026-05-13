@@ -3,6 +3,7 @@
 #include "../components/ColliderComponent.h"
 #include "../components/RigidbodyComponent.h"
 #include "../components/TransformComponent.h"
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -11,6 +12,7 @@ using ecs::Vec3;
 static Vec3 Add(const Vec3&a,const Vec3&b){return {a.x+b.x,a.y+b.y,a.z+b.z};}
 static Vec3 Sub(const Vec3&a,const Vec3&b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
 static Vec3 Scale(const Vec3&v,float s){return {v.x*s,v.y*s,v.z*s};}
+static float Dot(const Vec3&a,const Vec3&b){return a.x*b.x+a.y*b.y+a.z*b.z;}
 static float Abs(float v){ return v >= 0.0f ? v : -v; }
 static Vec3 RotatedAabbHalfExtents(const Vec3& localHalf, const Vec3& rot)
 {
@@ -44,9 +46,14 @@ struct BodyRef
 namespace ecs {
 void PhysicsSystem::Update(World& world, float dt)
 {
+    if (dt <= 0.0f)
+        return;
     const float gravity = m_Gravity;
     const float linearDamping = m_LinearDamping;
-    const int substeps = m_Substeps > 0 ? m_Substeps : 1;
+    const float baseStep = 1.0f / 120.0f;
+    const int dynamicSubsteps = static_cast<int>(std::ceil(dt / baseStep));
+    const int configuredSubsteps = m_Substeps > 0 ? m_Substeps : 1;
+    const int substeps = std::max(configuredSubsteps, std::min(dynamicSubsteps, 16));
     const float stepDt = dt / static_cast<float>(substeps);
     for (int step = 0; step < substeps; ++step)
     {
@@ -100,15 +107,20 @@ void PhysicsSystem::Update(World& world, float dt)
             if (axis == 1) sep.y = d.y >= 0 ? minPen : -minPen;
             if (axis == 2) sep.z = d.z >= 0 ? minPen : -minPen;
 
-            if (a.rigidbody->isStatic)
-                b.transform->position = Sub(b.transform->position, sep);
-            else if (b.rigidbody->isStatic)
-                a.transform->position = Add(a.transform->position, sep);
-            else
-            {
-                a.transform->position = Add(a.transform->position, Scale(sep, 0.5f));
-                b.transform->position = Sub(b.transform->position, Scale(sep, 0.5f));
-            }
+            const float invMassA = (a.rigidbody->isStatic || a.rigidbody->mass <= 0.0001f) ? 0.0f : (1.0f / a.rigidbody->mass);
+            const float invMassB = (b.rigidbody->isStatic || b.rigidbody->mass <= 0.0001f) ? 0.0f : (1.0f / b.rigidbody->mass);
+            const float invMassSum = invMassA + invMassB;
+            if (invMassSum <= 0.0f)
+                continue;
+
+            const float slop = 0.001f;
+            const float percent = 0.8f;
+            const float correctionScale = std::max(minPen - slop, 0.0f) * percent / invMassSum;
+            const Vec3 correction = Scale(sep, correctionScale / (minPen > 0.0f ? minPen : 1.0f));
+            if (invMassA > 0.0f)
+                a.transform->position = Add(a.transform->position, Scale(correction, invMassA));
+            if (invMassB > 0.0f)
+                b.transform->position = Sub(b.transform->position, Scale(correction, invMassB));
 
             const float restitution = (a.collider->restitution + b.collider->restitution) > 0.0f
                 ? (a.collider->restitution + b.collider->restitution) * 0.5f
@@ -116,28 +128,37 @@ void PhysicsSystem::Update(World& world, float dt)
             const float friction = (a.collider->friction + b.collider->friction) > 0.0f
                 ? (a.collider->friction + b.collider->friction) * 0.5f
                 : m_DefaultFriction;
-            if (axis == 0)
+            Vec3 normal{};
+            if (axis == 0) normal.x = (d.x >= 0.0f) ? 1.0f : -1.0f;
+            if (axis == 1) normal.y = (d.y >= 0.0f) ? 1.0f : -1.0f;
+            if (axis == 2) normal.z = (d.z >= 0.0f) ? 1.0f : -1.0f;
+            const Vec3 rv = Sub(a.rigidbody->velocity, b.rigidbody->velocity);
+            const float velAlongNormal = Dot(rv, normal);
+            if (velAlongNormal < 0.0f)
             {
-                const float va = a.rigidbody->velocity.x;
-                const float vb = b.rigidbody->velocity.x;
-                a.rigidbody->velocity.x = vb * restitution;
-                b.rigidbody->velocity.x = va * restitution;
+                const float j = -(1.0f + restitution) * velAlongNormal / invMassSum;
+                const Vec3 impulse = Scale(normal, j);
+                if (invMassA > 0.0f)
+                    a.rigidbody->velocity = Add(a.rigidbody->velocity, Scale(impulse, invMassA));
+                if (invMassB > 0.0f)
+                    b.rigidbody->velocity = Sub(b.rigidbody->velocity, Scale(impulse, invMassB));
             }
-            if (axis == 1)
+
+            const Vec3 rvAfter = Sub(a.rigidbody->velocity, b.rigidbody->velocity);
+            Vec3 tangent = Sub(rvAfter, Scale(normal, Dot(rvAfter, normal)));
+            const float tangentLenSq = Dot(tangent, tangent);
+            if (tangentLenSq > 0.000001f)
             {
-                a.rigidbody->velocity.y = 0.0f;
-                b.rigidbody->velocity.y = 0.0f;
-                a.rigidbody->velocity.x *= friction;
-                a.rigidbody->velocity.z *= friction;
-                b.rigidbody->velocity.x *= friction;
-                b.rigidbody->velocity.z *= friction;
-            }
-            if (axis == 2)
-            {
-                const float va = a.rigidbody->velocity.z;
-                const float vb = b.rigidbody->velocity.z;
-                a.rigidbody->velocity.z = vb * restitution;
-                b.rigidbody->velocity.z = va * restitution;
+                const float invTangentLen = 1.0f / std::sqrt(tangentLenSq);
+                tangent = Scale(tangent, invTangentLen);
+                const float jt = -Dot(rvAfter, tangent) / invMassSum;
+                const float maxFriction = friction * minPen * 25.0f;
+                const float clampedJt = std::max(-maxFriction, std::min(jt, maxFriction));
+                const Vec3 frictionImpulse = Scale(tangent, clampedJt);
+                if (invMassA > 0.0f)
+                    a.rigidbody->velocity = Add(a.rigidbody->velocity, Scale(frictionImpulse, invMassA));
+                if (invMassB > 0.0f)
+                    b.rigidbody->velocity = Sub(b.rigidbody->velocity, Scale(frictionImpulse, invMassB));
             }
             if (m_EventBus) m_EventBus->PublishCollision(CollisionEvent{ a.entity, b.entity });
         }
