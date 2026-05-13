@@ -696,13 +696,16 @@ ecs::Entity Application::SpawnPhysicsProjectile()
 
     const ecs::Vec3 forward = BuildCameraForward(m_Camera.yaw, m_Camera.pitch);
     projectileCfg.position = m_Camera.position;
-    projectileCfg.linearVelocity = Scale(forward, 8.0f);
+    projectileCfg.linearVelocity = Scale(forward, 14.0f);
 
     const ecs::Entity projectile = SpawnEcsDemoEntity(projectileCfg);
     m_EcsDebugEntities.push_back(projectile);
 
     if (auto* rb = m_World.GetComponent<ecs::RigidbodyComponent>(projectile))
+    {
         rb->velocity = projectileCfg.linearVelocity;
+        rb->mass = 2.0f;
+    }
 
     Logger::Get().Info("Gameplay: F detected -> spawned projectile entity");
     return projectile;

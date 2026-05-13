@@ -104,12 +104,12 @@ void PhysicsSystem::Update(World& world, float dt)
     if (dt > 0.05f)
         dt = 0.05f;
     const float gravity = m_Gravity;
-    const float linearDamping = m_LinearDamping;
     const float baseStep = 1.0f / 240.0f;
     const int dynamicSubsteps = static_cast<int>(std::ceil(dt / baseStep));
     const int configuredSubsteps = m_Substeps > 0 ? m_Substeps : 1;
     const int substeps = std::max(configuredSubsteps, std::min(dynamicSubsteps, 64));
     const float stepDt = dt / static_cast<float>(substeps);
+    const float dampingPerStep = std::pow(std::max(m_LinearDamping, 0.0f), stepDt * 60.0f);
     std::vector<BodyRef> bodies;
     bodies.reserve(128);
     world.ForEach<ColliderComponent, TransformComponent, RigidbodyComponent>([&](Entity e, ColliderComponent& c, TransformComponent& t, RigidbodyComponent& rb){
@@ -121,8 +121,8 @@ void PhysicsSystem::Update(World& world, float dt)
     world.ForEach<TransformComponent, RigidbodyComponent>([&](Entity, TransformComponent& t, RigidbodyComponent& rb){
         if (rb.isStatic || !rb.simulatePhysics) return;
         if (rb.useGravity) rb.velocity.y -= gravity * stepDt;
-        rb.velocity.x *= linearDamping;
-        rb.velocity.z *= linearDamping;
+        rb.velocity.x *= dampingPerStep;
+        rb.velocity.z *= dampingPerStep;
         if (Abs(rb.velocity.x) < 0.0005f) rb.velocity.x = 0.0f;
         if (Abs(rb.velocity.z) < 0.0005f) rb.velocity.z = 0.0f;
         rb.velocity = Add(rb.velocity, Scale(rb.acceleration, stepDt));
