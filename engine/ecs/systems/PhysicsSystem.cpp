@@ -267,6 +267,10 @@ void PhysicsSystem::Update(World& world, float dt)
         }
     }
 
+    std::vector<float> sphereSupportIncomingSpeedSq(bodies.size(), 0.0f);
+    std::vector<Vec3> sphereSupportIncomingVel(bodies.size(), Vec3{ 0.0f, 0.0f, 0.0f });
+    std::vector<std::uint8_t> sphereHadStaticSupport(bodies.size(), 0);
+
     for (int iter = 0; iter < solverIterations; ++iter)
     {
     for (const auto& pair : candidatePairs)
@@ -420,6 +424,22 @@ void PhysicsSystem::Update(World& world, float dt)
 
             const bool singleStaticContact = (invMassA == 0.0f) != (invMassB == 0.0f);
             const bool dynamicBoxSphere = (contactType == ContactType::BoxSphere) && !singleStaticContact;
+            if (contactType == ContactType::BoxSphere && singleStaticContact)
+            {
+                BodyRef* sphereBody = (a.collider->type == ColliderType::Sphere) ? &a : &b;
+                const std::size_t sphereIdx = (a.collider->type == ColliderType::Sphere) ? i : j;
+                if (!sphereBody->rigidbody->isStatic && sphereBody->rigidbody->simulatePhysics)
+                {
+                    const Vec3 inVel = sphereBody->rigidbody->velocity;
+                    const float speedSq = inVel.x * inVel.x + inVel.z * inVel.z;
+                    if (speedSq > sphereSupportIncomingSpeedSq[sphereIdx])
+                    {
+                        sphereSupportIncomingSpeedSq[sphereIdx] = speedSq;
+                        sphereSupportIncomingVel[sphereIdx] = inVel;
+                    }
+                    sphereHadStaticSupport[sphereIdx] = 1;
+                }
+            }
             const float slop = dynamicBoxSphere ? 0.0f : (singleStaticContact ? 0.0005f : 0.0025f);
             const float percent = dynamicBoxSphere ? m_DynamicBoxSphereCorrectionPercent : (singleStaticContact ? 0.9f : 0.65f);
             const float correctionScale = std::max(minPen - slop, 0.0f) * percent / invMassSum;
@@ -610,6 +630,38 @@ void PhysicsSystem::Update(World& world, float dt)
             }
             if (m_EventBus) m_EventBus->PublishCollision(CollisionEvent{ a.entity, b.entity });
     }}
+
+    for (std::size_t idx = 0; idx < bodies.size(); ++idx)
+    {
+        if (!sphereHadStaticSupport[idx])
+            continue;
+        BodyRef& sphere = bodies[idx];
+        if (sphere.collider->type != ColliderType::Sphere || sphere.rigidbody->isStatic || !sphere.rigidbody->simulatePhysics)
+            continue;
+
+        const Vec3 incoming = sphereSupportIncomingVel[idx];
+        const float inSpeedSq = sphereSupportIncomingSpeedSq[idx];
+        if (inSpeedSq < 0.04f)
+            continue;
+
+        const float currentSpeedSq = sphere.rigidbody->velocity.x * sphere.rigidbody->velocity.x +
+                                     sphere.rigidbody->velocity.z * sphere.rigidbody->velocity.z;
+        const float minCarrySpeedSq = inSpeedSq * 0.35f;
+        if (currentSpeedSq < minCarrySpeedSq)
+        {
+            const float inSpeed = std::sqrt(inSpeedSq);
+            const float carrySpeed = inSpeed * 0.65f;
+            Vec3 dir = Vec3{ incoming.x, 0.0f, incoming.z };
+            const float dirLenSq = dir.x * dir.x + dir.z * dir.z;
+            if (dirLenSq > 0.000001f)
+            {
+                const float invLen = 1.0f / std::sqrt(dirLenSq);
+                dir = Scale(dir, invLen);
+                sphere.rigidbody->velocity.x = dir.x * carrySpeed;
+                sphere.rigidbody->velocity.z = dir.z * carrySpeed;
+            }
+        }
+    }
     }
 
     // Post-solve sphere stabilization against static boxes:
