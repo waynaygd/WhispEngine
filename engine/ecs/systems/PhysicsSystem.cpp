@@ -156,7 +156,7 @@ void PhysicsSystem::Update(World& world, float dt)
 
     for (int step = 0; step < substeps; ++step)
     {
-    world.ForEach<TransformComponent, RigidbodyComponent>([&](Entity, TransformComponent& t, RigidbodyComponent& rb){
+    world.ForEach<TransformComponent, RigidbodyComponent, ColliderComponent>([&](Entity, TransformComponent& t, RigidbodyComponent& rb, ColliderComponent& collider){
         if (rb.isStatic || !rb.simulatePhysics) return;
         if (rb.useGravity) rb.velocity.y -= gravity * stepDt;
         const float bodyDamping = std::pow(dampingPerStep, std::max(rb.linearDampingMultiplier, 0.0f));
@@ -166,6 +166,13 @@ void PhysicsSystem::Update(World& world, float dt)
         if (Abs(rb.velocity.z) < 0.0005f) rb.velocity.z = 0.0f;
         rb.velocity = Add(rb.velocity, Scale(rb.acceleration, stepDt));
         t.position = Add(t.position, Scale(rb.velocity, stepDt));
+
+        if (collider.type == ColliderType::Sphere)
+        {
+            const float radius = std::max(SphereRadius(collider), 0.0001f);
+            t.rotation.x += (rb.velocity.z / radius) * stepDt;
+            t.rotation.z -= (rb.velocity.x / radius) * stepDt;
+        }
     });
 
     std::vector<std::pair<std::size_t, std::size_t>> candidatePairs;
@@ -451,9 +458,10 @@ void PhysicsSystem::Update(World& world, float dt)
                         const Vec3 outNormal = (distance > 0.000001f) ? Scale(delta, 1.0f / distance) : normal;
                         const float extraPen = radius - distance + 0.001f;
                         // For gameplay feel, do not "catapult" nearby cubes by splitting
-                        // dynamic box-sphere extra depenetration. Move sphere only.
-                        const float moveSphere = 1.0f;
-                        const float moveBox = 0.0f;
+                        // dynamic box-sphere extra depenetration. Mostly move sphere, but
+                        // still move cube slightly to avoid "sticking" on sphere tail.
+                        const float moveSphere = 0.88f;
+                        const float moveBox = 0.12f;
                         if (!sphereBody->rigidbody->isStatic)
                             sphereBody->transform->position = Add(sphereBody->transform->position, Scale(outNormal, extraPen * moveSphere));
                         if (!boxBody->rigidbody->isStatic)
@@ -525,6 +533,31 @@ void PhysicsSystem::Update(World& world, float dt)
                     a.rigidbody->velocity = Add(a.rigidbody->velocity, Scale(frictionImpulse, invMassA));
                 if (invMassB > 0.0f)
                     b.rigidbody->velocity = Sub(b.rigidbody->velocity, Scale(frictionImpulse, invMassB));
+            }
+
+            if (dynamicBoxSphere)
+            {
+                BodyRef* sphereBody = (a.collider->type == ColliderType::Sphere) ? &a : &b;
+                BodyRef* boxBody = (a.collider->type == ColliderType::Box) ? &a : &b;
+                const Vec3 relV = Sub(boxBody->rigidbody->velocity, sphereBody->rigidbody->velocity);
+                const Vec3 relNormal = Scale(normal, Dot(relV, normal));
+                const Vec3 relTangent = Sub(relV, relNormal);
+
+                // Transfer a controllable portion of cube tangential momentum into sphere
+                // so sphere continues moving after the cube slows/stops.
+                const float transfer = 0.28f;
+                sphereBody->rigidbody->velocity = Add(sphereBody->rigidbody->velocity, Scale(relTangent, transfer));
+                boxBody->rigidbody->velocity = Sub(boxBody->rigidbody->velocity, Scale(relTangent, transfer * 0.35f));
+
+                // Anti-suction guard: if bodies are still pressing together with low tangent
+                // speed, inject a small separating velocity so cubes don't wrap/stick.
+                const float approach = Dot(Sub(sphereBody->rigidbody->velocity, boxBody->rigidbody->velocity), normal);
+                if (approach < -0.02f && LengthSq(relTangent) < 0.04f)
+                {
+                    const float separateKick = std::min((-approach + 0.02f) * 0.35f, 0.45f);
+                    sphereBody->rigidbody->velocity = Add(sphereBody->rigidbody->velocity, Scale(normal, separateKick));
+                    boxBody->rigidbody->velocity = Sub(boxBody->rigidbody->velocity, Scale(normal, separateKick * 0.65f));
+                }
             }
 
             if (invMassA > 0.0f && invMassB == 0.0f)
