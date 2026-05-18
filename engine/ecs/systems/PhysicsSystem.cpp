@@ -562,17 +562,20 @@ void PhysicsSystem::Update(World& world, float dt)
                 const Vec3 relV = Sub(boxBody->rigidbody->velocity, sphereBody->rigidbody->velocity);
                 const Vec3 relNormal = Scale(normal, Dot(relV, normal));
                 const Vec3 relTangent = Sub(relV, relNormal);
+                const float relTanSq = LengthSq(relTangent);
 
                 // Transfer a controllable portion of cube tangential momentum into sphere
                 // so sphere continues moving after the cube slows/stops.
-                const float transfer = 0.28f;
-                sphereBody->rigidbody->velocity = Add(sphereBody->rigidbody->velocity, Scale(relTangent, transfer));
-                boxBody->rigidbody->velocity = Sub(boxBody->rigidbody->velocity, Scale(relTangent, transfer * 0.35f));
+                if (relTanSq > 0.0004f)
+                {
+                    const float transfer = 0.16f;
+                    sphereBody->rigidbody->velocity = Add(sphereBody->rigidbody->velocity, Scale(relTangent, transfer));
+                }
 
                 // Anti-suction guard: if bodies are still pressing together with low tangent
                 // speed, inject a small separating velocity so cubes don't wrap/stick.
                 const float approach = Dot(Sub(sphereBody->rigidbody->velocity, boxBody->rigidbody->velocity), normal);
-                if (approach < -0.02f && LengthSq(relTangent) < 0.04f)
+                if (approach < -0.02f && relTanSq < 0.02f)
                 {
                     const float separateKick = std::min((-approach + 0.02f) * 0.35f, 0.45f);
                     sphereBody->rigidbody->velocity = Add(sphereBody->rigidbody->velocity, Scale(normal, separateKick));
@@ -657,8 +660,12 @@ void PhysicsSystem::Update(World& world, float dt)
             {
                 const float invLen = 1.0f / std::sqrt(dirLenSq);
                 dir = Scale(dir, invLen);
-                sphere.rigidbody->velocity.x = dir.x * carrySpeed;
-                sphere.rigidbody->velocity.z = dir.z * carrySpeed;
+                const float alongIncoming = sphere.rigidbody->velocity.x * dir.x + sphere.rigidbody->velocity.z * dir.z;
+                if (alongIncoming < -0.02f)
+                    continue; // never force carry in opposite direction (prevents reverse bounce-back).
+                const float targetAlong = std::max(alongIncoming, carrySpeed);
+                sphere.rigidbody->velocity.x = dir.x * targetAlong;
+                sphere.rigidbody->velocity.z = dir.z * targetAlong;
             }
         }
     }
