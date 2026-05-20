@@ -17,7 +17,7 @@
     }
   ],
   "ecsDemo": {
-    "logSnapshots": true,
+    "logSnapshots": false,
     "sceneFile": "scenes/pz3_demo_scene.json",
     "initialEntities": []
   },

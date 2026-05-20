@@ -30,8 +30,11 @@ public:
     {}
     const char* Name() const override { return "PhysicsSystem"; }
     void Update(World& world, float dt) override;
+    void SetEnabled(bool enabled) { m_Enabled = enabled; }
+    bool IsEnabled() const { return m_Enabled; }
 private:
     EventBus* m_EventBus = nullptr;
+    bool m_Enabled = true;
     float m_Gravity = 9.81f;
     float m_LinearDamping = 0.985f;
     int m_Substeps = 2;

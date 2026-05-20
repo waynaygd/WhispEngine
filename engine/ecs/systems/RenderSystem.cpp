@@ -539,7 +539,10 @@ RenderMeshHandle RenderSystem::GetOrUploadMesh(const std::string& key)
 RenderTextureHandle RenderSystem::GetOrCreateTexture(const std::string& key)
 {
     auto resourceIt = m_TextureResources.find(key);
-    auto resource = resourceIt != m_TextureResources.end() ? resourceIt->second : m_ResourceManager->Load<TextureResource>(key);
+    auto resource =
+        resourceIt != m_TextureResources.end()
+            ? resourceIt->second
+            : (key == "defaults/texture" ? m_ResourceManager->GetDefault<TextureResource>() : m_ResourceManager->Load<TextureResource>(key));
     if (resource == nullptr || !resource->IsUsable())
     {
         m_FailedTextureKeys.insert(key);

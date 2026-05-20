@@ -13,6 +13,12 @@ class Dx12RenderAdapter final : public IRenderAdapter
 {
 public:
 	bool Initialize(IWindow* window) override;
+	bool InitializeEditorUi(IWindow* window) override;
+	void BeginEditorUiFrame() override;
+	void RenderEditorUiFrame() override;
+	bool BeginViewportRender(int width, int height, const float* clearColor) override;
+	void EndViewportRender() override;
+	std::uint64_t GetViewportTextureId() const override;
 	void BeginFrame() override;
 	void Clear(float r, float g, float b, float a) override;
 	void DrawTestTriangle() override;
@@ -21,6 +27,7 @@ public:
 	void DrawTestCube() override;
 	void EndFrame() override;
 	void Present() override;
+	void ShutdownEditorUi() override;
 	void Shutdown() override;
 
 	void SetTestTransform(const float* mvp16) override;
@@ -41,11 +48,23 @@ private:
 	bool CreateSwapchain(HWND hwnd);
 	bool CreateRtvHeapAndTargets();
 	bool CreateDepthResources();
+	bool ResizeBackBufferResources(UINT width, UINT height);
+	void ResizeBackBufferIfNeeded();
 	bool CreateSyncObjects();
 	bool CreatePipelineAndAssets();
+	bool EnsureViewportResources(UINT width, UINT height);
+	void ReleaseViewportResources();
 
 	void WaitForGpu();
 	void MoveToNextFrame();
+	static void AllocateImGuiDescriptor(
+		struct ImGui_ImplDX12_InitInfo* info,
+		D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle,
+		D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle);
+	static void FreeImGuiDescriptor(
+		struct ImGui_ImplDX12_InitInfo* info,
+		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle,
+		D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle);
 
 	static constexpr UINT FrameCount = 2;
     static constexpr UINT MaxDrawsPerFrame = 2048;
@@ -75,6 +94,22 @@ private:
 		Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineState;
 	};
 
+	struct ViewportTarget
+	{
+		Microsoft::WRL::ComPtr<ID3D12Resource> color;
+		Microsoft::WRL::ComPtr<ID3D12Resource> depth;
+		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> rtvHeap;
+		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> dsvHeap;
+		D3D12_CPU_DESCRIPTOR_HANDLE rtv{};
+		D3D12_CPU_DESCRIPTOR_HANDLE dsv{};
+		D3D12_CPU_DESCRIPTOR_HANDLE srvCpu{};
+		D3D12_GPU_DESCRIPTOR_HANDLE srvGpu{};
+		UINT width = 0;
+		UINT height = 0;
+		UINT srvDescriptorIndex = UINT_MAX;
+		bool rendering = false;
+	};
+
 	Microsoft::WRL::ComPtr<IDXGIFactory6> m_Factory;
 	Microsoft::WRL::ComPtr<ID3D12Device> m_Device;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_Queue;
@@ -82,6 +117,7 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_CmdList;
 
 	Microsoft::WRL::ComPtr<IDXGISwapChain3> m_Swapchain;
+	HWND m_Hwnd = nullptr;
 	UINT m_FrameIndex = 0;
 
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_RtvHeap;
@@ -124,11 +160,14 @@ private:
 	std::uint64_t m_NextMeshHandle = 1;
 	std::unordered_map<std::uint64_t, UploadedTexture> m_UploadedTextures;
 	std::vector<UINT> m_FreeTextureDescriptorIndices;
+	std::vector<UINT> m_FreeImGuiDescriptorIndices;
 	std::uint64_t m_NextTextureHandle = 1;
 	std::unordered_map<std::uint64_t, UploadedShader> m_UploadedShaders;
 	std::uint64_t m_NextShaderHandle = 1;
+	ViewportTarget m_ViewportTarget;
 	RenderShaderHandle m_BoundShaderHandle{};
 	RenderTextureHandle m_BoundTextureHandle{};
+	bool m_EditorUiInitialized = false;
 
 	float m_PendingMVP[16] = {
 		1,0,0,0,

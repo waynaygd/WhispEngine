@@ -17,7 +17,12 @@
 
 #include "../../../external/d3dx12.h" 
 
+#include <imgui.h>
+#include <backends/imgui_impl_dx12.h>
+#include <backends/imgui_impl_glfw.h>
+
 #include <stdexcept>
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -675,6 +680,7 @@ bool Dx12RenderAdapter::Initialize(IWindow* window)
     {
         auto* glfwWin = static_cast<GlfwWindow*>(window);
         HWND hwnd = (HWND)glfwGetWin32Window(glfwWin->GetGlfwHandle());
+        m_Hwnd = hwnd;
 
         UINT dxgiFlags = 0;
 #if defined(_DEBUG)
@@ -698,6 +704,256 @@ bool Dx12RenderAdapter::Initialize(IWindow* window)
         Logger::Get().Error(std::string("DX12 init exception: ") + e.what());
         return false;
     }
+}
+
+bool Dx12RenderAdapter::InitializeEditorUi(IWindow* window)
+{
+    if (m_EditorUiInitialized)
+        return true;
+
+    auto* glfwWin = dynamic_cast<GlfwWindow*>(window);
+    if (glfwWin == nullptr || glfwWin->GetGlfwHandle() == nullptr || !m_Device || !m_Queue || !m_SrvHeap)
+        return false;
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+    ImGui::StyleColorsDark();
+
+    if (!ImGui_ImplGlfw_InitForOther(glfwWin->GetGlfwHandle(), true))
+    {
+        ImGui::DestroyContext();
+        return false;
+    }
+
+    ImGui_ImplDX12_InitInfo initInfo;
+    initInfo.Device = m_Device.Get();
+    initInfo.CommandQueue = m_Queue.Get();
+    initInfo.NumFramesInFlight = FrameCount;
+    initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+    initInfo.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+    initInfo.SrvDescriptorHeap = m_SrvHeap.Get();
+    initInfo.SrvDescriptorAllocFn = &Dx12RenderAdapter::AllocateImGuiDescriptor;
+    initInfo.SrvDescriptorFreeFn = &Dx12RenderAdapter::FreeImGuiDescriptor;
+    initInfo.UserData = this;
+
+    if (!ImGui_ImplDX12_Init(&initInfo))
+    {
+        ImGui_ImplGlfw_Shutdown();
+        ImGui::DestroyContext();
+        return false;
+    }
+
+    m_EditorUiInitialized = true;
+    Logger::Get().Info("DX12 editor UI initialized");
+    return true;
+}
+
+void Dx12RenderAdapter::BeginEditorUiFrame()
+{
+    if (!m_EditorUiInitialized)
+        return;
+
+    ImGui_ImplDX12_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+}
+
+void Dx12RenderAdapter::RenderEditorUiFrame()
+{
+    if (!m_EditorUiInitialized)
+        return;
+
+    ImGui::Render();
+    ID3D12DescriptorHeap* descriptorHeaps[] = { m_SrvHeap.Get() };
+    m_CmdList->SetDescriptorHeaps(1, descriptorHeaps);
+    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_CmdList.Get());
+}
+
+bool Dx12RenderAdapter::EnsureViewportResources(UINT width, UINT height)
+{
+    if (width == 0 || height == 0 || !m_Device || !m_SrvHeap)
+        return false;
+
+    if (m_ViewportTarget.color &&
+        m_ViewportTarget.width == width &&
+        m_ViewportTarget.height == height)
+    {
+        return true;
+    }
+
+    if (m_Device)
+        WaitForGpu();
+
+    ReleaseViewportResources();
+
+    if (m_FreeTextureDescriptorIndices.empty())
+    {
+        Logger::Get().Warn("DX12 viewport: no free SRV descriptors remain");
+        return false;
+    }
+
+    m_ViewportTarget.srvDescriptorIndex = m_FreeTextureDescriptorIndices.back();
+    m_FreeTextureDescriptorIndices.pop_back();
+    m_ViewportTarget.width = width;
+    m_ViewportTarget.height = height;
+
+    D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc{};
+    rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+    rtvHeapDesc.NumDescriptors = 1;
+    rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+    ThrowIfFailed(
+        m_Device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_ViewportTarget.rtvHeap)),
+        "DX12 viewport RTV heap creation failed");
+    m_ViewportTarget.rtv = m_ViewportTarget.rtvHeap->GetCPUDescriptorHandleForHeapStart();
+
+    D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc{};
+    dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+    dsvHeapDesc.NumDescriptors = 1;
+    dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+    ThrowIfFailed(
+        m_Device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&m_ViewportTarget.dsvHeap)),
+        "DX12 viewport DSV heap creation failed");
+    m_ViewportTarget.dsv = m_ViewportTarget.dsvHeap->GetCPUDescriptorHandleForHeapStart();
+
+    D3D12_RESOURCE_DESC colorDesc{};
+    colorDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    colorDesc.Width = width;
+    colorDesc.Height = height;
+    colorDesc.DepthOrArraySize = 1;
+    colorDesc.MipLevels = 1;
+    colorDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    colorDesc.SampleDesc.Count = 1;
+    colorDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    colorDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+    D3D12_CLEAR_VALUE colorClear{};
+    colorClear.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    colorClear.Color[0] = m_ClearColor[0];
+    colorClear.Color[1] = m_ClearColor[1];
+    colorClear.Color[2] = m_ClearColor[2];
+    colorClear.Color[3] = m_ClearColor[3];
+
+    D3D12_HEAP_PROPERTIES defaultHeap{};
+    defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+    ThrowIfFailed(
+        m_Device->CreateCommittedResource(
+            &defaultHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &colorDesc,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+            &colorClear,
+            IID_PPV_ARGS(&m_ViewportTarget.color)),
+        "DX12 viewport color target creation failed");
+    m_Device->CreateRenderTargetView(m_ViewportTarget.color.Get(), nullptr, m_ViewportTarget.rtv);
+
+    D3D12_RESOURCE_DESC depthDesc{};
+    depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    depthDesc.Width = width;
+    depthDesc.Height = height;
+    depthDesc.DepthOrArraySize = 1;
+    depthDesc.MipLevels = 1;
+    depthDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    depthDesc.SampleDesc.Count = 1;
+    depthDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    depthDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+    D3D12_CLEAR_VALUE depthClear{};
+    depthClear.Format = DXGI_FORMAT_D32_FLOAT;
+    depthClear.DepthStencil.Depth = 1.0f;
+    depthClear.DepthStencil.Stencil = 0;
+    ThrowIfFailed(
+        m_Device->CreateCommittedResource(
+            &defaultHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &depthDesc,
+            D3D12_RESOURCE_STATE_DEPTH_WRITE,
+            &depthClear,
+            IID_PPV_ARGS(&m_ViewportTarget.depth)),
+        "DX12 viewport depth target creation failed");
+
+    D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
+    dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
+    m_Device->CreateDepthStencilView(m_ViewportTarget.depth.Get(), &dsvDesc, m_ViewportTarget.dsv);
+
+    m_ViewportTarget.srvCpu = m_SrvHeap->GetCPUDescriptorHandleForHeapStart();
+    m_ViewportTarget.srvCpu.ptr += static_cast<SIZE_T>(m_ViewportTarget.srvDescriptorIndex) * m_SrvDescriptorSize;
+    m_ViewportTarget.srvGpu = m_SrvHeap->GetGPUDescriptorHandleForHeapStart();
+    m_ViewportTarget.srvGpu.ptr += static_cast<UINT64>(m_ViewportTarget.srvDescriptorIndex) * m_SrvDescriptorSize;
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+    srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Texture2D.MipLevels = 1;
+    m_Device->CreateShaderResourceView(m_ViewportTarget.color.Get(), &srvDesc, m_ViewportTarget.srvCpu);
+
+    Logger::Get().Info(
+        "DX12 viewport target resized to " + std::to_string(width) + "x" + std::to_string(height));
+    return true;
+}
+
+bool Dx12RenderAdapter::BeginViewportRender(int width, int height, const float* clearColor)
+{
+    const UINT targetWidth = static_cast<UINT>(width > 1 ? width : 1);
+    const UINT targetHeight = static_cast<UINT>(height > 1 ? height : 1);
+    if (!EnsureViewportResources(targetWidth, targetHeight))
+        return false;
+
+    const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+        m_ViewportTarget.color.Get(),
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+        D3D12_RESOURCE_STATE_RENDER_TARGET);
+    m_CmdList->ResourceBarrier(1, &barrier);
+
+    D3D12_VIEWPORT viewport{};
+    viewport.TopLeftX = 0.0f;
+    viewport.TopLeftY = 0.0f;
+    viewport.Width = static_cast<float>(targetWidth);
+    viewport.Height = static_cast<float>(targetHeight);
+    viewport.MinDepth = 0.0f;
+    viewport.MaxDepth = 1.0f;
+
+    D3D12_RECT scissor{};
+    scissor.left = 0;
+    scissor.top = 0;
+    scissor.right = static_cast<LONG>(targetWidth);
+    scissor.bottom = static_cast<LONG>(targetHeight);
+
+    m_CmdList->RSSetViewports(1, &viewport);
+    m_CmdList->RSSetScissorRects(1, &scissor);
+    m_CmdList->OMSetRenderTargets(1, &m_ViewportTarget.rtv, FALSE, &m_ViewportTarget.dsv);
+
+    const float fallbackClear[4] = { 0.08f, 0.10f, 0.13f, 1.0f };
+    const float* chosenClear = clearColor != nullptr ? clearColor : fallbackClear;
+    m_CmdList->ClearRenderTargetView(m_ViewportTarget.rtv, chosenClear, 0, nullptr);
+    m_CmdList->ClearDepthStencilView(m_ViewportTarget.dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+    m_ViewportTarget.rendering = true;
+    return true;
+}
+
+void Dx12RenderAdapter::EndViewportRender()
+{
+    if (!m_ViewportTarget.rendering || !m_ViewportTarget.color)
+        return;
+
+    const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+        m_ViewportTarget.color.Get(),
+        D3D12_RESOURCE_STATE_RENDER_TARGET,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    m_CmdList->ResourceBarrier(1, &barrier);
+    m_ViewportTarget.rendering = false;
+}
+
+std::uint64_t Dx12RenderAdapter::GetViewportTextureId() const
+{
+    return m_ViewportTarget.color ? static_cast<std::uint64_t>(m_ViewportTarget.srvGpu.ptr) : 0;
 }
 
 bool Dx12RenderAdapter::CreateDevice(HWND)
@@ -832,6 +1088,56 @@ bool Dx12RenderAdapter::CreateDepthResources()
     return true;
 }
 
+bool Dx12RenderAdapter::ResizeBackBufferResources(UINT width, UINT height)
+{
+    if (!m_Swapchain || width == 0 || height == 0)
+        return false;
+
+    if (m_Width == width && m_Height == height)
+        return true;
+
+    WaitForGpu();
+
+    for (UINT i = 0; i < FrameCount; ++i)
+        m_Rt[i].Reset();
+    m_Depth.Reset();
+    m_RtvHeap.Reset();
+    m_DsvHeap.Reset();
+
+    DXGI_SWAP_CHAIN_DESC desc{};
+    ThrowIfFailed(m_Swapchain->GetDesc(&desc), "Swapchain GetDesc failed");
+    ThrowIfFailed(
+        m_Swapchain->ResizeBuffers(FrameCount, width, height, desc.BufferDesc.Format, desc.Flags),
+        "Swapchain ResizeBuffers failed");
+
+    m_Width = width;
+    m_Height = height;
+    m_FrameIndex = m_Swapchain->GetCurrentBackBufferIndex();
+
+    if (!CreateRtvHeapAndTargets())
+        return false;
+    if (!CreateDepthResources())
+        return false;
+
+    Logger::Get().Info("DX12 backbuffer resized to " + std::to_string(width) + "x" + std::to_string(height));
+    return true;
+}
+
+void Dx12RenderAdapter::ResizeBackBufferIfNeeded()
+{
+    if (m_Hwnd == nullptr)
+        return;
+
+    RECT clientRect{};
+    if (!GetClientRect(m_Hwnd, &clientRect))
+        return;
+
+    const UINT width = static_cast<UINT>(std::max<LONG>(clientRect.right - clientRect.left, 1));
+    const UINT height = static_cast<UINT>(std::max<LONG>(clientRect.bottom - clientRect.top, 1));
+    if (width != m_Width || height != m_Height)
+        ResizeBackBufferResources(width, height);
+}
+
 bool Dx12RenderAdapter::CreateSyncObjects()
 {
     ThrowIfFailed(m_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_Fence)), "CreateFence failed");
@@ -908,8 +1214,10 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
     m_SrvDescriptorSize = m_Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     m_FreeTextureDescriptorIndices.clear();
     m_FreeTextureDescriptorIndices.reserve(MaxTextures);
-    for (UINT descriptorIndex = 0; descriptorIndex < MaxTextures; ++descriptorIndex)
-        m_FreeTextureDescriptorIndices.push_back(MaxTextures - 1 - descriptorIndex);
+    m_FreeImGuiDescriptorIndices.clear();
+    m_FreeImGuiDescriptorIndices.push_back(0);
+    for (UINT descriptorIndex = 1; descriptorIndex < MaxTextures; ++descriptorIndex)
+        m_FreeTextureDescriptorIndices.push_back(MaxTextures - descriptorIndex);
 
     struct Vtx { float x, y, z; float r, g, b; };
     Vtx tri[3] = {
@@ -1016,6 +1324,8 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
 
 void Dx12RenderAdapter::BeginFrame()
 {
+    ResizeBackBufferIfNeeded();
+
     ThrowIfFailed(m_Allocator[m_FrameIndex]->Reset(), "Allocator Reset failed");
     ThrowIfFailed(m_CmdList->Reset(m_Allocator[m_FrameIndex].Get(), m_Pso.Get()), "CmdList Reset failed");
     m_DrawCbIndex = 0;
@@ -1163,7 +1473,7 @@ void Dx12RenderAdapter::EndFrame()
 
 void Dx12RenderAdapter::Present()
 {
-    ThrowIfFailed(m_Swapchain->Present(1, 0), "Present failed");
+    ThrowIfFailed(m_Swapchain->Present(0, 0), "Present failed");
     MoveToNextFrame();
 }
 
@@ -1192,6 +1502,70 @@ void Dx12RenderAdapter::WaitForGpu()
     WaitForSingleObject(m_FenceEvent, INFINITE);
 }
 
+void Dx12RenderAdapter::AllocateImGuiDescriptor(
+    ImGui_ImplDX12_InitInfo* info,
+    D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle,
+    D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle)
+{
+    auto* self = static_cast<Dx12RenderAdapter*>(info->UserData);
+    if (self == nullptr || self->m_FreeImGuiDescriptorIndices.empty())
+        throw std::runtime_error("DX12 ImGui descriptor allocation failed");
+
+    const UINT descriptorIndex = self->m_FreeImGuiDescriptorIndices.back();
+    self->m_FreeImGuiDescriptorIndices.pop_back();
+
+    *outCpuHandle = self->m_SrvHeap->GetCPUDescriptorHandleForHeapStart();
+    outCpuHandle->ptr += static_cast<SIZE_T>(descriptorIndex) * self->m_SrvDescriptorSize;
+    *outGpuHandle = self->m_SrvHeap->GetGPUDescriptorHandleForHeapStart();
+    outGpuHandle->ptr += static_cast<UINT64>(descriptorIndex) * self->m_SrvDescriptorSize;
+}
+
+void Dx12RenderAdapter::FreeImGuiDescriptor(
+    ImGui_ImplDX12_InitInfo* info,
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle,
+    D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle)
+{
+    (void)cpuHandle;
+    (void)gpuHandle;
+
+    auto* self = static_cast<Dx12RenderAdapter*>(info->UserData);
+    if (self != nullptr)
+        self->m_FreeImGuiDescriptorIndices.push_back(0);
+}
+
+void Dx12RenderAdapter::ReleaseViewportResources()
+{
+    if (m_ViewportTarget.srvDescriptorIndex != UINT_MAX)
+    {
+        m_FreeTextureDescriptorIndices.push_back(m_ViewportTarget.srvDescriptorIndex);
+        m_ViewportTarget.srvDescriptorIndex = UINT_MAX;
+    }
+
+    m_ViewportTarget.color.Reset();
+    m_ViewportTarget.depth.Reset();
+    m_ViewportTarget.rtvHeap.Reset();
+    m_ViewportTarget.dsvHeap.Reset();
+    m_ViewportTarget.rtv = {};
+    m_ViewportTarget.dsv = {};
+    m_ViewportTarget.srvCpu = {};
+    m_ViewportTarget.srvGpu = {};
+    m_ViewportTarget.width = 0;
+    m_ViewportTarget.height = 0;
+    m_ViewportTarget.rendering = false;
+}
+
+void Dx12RenderAdapter::ShutdownEditorUi()
+{
+    if (!m_EditorUiInitialized)
+        return;
+
+    ImGui_ImplDX12_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+    m_EditorUiInitialized = false;
+    Logger::Get().Info("DX12 editor UI shutdown");
+}
+
 void Dx12RenderAdapter::Shutdown()
 {
     try
@@ -1200,6 +1574,8 @@ void Dx12RenderAdapter::Shutdown()
             WaitForGpu();
     }
     catch (...) {}
+
+    ShutdownEditorUi();
 
     if (m_FenceEvent)
     {
@@ -1223,7 +1599,9 @@ void Dx12RenderAdapter::Shutdown()
     m_UploadedMeshes.clear();
     m_UploadedTextures.clear();
     m_UploadedShaders.clear();
+    ReleaseViewportResources();
     m_FreeTextureDescriptorIndices.clear();
+    m_FreeImGuiDescriptorIndices.clear();
     m_BoundShaderHandle = RenderShaderHandle::Invalid();
     m_BoundTextureHandle = RenderTextureHandle::Invalid();
     m_VB.Reset();

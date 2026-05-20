@@ -15,6 +15,22 @@ public:
     virtual ~IRenderAdapter() = default;
 
     virtual bool Initialize(IWindow* window) = 0;
+    virtual bool InitializeEditorUi(IWindow* window)
+    {
+        (void)window;
+        return false;
+    }
+    virtual void BeginEditorUiFrame() {}
+    virtual void RenderEditorUiFrame() {}
+    virtual bool BeginViewportRender(int width, int height, const float* clearColor)
+    {
+        (void)width;
+        (void)height;
+        (void)clearColor;
+        return false;
+    }
+    virtual void EndViewportRender() {}
+    virtual std::uint64_t GetViewportTextureId() const { return 0; }
     virtual void BeginFrame() = 0;
     virtual void Clear(float r, float g, float b, float a) = 0;
 
@@ -79,5 +95,6 @@ public:
     virtual void DrawTestCube() = 0;
     virtual void EndFrame() = 0;
     virtual void Present() = 0;
+    virtual void ShutdownEditorUi() {}
     virtual void Shutdown() = 0;
 };

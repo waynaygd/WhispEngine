@@ -136,6 +136,9 @@ enum class ContactType
 namespace ecs {
 void PhysicsSystem::Update(World& world, float dt)
 {
+    if (!m_Enabled)
+        return;
+
     if (dt <= 0.0f)
         return;
     if (dt > 0.05f)

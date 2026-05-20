@@ -19,6 +19,7 @@
 #include "../resources/ResourceManager.h"
 #include "../scene/SceneSerializer.h"
 #include <GLFW/glfw3.h>
+#include <imgui.h>
 
 #include "../game/states/LoadingState.h"
 
@@ -95,6 +96,13 @@ static std::string ResolveConfigPath()
 static bool HasNonDefaultTint(const std::array<float, 4>& tint)
 {
     return tint[0] != 1.0f || tint[1] != 1.0f || tint[2] != 1.0f || tint[3] != 1.0f;
+}
+
+static std::uint64_t BuildCollisionPairKey(std::size_t a, std::size_t b)
+{
+    const std::uint64_t lo = static_cast<std::uint64_t>(std::min(a, b));
+    const std::uint64_t hi = static_cast<std::uint64_t>(std::max(a, b));
+    return (hi << 32) ^ lo;
 }
 
 static bool TryBuildMeshCollider(
@@ -401,7 +409,7 @@ void Application::RunEcsBootstrapCheck()
 void Application::SetupEcsRuntimeDemo()
 {
     m_World.ClearSystems();
-    m_World.AddSystem<ecs::PhysicsSystem>(
+    m_PhysicsSystem = &m_World.AddSystem<ecs::PhysicsSystem>(
         &m_EventBus,
         m_Config.physics.gravity,
         m_Config.physics.linearDamping,
@@ -413,6 +421,7 @@ void Application::SetupEcsRuntimeDemo()
         m_Config.physics.spherePenetrationEpsilon,
         m_Config.physics.sphereVelocityEpsilon,
         m_Config.physics.dynamicBoxSphereCorrectionPercent);
+    m_PhysicsSystem->SetEnabled(m_EditorPlayMode);
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
     m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled);
@@ -516,6 +525,56 @@ bool Application::ReloadSceneFromCurrentConfig(const char* reason)
     m_Config.ecsDemo.initialEntities = std::move(sceneEntities);
     SetupEcsRuntimeDemo();
     Logger::Get().Info(std::string("Application: hot-reloaded ECS scene because ") + reason);
+    return true;
+}
+
+bool Application::SaveCurrentScene(std::string* outError)
+{
+    std::string sceneKey = m_Config.ecsDemo.sceneFile;
+    if (sceneKey.empty())
+        sceneKey = "scenes/editor_scene.json";
+
+    const std::filesystem::path scenePath = AssetPaths::ResolveAssetOutputPath(sceneKey);
+    if (scenePath.empty())
+    {
+        const std::string error = "Application: cannot resolve scene output path for " + sceneKey;
+        if (outError != nullptr)
+            *outError = error;
+        Logger::Get().Warn(error);
+        return false;
+    }
+
+    std::string saveError;
+    if (!SceneSerializer::SaveWorld(scenePath, m_World, &saveError))
+    {
+        if (outError != nullptr)
+            *outError = saveError;
+        if (!saveError.empty())
+            Logger::Get().Warn(saveError);
+        return false;
+    }
+
+    m_Config.ecsDemo.sceneFile = sceneKey;
+    std::error_code ec;
+    m_SceneWatchPath = scenePath;
+    m_SceneWriteTime = std::filesystem::last_write_time(scenePath, ec);
+    m_HasSceneWatch = !static_cast<bool>(ec);
+    Logger::Get().Info("Application: editor saved scene " + scenePath.string());
+    return true;
+}
+
+bool Application::LoadCurrentScene(std::string* outError)
+{
+    if (!ReloadSceneFromCurrentConfig("editor load requested"))
+    {
+        const std::string error = "Application: editor scene load failed";
+        if (outError != nullptr)
+            *outError = error;
+        Logger::Get().Warn(error);
+        return false;
+    }
+
+    InitializeConfigHotReload();
     return true;
 }
 
@@ -753,8 +812,18 @@ void Application::UpdateCameraController(float dt)
 
     const double scrollDeltaY = primary->ConsumeScrollDeltaY();
     const bool focused = glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE;
+    double cursorX = 0.0;
+    double cursorY = 0.0;
+    glfwGetCursorPos(window, &cursorX, &cursorY);
+
+    const bool editorWantsMouse =
+        ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse;
+    const bool mouseOverViewport = m_EditorLayer.IsPointInsideViewport(cursorX, cursorY);
+    const bool editorBlocksMouseLook = editorWantsMouse && !mouseOverViewport && !m_Camera.controlsActive;
     const bool rightMouseDown =
-        focused && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+        focused &&
+        !editorBlocksMouseLook &&
+        glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
 
     if (rightMouseDown && !m_Camera.previousRightMouseDown)
     {
@@ -800,14 +869,12 @@ void Application::UpdateCameraController(float dt)
             m_Camera.maxMoveSpeed);
     }
 
-    double mouseX = 0.0;
-    double mouseY = 0.0;
-    glfwGetCursorPos(window, &mouseX, &mouseY);
+    glfwGetCursorPos(window, &cursorX, &cursorY);
 
-    const float deltaX = static_cast<float>(mouseX - m_Camera.lastMouseX);
-    const float deltaY = static_cast<float>(mouseY - m_Camera.lastMouseY);
-    m_Camera.lastMouseX = mouseX;
-    m_Camera.lastMouseY = mouseY;
+    const float deltaX = static_cast<float>(cursorX - m_Camera.lastMouseX);
+    const float deltaY = static_cast<float>(cursorY - m_Camera.lastMouseY);
+    m_Camera.lastMouseX = cursorX;
+    m_Camera.lastMouseY = cursorY;
 
     m_Camera.yaw += deltaX * m_Camera.mouseSensitivity;
     m_Camera.pitch = std::clamp(
@@ -868,6 +935,17 @@ void Application::UpdateRenderSystemCamera(IWindow* window)
         framebufferHeight > 0
             ? static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight)
             : kFallbackAspectRatio;
+
+    UpdateRenderSystemCameraAspect(aspectRatio);
+}
+
+void Application::UpdateRenderSystemCameraAspect(float aspectRatio)
+{
+    if (m_RenderSystem == nullptr)
+        return;
+
+    if (aspectRatio <= 0.0001f)
+        aspectRatio = kFallbackAspectRatio;
 
     m_RenderSystem->SetCameraTransform(m_Camera.position, m_Camera.yaw, m_Camera.pitch);
     m_RenderSystem->SetCameraProjection(
@@ -950,7 +1028,22 @@ void Application::ToggleDebugColliders()
 
 bool Application::IsInputActionActive(const std::string& action) const
 {
+    if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard)
+        return false;
+
     return m_InputManager.IsActionActive(action);
+}
+
+void Application::SetEditorPlayMode(bool enabled)
+{
+    if (m_EditorPlayMode == enabled)
+        return;
+
+    m_EditorPlayMode = enabled;
+    if (m_PhysicsSystem != nullptr)
+        m_PhysicsSystem->SetEnabled(enabled);
+
+    Logger::Get().Info(std::string("Application: editor mode -> ") + (enabled ? "Play" : "Edit"));
 }
 
 void Application::UpdateEcs(float dt)
@@ -1076,13 +1169,14 @@ bool Application::Initialize()
     if (!ctx.renderer->Initialize(ctx.window.get()))
         return false;
 
+    ctx.editorUiAvailable = ctx.renderer->InitializeEditorUi(ctx.window.get());
+    if (!ctx.editorUiAvailable)
+        Logger::Get().Warn("Application: editor UI is unavailable for this renderer");
+
     m_Windows.push_back(std::move(ctx));
     ConfigureInputBindings();
-    m_EventBus.SubscribeCollision([](const ecs::CollisionEvent& e){
-        static int collisionLogCounter = 0;
-        ++collisionLogCounter;
-        if ((collisionLogCounter % 30) == 0)
-            Logger::Get().Info("Collision event(sampled): " + std::to_string(e.a.index) + " <-> " + std::to_string(e.b.index));
+    m_EventBus.SubscribeCollision([this](const ecs::CollisionEvent& e){
+        m_ActiveCollisionPairs.insert(BuildCollisionPairKey(e.a.index, e.b.index));
     });
     SetupEcsRuntimeDemo();
     InitializeConfigHotReload();
@@ -1218,18 +1312,53 @@ int Application::Run()
             if (!wc.window || wc.window->ShouldClose()) continue;
 
             wc.renderer->BeginFrame();
-            wc.renderer->Clear(wc.clear[0], wc.clear[1], wc.clear[2], wc.clear[3]);
-
-            if (m_RenderSystem != nullptr)
+            if (wc.editorUiAvailable)
             {
-                m_RenderSystem->SetRenderAdapter(wc.renderer.get());
-                UpdateRenderSystemCamera(wc.window.get());
+                wc.renderer->BeginEditorUiFrame();
+                m_EditorLayer.Render(*this, wc.renderer.get(), dt);
             }
 
-            m_World.UpdateSystems(dt);
-            UpdateEcs(dt);
+            const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
+            const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();
+            const bool renderSceneToViewport =
+                wc.editorUiAvailable &&
+                viewportWidth > 1 &&
+                viewportHeight > 1 &&
+                wc.renderer->BeginViewportRender(viewportWidth, viewportHeight, wc.clear);
 
-            m_StateMachine.Render(*this, *wc.renderer);
+            if (renderSceneToViewport)
+            {
+                m_ActiveCollisionPairs.clear();
+                if (m_RenderSystem != nullptr)
+                {
+                    m_RenderSystem->SetRenderAdapter(wc.renderer.get());
+                    UpdateRenderSystemCameraAspect(static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight));
+                }
+
+                m_World.UpdateSystems(dt);
+                UpdateEcs(dt);
+                m_StateMachine.Render(*this, *wc.renderer);
+                wc.renderer->EndViewportRender();
+            }
+
+            wc.renderer->Clear(wc.clear[0], wc.clear[1], wc.clear[2], wc.clear[3]);
+
+            if (!renderSceneToViewport)
+            {
+                m_ActiveCollisionPairs.clear();
+                if (m_RenderSystem != nullptr)
+                {
+                    m_RenderSystem->SetRenderAdapter(wc.renderer.get());
+                    UpdateRenderSystemCamera(wc.window.get());
+                }
+
+                m_World.UpdateSystems(dt);
+                UpdateEcs(dt);
+                m_StateMachine.Render(*this, *wc.renderer);
+            }
+
+            if (wc.editorUiAvailable)
+                wc.renderer->RenderEditorUiFrame();
 
             wc.renderer->EndFrame();
             wc.renderer->Present();
@@ -1261,12 +1390,17 @@ void Application::Shutdown()
 
     for (auto& wc : m_Windows)
     {
-        if (wc.renderer) wc.renderer->Shutdown();
+        if (wc.renderer)
+        {
+            wc.renderer->ShutdownEditorUi();
+            wc.renderer->Shutdown();
+        }
     }
 
     m_Windows.clear();
     m_ResourceManager.reset();
     m_World.ClearSystems();
+    m_PhysicsSystem = nullptr;
     m_RenderSystem = nullptr;
     m_EcsDebugEntities.clear();
     m_EcsDebugLogTimer = 0.0f;

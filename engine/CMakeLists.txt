@@ -1,6 +1,30 @@
 add_library(WhispEngineJson INTERFACE)
 target_include_directories(WhispEngineJson INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
+add_library(DearImGui STATIC
+  ${CMAKE_SOURCE_DIR}/external/imgui/imgui.cpp
+  ${CMAKE_SOURCE_DIR}/external/imgui/imgui_draw.cpp
+  ${CMAKE_SOURCE_DIR}/external/imgui/imgui_demo.cpp
+  ${CMAKE_SOURCE_DIR}/external/imgui/imgui_tables.cpp
+  ${CMAKE_SOURCE_DIR}/external/imgui/imgui_widgets.cpp
+  ${CMAKE_SOURCE_DIR}/external/imgui/misc/cpp/imgui_stdlib.cpp
+  ${CMAKE_SOURCE_DIR}/external/imgui/backends/imgui_impl_glfw.cpp
+  ${CMAKE_SOURCE_DIR}/external/imgui/backends/imgui_impl_dx12.cpp
+)
+target_include_directories(DearImGui PUBLIC
+  ${CMAKE_SOURCE_DIR}/external/imgui
+  ${CMAKE_SOURCE_DIR}/external/imgui/backends
+)
+target_link_libraries(DearImGui PUBLIC glfw d3d12)
+
+add_library(ImGuizmo STATIC
+  ${CMAKE_SOURCE_DIR}/external/imguizmo/src/ImGuizmo.cpp
+)
+target_include_directories(ImGuizmo PUBLIC
+  ${CMAKE_SOURCE_DIR}/external/imguizmo/src
+)
+target_link_libraries(ImGuizmo PUBLIC DearImGui)
+
 add_library(Engine
   core/Application.cpp
   core/AssetDependencyValidation.cpp
@@ -20,6 +44,7 @@ add_library(Engine
   resources/loaders/TextureLoader.cpp
   resources/loaders/ShaderLoader.cpp
   scene/SceneSerializer.cpp
+  editor/EditorLayer.cpp
   render/RenderFactory.cpp
   platform/GlfwWindow.cpp
   platform/InputManager.cpp
@@ -33,7 +58,7 @@ target_sources(Engine PRIVATE
 
 target_include_directories(Engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(Engine PUBLIC glfw)
-target_link_libraries(Engine PRIVATE assimp StbImage WhispEngineJson)
+target_link_libraries(Engine PRIVATE assimp StbImage WhispEngineJson DearImGui ImGuizmo)
 
 target_include_directories(Engine PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}

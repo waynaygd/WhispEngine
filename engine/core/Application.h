@@ -3,6 +3,8 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <cstdint>
+#include <unordered_set>
 
 #include "ConfigLoader.h"
 #include "Time.h"
@@ -13,11 +15,13 @@
 #include "../game/StateMachine.h"
 #include "../ecs/events/EventBus.h"
 #include "../platform/InputManager.h"
+#include "../editor/EditorLayer.h"
 
 class IWindow;
 class IRenderAdapter;
 class IGameState;
 class ResourceManager;
+namespace ecs { class PhysicsSystem; }
 
 enum class UpdateMode { 
     Variable, 
@@ -46,9 +50,20 @@ public:
     ecs::Entity SpawnPhysicsProjectile();
     bool DestroyLastGameplayEntity();
     std::size_t GetGameplayEntityCount() const { return m_EcsDebugEntities.size(); }
+    std::size_t GetActiveCollisionCount() const { return m_ActiveCollisionPairs.size(); }
     bool IsCameraControlActive() const { return m_Camera.controlsActive; }
+    const ecs::Vec3& GetCameraPosition() const { return m_Camera.position; }
+    float GetCameraYaw() const { return m_Camera.yaw; }
+    float GetCameraPitch() const { return m_Camera.pitch; }
+    float GetCameraVerticalFovRadians() const { return m_Camera.verticalFovRadians; }
+    float GetCameraNearPlane() const { return m_Camera.nearPlane; }
+    float GetCameraFarPlane() const { return m_Camera.farPlane; }
+    bool IsEditorPlayMode() const { return m_EditorPlayMode; }
+    void SetEditorPlayMode(bool enabled);
     void ToggleDebugColliders();
     bool IsInputActionActive(const std::string& action) const;
+    bool SaveCurrentScene(std::string* outError = nullptr);
+    bool LoadCurrentScene(std::string* outError = nullptr);
 
     void RequestStateChange(std::unique_ptr<IGameState> s);
 
@@ -67,6 +82,7 @@ private:
     void UpdateEcs(float dt);
     void UpdateCameraController(float dt);
     void UpdateRenderSystemCamera(IWindow* window);
+    void UpdateRenderSystemCameraAspect(float aspectRatio);
 
     struct WindowContext
     {
@@ -77,6 +93,7 @@ private:
 
         std::string baseTitle;  
         float clear[4] = { 0.08f, 0.08f, 0.12f, 1.0f };
+        bool editorUiAvailable = false;
     };
 
     struct CameraControllerState
@@ -106,6 +123,7 @@ private:
     std::unique_ptr<ResourceManager> m_ResourceManager;
 
     ecs::World m_World;
+    ecs::PhysicsSystem* m_PhysicsSystem = nullptr;
     ecs::RenderSystem* m_RenderSystem = nullptr;
     std::vector<ecs::Entity> m_EcsDebugEntities;
     float m_EcsDebugLogTimer = 0.0f;
@@ -120,8 +138,11 @@ private:
     StateMachine m_StateMachine;
     CameraControllerState m_Camera;
     bool m_DebugCollidersEnabled = false;
+    bool m_EditorPlayMode = false;
     ecs::EventBus m_EventBus;
     InputManager m_InputManager;
+    editor::EditorLayer m_EditorLayer;
+    std::unordered_set<std::uint64_t> m_ActiveCollisionPairs;
 
     UpdateMode m_UpdateMode = UpdateMode::Variable;
 

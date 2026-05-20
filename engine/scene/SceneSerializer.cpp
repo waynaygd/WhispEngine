@@ -3,8 +3,10 @@
 #include "../core/Logger.h"
 #include "../ecs/World.h"
 #include "../ecs/components/BoundsBounceComponent.h"
+#include "../ecs/components/ColliderComponent.h"
 #include "../ecs/components/MaterialComponent.h"
 #include "../ecs/components/MeshRendererComponent.h"
+#include "../ecs/components/RigidbodyComponent.h"
 #include "../ecs/components/TagComponent.h"
 #include "../ecs/components/TransformComponent.h"
 #include "../ecs/components/VelocityComponent.h"
@@ -201,6 +203,20 @@ bool SceneSerializer::SaveWorld(
             {
                 config.linearVelocity = velocity->linear;
                 config.angularVelocity = velocity->angular;
+            }
+            if (const auto* rigidbody = world.GetComponent<ecs::RigidbodyComponent>(entity))
+            {
+                config.linearVelocity = rigidbody->velocity;
+                config.isStatic = rigidbody->isStatic;
+                config.simulatePhysics = rigidbody->simulatePhysics;
+                config.useGravity = rigidbody->useGravity;
+            }
+            if (const auto* collider = world.GetComponent<ecs::ColliderComponent>(entity))
+            {
+                config.colliderManual = true;
+                config.colliderType = collider->type == ecs::ColliderType::Sphere ? "sphere" : "box";
+                config.colliderHalfExtents = collider->halfExtents;
+                config.colliderOffset = collider->offset;
             }
             entities.push_back(config);
         });

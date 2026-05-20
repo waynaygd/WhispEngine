@@ -1,0 +1,45 @@
+[INFO] 18:48:17 Application Initialize
+[INFO] 18:48:17 Asset validation: checking runtime roots and third-party loaders
+[INFO] 18:48:17 Asset validation: asset root -> C:\Users\topke\Desktop\WhispEngine\engine\assets
+[INFO] 18:48:17 Asset validation: shader root -> C:\Users\topke\Desktop\WhispEngine\engine\shaders
+[INFO] 18:48:17 Asset validation: Assimp ready, meshes=1, vertices=3
+[INFO] 18:48:17 Asset validation: stb_image ready, size=1x1, sourceChannels=3
+[INFO] 18:48:17 Asset validation: dependency bootstrap complete
+[INFO] 18:48:17 ResourceManager: initialized default mesh, texture, shader, and material resources
+[INFO] 18:48:17 Resource bootstrap: starting CPU-side resource loading self-check
+[INFO] 18:48:17 MeshLoader: loaded binary cache key=models/validation_triangle.obj vertices=3 indices=3 submeshes=1
+[INFO] 18:48:17 ResourceManager: loaded [Mesh] key=models/validation_triangle.obj
+[INFO] 18:48:17 Resource bootstrap: mesh key=models/validation_triangle.obj loaded=true fallback=false
+[INFO] 18:48:17 TextureLoader: loaded key=textures/validation_checker.png size=8x8 sourceChannels=4 storedChannels=4
+[INFO] 18:48:17 ResourceManager: loaded [Texture] key=textures/validation_checker.png
+[INFO] 18:48:17 Resource bootstrap: texture key=textures/validation_checker.png loaded=true fallback=false
+[INFO] 18:48:17 ShaderLoader: loaded key=dx12/textured.hlsl vertexChars=687 fragmentChars=687
+[INFO] 18:48:17 ResourceManager: loaded [Shader] key=dx12/textured.hlsl
+[INFO] 18:48:17 Resource bootstrap: shader key=dx12/textured.hlsl loaded=true fallback=false
+[INFO] 18:48:17 MaterialLoader: loaded key=materials/validation_checker.material.json shader=dx12/textured.hlsl texture=textures/validation_checker.png
+[INFO] 18:48:17 ResourceManager: loaded [Material] key=materials/validation_checker.material.json
+[INFO] 18:48:17 Resource bootstrap: material key=materials/validation_checker.material.json loaded=true fallback=false
+[INFO] 18:48:17 ECS bootstrap: starting entity and component self-check
+[INFO] 18:48:17 ECS bootstrap: created Entity(index=0, generation=0, alive=true)
+[INFO] 18:48:17 ECS bootstrap: created Entity(index=1, generation=0, alive=true)
+[INFO] 18:48:17 ECS bootstrap: created Entity(index=2, generation=0, alive=true)
+[INFO] 18:48:17 ECS bootstrap: destroy second entity -> ok
+[INFO] 18:48:17 ECS bootstrap: second entity after destroy -> Entity(index=1, generation=0, alive=false)
+[INFO] 18:48:17 ECS bootstrap: recycled slot into Entity(index=1, generation=1, alive=true)
+[INFO] 18:48:17 ECS bootstrap: first has transform -> true
+[INFO] 18:48:17 ECS bootstrap: first transform pos=(1.5, -0.5, 0) scale=(2, 2, 1) rot=(0, 0, 0)
+[INFO] 18:48:17 ECS bootstrap: first tag -> BootstrapEntity
+[INFO] 18:48:17 ECS bootstrap: first mesh renderer asset refs -> mesh=models/validation_triangle.obj material=materials/validation_checker.material.json
+[INFO] 18:48:17 ECS bootstrap: recycled has transform before remove -> true
+[INFO] 18:48:17 ECS bootstrap: remove transform from recycled -> ok
+[INFO] 18:48:17 ECS bootstrap: recycled has transform after remove -> false
+[INFO] 18:48:17 ECS bootstrap: destroy third entity with transform -> ok
+[INFO] 18:48:17 ECS bootstrap: third has transform after destroy -> false
+[INFO] 18:48:17 ECS bootstrap: first has tag -> true
+[INFO] 18:48:17 ECS bootstrap: first has mesh renderer -> true
+[INFO] 18:48:17 ECS bootstrap: alive entities=2, capacity=3
+[INFO] 18:48:17 ECS bootstrap: world reset after self-check
+[INFO] 18:48:17 Application: using config file: C:\Users\topke\Desktop\WhispEngine\engine\config\app.json
+[INFO] 18:48:17 ConfigLoader: loaded 2 windows from config, active renderer=dx12, ecs demo entities=0
+[INFO] 18:48:17 SceneSerializer: loaded scene=C:\Users\topke\Desktop\WhispEngine\engine\assets\scenes\pz3_demo_scene.json entities=6
+[ERROR] 18:48:17 DX12 init exception: DXIL not found. Ensure shaders are built to build/shaders/dx12 and working directory is build dir.

@@ -11,7 +11,7 @@ function(setup_shaders target_name)
 
     add_custom_command(
       OUTPUT ${DX12_SHADER_OUT_DIR}/triangle_vs.dxil
-      COMMAND ${DXC_EXE} -T vs_6_6 -E VSMain -O3
+      COMMAND ${DXC_EXE} -T vs_6_0 -E VSMain -O3
               -Fo ${DX12_SHADER_OUT_DIR}/triangle_vs.dxil
               ${DX12_SHADER_SRC}
       DEPENDS ${DX12_SHADER_SRC}
@@ -20,7 +20,7 @@ function(setup_shaders target_name)
 
     add_custom_command(
       OUTPUT ${DX12_SHADER_OUT_DIR}/triangle_ps.dxil
-      COMMAND ${DXC_EXE} -T ps_6_6 -E PSMain -O3
+      COMMAND ${DXC_EXE} -T ps_6_0 -E PSMain -O3
               -Fo ${DX12_SHADER_OUT_DIR}/triangle_ps.dxil
               ${DX12_SHADER_SRC}
       DEPENDS ${DX12_SHADER_SRC}

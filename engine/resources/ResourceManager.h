@@ -29,6 +29,17 @@ inline constexpr bool kUnsupportedResourceType = false;
 class ResourceManager
 {
 public:
+    struct ResourceStats
+    {
+        std::size_t meshCount = 0;
+        std::size_t textureCount = 0;
+        std::size_t shaderCount = 0;
+        std::size_t materialCount = 0;
+        std::size_t loadingCount = 0;
+        std::size_t failedCount = 0;
+        std::uint64_t estimatedCpuBytes = 0;
+    };
+
     ResourceManager();
     ~ResourceManager() = default;
 
@@ -208,6 +219,23 @@ public:
 
     void PollHotReload();
     void PollAsyncLoads();
+
+    ResourceStats GetStats() const
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_Mutex);
+
+        ResourceStats stats{};
+        stats.meshCount = m_MeshCache.size();
+        stats.textureCount = m_TextureCache.size();
+        stats.shaderCount = m_ShaderCache.size();
+        stats.materialCount = m_MaterialCache.size();
+
+        CollectResourceStats(m_MeshCache, stats);
+        CollectResourceStats(m_TextureCache, stats);
+        CollectResourceStats(m_ShaderCache, stats);
+        CollectResourceStats(m_MaterialCache, stats);
+        return stats;
+    }
 
     template <typename T>
     ResourceHandle<T> GetDefault() const
@@ -397,6 +425,51 @@ private:
             return ResourceKind::Material;
         else
             static_assert(kUnsupportedResourceType<T>, "Unsupported resource type");
+    }
+
+    template <typename T>
+    void CollectResourceStats(const CacheMap<T>& cache, ResourceStats& stats) const
+    {
+        for (const auto& [key, resource] : cache)
+        {
+            (void)key;
+            if (resource == nullptr)
+                continue;
+
+            if (resource->IsLoading())
+                ++stats.loadingCount;
+            if (resource->IsFailed())
+                ++stats.failedCount;
+
+            stats.estimatedCpuBytes += EstimateResourceBytes(resource->GetData());
+        }
+    }
+
+    std::uint64_t EstimateResourceBytes(const MeshResource& resource) const
+    {
+        return static_cast<std::uint64_t>(resource.meshData.vertices.size() * sizeof(MeshVertex)) +
+            static_cast<std::uint64_t>(resource.meshData.indices.size() * sizeof(std::uint32_t)) +
+            static_cast<std::uint64_t>(resource.meshData.submeshes.size() * sizeof(MeshSubmesh));
+    }
+
+    std::uint64_t EstimateResourceBytes(const TextureResource& resource) const
+    {
+        return static_cast<std::uint64_t>(resource.textureData.pixels.size());
+    }
+
+    std::uint64_t EstimateResourceBytes(const ShaderResource& resource) const
+    {
+        return static_cast<std::uint64_t>(resource.vertexSource.size() + resource.fragmentSource.size());
+    }
+
+    std::uint64_t EstimateResourceBytes(const MaterialResource& resource) const
+    {
+        return static_cast<std::uint64_t>(
+            resource.name.size() +
+            resource.sourcePath.size() +
+            resource.shaderPath.size() +
+            resource.texturePath.size() +
+            sizeof(resource.baseColor));
     }
 
     template <typename T>
