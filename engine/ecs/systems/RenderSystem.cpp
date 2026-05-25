@@ -2,6 +2,8 @@
 
 #include "../World.h"
 #include "../components/MaterialComponent.h"
+#include "../components/LightComponent.h"
+#include "../components/TagComponent.h"
 #include "../components/ColliderComponent.h"
 #include "../components/MeshRendererComponent.h"
 #include "../components/TransformComponent.h"
@@ -344,6 +346,52 @@ void RenderSystem::Update(World& world, float dt)
                 meshRenderer,
                 world.GetComponent<MaterialComponent>(entity));
         });
+
+
+    int directionalCount = 0;
+    int pointCount = 0;
+    int spotCount = 0;
+    world.ForEach<TransformComponent, LightComponent>(
+        [&](Entity, TransformComponent&, LightComponent& light)
+        {
+            if (!light.enabled)
+                return;
+            switch (light.type)
+            {
+            case LightType::Directional: ++directionalCount; break;
+            case LightType::Point: ++pointCount; break;
+            case LightType::Spot: ++spotCount; break;
+            }
+        });
+    Logger::Get().Info("RenderSystem lights: dir=" + std::to_string(directionalCount) +
+        " point=" + std::to_string(pointCount) +
+        " spot=" + std::to_string(spotCount) +
+        " shadows=" + std::string(m_ShadowsEnabled ? "on" : "off"));
+    if (!m_DebugCollidersEnabled && !m_LightDebugEnabled)
+        return;
+
+    if (m_LightDebugEnabled)
+    {
+        world.ForEach<TransformComponent, LightComponent>(
+            [&](Entity, TransformComponent& transform, LightComponent& light)
+            {
+                if (!light.enabled)
+                    return;
+                TransformComponent debugTransform = transform;
+                if (light.type == LightType::Directional)
+                    debugTransform.scale = Vec3{0.25f, 0.25f, 1.0f};
+                else if (light.type == LightType::Point)
+                    debugTransform.scale = Vec3{light.range * 0.2f, light.range * 0.2f, light.range * 0.2f};
+                else
+                    debugTransform.scale = Vec3{0.2f, 0.2f, light.range * 0.2f};
+                float mvp[16];
+                BuildMvp(mvp, debugTransform, m_CameraPosition, m_CameraYaw, m_CameraPitch,
+                    m_CameraVerticalFovRadians, m_CameraAspectRatio, m_CameraNearPlane, m_CameraFarPlane);
+                m_Renderer->SetTestTransform(mvp);
+                m_Renderer->SetTestColor(light.color.x, light.color.y, light.color.z, 1.0f);
+                m_Renderer->DrawTestCube();
+            });
+    }
 
     if (!m_DebugCollidersEnabled)
         return;
