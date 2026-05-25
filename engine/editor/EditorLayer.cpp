@@ -586,28 +586,6 @@ void EditorLayer::DrawSceneHierarchy(Application& app)
     }
 
 
-    if (auto* light = world.GetComponent<ecs::LightComponent>(m_SelectedEntity))
-    {
-        if (ImGui::TreeNodeEx("Light", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            const char* types[] = { "Directional", "Point", "Spot" };
-            int typeIndex = static_cast<int>(light->type);
-            EntitySnapshot before = CaptureSelectedEntity(app);
-            if (ImGui::Checkbox("Enabled", &light->enabled)) PushUndo("Toggle Light", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::Combo("Type", &typeIndex, types, 3)) { light->type = static_cast<ecs::LightType>(typeIndex); PushUndo("Change Light Type", before); }
-            before = CaptureSelectedEntity(app);
-            if (ImGui::ColorEdit3("Color", Vec3Data(light->color))) PushUndo("Edit Light Color", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::DragFloat("Intensity", &light->intensity, 0.05f, 0.0f, 50.0f)) PushUndo("Edit Light Intensity", before);
-            if (light->type != ecs::LightType::Directional) { before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Range", &light->range, 0.1f, 0.1f, 200.0f)) PushUndo("Edit Light Range", before); }
-            if (light->type == ecs::LightType::Spot) { before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Inner Cone", &light->innerConeAngle, 0.1f, 1.0f, 89.0f)) PushUndo("Edit Inner Cone", before); before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Outer Cone", &light->outerConeAngle, 0.1f, 1.0f, 89.0f)) PushUndo("Edit Outer Cone", before); }
-            before = CaptureSelectedEntity(app);
-            if (ImGui::Checkbox("Cast Shadows", &light->castsShadows)) PushUndo("Toggle Light Shadows", before);
-            if (light->castsShadows) { before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Shadow Bias", &light->shadowBias, 0.0001f, 0.0f, 0.1f, "%.5f")) PushUndo("Edit Shadow Bias", before); before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Normal Bias", &light->normalBias, 0.0001f, 0.0f, 0.1f, "%.5f")) PushUndo("Edit Normal Bias", before); before = CaptureSelectedEntity(app); if (ImGui::DragInt("Shadow Resolution", &light->shadowMapResolution, 64.0f, 128, 4096)) PushUndo("Edit Shadow Resolution", before);}
-            ImGui::TreePop();
-        }
-    }
 
     ImGui::End();
 }
@@ -763,7 +741,6 @@ void EditorLayer::DrawInspector(Application& app)
         }
     }
 
-
     if (auto* light = world.GetComponent<ecs::LightComponent>(m_SelectedEntity))
     {
         if (ImGui::TreeNodeEx("Light", ImGuiTreeNodeFlags_DefaultOpen))
@@ -771,21 +748,55 @@ void EditorLayer::DrawInspector(Application& app)
             const char* types[] = { "Directional", "Point", "Spot" };
             int typeIndex = static_cast<int>(light->type);
             EntitySnapshot before = CaptureSelectedEntity(app);
-            if (ImGui::Checkbox("Enabled", &light->enabled)) PushUndo("Toggle Light", before);
+            if (ImGui::Checkbox("Enabled", &light->enabled))
+                PushUndo("Toggle Light", before);
             before = CaptureSelectedEntity(app);
-            if (ImGui::Combo("Type", &typeIndex, types, 3)) { light->type = static_cast<ecs::LightType>(typeIndex); PushUndo("Change Light Type", before); }
+            if (ImGui::Combo("Type", &typeIndex, types, 3))
+            {
+                light->type = static_cast<ecs::LightType>(typeIndex);
+                PushUndo("Change Light Type", before);
+            }
             before = CaptureSelectedEntity(app);
-            if (ImGui::ColorEdit3("Color", Vec3Data(light->color))) PushUndo("Edit Light Color", before);
+            if (ImGui::ColorEdit3("Color", Vec3Data(light->color)))
+                PushUndo("Edit Light Color", before);
             before = CaptureSelectedEntity(app);
-            if (ImGui::DragFloat("Intensity", &light->intensity, 0.05f, 0.0f, 50.0f)) PushUndo("Edit Light Intensity", before);
-            if (light->type != ecs::LightType::Directional) { before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Range", &light->range, 0.1f, 0.1f, 200.0f)) PushUndo("Edit Light Range", before); }
-            if (light->type == ecs::LightType::Spot) { before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Inner Cone", &light->innerConeAngle, 0.1f, 1.0f, 89.0f)) PushUndo("Edit Inner Cone", before); before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Outer Cone", &light->outerConeAngle, 0.1f, 1.0f, 89.0f)) PushUndo("Edit Outer Cone", before); }
+            if (ImGui::DragFloat("Intensity", &light->intensity, 0.05f, 0.0f, 50.0f))
+                PushUndo("Edit Light Intensity", before);
+            if (light->type != ecs::LightType::Directional)
+            {
+                before = CaptureSelectedEntity(app);
+                if (ImGui::DragFloat("Range", &light->range, 0.1f, 0.1f, 200.0f))
+                    PushUndo("Edit Light Range", before);
+            }
+            if (light->type == ecs::LightType::Spot)
+            {
+                before = CaptureSelectedEntity(app);
+                if (ImGui::DragFloat("Inner Cone", &light->innerConeAngle, 0.1f, 1.0f, 89.0f))
+                    PushUndo("Edit Inner Cone", before);
+                before = CaptureSelectedEntity(app);
+                if (ImGui::DragFloat("Outer Cone", &light->outerConeAngle, 0.1f, 1.0f, 89.0f))
+                    PushUndo("Edit Outer Cone", before);
+            }
             before = CaptureSelectedEntity(app);
-            if (ImGui::Checkbox("Cast Shadows", &light->castsShadows)) PushUndo("Toggle Light Shadows", before);
-            if (light->castsShadows) { before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Shadow Bias", &light->shadowBias, 0.0001f, 0.0f, 0.1f, "%.5f")) PushUndo("Edit Shadow Bias", before); before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Normal Bias", &light->normalBias, 0.0001f, 0.0f, 0.1f, "%.5f")) PushUndo("Edit Normal Bias", before); before = CaptureSelectedEntity(app); if (ImGui::DragInt("Shadow Resolution", &light->shadowMapResolution, 64.0f, 128, 4096)) PushUndo("Edit Shadow Resolution", before);}
+            if (ImGui::Checkbox("Cast Shadows", &light->castsShadows))
+                PushUndo("Toggle Light Shadows", before);
+            if (light->castsShadows)
+            {
+                before = CaptureSelectedEntity(app);
+                if (ImGui::DragFloat("Shadow Bias", &light->shadowBias, 0.0001f, 0.0f, 0.1f, "%.5f"))
+                    PushUndo("Edit Shadow Bias", before);
+                before = CaptureSelectedEntity(app);
+                if (ImGui::DragFloat("Normal Bias", &light->normalBias, 0.0001f, 0.0f, 0.1f, "%.5f"))
+                    PushUndo("Edit Normal Bias", before);
+                before = CaptureSelectedEntity(app);
+                if (ImGui::DragInt("Shadow Resolution", &light->shadowMapResolution, 64.0f, 128, 4096))
+                    PushUndo("Edit Shadow Resolution", before);
+            }
             ImGui::TreePop();
         }
     }
+
+
 
     ImGui::End();
 }
@@ -917,28 +928,6 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
 
     DrawGizmo(app, contentMin, viewportSize);
 
-    if (auto* light = world.GetComponent<ecs::LightComponent>(m_SelectedEntity))
-    {
-        if (ImGui::TreeNodeEx("Light", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            const char* types[] = { "Directional", "Point", "Spot" };
-            int typeIndex = static_cast<int>(light->type);
-            EntitySnapshot before = CaptureSelectedEntity(app);
-            if (ImGui::Checkbox("Enabled", &light->enabled)) PushUndo("Toggle Light", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::Combo("Type", &typeIndex, types, 3)) { light->type = static_cast<ecs::LightType>(typeIndex); PushUndo("Change Light Type", before); }
-            before = CaptureSelectedEntity(app);
-            if (ImGui::ColorEdit3("Color", Vec3Data(light->color))) PushUndo("Edit Light Color", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::DragFloat("Intensity", &light->intensity, 0.05f, 0.0f, 50.0f)) PushUndo("Edit Light Intensity", before);
-            if (light->type != ecs::LightType::Directional) { before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Range", &light->range, 0.1f, 0.1f, 200.0f)) PushUndo("Edit Light Range", before); }
-            if (light->type == ecs::LightType::Spot) { before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Inner Cone", &light->innerConeAngle, 0.1f, 1.0f, 89.0f)) PushUndo("Edit Inner Cone", before); before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Outer Cone", &light->outerConeAngle, 0.1f, 1.0f, 89.0f)) PushUndo("Edit Outer Cone", before); }
-            before = CaptureSelectedEntity(app);
-            if (ImGui::Checkbox("Cast Shadows", &light->castsShadows)) PushUndo("Toggle Light Shadows", before);
-            if (light->castsShadows) { before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Shadow Bias", &light->shadowBias, 0.0001f, 0.0f, 0.1f, "%.5f")) PushUndo("Edit Shadow Bias", before); before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Normal Bias", &light->normalBias, 0.0001f, 0.0f, 0.1f, "%.5f")) PushUndo("Edit Normal Bias", before); before = CaptureSelectedEntity(app); if (ImGui::DragInt("Shadow Resolution", &light->shadowMapResolution, 64.0f, 128, 4096)) PushUndo("Edit Shadow Resolution", before);}
-            ImGui::TreePop();
-        }
-    }
 
     ImGui::End();
 }
@@ -1068,28 +1057,6 @@ void EditorLayer::DrawAssetBrowser(Application& app)
     }
 
 
-    if (auto* light = world.GetComponent<ecs::LightComponent>(m_SelectedEntity))
-    {
-        if (ImGui::TreeNodeEx("Light", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            const char* types[] = { "Directional", "Point", "Spot" };
-            int typeIndex = static_cast<int>(light->type);
-            EntitySnapshot before = CaptureSelectedEntity(app);
-            if (ImGui::Checkbox("Enabled", &light->enabled)) PushUndo("Toggle Light", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::Combo("Type", &typeIndex, types, 3)) { light->type = static_cast<ecs::LightType>(typeIndex); PushUndo("Change Light Type", before); }
-            before = CaptureSelectedEntity(app);
-            if (ImGui::ColorEdit3("Color", Vec3Data(light->color))) PushUndo("Edit Light Color", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::DragFloat("Intensity", &light->intensity, 0.05f, 0.0f, 50.0f)) PushUndo("Edit Light Intensity", before);
-            if (light->type != ecs::LightType::Directional) { before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Range", &light->range, 0.1f, 0.1f, 200.0f)) PushUndo("Edit Light Range", before); }
-            if (light->type == ecs::LightType::Spot) { before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Inner Cone", &light->innerConeAngle, 0.1f, 1.0f, 89.0f)) PushUndo("Edit Inner Cone", before); before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Outer Cone", &light->outerConeAngle, 0.1f, 1.0f, 89.0f)) PushUndo("Edit Outer Cone", before); }
-            before = CaptureSelectedEntity(app);
-            if (ImGui::Checkbox("Cast Shadows", &light->castsShadows)) PushUndo("Toggle Light Shadows", before);
-            if (light->castsShadows) { before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Shadow Bias", &light->shadowBias, 0.0001f, 0.0f, 0.1f, "%.5f")) PushUndo("Edit Shadow Bias", before); before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Normal Bias", &light->normalBias, 0.0001f, 0.0f, 0.1f, "%.5f")) PushUndo("Edit Normal Bias", before); before = CaptureSelectedEntity(app); if (ImGui::DragInt("Shadow Resolution", &light->shadowMapResolution, 64.0f, 128, 4096)) PushUndo("Edit Shadow Resolution", before);}
-            ImGui::TreePop();
-        }
-    }
 
     ImGui::End();
 }
@@ -1185,28 +1152,6 @@ void EditorLayer::DrawMaterialEditor(Application& app)
         ImGui::EndDisabled();
 
 
-    if (auto* light = world.GetComponent<ecs::LightComponent>(m_SelectedEntity))
-    {
-        if (ImGui::TreeNodeEx("Light", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            const char* types[] = { "Directional", "Point", "Spot" };
-            int typeIndex = static_cast<int>(light->type);
-            EntitySnapshot before = CaptureSelectedEntity(app);
-            if (ImGui::Checkbox("Enabled", &light->enabled)) PushUndo("Toggle Light", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::Combo("Type", &typeIndex, types, 3)) { light->type = static_cast<ecs::LightType>(typeIndex); PushUndo("Change Light Type", before); }
-            before = CaptureSelectedEntity(app);
-            if (ImGui::ColorEdit3("Color", Vec3Data(light->color))) PushUndo("Edit Light Color", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::DragFloat("Intensity", &light->intensity, 0.05f, 0.0f, 50.0f)) PushUndo("Edit Light Intensity", before);
-            if (light->type != ecs::LightType::Directional) { before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Range", &light->range, 0.1f, 0.1f, 200.0f)) PushUndo("Edit Light Range", before); }
-            if (light->type == ecs::LightType::Spot) { before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Inner Cone", &light->innerConeAngle, 0.1f, 1.0f, 89.0f)) PushUndo("Edit Inner Cone", before); before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Outer Cone", &light->outerConeAngle, 0.1f, 1.0f, 89.0f)) PushUndo("Edit Outer Cone", before); }
-            before = CaptureSelectedEntity(app);
-            if (ImGui::Checkbox("Cast Shadows", &light->castsShadows)) PushUndo("Toggle Light Shadows", before);
-            if (light->castsShadows) { before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Shadow Bias", &light->shadowBias, 0.0001f, 0.0f, 0.1f, "%.5f")) PushUndo("Edit Shadow Bias", before); before = CaptureSelectedEntity(app); if (ImGui::DragFloat("Normal Bias", &light->normalBias, 0.0001f, 0.0f, 0.1f, "%.5f")) PushUndo("Edit Normal Bias", before); before = CaptureSelectedEntity(app); if (ImGui::DragInt("Shadow Resolution", &light->shadowMapResolution, 64.0f, 128, 4096)) PushUndo("Edit Shadow Resolution", before);}
-            ImGui::TreePop();
-        }
-    }
 
     ImGui::End();
 }
