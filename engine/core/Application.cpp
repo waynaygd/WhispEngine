@@ -1227,10 +1227,10 @@ int Application::Run()
         if (primary)
         {
             GLFWwindow* w = primary->GetGlfwHandle();
-            static bool prevF5 = false;
-            bool f5 = glfwGetKey(w, GLFW_KEY_F5) == GLFW_PRESS;
+            static bool prevF6 = false;
+            bool f6 = glfwGetKey(w, GLFW_KEY_F6) == GLFW_PRESS;
 
-            if (f5 && !prevF5)
+            if (f6 && !prevF6)
             {
                 for (auto& wc : m_Windows)
                 {
@@ -1238,7 +1238,7 @@ int Application::Run()
                         wc.renderer->HotReloadShaders();
                 }
             }
-            prevF5 = f5;
+            prevF6 = f6;
         }
 
         bool anyAlive = false;
@@ -1248,20 +1248,6 @@ int Application::Run()
         if (!anyAlive) break;
 
         float dt = m_Time.Tick();
-    
-    auto spawnLight = [&](const char* name, ecs::LightType type, const ecs::Vec3& pos, const ecs::Vec3& rot, const ecs::Vec3& color, float intensity, float range)
-    {
-        const ecs::Entity e = m_World.CreateEntity();
-        auto& t = m_World.AddComponent<ecs::TransformComponent>(e);
-        t.position = pos; t.rotation = rot; t.scale = ecs::Vec3{1.0f,1.0f,1.0f};
-        auto& tag = m_World.AddComponent<ecs::TagComponent>(e);
-        tag.name = name;
-        auto& l = m_World.AddComponent<ecs::LightComponent>(e);
-        l.type = type; l.color = color; l.intensity = intensity; l.range = range;
-    };
-    spawnLight("Directional Light", ecs::LightType::Directional, ecs::Vec3{0.0f, 4.0f, 0.0f}, ecs::Vec3{-0.7f, 0.6f, 0.0f}, ecs::Vec3{1.0f,0.98f,0.9f}, 1.2f, 0.0f);
-    spawnLight("Point Light", ecs::LightType::Point, ecs::Vec3{1.2f, 1.7f, 0.6f}, ecs::Vec3{}, ecs::Vec3{1.0f,0.45f,0.3f}, 4.0f, 5.5f);
-    spawnLight("Spot Light", ecs::LightType::Spot, ecs::Vec3{-1.5f, 2.0f, -0.5f}, ecs::Vec3{-0.6f, -0.6f, 0.0f}, ecs::Vec3{0.4f,0.7f,1.0f}, 5.0f, 7.0f);
 
     if (m_ResourceManager != nullptr)
         {
