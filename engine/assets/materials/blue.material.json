@@ -1,5 +1,10 @@
 {
   "name": "BlueMaterial",
-  "shaderPath": "dx12/textured.hlsl",
-  "baseColor": [0.2, 0.5, 1.0, 1.0]
+  "shaderPath": "dx12/lit.hlsl",
+  "baseColor": [
+    0.2,
+    0.5,
+    1.0,
+    1.0
+  ]
 }

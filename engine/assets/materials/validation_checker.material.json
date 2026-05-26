@@ -1,6 +1,11 @@
 {
   "name": "ValidationCheckerMaterial",
-  "shaderPath": "dx12/textured.hlsl",
+  "shaderPath": "dx12/lit.hlsl",
   "texturePath": "textures/validation_checker.png",
-  "baseColor": [1.0, 1.0, 1.0, 1.0]
+  "baseColor": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ]
 }

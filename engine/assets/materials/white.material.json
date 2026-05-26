@@ -1,5 +1,10 @@
 {
   "name": "WhiteMaterial",
-  "shaderPath": "dx12/textured.hlsl",
-  "baseColor": [1.0, 1.0, 1.0, 1.0]
+  "shaderPath": "dx12/lit.hlsl",
+  "baseColor": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ]
 }
