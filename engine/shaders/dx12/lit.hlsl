@@ -48,5 +48,5 @@ float4 PSMain(VSOut input) : SV_Target
     float3 albedo = sampled.rgb * gTint.rgb;
     float3 lit = albedo * (ambient + directional) + specular;
 
-    return float4(saturate(lit), sampled.a * gTint.a);
+    return float4(saturate(lit), 1.0);
 }
