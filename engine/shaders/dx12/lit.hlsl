@@ -44,8 +44,12 @@ float4 PSMain(VSOut input) : SV_Target
     float3 directional = float3(1.0, 0.96, 0.88) * NdotL;
     float3 specular = float3(0.25, 0.25, 0.25) * spec;
 
+    // Keep lit path robust even when texture is missing/black in current content.
     float4 sampled = gTexture.Sample(gSampler, input.uv);
-    float3 albedo = sampled.rgb * gTint.rgb;
+    float textureLuma = dot(sampled.rgb, float3(0.299, 0.587, 0.114));
+    float useSampled = step(0.001, textureLuma);
+    float3 sampledOrWhite = lerp(float3(1.0, 1.0, 1.0), sampled.rgb, useSampled);
+    float3 albedo = sampledOrWhite * gTint.rgb;
     float3 lit = albedo * (ambient + directional) + specular;
 
     return float4(saturate(lit), 1.0);

@@ -58,8 +58,7 @@ public:
 
         if (auto cached = FindCachedResource<T>(key))
         {
-            if constexpr (!std::is_same_v<T, ShaderResource>)
-                Logger::Get().Info("ResourceManager: cache hit [" + ResourceTypeName<T>() + "] key=" + key);
+            // Cache hits are expected every frame for render paths, so keep logs quiet.
             return cached;
         }
 
