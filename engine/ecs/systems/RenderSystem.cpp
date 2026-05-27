@@ -363,10 +363,9 @@ void RenderSystem::Update(World& world, float dt)
             case LightType::Spot: ++spotCount; break;
             }
         });
-    Logger::Get().Info("RenderSystem lights: dir=" + std::to_string(directionalCount) +
-        " point=" + std::to_string(pointCount) +
-        " spot=" + std::to_string(spotCount) +
-        " shadows=" + std::string(m_ShadowsEnabled ? "on" : "off"));
+    (void)directionalCount;
+    (void)pointCount;
+    (void)spotCount;
     if (!m_DebugCollidersEnabled && !m_LightDebugEnabled)
         return;
 
@@ -482,6 +481,11 @@ bool RenderSystem::TryDrawResourceMesh(
         return false;
 
     const std::string meshKey = AssetPaths::NormalizeAssetKey(meshRenderer.meshPath);
+    if (m_ShadingMode == ShadingMode::Lit)
+        shaderPath = "dx12/lit.hlsl";
+    else
+        shaderPath = "dx12/textured.hlsl";
+
     const std::string shaderKey = AssetPaths::NormalizeShaderKey(shaderPath);
     if (meshKey.empty() || shaderKey.empty())
         return false;

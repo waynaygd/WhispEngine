@@ -26,6 +26,11 @@ struct TransformComponent;
 class RenderSystem final : public ISystem
 {
 public:
+    enum class ShadingMode
+    {
+        UnlitTextured = 0,
+        Lit = 1
+    };
     ~RenderSystem() override;
 
     const char* Name() const override { return "RenderSystem"; }
@@ -39,6 +44,8 @@ public:
     bool IsLightDebugEnabled() const { return m_LightDebugEnabled; }
     void SetShadowsEnabled(bool enabled) { m_ShadowsEnabled = enabled; }
     bool AreShadowsEnabled() const { return m_ShadowsEnabled; }
+    void SetShadingMode(ShadingMode mode) { m_ShadingMode = mode; }
+    ShadingMode GetShadingMode() const { return m_ShadingMode; }
     void ReleaseGpuResources();
 
 private:
@@ -78,5 +85,6 @@ private:
     bool m_DebugCollidersEnabled = false;
     bool m_LightDebugEnabled = true;
     bool m_ShadowsEnabled = true;
+    ShadingMode m_ShadingMode = ShadingMode::Lit;
 };
 }

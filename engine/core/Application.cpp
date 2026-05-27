@@ -615,6 +615,7 @@ void Application::ConfigureInputBindings()
     m_InputManager.BindAction("ToggleDebugColliders", GLFW_KEY_F3);
     m_InputManager.BindAction("ToggleLightDebug", GLFW_KEY_F4);
     m_InputManager.BindAction("ToggleShadows", GLFW_KEY_F5);
+    m_InputManager.BindAction("ToggleShadingMode", GLFW_KEY_F7);
 }
 
 void Application::PollConfigHotReload()
@@ -1064,11 +1065,26 @@ void Application::SetEditorPlayMode(bool enabled)
     Logger::Get().Info(std::string("Application: editor mode -> ") + (enabled ? "Play" : "Edit"));
 }
 
+bool Application::IsLitShadingEnabled() const
+{
+    return m_RenderSystem != nullptr &&
+        m_RenderSystem->GetShadingMode() == ecs::RenderSystem::ShadingMode::Lit;
+}
+
+void Application::SetLitShadingEnabled(bool enabled)
+{
+    if (m_RenderSystem == nullptr)
+        return;
+    m_RenderSystem->SetShadingMode(
+        enabled ? ecs::RenderSystem::ShadingMode::Lit : ecs::RenderSystem::ShadingMode::UnlitTextured);
+}
+
 void Application::UpdateEcs(float dt)
 {
     if (IsInputActionActive("ToggleDebugColliders")) ToggleDebugColliders();
     if (IsInputActionActive("ToggleLightDebug") && m_RenderSystem != nullptr) { m_RenderSystem->SetLightDebugEnabled(!m_RenderSystem->IsLightDebugEnabled()); Logger::Get().Info(std::string("Application: light debug ") + (m_RenderSystem->IsLightDebugEnabled()?"enabled":"disabled")); }
     if (IsInputActionActive("ToggleShadows") && m_RenderSystem != nullptr) { m_RenderSystem->SetShadowsEnabled(!m_RenderSystem->AreShadowsEnabled()); Logger::Get().Info(std::string("Application: shadows ") + (m_RenderSystem->AreShadowsEnabled()?"enabled":"disabled")); }
+    if (IsInputActionActive("ToggleShadingMode") && m_RenderSystem != nullptr) { const bool lit = !IsLitShadingEnabled(); SetLitShadingEnabled(lit); Logger::Get().Info(std::string("Application: shading mode -> ") + (lit ? "Lit" : "UnlitTextured")); }
 
     if (m_EcsDebugEntities.empty())
         return;

@@ -876,6 +876,10 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
         app.SetEditorPlayMode(!playMode);
     ImGui::SameLine();
     ImGui::TextUnformatted(playMode ? "Play" : "Edit");
+    ImGui::SameLine();
+    bool litMode = app.IsLitShadingEnabled();
+    if (ImGui::Checkbox("Lit", &litMode))
+        app.SetLitShadingEnabled(litMode);
 
     ImGui::Separator();
 
