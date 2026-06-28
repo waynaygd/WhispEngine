@@ -1,0 +1,6 @@
+{
+  "name": "cavenab",
+  "shaderPath": "dx12/textured.hlsl",
+  "texturePath": "textures/caveman_baseColor.png",
+  "baseColor": [ 1.0, 1.0, 1.0, 1.0 ]
+}
