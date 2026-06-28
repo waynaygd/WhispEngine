@@ -32,3 +32,8 @@ compile_commands.json
 
 # Source mesh assets are OBJ files and must remain trackable.
 !engine/assets/models/*.obj
+
+# Keep DXC runtime and import library in repository
+!external/dxc/lib/x64/dxcompiler.lib
+!external/dxc/bin/x64/dxcompiler.dll
+!external/dxc/bin/x64/dxil.dll
