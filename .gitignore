@@ -37,3 +37,4 @@ compile_commands.json
 !external/dxc/lib/x64/dxcompiler.lib
 !external/dxc/bin/x64/dxcompiler.dll
 !external/dxc/bin/x64/dxil.dll
+!external/dxc/bin/x64/dxc.exe
