@@ -58,7 +58,7 @@ public:
 
         if (auto cached = FindCachedResource<T>(key))
         {
-            Logger::Get().Info("ResourceManager: cache hit [" + ResourceTypeName<T>() + "] key=" + key);
+            // Cache hits are expected every frame for render paths, so keep logs quiet.
             return cached;
         }
 

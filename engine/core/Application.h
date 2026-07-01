@@ -60,6 +60,8 @@ public:
     float GetCameraFarPlane() const { return m_Camera.farPlane; }
     bool IsEditorPlayMode() const { return m_EditorPlayMode; }
     void SetEditorPlayMode(bool enabled);
+    bool IsLitShadingEnabled() const;
+    void SetLitShadingEnabled(bool enabled);
     void ToggleDebugColliders();
     bool IsInputActionActive(const std::string& action) const;
     bool SaveCurrentScene(std::string* outError = nullptr);

@@ -3,6 +3,7 @@
 #include "../core/Application.h"
 #include "../ecs/World.h"
 #include "../ecs/components/ColliderComponent.h"
+#include "../ecs/components/LightComponent.h"
 #include "../ecs/components/MaterialComponent.h"
 #include "../ecs/components/MeshRendererComponent.h"
 #include "../ecs/components/RigidbodyComponent.h"
@@ -584,6 +585,8 @@ void EditorLayer::DrawSceneHierarchy(Application& app)
             m_SelectedEntity = entity;
     }
 
+
+
     ImGui::End();
 }
 
@@ -637,6 +640,21 @@ void EditorLayer::DrawInspector(Application& app)
             EntitySnapshot before = CaptureSelectedEntity(app);
             if (ImGui::Checkbox("Visible", &mesh->visible))
                 PushUndo("Toggle Mesh Visibility", before);
+            before = CaptureSelectedEntity(app);
+            if (ImGui::Checkbox("Cast Shadows", &mesh->castShadows))
+                PushUndo("Toggle Cast Shadows", before);
+            before = CaptureSelectedEntity(app);
+            if (ImGui::Checkbox("Receive Shadows", &mesh->receiveShadows))
+                PushUndo("Toggle Receive Shadows", before);
+            before = CaptureSelectedEntity(app);
+            if (ImGui::ColorEdit4("Albedo Color", mesh->albedoColor))
+                PushUndo("Edit Albedo", before);
+            before = CaptureSelectedEntity(app);
+            if (ImGui::DragFloat("Shininess", &mesh->shininess, 0.1f, 1.0f, 256.0f))
+                PushUndo("Edit Shininess", before);
+            before = CaptureSelectedEntity(app);
+            if (ImGui::Checkbox("Use Texture", &mesh->useTexture))
+                PushUndo("Toggle Use Texture", before);
             before = CaptureSelectedEntity(app);
             if (DrawResourceCombo("Mesh", mesh->meshPath, m_MeshAssets, false))
                 PushUndo("Change Mesh", before);
@@ -723,6 +741,63 @@ void EditorLayer::DrawInspector(Application& app)
         }
     }
 
+    if (auto* light = world.GetComponent<ecs::LightComponent>(m_SelectedEntity))
+    {
+        if (ImGui::TreeNodeEx("Light", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            const char* types[] = { "Directional", "Point", "Spot" };
+            int typeIndex = static_cast<int>(light->type);
+            EntitySnapshot before = CaptureSelectedEntity(app);
+            if (ImGui::Checkbox("Enabled", &light->enabled))
+                PushUndo("Toggle Light", before);
+            before = CaptureSelectedEntity(app);
+            if (ImGui::Combo("Type", &typeIndex, types, 3))
+            {
+                light->type = static_cast<ecs::LightType>(typeIndex);
+                PushUndo("Change Light Type", before);
+            }
+            before = CaptureSelectedEntity(app);
+            if (ImGui::ColorEdit3("Color", Vec3Data(light->color)))
+                PushUndo("Edit Light Color", before);
+            before = CaptureSelectedEntity(app);
+            if (ImGui::DragFloat("Intensity", &light->intensity, 0.05f, 0.0f, 50.0f))
+                PushUndo("Edit Light Intensity", before);
+            if (light->type != ecs::LightType::Directional)
+            {
+                before = CaptureSelectedEntity(app);
+                if (ImGui::DragFloat("Range", &light->range, 0.1f, 0.1f, 200.0f))
+                    PushUndo("Edit Light Range", before);
+            }
+            if (light->type == ecs::LightType::Spot)
+            {
+                before = CaptureSelectedEntity(app);
+                if (ImGui::DragFloat("Inner Cone", &light->innerConeAngle, 0.1f, 1.0f, 89.0f))
+                    PushUndo("Edit Inner Cone", before);
+                before = CaptureSelectedEntity(app);
+                if (ImGui::DragFloat("Outer Cone", &light->outerConeAngle, 0.1f, 1.0f, 89.0f))
+                    PushUndo("Edit Outer Cone", before);
+            }
+            before = CaptureSelectedEntity(app);
+            if (ImGui::Checkbox("Cast Shadows", &light->castsShadows))
+                PushUndo("Toggle Light Shadows", before);
+            if (light->castsShadows)
+            {
+                before = CaptureSelectedEntity(app);
+                if (ImGui::DragFloat("Shadow Bias", &light->shadowBias, 0.0001f, 0.0f, 0.1f, "%.5f"))
+                    PushUndo("Edit Shadow Bias", before);
+                before = CaptureSelectedEntity(app);
+                if (ImGui::DragFloat("Normal Bias", &light->normalBias, 0.0001f, 0.0f, 0.1f, "%.5f"))
+                    PushUndo("Edit Normal Bias", before);
+                before = CaptureSelectedEntity(app);
+                if (ImGui::DragInt("Shadow Resolution", &light->shadowMapResolution, 64.0f, 128, 4096))
+                    PushUndo("Edit Shadow Resolution", before);
+            }
+            ImGui::TreePop();
+        }
+    }
+
+
+
     ImGui::End();
 }
 
@@ -740,6 +815,9 @@ void EditorLayer::DrawStatistics(Application& app, float dt)
     auto& world = app.GetWorld();
     int meshRendererCount = 0;
     int colliderCount = 0;
+    int directionalLights = 0;
+    int pointLights = 0;
+    int spotLights = 0;
     world.ForEach<ecs::MeshRendererComponent>(
         [&](ecs::Entity, ecs::MeshRendererComponent&)
         {
@@ -750,8 +828,16 @@ void EditorLayer::DrawStatistics(Application& app, float dt)
         {
             ++colliderCount;
         });
+    world.ForEach<ecs::LightComponent>(
+        [&](ecs::Entity, ecs::LightComponent& light)
+        {
+            if (!light.enabled) return;
+            if (light.type == ecs::LightType::Directional) ++directionalLights;
+            else if (light.type == ecs::LightType::Point) ++pointLights;
+            else ++spotLights;
+        });
 
-    ImGui::SetNextWindowSize(ImVec2(280.0f, 170.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(320.0f, 250.0f), ImGuiCond_FirstUseEver);
     ImGui::Begin("Statistics", &m_ShowStatistics);
     ImGui::Text("Average FPS: %.1f", m_AverageFps);
     ImGui::Text("Frame time: %.3f ms (~%.1f FPS)", dt * 1000.0f, dt > 0.0f ? 1.0f / dt : 0.0f);
@@ -759,6 +845,9 @@ void EditorLayer::DrawStatistics(Application& app, float dt)
     ImGui::Text("Mesh renderers: %d", meshRendererCount);
     ImGui::Text("Colliders: %d", colliderCount);
     ImGui::Text("Active collisions: %zu", app.GetActiveCollisionCount());
+    ImGui::Text("Directional lights: %d", directionalLights);
+    ImGui::Text("Point lights: %d", pointLights);
+    ImGui::Text("Spot lights: %d", spotLights);
     ImGui::Text("Gameplay entities: %zu", app.GetGameplayEntityCount());
     if (const ResourceManager* resources = app.GetResourceManager())
     {
@@ -772,6 +861,7 @@ void EditorLayer::DrawStatistics(Application& app, float dt)
         ImGui::Text("Resource memory: %s", FormatBytes(stats.estimatedCpuBytes));
         ImGui::Text("Loading: %zu  Failed: %zu", stats.loadingCount, stats.failedCount);
     }
+
     ImGui::End();
 }
 
@@ -786,6 +876,10 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
         app.SetEditorPlayMode(!playMode);
     ImGui::SameLine();
     ImGui::TextUnformatted(playMode ? "Play" : "Edit");
+    ImGui::SameLine();
+    bool litMode = app.IsLitShadingEnabled();
+    if (ImGui::Checkbox("Lit", &litMode))
+        app.SetLitShadingEnabled(litMode);
 
     ImGui::Separator();
 
@@ -837,6 +931,8 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     }
 
     DrawGizmo(app, contentMin, viewportSize);
+
+
     ImGui::End();
 }
 
@@ -964,6 +1060,8 @@ void EditorLayer::DrawAssetBrowser(Application& app)
         ImGui::EndDisabled();
     }
 
+
+
     ImGui::End();
 }
 
@@ -1056,6 +1154,8 @@ void EditorLayer::DrawMaterialEditor(Application& app)
     }
     if (!canSaveMaterial)
         ImGui::EndDisabled();
+
+
 
     ImGui::End();
 }

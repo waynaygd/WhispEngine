@@ -26,6 +26,11 @@ struct TransformComponent;
 class RenderSystem final : public ISystem
 {
 public:
+    enum class ShadingMode
+    {
+        UnlitTextured = 0,
+        Lit = 1
+    };
     ~RenderSystem() override;
 
     const char* Name() const override { return "RenderSystem"; }
@@ -35,6 +40,12 @@ public:
     void SetCameraProjection(float verticalFovRadians, float aspectRatio, float nearPlane, float farPlane);
     void SetResourceManager(ResourceManager* resourceManager) { m_ResourceManager = resourceManager; }
     void SetDebugCollidersEnabled(bool enabled) { m_DebugCollidersEnabled = enabled; }
+    void SetLightDebugEnabled(bool enabled) { m_LightDebugEnabled = enabled; }
+    bool IsLightDebugEnabled() const { return m_LightDebugEnabled; }
+    void SetShadowsEnabled(bool enabled) { m_ShadowsEnabled = enabled; }
+    bool AreShadowsEnabled() const { return m_ShadowsEnabled; }
+    void SetShadingMode(ShadingMode mode) { m_ShadingMode = mode; }
+    ShadingMode GetShadingMode() const { return m_ShadingMode; }
     void ReleaseGpuResources();
 
 private:
@@ -72,5 +83,8 @@ private:
     std::unordered_set<std::string> m_LoggedTextureReuseKeys;
     std::unordered_set<std::string> m_LoggedShaderReuseKeys;
     bool m_DebugCollidersEnabled = false;
+    bool m_LightDebugEnabled = true;
+    bool m_ShadowsEnabled = true;
+    ShadingMode m_ShadingMode = ShadingMode::Lit;
 };
 }
