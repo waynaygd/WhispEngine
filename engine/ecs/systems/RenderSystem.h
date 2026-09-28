@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <deque>
 
 class IRenderAdapter;
 class ResourceManager;
@@ -109,5 +110,34 @@ private:
 
     std::vector<RenderSnapshot> m_RenderSnapshots;
     std::vector<RenderPacket> m_RenderPackets;
+
+    enum class GpuFinalizeKind
+    {
+        Mesh,
+        Texture,
+        Shader
+    };
+
+    struct GpuFinalizeRequest
+    {
+        GpuFinalizeKind kind;
+        std::string key;
+        std::uint64_t version = 0;
+    };
+
+    void QueueGpuFinalization(
+        GpuFinalizeKind kind,
+        const std::string& key,
+        std::uint64_t version);
+
+    std::size_t PumpGpuFinalization(std::size_t maxItems);
+
+    void FinalizeMeshGpu(const std::string& key, std::uint64_t version);
+    void FinalizeTextureGpu(const std::string& key, std::uint64_t version);
+    void FinalizeShaderGpu(const std::string& key, std::uint64_t version);
+
+    std::deque<GpuFinalizeRequest> m_GpuFinalizeQueue;
+    std::unordered_set<std::string> m_PendingGpuFinalizations;
+
 };
 }

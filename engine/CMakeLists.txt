@@ -18,8 +18,7 @@ target_include_directories(DearImGui PUBLIC
 target_link_libraries(DearImGui PUBLIC glfw d3d12)
 
 add_library(ImGuizmo STATIC
-  ${CMAKE_SOURCE_DIR}/external/imguizmo/src/ImGuizmo.cpp
-)
+  ${CMAKE_SOURCE_DIR}/external/imguizmo/src/ImGuizmo.cpp)
 target_include_directories(ImGuizmo PUBLIC
   ${CMAKE_SOURCE_DIR}/external/imguizmo/src
 )
@@ -38,6 +37,8 @@ add_library(Engine
   ecs/systems/RenderSystem.cpp
   ecs/systems/SystemPipeline.cpp
   game/StateMachine.cpp
+  jobs/JobSystem.cpp
+  jobs/JobSystem.h
   resources/ResourceManager.cpp
   resources/loaders/MeshLoader.cpp
   resources/loaders/MaterialLoader.cpp
@@ -58,7 +59,16 @@ target_sources(Engine PRIVATE
 
 target_include_directories(Engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(Engine PUBLIC glfw)
-target_link_libraries(Engine PRIVATE assimp StbImage WhispEngineJson DearImGui ImGuizmo)
+target_link_libraries(
+    Engine
+    PRIVATE
+        assimp
+        StbImage
+        WhispEngineJson
+        DearImGui
+        ImGuizmo
+        enkiTS
+)
 
 target_include_directories(Engine PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}

@@ -68,6 +68,19 @@ if (ENABLE_TRACY)
     target_link_libraries(Engine PRIVATE Tracy::TracyClient)
 endif()
 
+set(ENKITS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(ENKITS_BUILD_C_INTERFACE OFF CACHE BOOL "" FORCE)
+set(ENKITS_INSTALL OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    enkits
+    GIT_REPOSITORY https://github.com/dougbinks/enkiTS.git
+    GIT_TAG v1.12
+    GIT_SHALLOW TRUE
+)
+
+FetchContent_MakeAvailable(enkits)
+
 include(engine/shaders/Shaders.cmake)
 setup_shaders(WhispEngine)
 

@@ -18,6 +18,7 @@
 #include "../render/IRenderAdapter.h"
 #include "../resources/ResourceManager.h"
 #include "../scene/SceneSerializer.h"
+#include "../jobs/JobSystem.h"
 #include <GLFW/glfw3.h>
 #include <imgui.h>
 
@@ -1095,7 +1096,16 @@ bool Application::Initialize()
     if (!ValidateAssetDependencyAvailability())
         return false;
 
-    m_ResourceManager = std::make_unique<ResourceManager>();
+    m_JobSystem = std::make_unique<JobSystem>();
+
+    if (!m_JobSystem->Initialize())
+    {
+        Logger::Get().Error("Application: failed to initialize JobSystem");
+        return false;
+    }
+
+    m_ResourceManager =
+        std::make_unique<ResourceManager>(m_JobSystem.get());
     RunResourceBootstrapCheck();
 
     RunEcsBootstrapCheck();
@@ -1182,7 +1192,7 @@ bool Application::Initialize()
     });
     SetupEcsRuntimeDemo();
     // SetupRenderStressScene();
-    SetupPhysicsStressScene();
+    // SetupPhysicsStressScene();
     InitializeConfigHotReload();
 
     m_IsRunning = true;
@@ -1223,6 +1233,30 @@ int Application::Run()
                 }
             }
             prevF5 = f5;
+
+            static bool prevF8 = false;
+
+            const bool f8 =
+                glfwGetKey(w, GLFW_KEY_F8) == GLFW_PRESS;
+
+            if (f8 && !prevF8)
+            {
+                RunAsyncResourceStressTest();
+            }
+
+            prevF8 = f8;
+
+            static bool prevF7 = false;
+
+            const bool f7 =
+                glfwGetKey(w, GLFW_KEY_F7) == GLFW_PRESS;
+
+            if (f7 && !prevF7)
+            {
+                RunSyncResourceStressTest();
+            }
+
+            prevF7 = f7;
         }
 
         bool anyAlive = false;
@@ -1238,7 +1272,12 @@ int Application::Run()
 
             if (m_ResourceManager != nullptr)
             {
+                constexpr std::size_t maxResourceFinalizationsPerFrame = 4;
+
                 m_ResourceManager->PollAsyncLoads();
+                m_ResourceManager->PumpFinalization(
+                    maxResourceFinalizationsPerFrame);
+
                 m_ResourceManager->PollHotReload();
 
                 m_World.ForEach<ecs::ColliderComponent, ecs::MeshRendererComponent, ecs::TransformComponent>(
@@ -1433,7 +1472,19 @@ void Application::Shutdown()
     }
 
     m_Windows.clear();
+
+    if (m_ResourceManager != nullptr)
+        m_ResourceManager->Shutdown();
+
     m_ResourceManager.reset();
+
+
+    if (m_JobSystem != nullptr)
+    {
+        m_JobSystem->Shutdown();
+        m_JobSystem.reset();
+    }
+
     m_World.ClearSystems();
     m_PhysicsSystem = nullptr;
     m_RenderSystem = nullptr;
@@ -1534,4 +1585,129 @@ void Application::SetupPhysicsStressScene()
         "Physics stress scene: spawned " +
         std::to_string(bodyCount) +
         " dynamic bodies");
+}
+
+void Application::RunAsyncResourceStressTest()
+{
+    if (m_AsyncResourceStressStarted)
+        return;
+
+    if (m_ResourceManager == nullptr)
+        return;
+
+    m_AsyncResourceStressStarted = true;
+
+    constexpr int textureCount = 8;
+
+    Logger::Get().Info(
+        "Async resource stress: starting textures=" +
+        std::to_string(textureCount));
+
+    for (int i = 0; i < textureCount; ++i)
+    {
+        char texturePath[128];
+
+        std::snprintf(
+            texturePath,
+            sizeof(texturePath),
+            "textures/stress/head_%02d.dds",
+            i + 1);
+
+        //
+        // Сразу ставим CPU load в JobSystem.
+        //
+        (void)m_ResourceManager->LoadAsync<TextureResource>(
+            texturePath);
+
+        //
+        // Создаём реальный объект, который использует ресурс.
+        // RenderSystem увидит Loading resource и сначала покажет fallback.
+        //
+        EcsDemoEntityConfig entityCfg;
+
+        entityCfg.tag =
+            "AsyncStress_" + std::to_string(i);
+
+        entityCfg.meshPath =
+            "models/validation_cube.obj";
+
+        entityCfg.texturePath =
+            texturePath;
+
+        entityCfg.shaderPath =
+            "dx12/textured.hlsl";
+
+        entityCfg.materialPath.clear();
+
+        const int column = i % 4;
+        const int row = i / 4;
+
+        entityCfg.position = ecs::Vec3{
+            -2.25f + static_cast<float>(column) * 1.5f,
+            1.5f - static_cast<float>(row) * 1.5f,
+            0.0f
+        };
+
+        entityCfg.scale =
+            ecs::Vec3{ 0.65f, 0.65f, 0.65f };
+
+        //
+        // Чтобы stress test ресурсов не превратился
+        // одновременно в physics benchmark.
+        //
+        entityCfg.bounce = false;
+        entityCfg.simulatePhysics = false;
+        entityCfg.isStatic = true;
+        entityCfg.useGravity = false;
+
+        //
+        // Очень важно:
+        // иначе SpawnEcsDemoEntity() может вызвать
+        // TryBuildMeshCollider(), а тот делает sync Load<Mesh>().
+        //
+        entityCfg.colliderManual = true;
+        entityCfg.colliderHalfExtents =
+            ecs::Vec3{ 0.325f, 0.325f, 0.325f };
+
+        const ecs::Entity entity =
+            SpawnEcsDemoEntity(entityCfg);
+
+        m_EcsDebugEntities.push_back(entity);
+    }
+
+    Logger::Get().Info(
+        "Async resource stress: all requests scheduled");
+}
+
+void Application::RunSyncResourceStressTest()
+{
+    ZoneScopedN("SyncResourceStress");
+
+    if (m_ResourceManager == nullptr)
+        return;
+
+    constexpr int textureCount = 8;
+
+    Logger::Get().Info(
+        "Sync resource stress: starting textures=" +
+        std::to_string(textureCount));
+
+    for (int i = 0; i < textureCount; ++i)
+    {
+        ZoneScopedN("SyncTextureLoad");
+
+        char texturePath[128];
+
+        std::snprintf(
+            texturePath,
+            sizeof(texturePath),
+            "textures/stress/head_%02d.dds",
+            i + 1);
+
+        (void)m_ResourceManager->Load<TextureResource>(
+            texturePath);
+    }
+
+    Logger::Get().Info(
+        "Sync resource stress: complete");
 }

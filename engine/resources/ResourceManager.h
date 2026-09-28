@@ -11,6 +11,11 @@
 #include "loaders/TextureLoader.h"
 #include "../core/AssetPaths.h"
 #include "../core/Logger.h"
+#include "../jobs/JobSystem.h"
+#include <tracy/Tracy.hpp>
+
+#include <deque>
+#include <functional>
 
 #include <filesystem>
 #include <future>
@@ -40,8 +45,13 @@ public:
         std::uint64_t estimatedCpuBytes = 0;
     };
 
-    ResourceManager();
-    ~ResourceManager() = default;
+    std::size_t PumpFinalization(std::size_t maxItems);
+
+    std::mutex m_FinalizationMutex;
+    std::deque<std::function<void()>> m_FinalizationQueue;
+
+    explicit ResourceManager(JobSystem* jobSystem);
+    ~ResourceManager();
 
     template <typename T>
     ResourceHandle<T> Load(const std::filesystem::path& path)
@@ -88,6 +98,24 @@ public:
     std::future<ResourceHandle<T>> LoadAsync(const std::filesystem::path& path)
     {
         std::lock_guard<std::recursive_mutex> lock(m_Mutex);
+
+        if (!m_AcceptAsyncLoads)
+        {
+            const std::string key = NormalizeKey<T>(path);
+
+            auto cached = key.empty()
+                ? nullptr
+                : FindCachedResource<T>(key);
+
+            if (cached != nullptr)
+                return MakeReadyFuture(cached);
+
+            return MakeReadyFuture(
+                CreateFallbackResource<T>(
+                    key.empty() ? "<shutdown>" : key,
+                    "ResourceManager is shutting down"));
+        }
+
         const std::string key = NormalizeKey<T>(path);
         if (key.empty())
         {
@@ -243,6 +271,8 @@ public:
         return GetDefaultStorage<T>();
     }
 
+    JobSystem* m_JobSystem = nullptr;
+
 private:
     template <typename T>
     using CacheMap = std::unordered_map<std::string, ResourceHandle<T>>;
@@ -267,7 +297,7 @@ private:
     struct AsyncTask
     {
         std::string token;
-        std::future<void> future;
+        JobSystem::TaskHandle task;
     };
 
     template <typename T>
@@ -481,67 +511,146 @@ private:
     template <typename T>
     void StartAsyncLoad(const std::string& key, ResourceHandle<T> resource)
     {
+        if (!m_AcceptAsyncLoads)
+            return;
+
         const std::string token = MakeAsyncToken<T>(key);
         if (m_PendingAsyncKeys.contains(token))
             return;
 
         m_PendingAsyncKeys.insert(token);
-        m_AsyncTasks.push_back(
-            AsyncTask
+
+        if (m_JobSystem == nullptr ||
+            !m_JobSystem->IsInitialized())
+        {
+            m_PendingAsyncKeys.erase(token);
+
+            T fallbackData =
+                GetDefault<T>() != nullptr
+                ? GetDefault<T>()->GetData()
+                : T{};
+
+            resource->ReplaceData(
+                std::move(fallbackData),
+                ResourceLoadState::Failed,
+                true,
+                "JobSystem is not available");
+
+            Logger::Get().Warn(
+                "ResourceManager: async load failed [" +
+                ResourceTypeName<T>() +
+                "] key=" + key +
+                ". JobSystem is not available");
+
+            return;
+        }
+
+        auto task = m_JobSystem->Execute(
+            [this, key, resource, token]()
             {
-                token,
-                std::async(std::launch::async, [this, key, resource, token]()
+                ZoneScopedN("ResourceLoadJob");
+
+                ResourceLoadResult<T> result;
+                std::string error;
+
+                try
                 {
-                    ResourceLoadResult<T> result;
-                    std::string error;
-                    try
-                    {
-                        result = InvokeLoader<T>(key);
-                    }
-                    catch (const std::exception& e)
-                    {
-                        error = e.what();
-                    }
-                    catch (...)
-                    {
-                        error = "unknown async load exception";
-                    }
+                    ZoneScopedN("ResourceDecode");
+                    result = InvokeLoader<T>(key);
+                }
+                catch (const std::exception& e)
+                {
+                    error = e.what();
+                }
+                catch (...)
+                {
+                    error = "unknown async load exception";
+                }
 
-                    std::lock_guard<std::recursive_mutex> taskLock(m_Mutex);
-                    auto cached = FindCachedResource<T>(key);
-                    if (cached == nullptr || cached != resource)
-                    {
-                        m_PendingAsyncKeys.erase(token);
-                        return;
-                    }
+                {
+                    std::lock_guard<std::mutex> finalizeLock(m_FinalizationMutex);
 
-                    if (error.empty() && result.success)
-                    {
-                        cached->ReplaceData(std::move(result.data), ResourceLoadState::Loaded, false);
-                        Logger::Get().Info("ResourceManager: async load completed [" + ResourceTypeName<T>() + "] key=" + key);
-
-                        if constexpr (std::is_same_v<T, MaterialResource>)
+                    m_FinalizationQueue.emplace_back(
+                        [this,
+                        key,
+                        resource,
+                        token,
+                        result = std::move(result),
+                        error = std::move(error)]() mutable
                         {
-                            const auto& material = cached->GetData();
-                            if (!material.shaderPath.empty())
-                                (void)Load<ShaderResource>(material.shaderPath);
-                            if (!material.texturePath.empty())
-                                (void)LoadAsync<TextureResource>(material.texturePath);
-                        }
-                    }
-                    else
-                    {
-                        const std::string finalError = error.empty() ? result.errorMessage : error;
-                        T fallbackData = GetDefault<T>() != nullptr ? GetDefault<T>()->GetData() : T{};
-                        cached->ReplaceData(std::move(fallbackData), ResourceLoadState::Failed, true, finalError);
-                        Logger::Get().Warn(
-                            "ResourceManager: async load failed [" + ResourceTypeName<T>() + "] key=" + key +
-                            ". " + finalError);
-                    }
+                            std::lock_guard<std::recursive_mutex> lock(m_Mutex);
 
-                    m_PendingAsyncKeys.erase(token);
-                })
+                            auto cached = FindCachedResource<T>(key);
+
+                            if (cached == nullptr || cached != resource)
+                            {
+                                m_PendingAsyncKeys.erase(token);
+                                return;
+                            }
+
+                            if (error.empty() && result.success)
+                            {
+                                cached->ReplaceData(
+                                    std::move(result.data),
+                                    ResourceLoadState::Loaded,
+                                    false);
+
+                                Logger::Get().Info(
+                                    "ResourceManager: async load finalized [" +
+                                    ResourceTypeName<T>() +
+                                    "] key=" + key);
+
+                                if constexpr (std::is_same_v<T, MaterialResource>)
+                                {
+                                    const auto& material = cached->GetData();
+
+                                    if (!material.shaderPath.empty())
+                                        (void)LoadAsync<ShaderResource>(
+                                            material.shaderPath);
+
+                                    if (!material.texturePath.empty())
+                                        (void)LoadAsync<TextureResource>(
+                                            material.texturePath);
+                                }
+                            }
+                            else
+                            {
+                                const std::string finalError =
+                                    error.empty()
+                                    ? result.errorMessage
+                                    : error;
+
+                                T fallbackData =
+                                    GetDefault<T>() != nullptr
+                                    ? GetDefault<T>()->GetData()
+                                    : T{};
+
+                                cached->ReplaceData(
+                                    std::move(fallbackData),
+                                    ResourceLoadState::Failed,
+                                    true,
+                                    finalError);
+
+                                Logger::Get().Warn(
+                                    "ResourceManager: async load failed [" +
+                                    ResourceTypeName<T>() +
+                                    "] key=" + key +
+                                    ". " + finalError);
+                            }
+
+                            m_PendingAsyncKeys.erase(token);
+                        });
+                }
             });
+
+        if (task != nullptr)
+        {
+            m_AsyncTasks.push_back(
+                AsyncTask{
+                    token,
+                    std::move(task)
+                });
+        }
     }
 
     mutable std::recursive_mutex m_Mutex;
@@ -557,4 +666,12 @@ private:
     ResourceHandle<TextureResource> m_DefaultTexture;
     ResourceHandle<ShaderResource> m_DefaultShader;
     ResourceHandle<MaterialResource> m_DefaultMaterial;
+
+public:
+    void Shutdown();
+
+private:
+    bool m_AcceptAsyncLoads = true;
 };
+
+

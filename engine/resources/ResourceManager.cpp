@@ -1,8 +1,8 @@
 #include "ResourceManager.h"
+#include <tracy/Tracy.hpp>
 
-#include <chrono>
-
-ResourceManager::ResourceManager()
+ResourceManager::ResourceManager(JobSystem* jobSystem)
+    : m_JobSystem(jobSystem)
 {
     m_DefaultMesh = CreateDefaultResource<MeshResource>("defaults/mesh", MeshLoader::CreateDefault());
     m_DefaultTexture = CreateDefaultResource<TextureResource>("defaults/texture", TextureLoader::CreateDefault());
@@ -10,6 +10,11 @@ ResourceManager::ResourceManager()
     m_DefaultMaterial = CreateDefaultResource<MaterialResource>("defaults/material", MaterialLoader::CreateDefault());
 
     Logger::Get().Info("ResourceManager: initialized default mesh, texture, shader, and material resources");
+}
+
+ResourceManager::~ResourceManager()
+{
+    Shutdown();
 }
 
 void ResourceManager::ClearAll()
@@ -39,15 +44,16 @@ void ResourceManager::PollAsyncLoads()
     std::lock_guard<std::recursive_mutex> lock(m_Mutex);
 
     auto it = m_AsyncTasks.begin();
+
     while (it != m_AsyncTasks.end())
     {
-        if (it->future.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        if (m_JobSystem != nullptr &&
+            !m_JobSystem->IsComplete(it->task))
         {
             ++it;
             continue;
         }
 
-        it->future.get();
         it = m_AsyncTasks.erase(it);
     }
 }
@@ -90,4 +96,75 @@ void ResourceManager::PollHotReload()
 
         Logger::Get().Info("ResourceManager: hot reload detected key=" + watch.key);
     }
+}
+
+std::size_t ResourceManager::PumpFinalization(std::size_t maxItems)
+{
+    ZoneScopedN("ResourceFinalizePump");
+
+    std::size_t processed = 0;
+
+    while (processed < maxItems)
+    {
+        std::function<void()> finalizer;
+
+        {
+            std::lock_guard<std::mutex> lock(m_FinalizationMutex);
+
+            if (m_FinalizationQueue.empty())
+                break;
+
+            finalizer = std::move(m_FinalizationQueue.front());
+            m_FinalizationQueue.pop_front();
+        }
+
+        if (finalizer)
+            finalizer();
+
+        ++processed;
+    }
+
+    return processed;
+}
+
+void ResourceManager::Shutdown()
+{
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_Mutex);
+
+        if (!m_AcceptAsyncLoads)
+            return;
+
+        m_AcceptAsyncLoads = false;
+    }
+
+    if (m_JobSystem != nullptr &&
+        m_JobSystem->IsInitialized())
+    {
+        m_JobSystem->WaitAll();
+    }
+
+    for (;;)
+    {
+        std::size_t pendingCount = 0;
+
+        {
+            std::lock_guard<std::mutex> lock(
+                m_FinalizationMutex);
+
+            pendingCount =
+                m_FinalizationQueue.size();
+        }
+
+        if (pendingCount == 0)
+            break;
+
+        PumpFinalization(pendingCount);
+    }
+
+    m_AsyncTasks.clear();
+    m_PendingAsyncKeys.clear();
+
+    Logger::Get().Info(
+        "ResourceManager: async shutdown complete");
 }
