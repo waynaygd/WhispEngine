@@ -61,6 +61,21 @@ target_include_directories(StbImage PUBLIC ${stb_SOURCE_DIR})
 
 add_subdirectory(engine)
 
+option(WHISP_BUILD_PHYSICS_TESTS "Build headless rigid-body regression scenarios" OFF)
+if (WHISP_BUILD_PHYSICS_TESTS)
+  enable_testing()
+  add_executable(PhysicsRegression
+    tests/PhysicsRegression.cpp
+    engine/ecs/World.cpp
+    engine/ecs/systems/SystemPipeline.cpp
+    engine/ecs/systems/PhysicsSystem.cpp)
+  target_include_directories(PhysicsRegression PRIVATE engine)
+  if (ENABLE_TRACY)
+    target_link_libraries(PhysicsRegression PRIVATE Tracy::TracyClient)
+  endif()
+  add_test(NAME PhysicsRegression COMMAND PhysicsRegression)
+endif()
+
 add_executable(WhispEngine WhispEngine.cpp)
 target_link_libraries(WhispEngine PRIVATE Engine)
 

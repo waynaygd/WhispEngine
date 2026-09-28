@@ -439,23 +439,71 @@ void Application::SetupEcsRuntimeDemo()
         m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(entityCfg));
     }
 
-    // Small cube pyramid for interactive shooting tests.
+    constexpr float cubeSize = 0.18f;
+    constexpr float cubeHalf = cubeSize * 0.5f;
+
+    constexpr float groundCenterY = -1.0f;
+    constexpr float groundHalfHeight = 0.025f;
+    constexpr float groundTop =
+        groundCenterY + groundHalfHeight;
+
     for (int layer = 0; layer < 4; ++layer)
     {
         const int count = 4 - layer;
+
+        const float startX =
+            -0.5f *
+            static_cast<float>(count - 1) *
+            cubeSize;
+
         for (int i = 0; i < count; ++i)
         {
             EcsDemoEntityConfig cubeCfg;
-            cubeCfg.tag = "PyramidCube_" + std::to_string(layer) + "_" + std::to_string(i);
-            cubeCfg.meshPath = "models/validation_cube.obj";
-            cubeCfg.materialPath = "materials/blue.material.json";
-            cubeCfg.scale = ecs::Vec3{ 0.18f, 0.18f, 0.18f };
-            cubeCfg.position = ecs::Vec3{
-                -0.35f + static_cast<float>(i) * 0.20f + static_cast<float>(layer) * 0.10f,
-                -0.92f + static_cast<float>(layer) * 0.22f,
-                0.45f
+
+            cubeCfg.tag =
+                "PyramidCube_" +
+                std::to_string(layer) +
+                "_" +
+                std::to_string(i);
+
+            cubeCfg.meshPath =
+                "models/validation_cube.obj";
+
+            cubeCfg.materialPath =
+                "materials/blue.material.json";
+
+            cubeCfg.scale =
+                ecs::Vec3{
+                    cubeSize,
+                    cubeSize,
+                    cubeSize
             };
-            m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(cubeCfg));
+
+            cubeCfg.position =
+                ecs::Vec3{
+                    startX +
+                        static_cast<float>(i) *
+                        cubeSize,
+
+                    groundTop +
+                        cubeHalf +
+                        static_cast<float>(layer) *
+                        cubeSize,
+
+                    0.45f
+            };
+
+            cubeCfg.colliderManual = true;
+
+            cubeCfg.colliderHalfExtents =
+                ecs::Vec3{
+                    cubeHalf,
+                    cubeHalf,
+                    cubeHalf
+            };
+
+            m_EcsDebugEntities.push_back(
+                SpawnEcsDemoEntity(cubeCfg));
         }
     }
 
@@ -711,6 +759,7 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     rigidbody.isStatic = entityCfg.isStatic || tag.name == "GroundPlane";
     rigidbody.simulatePhysics = entityCfg.simulatePhysics;
     rigidbody.velocity = entityCfg.linearVelocity;
+    rigidbody.angularVelocity = entityCfg.angularVelocity;
     auto& collider = m_World.AddComponent<ecs::ColliderComponent>(entity);
     collider.type = (entityCfg.colliderType == "sphere" || entityCfg.colliderType == "Sphere")
         ? ecs::ColliderType::Sphere
