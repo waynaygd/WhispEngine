@@ -338,17 +338,54 @@ void RenderSystem::Update(World& world, float dt)
     {
         ZoneScopedN("RenderEntities");
 
-        world.ForEach<TransformComponent, MeshRendererComponent>(
-            [&](Entity entity, TransformComponent& transform, MeshRendererComponent& meshRenderer)
-            {
-                if (!meshRenderer.visible)
-                    return;
+        m_RenderSnapshots.clear();
+        m_RenderSnapshots.reserve(world.GetAliveCount());
 
-                (void)TryDrawResourceMesh(
-                    transform,
-                    meshRenderer,
-                    world.GetComponent<MaterialComponent>(entity));
-            });
+        {
+            ZoneScopedN("RenderGather");
+
+            world.ForEach<TransformComponent, MeshRendererComponent>(
+                [&](Entity entity,
+                    TransformComponent& transform,
+                    MeshRendererComponent& meshRenderer)
+                {
+                    if (!meshRenderer.visible)
+                        return;
+
+                    RenderSnapshot snapshot{};
+
+                    if (TryBuildRenderSnapshot(
+                        transform,
+                        meshRenderer,
+                        world.GetComponent<MaterialComponent>(entity),
+                        snapshot))
+                    {
+                        m_RenderSnapshots.push_back(std::move(snapshot));
+                    }
+                });
+        }
+
+        {
+            ZoneScopedN("RenderPrepare");
+
+            m_RenderPackets.resize(m_RenderSnapshots.size());
+
+            for (std::size_t i = 0; i < m_RenderSnapshots.size(); ++i)
+            {
+                PrepareRenderPacket(
+                    m_RenderSnapshots[i],
+                    m_RenderPackets[i]);
+            }
+        }
+
+        {
+            ZoneScopedN("RenderSubmit");
+
+            for (const RenderPacket& packet : m_RenderPackets)
+            {
+                SubmitRenderPacket(packet);
+            }
+        }
     }
 
     if (!m_DebugCollidersEnabled)
@@ -396,10 +433,11 @@ void RenderSystem::Update(World& world, float dt)
     }
 }
 
-bool RenderSystem::TryDrawResourceMesh(
+bool RenderSystem::TryBuildRenderSnapshot(
     const TransformComponent& transform,
     const MeshRendererComponent& meshRenderer,
-    const MaterialComponent* materialComponent)
+    const MaterialComponent* materialComponent,
+    RenderSnapshot& outSnapshot)
 {
     if (m_Renderer == nullptr || m_ResourceManager == nullptr)
         return false;
@@ -464,10 +502,30 @@ bool RenderSystem::TryDrawResourceMesh(
     if (!meshHandle.IsValid() || !textureHandle.IsValid() || !shaderHandle.IsValid())
         return false;
 
-    float mvp[16];
+    outSnapshot.transform = transform;
+
+    outSnapshot.mesh = meshHandle;
+    outSnapshot.texture = textureHandle;
+    outSnapshot.shader = shaderHandle;
+
+    outSnapshot.tint =
+    {
+        tint[0],
+        tint[1],
+        tint[2],
+        tint[3]
+    };
+
+    return true;
+}
+
+void RenderSystem::PrepareRenderPacket(
+    const RenderSnapshot& snapshot,
+    RenderPacket& outPacket) const
+{
     BuildMvp(
-        mvp,
-        transform,
+        outPacket.mvp.data(),
+        snapshot.transform,
         m_CameraPosition,
         m_CameraYaw,
         m_CameraPitch,
@@ -475,16 +533,37 @@ bool RenderSystem::TryDrawResourceMesh(
         m_CameraAspectRatio,
         m_CameraNearPlane,
         m_CameraFarPlane);
-    m_Renderer->SetTestTransform(mvp);
+
+    outPacket.mesh = snapshot.mesh;
+    outPacket.texture = snapshot.texture;
+    outPacket.shader = snapshot.shader;
+    outPacket.tint = snapshot.tint;
+}
+
+void RenderSystem::SubmitRenderPacket(
+    const RenderPacket& packet)
+{
+    if (m_Renderer == nullptr)
+        return;
+
+    if (!packet.mesh.IsValid() ||
+        !packet.texture.IsValid() ||
+        !packet.shader.IsValid())
+    {
+        return;
+    }
+
+    m_Renderer->SetTestTransform(packet.mvp.data());
+
     m_Renderer->SetTestColor(
-        tint[0],
-        tint[1],
-        tint[2],
-        tint[3]);
-    m_Renderer->BindShader(shaderHandle);
-    m_Renderer->BindTexture(0, textureHandle);
-    m_Renderer->DrawMesh(meshHandle);
-    return true;
+        packet.tint[0],
+        packet.tint[1],
+        packet.tint[2],
+        packet.tint[3]);
+
+    m_Renderer->BindShader(packet.shader);
+    m_Renderer->BindTexture(0, packet.texture);
+    m_Renderer->DrawMesh(packet.mesh);
 }
 
 RenderMeshHandle RenderSystem::GetOrUploadMesh(const std::string& key)

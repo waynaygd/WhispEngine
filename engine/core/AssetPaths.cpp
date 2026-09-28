@@ -150,11 +150,23 @@ std::filesystem::path ResolveShaderRoot()
 
 std::string NormalizeAssetKey(const std::filesystem::path& path)
 {
+    if (path.empty())
+        return {};
+
+    if (!path.is_absolute())
+        return NormalizeRelativeKey(path);
+
     return NormalizeKeyAgainstRoot(path, ResolveAssetRoot());
 }
 
 std::string NormalizeShaderKey(const std::filesystem::path& path)
 {
+    if (path.empty())
+        return {};
+
+    if (!path.is_absolute())
+        return NormalizeRelativeKey(path);
+
     return NormalizeKeyAgainstRoot(path, ResolveShaderRoot());
 }
 

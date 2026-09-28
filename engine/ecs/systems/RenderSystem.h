@@ -2,13 +2,16 @@
 
 #include "ISystem.h"
 #include "../MathTypes.h"
+#include "../components/TransformComponent.h"
 #include "../../render/RenderResourceHandles.h"
 #include "../../resources/Resource.h"
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 class IRenderAdapter;
 class ResourceManager;
@@ -38,10 +41,41 @@ public:
     void ReleaseGpuResources();
 
 private:
-    bool TryDrawResourceMesh(
+    struct RenderSnapshot
+    {
+        TransformComponent transform{};
+
+        RenderMeshHandle mesh = RenderMeshHandle::Invalid();
+        RenderTextureHandle texture = RenderTextureHandle::Invalid();
+        RenderShaderHandle shader = RenderShaderHandle::Invalid();
+
+        std::array<float, 4> tint = { 1.0f, 1.0f, 1.0f, 1.0f };
+    };
+
+    struct RenderPacket
+    {
+        std::array<float, 16> mvp{};
+
+        RenderMeshHandle mesh = RenderMeshHandle::Invalid();
+        RenderTextureHandle texture = RenderTextureHandle::Invalid();
+        RenderShaderHandle shader = RenderShaderHandle::Invalid();
+
+        std::array<float, 4> tint = { 1.0f, 1.0f, 1.0f, 1.0f };
+    };
+
+    bool TryBuildRenderSnapshot(
         const TransformComponent& transform,
         const MeshRendererComponent& meshRenderer,
-        const MaterialComponent* materialComponent);
+        const MaterialComponent* materialComponent,
+        RenderSnapshot& outSnapshot);
+
+    void PrepareRenderPacket(
+        const RenderSnapshot& snapshot,
+        RenderPacket& outPacket) const;
+
+    void SubmitRenderPacket(
+        const RenderPacket& packet);
+
     RenderMeshHandle GetOrUploadMesh(const std::string& key);
     RenderTextureHandle GetOrCreateTexture(const std::string& key);
     RenderShaderHandle GetOrCreateShader(const std::string& key);
@@ -72,5 +106,8 @@ private:
     std::unordered_set<std::string> m_LoggedTextureReuseKeys;
     std::unordered_set<std::string> m_LoggedShaderReuseKeys;
     bool m_DebugCollidersEnabled = false;
+
+    std::vector<RenderSnapshot> m_RenderSnapshots;
+    std::vector<RenderPacket> m_RenderPackets;
 };
 }

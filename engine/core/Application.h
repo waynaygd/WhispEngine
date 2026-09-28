@@ -84,6 +84,7 @@ private:
     void UpdateRenderSystemCamera(IWindow* window);
     void UpdateRenderSystemCameraAspect(float aspectRatio);
     void SetupRenderStressScene();
+    void SetupPhysicsStressScene();
 
     struct WindowContext
     {

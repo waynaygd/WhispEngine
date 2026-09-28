@@ -475,8 +475,6 @@ void Application::SetupEcsRuntimeDemo()
     Logger::Get().Info("ECS runtime: demo scene created with " + std::to_string(m_EcsDebugEntities.size()) + " ECS entities");
     Logger::Get().Info("ECS runtime: render system registered");
 
-    SetupRenderStressScene();
-
     std::string saveError;
     const auto snapshotPath = AssetPaths::ResolveAssetOutputPath("scenes/pz3_runtime_snapshot.json");
     if (!SceneSerializer::SaveWorld(snapshotPath, m_World, &saveError) && !saveError.empty())
@@ -1183,6 +1181,8 @@ bool Application::Initialize()
         m_ActiveCollisionPairs.insert(BuildCollisionPairKey(e.a.index, e.b.index));
     });
     SetupEcsRuntimeDemo();
+    // SetupRenderStressScene();
+    SetupPhysicsStressScene();
     InitializeConfigHotReload();
 
     m_IsRunning = true;
@@ -1496,4 +1496,42 @@ void Application::SetupRenderStressScene()
         "JobSystem stress scene: spawned " +
         std::to_string(rows * columns) +
         " render entities");
+}
+
+void Application::SetupPhysicsStressScene()
+{
+    constexpr int bodyCount = 20000;
+
+    for (int i = 0; i < bodyCount; ++i)
+    {
+        const ecs::Entity entity = m_World.CreateEntity();
+
+        auto& transform =
+            m_World.AddComponent<ecs::TransformComponent>(entity);
+
+        transform.position = ecs::Vec3{
+            static_cast<float>(i % 100) * 0.25f,
+            10.0f + static_cast<float>(i / 100) * 0.25f,
+            0.0f
+        };
+
+        auto& rigidbody =
+            m_World.AddComponent<ecs::RigidbodyComponent>(entity);
+
+        rigidbody.isStatic = false;
+        rigidbody.simulatePhysics = true;
+        rigidbody.useGravity = true;
+        rigidbody.mass = 1.0f;
+
+        rigidbody.velocity = ecs::Vec3{
+            0.1f,
+            0.0f,
+            0.0f
+        };
+    }
+
+    Logger::Get().Info(
+        "Physics stress scene: spawned " +
+        std::to_string(bodyCount) +
+        " dynamic bodies");
 }
