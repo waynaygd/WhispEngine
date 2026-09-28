@@ -15,6 +15,7 @@
 #include "../../resources/TextureResource.h"
 
 #include <cmath>
+#include <tracy/Tracy.hpp>
 
 namespace
 {
@@ -329,62 +330,70 @@ void RenderSystem::ReleaseGpuResources()
 
 void RenderSystem::Update(World& world, float dt)
 {
+    ZoneScopedN("RenderSystem");
+
     (void)dt;
     if (m_Renderer == nullptr)
         return;
+    {
+        ZoneScopedN("RenderEntities");
 
-    world.ForEach<TransformComponent, MeshRendererComponent>(
-        [&](Entity entity, TransformComponent& transform, MeshRendererComponent& meshRenderer)
-        {
-            if (!meshRenderer.visible)
-                return;
+        world.ForEach<TransformComponent, MeshRendererComponent>(
+            [&](Entity entity, TransformComponent& transform, MeshRendererComponent& meshRenderer)
+            {
+                if (!meshRenderer.visible)
+                    return;
 
-            (void)TryDrawResourceMesh(
-                transform,
-                meshRenderer,
-                world.GetComponent<MaterialComponent>(entity));
-        });
+                (void)TryDrawResourceMesh(
+                    transform,
+                    meshRenderer,
+                    world.GetComponent<MaterialComponent>(entity));
+            });
+    }
 
     if (!m_DebugCollidersEnabled)
         return;
+    {
+        ZoneScopedN("DebugColliders");
 
-    world.ForEach<TransformComponent, ColliderComponent>(
-        [&](Entity, TransformComponent& transform, ColliderComponent& collider)
-        {
-            float mvp[16];
-            TransformComponent debugTransform = transform;
-            debugTransform.position.x += collider.offset.x;
-            debugTransform.position.y += collider.offset.y;
-            debugTransform.position.z += collider.offset.z;
-            // Box colliders can be oriented; keep rotation for box debug draw.
-            if (collider.type == ColliderType::Sphere)
+        world.ForEach<TransformComponent, ColliderComponent>(
+            [&](Entity, TransformComponent& transform, ColliderComponent& collider)
             {
-                const float radius = std::max(collider.halfExtents.x, std::max(collider.halfExtents.y, collider.halfExtents.z));
-                debugTransform.scale = ecs::Vec3{ radius * 2.0f, radius * 2.0f, radius * 2.0f };
-            }
-            else
-            {
+                float mvp[16];
+                TransformComponent debugTransform = transform;
+                debugTransform.position.x += collider.offset.x;
+                debugTransform.position.y += collider.offset.y;
+                debugTransform.position.z += collider.offset.z;
                 // Box colliders can be oriented; keep rotation for box debug draw.
-                debugTransform.scale = ecs::Vec3{
-                    collider.halfExtents.x * 2.0f,
-                    collider.halfExtents.y * 2.0f,
-                    collider.halfExtents.z * 2.0f
-                };
-            }
-            BuildMvp(
-                mvp,
-                debugTransform,
-                m_CameraPosition,
-                m_CameraYaw,
-                m_CameraPitch,
-                m_CameraVerticalFovRadians,
-                m_CameraAspectRatio,
-                m_CameraNearPlane,
-                m_CameraFarPlane);
-            m_Renderer->SetTestTransform(mvp);
-            m_Renderer->SetTestColor(0.1f, 1.0f, 0.1f, 1.0f);
-            m_Renderer->DrawTestCube();
-        });
+                if (collider.type == ColliderType::Sphere)
+                {
+                    const float radius = std::max(collider.halfExtents.x, std::max(collider.halfExtents.y, collider.halfExtents.z));
+                    debugTransform.scale = ecs::Vec3{ radius * 2.0f, radius * 2.0f, radius * 2.0f };
+                }
+                else
+                {
+                    // Box colliders can be oriented; keep rotation for box debug draw.
+                    debugTransform.scale = ecs::Vec3{
+                        collider.halfExtents.x * 2.0f,
+                        collider.halfExtents.y * 2.0f,
+                        collider.halfExtents.z * 2.0f
+                    };
+                }
+                BuildMvp(
+                    mvp,
+                    debugTransform,
+                    m_CameraPosition,
+                    m_CameraYaw,
+                    m_CameraPitch,
+                    m_CameraVerticalFovRadians,
+                    m_CameraAspectRatio,
+                    m_CameraNearPlane,
+                    m_CameraFarPlane);
+                m_Renderer->SetTestTransform(mvp);
+                m_Renderer->SetTestColor(0.1f, 1.0f, 0.1f, 1.0f);
+                m_Renderer->DrawTestCube();
+            });
+    }
 }
 
 bool RenderSystem::TryDrawResourceMesh(

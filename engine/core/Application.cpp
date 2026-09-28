@@ -21,6 +21,8 @@
 #include <GLFW/glfw3.h>
 #include <imgui.h>
 
+#include <tracy/Tracy.hpp>
+
 #include "../game/states/LoadingState.h"
 
 #include <algorithm>
@@ -472,6 +474,8 @@ void Application::SetupEcsRuntimeDemo()
     Logger::Get().Info("ECS runtime: physics system registered (motion system disabled to avoid double integration)");
     Logger::Get().Info("ECS runtime: demo scene created with " + std::to_string(m_EcsDebugEntities.size()) + " ECS entities");
     Logger::Get().Info("ECS runtime: render system registered");
+
+    SetupRenderStressScene();
 
     std::string saveError;
     const auto snapshotPath = AssetPaths::ResolveAssetOutputPath("scenes/pz3_runtime_snapshot.json");
@@ -1198,6 +1202,8 @@ int Application::Run()
 
     while (m_IsRunning)
     {
+        ZoneScopedN("Frame");
+
         if (!m_Windows.empty())
             m_Windows[0].window->PollEvents();
 
@@ -1226,53 +1232,65 @@ int Application::Run()
         if (!anyAlive) break;
 
         float dt = m_Time.Tick();
-        if (m_ResourceManager != nullptr)
-        {
-            m_ResourceManager->PollAsyncLoads();
-            m_ResourceManager->PollHotReload();
-            m_World.ForEach<ecs::ColliderComponent, ecs::MeshRendererComponent, ecs::TransformComponent>(
-                [&](ecs::Entity, ecs::ColliderComponent& collider, ecs::MeshRendererComponent& meshRenderer, ecs::TransformComponent& transform)
-                {
-                    if (!collider.autoFitFromMesh)
-                        return;
-                    ecs::Vec3 halfExtents{};
-                    ecs::Vec3 offset{};
-                    if (TryBuildMeshCollider(m_ResourceManager.get(), meshRenderer.meshPath, transform.scale, halfExtents, offset))
-                    {
-                        collider.halfExtents = halfExtents;
-                        collider.offset = offset;
-                        if (meshRenderer.meshPath.find("african_head") != std::string::npos)
-                        {
-                            collider.halfExtents.x *= 1.08f;
-                            collider.halfExtents.y *= 1.10f;
-                            collider.halfExtents.z *= 1.18f;
-                            collider.offset.y += collider.halfExtents.y * 0.04f;
-                        }
-                        collider.autoFitFromMesh = false;
-                    }
-                });
-        }
-        PollConfigHotReload();
-        UpdateCameraController(dt);
 
-        if (m_UpdateMode == UpdateMode::Fixed)
         {
-            accumulator += dt;
+            ZoneScopedN("ResourceUpdate");
 
-            int steps = 0;
-            while (accumulator >= fixedDt && steps < maxSteps)
+            if (m_ResourceManager != nullptr)
             {
-                m_StateMachine.Update(*this, fixedDt);
-                m_StateMachine.ApplyPending(*this);
+                m_ResourceManager->PollAsyncLoads();
+                m_ResourceManager->PollHotReload();
 
-                accumulator -= fixedDt;
-                ++steps;
+                m_World.ForEach<ecs::ColliderComponent, ecs::MeshRendererComponent, ecs::TransformComponent>(
+                    [&](ecs::Entity, ecs::ColliderComponent& collider, ecs::MeshRendererComponent& meshRenderer, ecs::TransformComponent& transform)
+                    {
+                        if (!collider.autoFitFromMesh)
+                            return;
+                        ecs::Vec3 halfExtents{};
+                        ecs::Vec3 offset{};
+                        if (TryBuildMeshCollider(m_ResourceManager.get(), meshRenderer.meshPath, transform.scale, halfExtents, offset))
+                        {
+                            collider.halfExtents = halfExtents;
+                            collider.offset = offset;
+                            if (meshRenderer.meshPath.find("african_head") != std::string::npos)
+                            {
+                                collider.halfExtents.x *= 1.08f;
+                                collider.halfExtents.y *= 1.10f;
+                                collider.halfExtents.z *= 1.18f;
+                                collider.offset.y += collider.halfExtents.y * 0.04f;
+                            }
+                            collider.autoFitFromMesh = false;
+                        }
+                    });
             }
+
+            PollConfigHotReload();
         }
-        else
+
         {
-            m_StateMachine.Update(*this, dt);
-            m_StateMachine.ApplyPending(*this);
+            ZoneScopedN("GameUpdate");
+
+            UpdateCameraController(dt);
+
+            if (m_UpdateMode == UpdateMode::Fixed)
+            {
+                accumulator += dt;
+
+                int steps = 0;
+                while (accumulator >= fixedDt && steps < maxSteps)
+                {
+                    m_StateMachine.Update(*this, fixedDt);
+                    m_StateMachine.ApplyPending(*this);
+
+                    accumulator -= fixedDt;
+                    ++steps;
+                }
+            }
+            else
+            {
+                m_StateMachine.Update(*this, dt);
+                m_StateMachine.ApplyPending(*this);
+            }
         }
 
         static float fpsTimer = 0.0f;
@@ -1307,65 +1325,82 @@ int Application::Run()
             fpsFrames = 0;
         }
 
-        for (auto& wc : m_Windows)
         {
-            if (!wc.window || wc.window->ShouldClose()) continue;
+            ZoneScopedN("Render");
 
-            wc.renderer->BeginFrame();
-            if (wc.editorUiAvailable)
+            for (auto& wc : m_Windows)
             {
-                wc.renderer->BeginEditorUiFrame();
-                m_EditorLayer.Render(*this, wc.renderer.get(), dt);
-            }
+                if (!wc.window || wc.window->ShouldClose()) continue;
 
-            const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
-            const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();
-            const bool renderSceneToViewport =
-                wc.editorUiAvailable &&
-                viewportWidth > 1 &&
-                viewportHeight > 1 &&
-                wc.renderer->BeginViewportRender(viewportWidth, viewportHeight, wc.clear);
-
-            if (renderSceneToViewport)
-            {
-                m_ActiveCollisionPairs.clear();
-                if (m_RenderSystem != nullptr)
+                wc.renderer->BeginFrame();
+                if (wc.editorUiAvailable)
                 {
-                    m_RenderSystem->SetRenderAdapter(wc.renderer.get());
-                    UpdateRenderSystemCameraAspect(static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight));
+                    wc.renderer->BeginEditorUiFrame();
+                    m_EditorLayer.Render(*this, wc.renderer.get(), dt);
                 }
 
-                m_World.UpdateSystems(dt);
-                UpdateEcs(dt);
-                m_StateMachine.Render(*this, *wc.renderer);
-                wc.renderer->EndViewportRender();
-            }
+                const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
+                const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();
+                const bool renderSceneToViewport =
+                    wc.editorUiAvailable &&
+                    viewportWidth > 1 &&
+                    viewportHeight > 1 &&
+                    wc.renderer->BeginViewportRender(viewportWidth, viewportHeight, wc.clear);
 
-            wc.renderer->Clear(wc.clear[0], wc.clear[1], wc.clear[2], wc.clear[3]);
-
-            if (!renderSceneToViewport)
-            {
-                m_ActiveCollisionPairs.clear();
-                if (m_RenderSystem != nullptr)
+                if (renderSceneToViewport)
                 {
-                    m_RenderSystem->SetRenderAdapter(wc.renderer.get());
-                    UpdateRenderSystemCamera(wc.window.get());
+                    m_ActiveCollisionPairs.clear();
+                    if (m_RenderSystem != nullptr)
+                    {
+                        m_RenderSystem->SetRenderAdapter(wc.renderer.get());
+                        UpdateRenderSystemCameraAspect(static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight));
+                    }
+
+                    {
+                        ZoneScopedN("WorldSystems");
+                        m_World.UpdateSystems(dt);
+                    }
+                    UpdateEcs(dt);
+                    m_StateMachine.Render(*this, *wc.renderer);
+                    wc.renderer->EndViewportRender();
                 }
 
-                m_World.UpdateSystems(dt);
-                UpdateEcs(dt);
-                m_StateMachine.Render(*this, *wc.renderer);
+                wc.renderer->Clear(wc.clear[0], wc.clear[1], wc.clear[2], wc.clear[3]);
+
+                if (!renderSceneToViewport)
+                {
+                    m_ActiveCollisionPairs.clear();
+                    if (m_RenderSystem != nullptr)
+                    {
+                        m_RenderSystem->SetRenderAdapter(wc.renderer.get());
+                        UpdateRenderSystemCamera(wc.window.get());
+                    }
+
+                    {
+                        ZoneScopedN("WorldSystems");
+                        m_World.UpdateSystems(dt);
+                    }
+
+                    UpdateEcs(dt);
+                    m_StateMachine.Render(*this, *wc.renderer);
+                }
+
+                if (wc.editorUiAvailable)
+                    wc.renderer->RenderEditorUiFrame();
+
+                wc.renderer->EndFrame();
+
+                {
+                    ZoneScopedN("Present");
+                    wc.renderer->Present();
+                }
+
+                if (m_RenderSystem != nullptr)
+                    m_RenderSystem->SetRenderAdapter(nullptr);
             }
-
-            if (wc.editorUiAvailable)
-                wc.renderer->RenderEditorUiFrame();
-
-            wc.renderer->EndFrame();
-            wc.renderer->Present();
-
-            if (m_RenderSystem != nullptr)
-                m_RenderSystem->SetRenderAdapter(nullptr);
         }
+
+        FrameMark;
     }
     return 0;
 }
@@ -1412,4 +1447,53 @@ void Application::Shutdown()
 void Application::RequestStateChange(std::unique_ptr<IGameState> s)
 {
     m_StateMachine.ChangeState(std::move(s));
+}
+
+void Application::SetupRenderStressScene()
+{
+    constexpr int rows = 50;
+    constexpr int columns = 50;
+    constexpr float spacing = 0.18f;
+
+    for (int row = 0; row < rows; ++row)
+    {
+        for (int column = 0; column < columns; ++column)
+        {
+            const ecs::Entity entity = m_World.CreateEntity();
+
+            auto& transform =
+                m_World.AddComponent<ecs::TransformComponent>(entity);
+
+            transform.position = ecs::Vec3{
+                (column - columns / 2) * spacing,
+                (row - rows / 2) * spacing,
+                1.5f
+            };
+
+            transform.scale = ecs::Vec3{
+                0.08f,
+                0.08f,
+                0.08f
+            };
+
+            auto& meshRenderer =
+                m_World.AddComponent<ecs::MeshRendererComponent>(entity);
+
+            meshRenderer.meshPath =
+                "models/validation_cube.obj";
+
+            auto& material =
+                m_World.AddComponent<ecs::MaterialComponent>(entity);
+
+            material.materialPath =
+                "materials/blue.material.json";
+
+            m_EcsDebugEntities.push_back(entity);
+        }
+    }
+
+    Logger::Get().Info(
+        "JobSystem stress scene: spawned " +
+        std::to_string(rows * columns) +
+        " render entities");
 }

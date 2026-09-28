@@ -10,6 +10,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <tracy/Tracy.hpp>
 
 namespace {
 using ecs::Vec3;
@@ -136,6 +137,7 @@ enum class ContactType
 namespace ecs {
 void PhysicsSystem::Update(World& world, float dt)
 {
+    ZoneScopedN("PhysicsSystem");
     if (!m_Enabled)
         return;
 

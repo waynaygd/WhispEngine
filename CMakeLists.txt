@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(ENABLE_DX12 "Enable DirectX 12 backend" ON)
 option(ENABLE_VULKAN "Enable Vulkan backend" ON)
+option(ENABLE_TRACY "Enable Tracy profiler" ON)
 
 include(FetchContent)
 
@@ -32,7 +33,23 @@ FetchContent_Declare(
   GIT_TAG 31c1ad37456438565541f4919958214b6e762fb4
 )
 
+if (ENABLE_TRACY)
+  set(TRACY_ENABLE ON CACHE BOOL "" FORCE)
+  set(TRACY_ON_DEMAND ON CACHE BOOL "" FORCE)
+
+  FetchContent_Declare(
+    tracy
+    GIT_REPOSITORY https://github.com/wolfpld/tracy.git
+    GIT_TAG v0.14.1
+    GIT_SHALLOW TRUE
+  )
+endif()
+
 FetchContent_MakeAvailable(glfw assimp)
+
+if (ENABLE_TRACY)
+  FetchContent_MakeAvailable(tracy)
+endif()
 
 FetchContent_GetProperties(stb)
 if (NOT stb_POPULATED)
@@ -46,6 +63,10 @@ add_subdirectory(engine)
 
 add_executable(WhispEngine WhispEngine.cpp)
 target_link_libraries(WhispEngine PRIVATE Engine)
+
+if (ENABLE_TRACY)
+    target_link_libraries(Engine PRIVATE Tracy::TracyClient)
+endif()
 
 include(engine/shaders/Shaders.cmake)
 setup_shaders(WhispEngine)
