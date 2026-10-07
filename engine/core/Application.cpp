@@ -424,6 +424,8 @@ void Application::SetupEcsRuntimeDemo()
         m_Config.physics.spherePenetrationEpsilon,
         m_Config.physics.sphereVelocityEpsilon,
         m_Config.physics.dynamicBoxSphereCorrectionPercent);
+    m_PhysicsSystem->SetJobSystem(
+        m_JobSystem.get());
     m_PhysicsSystem->SetEnabled(m_EditorPlayMode);
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());

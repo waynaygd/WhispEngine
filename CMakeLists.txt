@@ -69,9 +69,16 @@ if (WHISP_BUILD_PHYSICS_TESTS)
     engine/ecs/World.cpp
     engine/ecs/systems/SystemPipeline.cpp
     engine/ecs/systems/PhysicsSystem.cpp)
+target_sources(PhysicsRegression PRIVATE
+    engine/jobs/JobSystem.cpp
+    engine/core/Logger.cpp
+)
   target_include_directories(PhysicsRegression PRIVATE engine)
   if (ENABLE_TRACY)
-    target_link_libraries(PhysicsRegression PRIVATE Tracy::TracyClient)
+    target_link_libraries(PhysicsRegression PRIVATE
+    TracyClient
+    enkiTS
+)
   endif()
   add_test(NAME PhysicsRegression COMMAND PhysicsRegression)
 endif()

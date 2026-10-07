@@ -29,7 +29,17 @@ public:
 
     using TaskHandle = std::shared_ptr<enki::TaskSet>;
 
+    using RangeJob = std::function<void(
+        std::uint32_t begin,
+        std::uint32_t end,
+        std::uint32_t threadIndex)>;
+
     TaskHandle Execute(std::function<void()> job);
+
+    TaskHandle Dispatch(
+        std::uint32_t itemCount,
+        std::uint32_t minRange,
+        RangeJob job);
 
     [[nodiscard]] bool IsComplete(const TaskHandle& task) const;
 

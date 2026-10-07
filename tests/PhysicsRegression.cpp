@@ -3,15 +3,32 @@
 #include "ecs/components/TransformComponent.h"
 #include "ecs/components/RigidbodyComponent.h"
 #include "ecs/components/ColliderComponent.h"
+#include "jobs/JobSystem.h"
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
+#include <atomic>
 #include <string>
 #include <algorithm>
+#include <chrono>
+
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#else
+#define ZoneScopedN(name) ((void)0)
+#endif
+
 using namespace ecs;
 static float Length(Vec3 v) { return std::sqrt(v.x*v.x+v.y*v.y+v.z*v.z); }
 static Vec3 Sub(Vec3 a, Vec3 b) { return {a.x-b.x,a.y-b.y,a.z-b.z}; }
+static bool Near(
+    Vec3 a,
+    Vec3 b,
+    float epsilon = 0.00001f)
+{
+    return Length(Sub(a, b)) <= epsilon;
+}
 static void Require(bool yes, const char* message) { if (!yes) throw std::runtime_error(message); }
 struct Scene
 {
@@ -181,11 +198,879 @@ static void UndampedImpacts()
     Require(peak<initial*1.02f,"undamped collision energy grew");
     Require(energy()<initial*.5f,"inelastic impacts failed to dissipate energy");
 }
-int main()
+
+static void ParallelIntegration()
+{
+    constexpr int bodyCount = 512;
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr int frames = 60;
+
+    // ---------------------------------------------------------
+    // JobSystem sanity check
+    // ---------------------------------------------------------
+
+    JobSystem jobs;
+
+    Require(
+        jobs.Initialize(),
+        "JobSystem failed to initialize");
+
+    std::vector<int> dispatchHits(
+        bodyCount,
+        0);
+
+    auto dispatchTest =
+        jobs.Dispatch(
+            bodyCount,
+            64,
+            [&](std::uint32_t begin,
+                std::uint32_t end,
+                std::uint32_t /*threadIndex*/)
+            {
+                for (std::uint32_t i = begin;
+                    i < end;
+                    ++i)
+                {
+                    dispatchHits[i] += 1;
+                }
+            });
+
+    Require(
+        dispatchTest != nullptr,
+        "JobSystem Dispatch returned null");
+
+    jobs.Wait(dispatchTest);
+
+    for (int value : dispatchHits)
+    {
+        Require(
+            value == 1,
+            "JobSystem Dispatch processed an item incorrectly");
+    }
+
+    // ---------------------------------------------------------
+    // Serial and parallel worlds
+    // ---------------------------------------------------------
+
+    Scene serial;
+    Scene parallel;
+
+    parallel.physics.SetJobSystem(
+        &jobs);
+
+    std::vector<Entity> serialBodies;
+    std::vector<Entity> parallelBodies;
+
+    serialBodies.reserve(bodyCount);
+    parallelBodies.reserve(bodyCount);
+
+    // Keep bodies far enough apart that this test measures
+    // integration rather than collision solving.
+    for (int i = 0; i < bodyCount; ++i)
+    {
+        const int xIndex =
+            i % 32;
+
+        const int zIndex =
+            i / 32;
+
+        const Vec3 position{
+            static_cast<float>(xIndex) * 2.0f,
+            5.0f +
+                static_cast<float>(i % 7) * 0.05f,
+            static_cast<float>(zIndex) * 2.0f
+        };
+
+        const Vec3 rotation{
+            0.01f * static_cast<float>(i % 5),
+            0.015f * static_cast<float>(i % 7),
+            0.02f * static_cast<float>(i % 3)
+        };
+
+        Entity serialEntity =
+            serial.Add(
+                position,
+                { 0.09f, 0.09f, 0.09f },
+                false,
+                ColliderType::Box,
+                rotation);
+
+        Entity parallelEntity =
+            parallel.Add(
+                position,
+                { 0.09f, 0.09f, 0.09f },
+                false,
+                ColliderType::Box,
+                rotation);
+
+        serialBodies.push_back(
+            serialEntity);
+
+        parallelBodies.push_back(
+            parallelEntity);
+
+        const float vx =
+            -0.20f +
+            static_cast<float>(i % 11) *
+            0.04f;
+
+        const float vy =
+            -0.10f +
+            static_cast<float>(i % 5) *
+            0.05f;
+
+        const float vz =
+            -0.15f +
+            static_cast<float>(i % 7) *
+            0.05f;
+
+        const Vec3 velocity{
+            vx,
+            vy,
+            vz
+        };
+
+        const Vec3 angularVelocity{
+            0.10f +
+                static_cast<float>(i % 3) * 0.02f,
+
+            -0.08f +
+                static_cast<float>(i % 5) * 0.015f,
+
+            0.05f +
+                static_cast<float>(i % 7) * 0.01f
+        };
+
+        const Vec3 acceleration{
+            0.01f *
+                static_cast<float>(i % 3),
+
+            0.0f,
+
+            -0.01f *
+                static_cast<float>(i % 4)
+        };
+
+        const Vec3 torque{
+            0.001f *
+                static_cast<float>(i % 5),
+
+            0.002f *
+                static_cast<float>(i % 3),
+
+            -0.001f *
+                static_cast<float>(i % 7)
+        };
+
+        auto configure =
+            [&](Scene& scene,
+                Entity entity)
+            {
+                auto& rb =
+                    scene.R(entity);
+
+                rb.useGravity = false;
+
+                rb.velocity =
+                    velocity;
+
+                rb.angularVelocity =
+                    angularVelocity;
+
+                rb.acceleration =
+                    acceleration;
+
+                rb.torque =
+                    torque;
+
+                // Disable damping so the comparison focuses
+                // purely on the integration result.
+                rb.linearDampingMultiplier =
+                    0.0f;
+
+                rb.angularDampingMultiplier =
+                    0.0f;
+            };
+
+        configure(
+            serial,
+            serialEntity);
+
+        configure(
+            parallel,
+            parallelEntity);
+    }
+
+    // ---------------------------------------------------------
+    // Simulate
+    // ---------------------------------------------------------
+
+    for (int frame = 0;
+        frame < frames;
+        ++frame)
+    {
+        serial.physics.Update(
+            serial.world,
+            dt);
+
+        parallel.physics.Update(
+            parallel.world,
+            dt);
+    }
+
+    // ---------------------------------------------------------
+    // Compare results
+    // ---------------------------------------------------------
+
+    float maxPositionDifference = 0.0f;
+    float maxRotationDifference = 0.0f;
+    float maxVelocityDifference = 0.0f;
+    float maxAngularDifference = 0.0f;
+
+    for (int i = 0;
+        i < bodyCount;
+        ++i)
+    {
+        const auto serialEntity =
+            serialBodies[i];
+
+        const auto parallelEntity =
+            parallelBodies[i];
+
+        const auto& serialTransform =
+            serial.T(serialEntity);
+
+        const auto& parallelTransform =
+            parallel.T(parallelEntity);
+
+        const auto& serialRb =
+            serial.R(serialEntity);
+
+        const auto& parallelRb =
+            parallel.R(parallelEntity);
+
+        maxPositionDifference =
+            std::max(
+                maxPositionDifference,
+                Length(
+                    Sub(
+                        serialTransform.position,
+                        parallelTransform.position)));
+
+        maxRotationDifference =
+            std::max(
+                maxRotationDifference,
+                Length(
+                    Sub(
+                        serialTransform.rotation,
+                        parallelTransform.rotation)));
+
+        maxVelocityDifference =
+            std::max(
+                maxVelocityDifference,
+                Length(
+                    Sub(
+                        serialRb.velocity,
+                        parallelRb.velocity)));
+
+        maxAngularDifference =
+            std::max(
+                maxAngularDifference,
+                Length(
+                    Sub(
+                        serialRb.angularVelocity,
+                        parallelRb.angularVelocity)));
+
+        Require(
+            Near(
+                serialTransform.position,
+                parallelTransform.position),
+            "parallel position differs from serial");
+
+        Require(
+            Near(
+                serialTransform.rotation,
+                parallelTransform.rotation),
+            "parallel rotation differs from serial");
+
+        Require(
+            Near(
+                serialRb.velocity,
+                parallelRb.velocity),
+            "parallel velocity differs from serial");
+
+        Require(
+            Near(
+                serialRb.angularVelocity,
+                parallelRb.angularVelocity),
+            "parallel angular velocity differs from serial");
+    }
+
+    std::cout
+        << "parallel integration bodies="
+        << bodyCount
+        << " positionDiff="
+        << maxPositionDifference
+        << " rotationDiff="
+        << maxRotationDifference
+        << " velocityDiff="
+        << maxVelocityDifference
+        << " angularDiff="
+        << maxAngularDifference
+        << '\n';
+
+    jobs.Shutdown();
+}
+
+static void ParallelNarrowphase()
+{
+    constexpr int pairCount = 320;
+    constexpr float dt = 1.0f / 60.0f;
+
+    JobSystem jobs;
+
+    Require(
+        jobs.Initialize(),
+        "JobSystem failed to initialize for narrowphase test");
+
+    Scene serial;
+    Scene parallel;
+
+    parallel.physics.SetJobSystem(
+        &jobs);
+
+    std::vector<Entity> serialBodies;
+    std::vector<Entity> parallelBodies;
+
+    serialBodies.reserve(pairCount * 2);
+    parallelBodies.reserve(pairCount * 2);
+
+    // 320 completely isolated collision pairs.
+    // Each pair overlaps slightly, while neighbouring pairs
+    // are far enough apart to never collide with one another.
+    for (int pairIndex = 0;
+        pairIndex < pairCount;
+        ++pairIndex)
+    {
+        const int column =
+            pairIndex % 20;
+
+        const int row =
+            pairIndex / 20;
+
+        const float baseX =
+            static_cast<float>(column) * 1.0f;
+
+        const float baseZ =
+            static_cast<float>(row) * 1.0f;
+
+        const Vec3 posA{
+            baseX - 0.075f,
+            1.0f,
+            baseZ
+        };
+
+        const Vec3 posB{
+            baseX + 0.075f,
+            1.0f,
+            baseZ
+        };
+
+        const Vec3 half{
+            0.1f,
+            0.1f,
+            0.1f
+        };
+
+        const Entity serialA =
+            serial.Add(
+                posA,
+                half,
+                false,
+                ColliderType::Sphere);
+
+        const Entity serialB =
+            serial.Add(
+                posB,
+                half,
+                false,
+                ColliderType::Sphere);
+
+        const Entity parallelA =
+            parallel.Add(
+                posA,
+                half,
+                false,
+                ColliderType::Sphere);
+
+        const Entity parallelB =
+            parallel.Add(
+                posB,
+                half,
+                false,
+                ColliderType::Sphere);
+
+        serialBodies.push_back(serialA);
+        serialBodies.push_back(serialB);
+
+        parallelBodies.push_back(parallelA);
+        parallelBodies.push_back(parallelB);
+
+        auto configurePair =
+            [](Scene& scene,
+                Entity a,
+                Entity b)
+            {
+                auto& rbA =
+                    scene.R(a);
+
+                auto& rbB =
+                    scene.R(b);
+
+                rbA.useGravity = false;
+                rbB.useGravity = false;
+
+                rbA.linearDampingMultiplier = 0.0f;
+                rbB.linearDampingMultiplier = 0.0f;
+
+                rbA.angularDampingMultiplier = 0.0f;
+                rbB.angularDampingMultiplier = 0.0f;
+
+                rbA.velocity =
+                { 0.5f, 0.0f, 0.0f };
+
+                rbB.velocity =
+                { -0.5f, 0.0f, 0.0f };
+
+                rbA.sleeping = false;
+                rbB.sleeping = false;
+            };
+
+        configurePair(
+            serial,
+            serialA,
+            serialB);
+
+        configurePair(
+            parallel,
+            parallelA,
+            parallelB);
+    }
+
+    // One update is enough:
+    // broadphase sees 320 isolated candidate pairs,
+    // therefore the parallel scene must cross the
+    // narrowphase parallel threshold of 256.
+    serial.physics.Update(
+        serial.world,
+        dt);
+
+    parallel.physics.Update(
+        parallel.world,
+        dt);
+
+    float maxPositionDifference = 0.0f;
+    float maxRotationDifference = 0.0f;
+    float maxVelocityDifference = 0.0f;
+    float maxAngularDifference = 0.0f;
+
+    for (std::size_t i = 0;
+        i < serialBodies.size();
+        ++i)
+    {
+        const auto& serialTransform =
+            serial.T(serialBodies[i]);
+
+        const auto& parallelTransform =
+            parallel.T(parallelBodies[i]);
+
+        const auto& serialRb =
+            serial.R(serialBodies[i]);
+
+        const auto& parallelRb =
+            parallel.R(parallelBodies[i]);
+
+        maxPositionDifference =
+            std::max(
+                maxPositionDifference,
+                Length(
+                    Sub(
+                        serialTransform.position,
+                        parallelTransform.position)));
+
+        maxRotationDifference =
+            std::max(
+                maxRotationDifference,
+                Length(
+                    Sub(
+                        serialTransform.rotation,
+                        parallelTransform.rotation)));
+
+        maxVelocityDifference =
+            std::max(
+                maxVelocityDifference,
+                Length(
+                    Sub(
+                        serialRb.velocity,
+                        parallelRb.velocity)));
+
+        maxAngularDifference =
+            std::max(
+                maxAngularDifference,
+                Length(
+                    Sub(
+                        serialRb.angularVelocity,
+                        parallelRb.angularVelocity)));
+
+        Require(
+            Near(
+                serialTransform.position,
+                parallelTransform.position),
+            "parallel narrowphase position differs from serial");
+
+        Require(
+            Near(
+                serialTransform.rotation,
+                parallelTransform.rotation),
+            "parallel narrowphase rotation differs from serial");
+
+        Require(
+            Near(
+                serialRb.velocity,
+                parallelRb.velocity),
+            "parallel narrowphase velocity differs from serial");
+
+        Require(
+            Near(
+                serialRb.angularVelocity,
+                parallelRb.angularVelocity),
+            "parallel narrowphase angular velocity differs from serial");
+    }
+
+    std::cout
+        << "parallel narrowphase pairs="
+        << pairCount
+        << " bodies="
+        << serialBodies.size()
+        << " positionDiff="
+        << maxPositionDifference
+        << " rotationDiff="
+        << maxRotationDifference
+        << " velocityDiff="
+        << maxVelocityDifference
+        << " angularDiff="
+        << maxAngularDifference
+        << '\n';
+
+    jobs.Shutdown();
+}
+
+struct TimingStats
+{
+    double medianMs = 0.0;
+    double p95Ms = 0.0;
+    double p99Ms = 0.0;
+};
+
+static TimingStats CalculateTimingStats(
+    std::vector<double> samples)
+{
+    Require(
+        !samples.empty(),
+        "benchmark has no timing samples");
+
+    std::sort(
+        samples.begin(),
+        samples.end());
+
+    auto percentile =
+        [&](double value)
+        {
+            std::size_t rank =
+                static_cast<std::size_t>(
+                    std::ceil(
+                        value *
+                        static_cast<double>(
+                            samples.size())));
+
+            rank =
+                std::max<std::size_t>(
+                    rank,
+                    1);
+
+            rank =
+                std::min(
+                    rank,
+                    samples.size());
+
+            return samples[rank - 1];
+        };
+
+    return TimingStats{
+        percentile(0.50),
+        percentile(0.95),
+        percentile(0.99)
+    };
+}
+
+static void PopulatePhysicsStressScene(
+    Scene& scene)
+{
+    constexpr int side = 24;
+    constexpr float spacing = 0.28f;
+
+    scene.Ground();
+
+    for (int z = 0;
+        z < side;
+        ++z)
+    {
+        for (int x = 0;
+            x < side;
+            ++x)
+        {
+            const float px =
+                (static_cast<float>(x) -
+                    static_cast<float>(side - 1) * 0.5f) *
+                spacing;
+
+            const float pz =
+                (static_cast<float>(z) -
+                    static_cast<float>(side - 1) * 0.5f) *
+                spacing;
+
+            scene.Add(
+                {
+                    px,
+                    0.09f,
+                    pz
+                },
+                {
+                    0.09f,
+                    0.09f,
+                    0.09f
+                });
+        }
+    }
+}
+
+static void WarmUpPhysicsScene(
+    Scene& scene)
+{
+    constexpr int warmupFrames = 10;
+    constexpr float dt = 1.0f / 60.0f;
+
+    for (int frame = 0;
+        frame < warmupFrames;
+        ++frame)
+    {
+        scene.physics.Update(
+            scene.world,
+            dt);
+    }
+}
+
+static void MeasurePhysicsScene(
+    Scene& scene,
+    std::vector<double>& samples)
+{
+    constexpr int frames = 30;
+    constexpr float dt = 1.0f / 60.0f;
+
+    for (int frame = 0;
+        frame < frames;
+        ++frame)
+    {
+        const auto begin =
+            std::chrono::steady_clock::now();
+
+        scene.physics.Update(
+            scene.world,
+            dt);
+
+        const auto end =
+            std::chrono::steady_clock::now();
+
+        const double milliseconds =
+            std::chrono::duration<
+            double,
+            std::milli>(
+                end - begin)
+            .count();
+
+        samples.push_back(
+            milliseconds);
+    }
+}
+
+static void PhysicsParallelBenchmark(
+    bool waitForProfiler = false)
+{
+    constexpr int repetitions = 5;
+
+    JobSystem jobs;
+
+    Require(
+        jobs.Initialize(),
+        "benchmark JobSystem initialization failed");
+
+    if (waitForProfiler)
+    {
+        std::cout
+            << "\nTracy capture mode.\n"
+            << "Connect Tracy Profiler to PhysicsRegression.exe,\n"
+            << "then press Enter to start benchmark...\n";
+
+        std::cin.get();
+    }
+
+    std::vector<double> serialSamples;
+    std::vector<double> parallelSamples;
+
+    serialSamples.reserve(
+        repetitions * 30);
+
+    parallelSamples.reserve(
+        repetitions * 30);
+
+    for (int repetition = 0;
+        repetition < repetitions;
+        ++repetition)
+    {
+        Scene serial;
+        Scene parallel;
+
+        PopulatePhysicsStressScene(
+            serial);
+
+        PopulatePhysicsStressScene(
+            parallel);
+
+        parallel.physics.SetJobSystem(
+            &jobs);
+
+        WarmUpPhysicsScene(serial);
+        WarmUpPhysicsScene(parallel);
+
+        // Alternate order to reduce systematic bias
+        // from temperature / CPU boost / scheduler state.
+        if ((repetition % 2) == 0)
+        {
+            {
+                ZoneScopedN("PhysicsBenchmarkSerial");
+
+                MeasurePhysicsScene(
+                    serial,
+                    serialSamples);
+            }
+
+            {
+                ZoneScopedN("PhysicsBenchmarkParallel");
+
+                MeasurePhysicsScene(
+                    parallel,
+                    parallelSamples);
+            }
+        }
+        else
+        {
+            {
+                ZoneScopedN("PhysicsBenchmarkParallel");
+
+                MeasurePhysicsScene(
+                    parallel,
+                    parallelSamples);
+            }
+
+            {
+                ZoneScopedN("PhysicsBenchmarkSerial");
+
+                MeasurePhysicsScene(
+                    serial,
+                    serialSamples);
+            }
+        }
+    }
+
+    const TimingStats serial =
+        CalculateTimingStats(
+            serialSamples);
+
+    const TimingStats parallel =
+        CalculateTimingStats(
+            parallelSamples);
+
+    const double speedup =
+        parallel.medianMs > 0.0
+        ? serial.medianMs /
+        parallel.medianMs
+        : 0.0;
+
+    std::cout
+        << "\n=== WhispPhysics benchmark ===\n"
+        << "scene: 576 dynamic boxes + 1 static ground\n"
+        << "repetitions: "
+        << repetitions
+        << '\n'
+        << "samples per mode: "
+        << serialSamples.size()
+        << '\n'
+        << '\n'
+        << "Serial:\n"
+        << "  median = "
+        << serial.medianMs
+        << " ms\n"
+        << "  p95    = "
+        << serial.p95Ms
+        << " ms\n"
+        << "  p99    = "
+        << serial.p99Ms
+        << " ms\n"
+        << '\n'
+        << "Parallel:\n"
+        << "  median = "
+        << parallel.medianMs
+        << " ms\n"
+        << "  p95    = "
+        << parallel.p95Ms
+        << " ms\n"
+        << "  p99    = "
+        << parallel.p99Ms
+        << " ms\n"
+        << '\n'
+        << "Median speedup: "
+        << speedup
+        << "x\n"
+        << "==============================\n";
+
+    jobs.Shutdown();
+}
+
+int main(
+    int argc,
+    char** argv)
 {
     try {
+        if (argc > 1)
+        {
+            const std::string mode =
+                argv[1];
+
+            if (mode == "--benchmark")
+            {
+                PhysicsParallelBenchmark(false);
+                return 0;
+            }
+
+            if (mode == "--benchmark-tracy")
+            {
+                PhysicsParallelBenchmark(true);
+                return 0;
+            }
+        }
+
         RestAndTilt(); Pyramid(1.0f/60); Pyramid(1.0f/30); Pyramid(1.0f/144); Pyramid(1.0f/60,true);
-        WakeAndAir(); Spheres(); BroadphaseAndFast(); WorldAngularVelocity(); UndampedImpacts();
+        WakeAndAir(); Spheres(); BroadphaseAndFast(); WorldAngularVelocity(); UndampedImpacts(); ParallelIntegration(); ParallelNarrowphase();
         std::cout<<"All physics regression scenarios passed\n"; return 0;
     } catch(const std::exception& e) {std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}
 }

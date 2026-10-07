@@ -3,6 +3,7 @@
 #include "../core/Logger.h"
 
 #include <TaskScheduler.h>
+#include <algorithm>
 
 JobSystem::JobSystem() = default;
 
@@ -78,6 +79,47 @@ JobSystem::TaskHandle JobSystem::Execute(std::function<void()> job)
         });
 
     m_Scheduler->AddTaskSetToPipe(task.get());
+
+    return task;
+}
+
+JobSystem::TaskHandle JobSystem::Dispatch(
+    std::uint32_t itemCount,
+    std::uint32_t minRange,
+    RangeJob job)
+{
+    if (!m_Initialized ||
+        m_Scheduler == nullptr ||
+        !job ||
+        itemCount == 0)
+    {
+        return nullptr;
+    }
+
+    minRange =
+        std::max(
+            1u,
+            std::min(
+                minRange,
+                itemCount));
+
+    auto task =
+        std::make_shared<enki::TaskSet>(
+            itemCount,
+            [job = std::move(job)](
+                enki::TaskSetPartition range,
+                std::uint32_t threadIndex)
+            {
+                job(
+                    range.start,
+                    range.end,
+                    threadIndex);
+            });
+
+    task->m_MinRange = minRange;
+
+    m_Scheduler->AddTaskSetToPipe(
+        task.get());
 
     return task;
 }

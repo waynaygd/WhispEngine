@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include "../../jobs/JobSystem.h"
 #include <vector>
 #include <array>
 #if defined(TRACY_ENABLE)
@@ -551,6 +552,8 @@ static std::vector<std::pair<std::size_t, std::size_t>> Broadphase(const std::ve
 }
 } // namespace
 
+
+
 namespace ecs {
 void PhysicsSystem::Update(World& world, float dt)
 {
@@ -583,11 +586,101 @@ void PhysicsSystem::Update(World& world, float dt)
     {
         ZoneScopedN("PhysicsStep");
         std::vector<Manifold> contacts;
-        const auto pairs = Broadphase(bodies);
-        for (auto [i,j] : pairs)
+
+        const auto pairs =
+            Broadphase(bodies);
+
         {
-            Manifold m; m.a = i; m.b = j;
-            if (Collide(bodies[i], bodies[j], m)) contacts.push_back(m);
+            ZoneScopedN("PhysicsNarrowphase");
+
+            std::vector<Manifold> pairContacts(
+                pairs.size());
+
+            std::vector<std::uint8_t> hasContact(
+                pairs.size(),
+                0);
+
+            auto narrowphaseRange =
+                [&](std::uint32_t begin,
+                    std::uint32_t end,
+                    std::uint32_t /*threadIndex*/)
+                {
+                    ZoneScopedN("PhysicsNarrowphaseJob");
+
+                    for (std::uint32_t pairIndex = begin;
+                        pairIndex < end;
+                        ++pairIndex)
+                    {
+                        const auto [i, j] =
+                            pairs[pairIndex];
+
+                        Manifold manifold;
+
+                        manifold.a = i;
+                        manifold.b = j;
+
+                        if (Collide(
+                            bodies[i],
+                            bodies[j],
+                            manifold))
+                        {
+                            pairContacts[pairIndex] =
+                                std::move(manifold);
+
+                            hasContact[pairIndex] = 1;
+                        }
+                    }
+                };
+
+            constexpr std::uint32_t parallelThreshold =
+                256;
+
+            constexpr std::uint32_t minRange =
+                64;
+
+            const bool useJobs =
+                m_JobSystem != nullptr &&
+                m_JobSystem->IsInitialized() &&
+                pairs.size() >= parallelThreshold;
+
+            if (useJobs)
+            {
+                ZoneScopedN("PhysicsNarrowphaseParallel");
+
+                auto task =
+                    m_JobSystem->Dispatch(
+                        static_cast<std::uint32_t>(
+                            pairs.size()),
+                        minRange,
+                        narrowphaseRange);
+
+                m_JobSystem->Wait(task);
+            }
+            else
+            {
+                ZoneScopedN("PhysicsNarrowphaseSerial");
+
+                narrowphaseRange(
+                    0,
+                    static_cast<std::uint32_t>(
+                        pairs.size()),
+                    0);
+            }
+
+            contacts.reserve(
+                pairs.size());
+
+            for (std::size_t pairIndex = 0;
+                pairIndex < pairs.size();
+                ++pairIndex)
+            {
+                if (hasContact[pairIndex] == 0)
+                    continue;
+
+                contacts.push_back(
+                    std::move(
+                        pairContacts[pairIndex]));
+            }
         }
         // Dynamic contact islands are also used for waking/sleeping. Static
         // bodies anchor an island but must never merge unrelated resting bodies.
@@ -621,17 +714,122 @@ void PhysicsSystem::Update(World& world, float dt)
         }
         for (std::size_t i = 0; i < bodies.size(); ++i)
             if (InvMass(bodies[i]) > 0 && active[root(i)] && bodies[i].rigidbody->sleeping) Wake(bodies[i]);
-        for (auto& b : bodies)
         {
-            auto& rb = *b.rigidbody;
-            if (InvMass(b) == 0.0f || rb.sleeping) continue;
-            Vec3 acceleration = rb.acceleration;
-            if (rb.useGravity) acceleration.y -= m_Gravity;
-            rb.velocity = Add(rb.velocity, Scale(acceleration, h));
-            const float damping = std::pow(std::max(m_LinearDamping, 0.0f), h * 60.0f * std::max(rb.linearDampingMultiplier, 0.0f));
-            rb.velocity.x *= damping; rb.velocity.z *= damping;
-            rb.angularVelocity = Add(rb.angularVelocity, Scale(ApplyInverseInertiaWorld(b, rb.torque), h));
-            rb.angularVelocity = Scale(rb.angularVelocity, std::pow(0.995f, h * 60.0f * std::max(rb.angularDampingMultiplier, 0.0f)));
+            ZoneScopedN("PhysicsIntegrate");
+
+            auto integrateRange =
+                [&](std::uint32_t begin,
+                    std::uint32_t end,
+                    std::uint32_t /*threadIndex*/)
+                {
+                    ZoneScopedN("PhysicsIntegrateJob");
+
+                    for (std::uint32_t index = begin;
+                        index < end;
+                        ++index)
+                    {
+                        BodyRef& b =
+                            bodies[index];
+
+                        auto& rb =
+                            *b.rigidbody;
+
+                        if (InvMass(b) == 0.0f ||
+                            rb.sleeping)
+                        {
+                            continue;
+                        }
+
+                        Vec3 acceleration =
+                            rb.acceleration;
+
+                        if (rb.useGravity)
+                        {
+                            acceleration.y -=
+                                m_Gravity;
+                        }
+
+                        rb.velocity =
+                            Add(
+                                rb.velocity,
+                                Scale(
+                                    acceleration,
+                                    h));
+
+                        const float damping =
+                            std::pow(
+                                std::max(
+                                    m_LinearDamping,
+                                    0.0f),
+                                h * 60.0f *
+                                std::max(
+                                    rb.linearDampingMultiplier,
+                                    0.0f));
+
+                        rb.velocity.x *= damping;
+                        rb.velocity.z *= damping;
+
+                        const Vec3 angularAcceleration =
+                            ApplyInverseInertiaWorld(
+                                b,
+                                rb.torque);
+
+                        rb.angularVelocity =
+                            Add(
+                                rb.angularVelocity,
+                                Scale(
+                                    angularAcceleration,
+                                    h));
+
+                        const float angularDamping =
+                            std::pow(
+                                0.995f,
+                                h * 60.0f *
+                                std::max(
+                                    rb.angularDampingMultiplier,
+                                    0.0f));
+
+                        rb.angularVelocity =
+                            Scale(
+                                rb.angularVelocity,
+                                angularDamping);
+                    }
+                };
+
+            constexpr std::uint32_t parallelThreshold =
+                256;
+
+            constexpr std::uint32_t minRange =
+                256;
+
+            const bool useJobs =
+                m_JobSystem != nullptr &&
+                m_JobSystem->IsInitialized() &&
+                bodies.size() >= parallelThreshold;
+
+            if (useJobs)
+            {
+                ZoneScopedN("PhysicsIntegrateParallel");
+
+                auto task =
+                    m_JobSystem->Dispatch(
+                        static_cast<std::uint32_t>(
+                            bodies.size()),
+                        minRange,
+                        integrateRange);
+
+                m_JobSystem->Wait(task);
+            }
+            else
+            {
+                ZoneScopedN("PhysicsIntegrateSerial");
+
+                integrateRange(
+                    0,
+                    static_cast<std::uint32_t>(
+                        bodies.size()),
+                    0);
+            }
         }
         // Prepare every restitution target BEFORE any warm-start impulses.
         for (auto& m : contacts)
@@ -723,11 +921,78 @@ void PhysicsSystem::Update(World& world, float dt)
                     PairImpulse(a,b,p,Add(Scale(m.t1,p.tangent1-old1),Scale(m.t2,p.tangent2-old2)));
                 }
             }
-        for (auto& b : bodies)
         {
-            if (InvMass(b) == 0.0f || b.rigidbody->sleeping) continue;
-            b.transform->position = Add(b.transform->position, Scale(b.rigidbody->velocity,h));
-            Rotate(b,Scale(b.rigidbody->angularVelocity,h));
+            ZoneScopedN("PhysicsPoseIntegrate");
+
+            auto poseRange =
+                [&](std::uint32_t begin,
+                    std::uint32_t end,
+                    std::uint32_t /*threadIndex*/)
+                {
+                    ZoneScopedN("PhysicsPoseIntegrateJob");
+
+                    for (std::uint32_t index = begin;
+                        index < end;
+                        ++index)
+                    {
+                        BodyRef& b =
+                            bodies[index];
+
+                        if (InvMass(b) == 0.0f ||
+                            b.rigidbody->sleeping)
+                        {
+                            continue;
+                        }
+
+                        b.transform->position =
+                            Add(
+                                b.transform->position,
+                                Scale(
+                                    b.rigidbody->velocity,
+                                    h));
+
+                        Rotate(
+                            b,
+                            Scale(
+                                b.rigidbody->angularVelocity,
+                                h));
+                    }
+                };
+
+            constexpr std::uint32_t parallelThreshold =
+                256;
+
+            constexpr std::uint32_t minRange =
+                256;
+
+            const bool useJobs =
+                m_JobSystem != nullptr &&
+                m_JobSystem->IsInitialized() &&
+                bodies.size() >= parallelThreshold;
+
+            if (useJobs)
+            {
+                ZoneScopedN("PhysicsPoseParallel");
+
+                auto task =
+                    m_JobSystem->Dispatch(
+                        static_cast<std::uint32_t>(
+                            bodies.size()),
+                        minRange,
+                        poseRange);
+
+                m_JobSystem->Wait(task);
+            }
+            else
+            {
+                ZoneScopedN("PhysicsPoseSerial");
+
+                poseRange(
+                    0,
+                    static_cast<std::uint32_t>(
+                        bodies.size()),
+                    0);
+            }
         }
         // Nonlinear position projection uses angular effective mass and fresh
         // contact geometry. It changes poses only, never physical velocities.

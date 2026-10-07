@@ -4,6 +4,9 @@
 #include "../MathTypes.h"
 #include <array>
 #include <unordered_map>
+
+class JobSystem;
+
 namespace ecs {
 class PhysicsSystem final : public ISystem {
 public:
@@ -35,6 +38,11 @@ public:
         if (m_Enabled != enabled) m_ContactCache.clear();
         m_Enabled = enabled;
     }
+
+    void SetJobSystem(::JobSystem* jobSystem)
+    {
+        m_JobSystem = jobSystem;
+    }
     bool IsEnabled() const { return m_Enabled; }
 private:
     struct CachedPoint {
@@ -53,6 +61,7 @@ private:
         int count = 0;
     };
     std::unordered_map<std::uint64_t, CachedManifold> m_ContactCache;
+    ::JobSystem* m_JobSystem = nullptr;
     EventBus* m_EventBus = nullptr;
     bool m_Enabled = true;
     float m_Gravity = 9.81f;
