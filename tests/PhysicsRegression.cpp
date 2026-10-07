@@ -1039,11 +1039,10 @@ static void PhysicsParallelBenchmark(
         << "warm-up frames per repetition: 10\n"
         << "measured simulation frames per repetition: 30\n"
         << "samples per mode: "
-        << "\nSerial frame time:\n"
         << serialSamples.size()
         << '\n'
         << '\n'
-        << "Serial:\n"
+        << "Serial frame time:\n"
         << "  median = "
         << serial.medianMs
         << " ms\n"
@@ -1054,8 +1053,7 @@ static void PhysicsParallelBenchmark(
         << serial.p99Ms
         << " ms\n"
         << '\n'
-        << "\nParallel frame time:\n"
-        << "Parallel:\n"
+        << "Parallel frame time:\n"
         << "  median = "
         << parallel.medianMs
         << " ms\n"
