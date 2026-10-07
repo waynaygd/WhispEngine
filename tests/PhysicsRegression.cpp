@@ -19,6 +19,12 @@
 #define ZoneScopedN(name) ((void)0)
 #endif
 
+enum class PhysicsBenchmarkMode
+{
+    Serial,
+    Parallel
+};
+
 using namespace ecs;
 static float Length(Vec3 v) { return std::sqrt(v.x*v.x+v.y*v.y+v.z*v.z); }
 static Vec3 Sub(Vec3 a, Vec3 b) { return {a.x-b.x,a.y-b.y,a.z-b.z}; }
@@ -872,7 +878,8 @@ static void WarmUpPhysicsScene(
 
 static void MeasurePhysicsScene(
     Scene& scene,
-    std::vector<double>& samples)
+    std::vector<double>& samples,
+    PhysicsBenchmarkMode mode)
 {
     constexpr int frames = 30;
     constexpr float dt = 1.0f / 60.0f;
@@ -884,9 +891,22 @@ static void MeasurePhysicsScene(
         const auto begin =
             std::chrono::steady_clock::now();
 
-        scene.physics.Update(
-            scene.world,
-            dt);
+        if (mode == PhysicsBenchmarkMode::Serial)
+        {
+            ZoneScopedN("PhysicsBenchmarkFrameSerial");
+
+            scene.physics.Update(
+                scene.world,
+                dt);
+        }
+        else
+        {
+            ZoneScopedN("PhysicsBenchmarkFrameParallel");
+
+            scene.physics.Update(
+                scene.world,
+                dt);
+        }
 
         const auto end =
             std::chrono::steady_clock::now();
@@ -961,7 +981,8 @@ static void PhysicsParallelBenchmark(
 
                 MeasurePhysicsScene(
                     serial,
-                    serialSamples);
+                    serialSamples,
+                    PhysicsBenchmarkMode::Serial);
             }
 
             {
@@ -969,7 +990,8 @@ static void PhysicsParallelBenchmark(
 
                 MeasurePhysicsScene(
                     parallel,
-                    parallelSamples);
+                    parallelSamples,
+                    PhysicsBenchmarkMode::Parallel);
             }
         }
         else
@@ -979,7 +1001,8 @@ static void PhysicsParallelBenchmark(
 
                 MeasurePhysicsScene(
                     parallel,
-                    parallelSamples);
+                    parallelSamples,
+                    PhysicsBenchmarkMode::Parallel);
             }
 
             {
@@ -987,7 +1010,8 @@ static void PhysicsParallelBenchmark(
 
                 MeasurePhysicsScene(
                     serial,
-                    serialSamples);
+                    serialSamples,
+                    PhysicsBenchmarkMode::Serial);
             }
         }
     }
@@ -1012,7 +1036,10 @@ static void PhysicsParallelBenchmark(
         << "repetitions: "
         << repetitions
         << '\n'
+        << "warm-up frames per repetition: 10\n"
+        << "measured simulation frames per repetition: 30\n"
         << "samples per mode: "
+        << "\nSerial frame time:\n"
         << serialSamples.size()
         << '\n'
         << '\n'
@@ -1027,6 +1054,7 @@ static void PhysicsParallelBenchmark(
         << serial.p99Ms
         << " ms\n"
         << '\n'
+        << "\nParallel frame time:\n"
         << "Parallel:\n"
         << "  median = "
         << parallel.medianMs
