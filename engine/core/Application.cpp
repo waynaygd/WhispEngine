@@ -18,8 +18,11 @@
 #include "../render/IRenderAdapter.h"
 #include "../resources/ResourceManager.h"
 #include "../scene/SceneSerializer.h"
+#include "../jobs/JobSystem.h"
 #include <GLFW/glfw3.h>
 #include <imgui.h>
+
+#include <tracy/Tracy.hpp>
 
 #include "../game/states/LoadingState.h"
 
@@ -421,6 +424,8 @@ void Application::SetupEcsRuntimeDemo()
         m_Config.physics.spherePenetrationEpsilon,
         m_Config.physics.sphereVelocityEpsilon,
         m_Config.physics.dynamicBoxSphereCorrectionPercent);
+    m_PhysicsSystem->SetJobSystem(
+        m_JobSystem.get());
     m_PhysicsSystem->SetEnabled(m_EditorPlayMode);
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
@@ -436,23 +441,71 @@ void Application::SetupEcsRuntimeDemo()
         m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(entityCfg));
     }
 
-    // Small cube pyramid for interactive shooting tests.
+    constexpr float cubeSize = 0.18f;
+    constexpr float cubeHalf = cubeSize * 0.5f;
+
+    constexpr float groundCenterY = -1.0f;
+    constexpr float groundHalfHeight = 0.025f;
+    constexpr float groundTop =
+        groundCenterY + groundHalfHeight;
+
     for (int layer = 0; layer < 4; ++layer)
     {
         const int count = 4 - layer;
+
+        const float startX =
+            -0.5f *
+            static_cast<float>(count - 1) *
+            cubeSize;
+
         for (int i = 0; i < count; ++i)
         {
             EcsDemoEntityConfig cubeCfg;
-            cubeCfg.tag = "PyramidCube_" + std::to_string(layer) + "_" + std::to_string(i);
-            cubeCfg.meshPath = "models/validation_cube.obj";
-            cubeCfg.materialPath = "materials/blue.material.json";
-            cubeCfg.scale = ecs::Vec3{ 0.18f, 0.18f, 0.18f };
-            cubeCfg.position = ecs::Vec3{
-                -0.35f + static_cast<float>(i) * 0.20f + static_cast<float>(layer) * 0.10f,
-                -0.92f + static_cast<float>(layer) * 0.22f,
-                0.45f
+
+            cubeCfg.tag =
+                "PyramidCube_" +
+                std::to_string(layer) +
+                "_" +
+                std::to_string(i);
+
+            cubeCfg.meshPath =
+                "models/validation_cube.obj";
+
+            cubeCfg.materialPath =
+                "materials/blue.material.json";
+
+            cubeCfg.scale =
+                ecs::Vec3{
+                    cubeSize,
+                    cubeSize,
+                    cubeSize
             };
-            m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(cubeCfg));
+
+            cubeCfg.position =
+                ecs::Vec3{
+                    startX +
+                        static_cast<float>(i) *
+                        cubeSize,
+
+                    groundTop +
+                        cubeHalf +
+                        static_cast<float>(layer) *
+                        cubeSize,
+
+                    0.45f
+            };
+
+            cubeCfg.colliderManual = true;
+
+            cubeCfg.colliderHalfExtents =
+                ecs::Vec3{
+                    cubeHalf,
+                    cubeHalf,
+                    cubeHalf
+            };
+
+            m_EcsDebugEntities.push_back(
+                SpawnEcsDemoEntity(cubeCfg));
         }
     }
 
@@ -708,6 +761,7 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     rigidbody.isStatic = entityCfg.isStatic || tag.name == "GroundPlane";
     rigidbody.simulatePhysics = entityCfg.simulatePhysics;
     rigidbody.velocity = entityCfg.linearVelocity;
+    rigidbody.angularVelocity = entityCfg.angularVelocity;
     auto& collider = m_World.AddComponent<ecs::ColliderComponent>(entity);
     collider.type = (entityCfg.colliderType == "sphere" || entityCfg.colliderType == "Sphere")
         ? ecs::ColliderType::Sphere
@@ -1093,7 +1147,16 @@ bool Application::Initialize()
     if (!ValidateAssetDependencyAvailability())
         return false;
 
-    m_ResourceManager = std::make_unique<ResourceManager>();
+    m_JobSystem = std::make_unique<JobSystem>();
+
+    if (!m_JobSystem->Initialize())
+    {
+        Logger::Get().Error("Application: failed to initialize JobSystem");
+        return false;
+    }
+
+    m_ResourceManager =
+        std::make_unique<ResourceManager>(m_JobSystem.get());
     RunResourceBootstrapCheck();
 
     RunEcsBootstrapCheck();
@@ -1179,6 +1242,8 @@ bool Application::Initialize()
         m_ActiveCollisionPairs.insert(BuildCollisionPairKey(e.a.index, e.b.index));
     });
     SetupEcsRuntimeDemo();
+    // SetupRenderStressScene();
+    SetupPhysicsStressScene();
     InitializeConfigHotReload();
 
     m_IsRunning = true;
@@ -1198,6 +1263,8 @@ int Application::Run()
 
     while (m_IsRunning)
     {
+        ZoneScopedN("Frame");
+
         if (!m_Windows.empty())
             m_Windows[0].window->PollEvents();
 
@@ -1217,6 +1284,30 @@ int Application::Run()
                 }
             }
             prevF5 = f5;
+
+            static bool prevF8 = false;
+
+            const bool f8 =
+                glfwGetKey(w, GLFW_KEY_F8) == GLFW_PRESS;
+
+            if (f8 && !prevF8)
+            {
+                RunAsyncResourceStressTest();
+            }
+
+            prevF8 = f8;
+
+            static bool prevF7 = false;
+
+            const bool f7 =
+                glfwGetKey(w, GLFW_KEY_F7) == GLFW_PRESS;
+
+            if (f7 && !prevF7)
+            {
+                RunSyncResourceStressTest();
+            }
+
+            prevF7 = f7;
         }
 
         bool anyAlive = false;
@@ -1226,53 +1317,70 @@ int Application::Run()
         if (!anyAlive) break;
 
         float dt = m_Time.Tick();
-        if (m_ResourceManager != nullptr)
-        {
-            m_ResourceManager->PollAsyncLoads();
-            m_ResourceManager->PollHotReload();
-            m_World.ForEach<ecs::ColliderComponent, ecs::MeshRendererComponent, ecs::TransformComponent>(
-                [&](ecs::Entity, ecs::ColliderComponent& collider, ecs::MeshRendererComponent& meshRenderer, ecs::TransformComponent& transform)
-                {
-                    if (!collider.autoFitFromMesh)
-                        return;
-                    ecs::Vec3 halfExtents{};
-                    ecs::Vec3 offset{};
-                    if (TryBuildMeshCollider(m_ResourceManager.get(), meshRenderer.meshPath, transform.scale, halfExtents, offset))
-                    {
-                        collider.halfExtents = halfExtents;
-                        collider.offset = offset;
-                        if (meshRenderer.meshPath.find("african_head") != std::string::npos)
-                        {
-                            collider.halfExtents.x *= 1.08f;
-                            collider.halfExtents.y *= 1.10f;
-                            collider.halfExtents.z *= 1.18f;
-                            collider.offset.y += collider.halfExtents.y * 0.04f;
-                        }
-                        collider.autoFitFromMesh = false;
-                    }
-                });
-        }
-        PollConfigHotReload();
-        UpdateCameraController(dt);
 
-        if (m_UpdateMode == UpdateMode::Fixed)
         {
-            accumulator += dt;
+            ZoneScopedN("ResourceUpdate");
 
-            int steps = 0;
-            while (accumulator >= fixedDt && steps < maxSteps)
+            if (m_ResourceManager != nullptr)
             {
-                m_StateMachine.Update(*this, fixedDt);
-                m_StateMachine.ApplyPending(*this);
+                constexpr std::size_t maxResourceFinalizationsPerFrame = 4;
 
-                accumulator -= fixedDt;
-                ++steps;
+                m_ResourceManager->PollAsyncLoads();
+                m_ResourceManager->PumpFinalization(
+                    maxResourceFinalizationsPerFrame);
+
+                m_ResourceManager->PollHotReload();
+
+                m_World.ForEach<ecs::ColliderComponent, ecs::MeshRendererComponent, ecs::TransformComponent>(
+                    [&](ecs::Entity, ecs::ColliderComponent& collider, ecs::MeshRendererComponent& meshRenderer, ecs::TransformComponent& transform)
+                    {
+                        if (!collider.autoFitFromMesh)
+                            return;
+                        ecs::Vec3 halfExtents{};
+                        ecs::Vec3 offset{};
+                        if (TryBuildMeshCollider(m_ResourceManager.get(), meshRenderer.meshPath, transform.scale, halfExtents, offset))
+                        {
+                            collider.halfExtents = halfExtents;
+                            collider.offset = offset;
+                            if (meshRenderer.meshPath.find("african_head") != std::string::npos)
+                            {
+                                collider.halfExtents.x *= 1.08f;
+                                collider.halfExtents.y *= 1.10f;
+                                collider.halfExtents.z *= 1.18f;
+                                collider.offset.y += collider.halfExtents.y * 0.04f;
+                            }
+                            collider.autoFitFromMesh = false;
+                        }
+                    });
             }
+
+            PollConfigHotReload();
         }
-        else
+
         {
-            m_StateMachine.Update(*this, dt);
-            m_StateMachine.ApplyPending(*this);
+            ZoneScopedN("GameUpdate");
+
+            UpdateCameraController(dt);
+
+            if (m_UpdateMode == UpdateMode::Fixed)
+            {
+                accumulator += dt;
+
+                int steps = 0;
+                while (accumulator >= fixedDt && steps < maxSteps)
+                {
+                    m_StateMachine.Update(*this, fixedDt);
+                    m_StateMachine.ApplyPending(*this);
+
+                    accumulator -= fixedDt;
+                    ++steps;
+                }
+            }
+            else
+            {
+                m_StateMachine.Update(*this, dt);
+                m_StateMachine.ApplyPending(*this);
+            }
         }
 
         static float fpsTimer = 0.0f;
@@ -1307,65 +1415,82 @@ int Application::Run()
             fpsFrames = 0;
         }
 
-        for (auto& wc : m_Windows)
         {
-            if (!wc.window || wc.window->ShouldClose()) continue;
+            ZoneScopedN("Render");
 
-            wc.renderer->BeginFrame();
-            if (wc.editorUiAvailable)
+            for (auto& wc : m_Windows)
             {
-                wc.renderer->BeginEditorUiFrame();
-                m_EditorLayer.Render(*this, wc.renderer.get(), dt);
-            }
+                if (!wc.window || wc.window->ShouldClose()) continue;
 
-            const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
-            const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();
-            const bool renderSceneToViewport =
-                wc.editorUiAvailable &&
-                viewportWidth > 1 &&
-                viewportHeight > 1 &&
-                wc.renderer->BeginViewportRender(viewportWidth, viewportHeight, wc.clear);
-
-            if (renderSceneToViewport)
-            {
-                m_ActiveCollisionPairs.clear();
-                if (m_RenderSystem != nullptr)
+                wc.renderer->BeginFrame();
+                if (wc.editorUiAvailable)
                 {
-                    m_RenderSystem->SetRenderAdapter(wc.renderer.get());
-                    UpdateRenderSystemCameraAspect(static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight));
+                    wc.renderer->BeginEditorUiFrame();
+                    m_EditorLayer.Render(*this, wc.renderer.get(), dt);
                 }
 
-                m_World.UpdateSystems(dt);
-                UpdateEcs(dt);
-                m_StateMachine.Render(*this, *wc.renderer);
-                wc.renderer->EndViewportRender();
-            }
+                const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
+                const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();
+                const bool renderSceneToViewport =
+                    wc.editorUiAvailable &&
+                    viewportWidth > 1 &&
+                    viewportHeight > 1 &&
+                    wc.renderer->BeginViewportRender(viewportWidth, viewportHeight, wc.clear);
 
-            wc.renderer->Clear(wc.clear[0], wc.clear[1], wc.clear[2], wc.clear[3]);
-
-            if (!renderSceneToViewport)
-            {
-                m_ActiveCollisionPairs.clear();
-                if (m_RenderSystem != nullptr)
+                if (renderSceneToViewport)
                 {
-                    m_RenderSystem->SetRenderAdapter(wc.renderer.get());
-                    UpdateRenderSystemCamera(wc.window.get());
+                    m_ActiveCollisionPairs.clear();
+                    if (m_RenderSystem != nullptr)
+                    {
+                        m_RenderSystem->SetRenderAdapter(wc.renderer.get());
+                        UpdateRenderSystemCameraAspect(static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight));
+                    }
+
+                    {
+                        ZoneScopedN("WorldSystems");
+                        m_World.UpdateSystems(dt);
+                    }
+                    UpdateEcs(dt);
+                    m_StateMachine.Render(*this, *wc.renderer);
+                    wc.renderer->EndViewportRender();
                 }
 
-                m_World.UpdateSystems(dt);
-                UpdateEcs(dt);
-                m_StateMachine.Render(*this, *wc.renderer);
+                wc.renderer->Clear(wc.clear[0], wc.clear[1], wc.clear[2], wc.clear[3]);
+
+                if (!renderSceneToViewport)
+                {
+                    m_ActiveCollisionPairs.clear();
+                    if (m_RenderSystem != nullptr)
+                    {
+                        m_RenderSystem->SetRenderAdapter(wc.renderer.get());
+                        UpdateRenderSystemCamera(wc.window.get());
+                    }
+
+                    {
+                        ZoneScopedN("WorldSystems");
+                        m_World.UpdateSystems(dt);
+                    }
+
+                    UpdateEcs(dt);
+                    m_StateMachine.Render(*this, *wc.renderer);
+                }
+
+                if (wc.editorUiAvailable)
+                    wc.renderer->RenderEditorUiFrame();
+
+                wc.renderer->EndFrame();
+
+                {
+                    ZoneScopedN("Present");
+                    wc.renderer->Present();
+                }
+
+                if (m_RenderSystem != nullptr)
+                    m_RenderSystem->SetRenderAdapter(nullptr);
             }
-
-            if (wc.editorUiAvailable)
-                wc.renderer->RenderEditorUiFrame();
-
-            wc.renderer->EndFrame();
-            wc.renderer->Present();
-
-            if (m_RenderSystem != nullptr)
-                m_RenderSystem->SetRenderAdapter(nullptr);
         }
+
+        FrameMark;
     }
     return 0;
 }
@@ -1398,7 +1523,19 @@ void Application::Shutdown()
     }
 
     m_Windows.clear();
+
+    if (m_ResourceManager != nullptr)
+        m_ResourceManager->Shutdown();
+
     m_ResourceManager.reset();
+
+
+    if (m_JobSystem != nullptr)
+    {
+        m_JobSystem->Shutdown();
+        m_JobSystem.reset();
+    }
+
     m_World.ClearSystems();
     m_PhysicsSystem = nullptr;
     m_RenderSystem = nullptr;
@@ -1412,4 +1549,225 @@ void Application::Shutdown()
 void Application::RequestStateChange(std::unique_ptr<IGameState> s)
 {
     m_StateMachine.ChangeState(std::move(s));
+}
+
+void Application::SetupRenderStressScene()
+{
+    constexpr int rows = 50;
+    constexpr int columns = 50;
+    constexpr float spacing = 0.18f;
+
+    for (int row = 0; row < rows; ++row)
+    {
+        for (int column = 0; column < columns; ++column)
+        {
+            const ecs::Entity entity = m_World.CreateEntity();
+
+            auto& transform =
+                m_World.AddComponent<ecs::TransformComponent>(entity);
+
+            transform.position = ecs::Vec3{
+                (column - columns / 2) * spacing,
+                (row - rows / 2) * spacing,
+                1.5f
+            };
+
+            transform.scale = ecs::Vec3{
+                0.08f,
+                0.08f,
+                0.08f
+            };
+
+            auto& meshRenderer =
+                m_World.AddComponent<ecs::MeshRendererComponent>(entity);
+
+            meshRenderer.meshPath =
+                "models/validation_cube.obj";
+
+            auto& material =
+                m_World.AddComponent<ecs::MaterialComponent>(entity);
+
+            material.materialPath =
+                "materials/blue.material.json";
+
+            m_EcsDebugEntities.push_back(entity);
+        }
+    }
+
+    Logger::Get().Info(
+        "JobSystem stress scene: spawned " +
+        std::to_string(rows * columns) +
+        " render entities");
+}
+
+void Application::SetupPhysicsStressScene()
+{
+    constexpr int bodyCount = 500;
+
+    for (int i = 0; i < bodyCount; ++i)
+    {
+        const ecs::Entity entity = m_World.CreateEntity();
+
+        auto& transform =
+            m_World.AddComponent<ecs::TransformComponent>(entity);
+
+        transform.position = ecs::Vec3{
+            static_cast<float>(i % 25) * 2.0f,
+            10.0f + static_cast<float>(i / 25) * 2.0f,
+            0.0f
+        };
+
+        auto& collider =
+            m_World.AddComponent<ecs::ColliderComponent>(entity);
+
+        collider.type = ecs::ColliderType::Box;
+        collider.halfExtents = ecs::Vec3{
+            0.5f, 0.5f, 0.5f
+        };
+        collider.autoFitFromMesh = false;
+
+        auto& rigidbody =
+            m_World.AddComponent<ecs::RigidbodyComponent>(entity);
+
+        rigidbody.isStatic = false;
+        rigidbody.simulatePhysics = true;
+        rigidbody.useGravity = true;
+        rigidbody.mass = 1.0f;
+
+        rigidbody.velocity = ecs::Vec3{
+            0.1f,
+            0.0f,
+            0.0f
+        };
+    }
+
+    Logger::Get().Info(
+        "Physics stress scene: spawned " +
+        std::to_string(bodyCount) +
+        " dynamic bodies");
+}
+
+void Application::RunAsyncResourceStressTest()
+{
+    if (m_AsyncResourceStressStarted)
+        return;
+
+    if (m_ResourceManager == nullptr)
+        return;
+
+    m_AsyncResourceStressStarted = true;
+
+    constexpr int textureCount = 8;
+
+    Logger::Get().Info(
+        "Async resource stress: starting textures=" +
+        std::to_string(textureCount));
+
+    for (int i = 0; i < textureCount; ++i)
+    {
+        char texturePath[128];
+
+        std::snprintf(
+            texturePath,
+            sizeof(texturePath),
+            "textures/stress/head_%02d.dds",
+            i + 1);
+
+        //
+        // Сразу ставим CPU load в JobSystem.
+        //
+        (void)m_ResourceManager->LoadAsync<TextureResource>(
+            texturePath);
+
+        //
+        // Создаём реальный объект, который использует ресурс.
+        // RenderSystem увидит Loading resource и сначала покажет fallback.
+        //
+        EcsDemoEntityConfig entityCfg;
+
+        entityCfg.tag =
+            "AsyncStress_" + std::to_string(i);
+
+        entityCfg.meshPath =
+            "models/validation_cube.obj";
+
+        entityCfg.texturePath =
+            texturePath;
+
+        entityCfg.shaderPath =
+            "dx12/textured.hlsl";
+
+        entityCfg.materialPath.clear();
+
+        const int column = i % 4;
+        const int row = i / 4;
+
+        entityCfg.position = ecs::Vec3{
+            -2.25f + static_cast<float>(column) * 1.5f,
+            1.5f - static_cast<float>(row) * 1.5f,
+            0.0f
+        };
+
+        entityCfg.scale =
+            ecs::Vec3{ 0.65f, 0.65f, 0.65f };
+
+        //
+        // Чтобы stress test ресурсов не превратился
+        // одновременно в physics benchmark.
+        //
+        entityCfg.bounce = false;
+        entityCfg.simulatePhysics = false;
+        entityCfg.isStatic = true;
+        entityCfg.useGravity = false;
+
+        //
+        // Очень важно:
+        // иначе SpawnEcsDemoEntity() может вызвать
+        // TryBuildMeshCollider(), а тот делает sync Load<Mesh>().
+        //
+        entityCfg.colliderManual = true;
+        entityCfg.colliderHalfExtents =
+            ecs::Vec3{ 0.325f, 0.325f, 0.325f };
+
+        const ecs::Entity entity =
+            SpawnEcsDemoEntity(entityCfg);
+
+        m_EcsDebugEntities.push_back(entity);
+    }
+
+    Logger::Get().Info(
+        "Async resource stress: all requests scheduled");
+}
+
+void Application::RunSyncResourceStressTest()
+{
+    ZoneScopedN("SyncResourceStress");
+
+    if (m_ResourceManager == nullptr)
+        return;
+
+    constexpr int textureCount = 8;
+
+    Logger::Get().Info(
+        "Sync resource stress: starting textures=" +
+        std::to_string(textureCount));
+
+    for (int i = 0; i < textureCount; ++i)
+    {
+        ZoneScopedN("SyncTextureLoad");
+
+        char texturePath[128];
+
+        std::snprintf(
+            texturePath,
+            sizeof(texturePath),
+            "textures/stress/head_%02d.dds",
+            i + 1);
+
+        (void)m_ResourceManager->Load<TextureResource>(
+            texturePath);
+    }
+
+    Logger::Get().Info(
+        "Sync resource stress: complete");
 }

@@ -15,6 +15,7 @@
 #include "../../resources/TextureResource.h"
 
 #include <cmath>
+#include <tracy/Tracy.hpp>
 
 namespace
 {
@@ -232,445 +233,803 @@ void BuildMvp(
 }
 }
 
-namespace ecs
-{
-RenderSystem::~RenderSystem()
-{
-    ReleaseGpuResources();
-}
-
-void RenderSystem::SetRenderAdapter(IRenderAdapter* renderer)
-{
-    if (renderer != nullptr && m_ResourceOwnerRenderer != nullptr && renderer != m_ResourceOwnerRenderer)
+namespace ecs {
+    RenderSystem::~RenderSystem() {
         ReleaseGpuResources();
+    }
 
-    m_Renderer = renderer;
-    if (renderer != nullptr && m_ResourceOwnerRenderer == nullptr)
-        m_ResourceOwnerRenderer = renderer;
-}
+    void RenderSystem::SetRenderAdapter(IRenderAdapter* renderer)
+    {
+        if (renderer != nullptr && m_ResourceOwnerRenderer != nullptr && renderer != m_ResourceOwnerRenderer)
+            ReleaseGpuResources();
 
-void RenderSystem::SetCameraTransform(const Vec3& position, float yawRadians, float pitchRadians)
-{
-    m_CameraPosition = position;
-    m_CameraYaw = yawRadians;
-    m_CameraPitch = pitchRadians;
-}
+        m_Renderer = renderer;
+        if (renderer != nullptr && m_ResourceOwnerRenderer == nullptr)
+            m_ResourceOwnerRenderer = renderer;
+    }
 
-void RenderSystem::SetCameraProjection(
-    float verticalFovRadians,
-    float aspectRatio,
-    float nearPlane,
-    float farPlane)
-{
-    m_CameraVerticalFovRadians = verticalFovRadians > 0.001f ? verticalFovRadians : 1.04719755f;
-    m_CameraAspectRatio = aspectRatio > 0.001f ? aspectRatio : 16.0f / 9.0f;
-    m_CameraNearPlane = nearPlane > 0.0001f ? nearPlane : 0.01f;
-    m_CameraFarPlane =
-        farPlane > m_CameraNearPlane + 0.001f
+    void RenderSystem::SetCameraTransform(const Vec3& position, float yawRadians, float pitchRadians)
+    {
+        m_CameraPosition = position;
+        m_CameraYaw = yawRadians;
+        m_CameraPitch = pitchRadians;
+    }
+
+    void RenderSystem::SetCameraProjection(
+        float verticalFovRadians,
+        float aspectRatio,
+        float nearPlane,
+        float farPlane)
+    {
+        m_CameraVerticalFovRadians = verticalFovRadians > 0.001f ? verticalFovRadians : 1.04719755f;
+        m_CameraAspectRatio = aspectRatio > 0.001f ? aspectRatio : 16.0f / 9.0f;
+        m_CameraNearPlane = nearPlane > 0.0001f ? nearPlane : 0.01f;
+        m_CameraFarPlane =
+            farPlane > m_CameraNearPlane + 0.001f
             ? farPlane
             : m_CameraNearPlane + 0.001f;
-}
+    }
 
-void RenderSystem::ReleaseGpuResources()
-{
-    IRenderAdapter* renderer = m_ResourceOwnerRenderer != nullptr ? m_ResourceOwnerRenderer : m_Renderer;
-    if (renderer != nullptr)
+    void RenderSystem::ReleaseGpuResources()
     {
-        for (auto& [key, resource] : m_ShaderResources)
+        IRenderAdapter* renderer = m_ResourceOwnerRenderer != nullptr ? m_ResourceOwnerRenderer : m_Renderer;
+        if (renderer != nullptr)
         {
-            (void)key;
-            if (resource != nullptr && resource->GetData().gpuHandle.IsValid())
+            for (auto& [key, resource] : m_ShaderResources)
             {
-                renderer->DestroyShader(resource->GetData().gpuHandle);
-                resource->GetData().gpuHandle = RenderShaderHandle::Invalid();
-                resource->GetData().gpuHandleVersion = 0;
+                (void)key;
+                if (resource != nullptr && resource->GetData().gpuHandle.IsValid())
+                {
+                    renderer->DestroyShader(resource->GetData().gpuHandle);
+                    resource->GetData().gpuHandle = RenderShaderHandle::Invalid();
+                    resource->GetData().gpuHandleVersion = 0;
+                }
+            }
+
+            for (auto& [key, resource] : m_TextureResources)
+            {
+                (void)key;
+                if (resource != nullptr && resource->GetData().gpuHandle.IsValid())
+                {
+                    renderer->DestroyTexture(resource->GetData().gpuHandle);
+                    resource->GetData().gpuHandle = RenderTextureHandle::Invalid();
+                    resource->GetData().gpuHandleVersion = 0;
+                }
+            }
+
+            for (auto& [key, resource] : m_MeshResources)
+            {
+                (void)key;
+                if (resource != nullptr && resource->GetData().gpuHandle.IsValid())
+                {
+                    renderer->DestroyMesh(resource->GetData().gpuHandle);
+                    resource->GetData().gpuHandle = RenderMeshHandle::Invalid();
+                    resource->GetData().gpuHandleVersion = 0;
+                }
             }
         }
 
-        for (auto& [key, resource] : m_TextureResources)
+        m_MeshResources.clear();
+        m_TextureResources.clear();
+        m_ShaderResources.clear();
+        m_MaterialResources.clear();
+        m_FailedMeshKeys.clear();
+        m_FailedTextureKeys.clear();
+        m_FailedShaderKeys.clear();
+        m_FailedMaterialKeys.clear();
+        m_FailedMeshGpuVersions.clear();
+        m_FailedTextureGpuVersions.clear();
+        m_FailedShaderGpuVersions.clear();
+        m_LoggedMeshReuseKeys.clear();
+        m_LoggedTextureReuseKeys.clear();
+        m_LoggedShaderReuseKeys.clear();
+        m_ResourceOwnerRenderer = nullptr;
+    }
+
+    void RenderSystem::Update(World& world, float dt)
+    {
+        ZoneScopedN("RenderSystem");
+
+        (void)dt;
+
+        if (m_Renderer == nullptr)
+            return;
+
+        constexpr std::size_t
+            maxGpuFinalizationsPerFrame = 1;
+
+        PumpGpuFinalization(
+            maxGpuFinalizationsPerFrame);
+
         {
-            (void)key;
-            if (resource != nullptr && resource->GetData().gpuHandle.IsValid())
+            ZoneScopedN("RenderEntities");
+
+            m_RenderSnapshots.clear();
+            m_RenderSnapshots.reserve(world.GetAliveCount());
+
             {
-                renderer->DestroyTexture(resource->GetData().gpuHandle);
-                resource->GetData().gpuHandle = RenderTextureHandle::Invalid();
-                resource->GetData().gpuHandleVersion = 0;
+                ZoneScopedN("RenderGather");
+
+                world.ForEach<TransformComponent, MeshRendererComponent>(
+                    [&](Entity entity,
+                        TransformComponent& transform,
+                        MeshRendererComponent& meshRenderer)
+                    {
+                        if (!meshRenderer.visible)
+                            return;
+
+                        RenderSnapshot snapshot{};
+
+                        if (TryBuildRenderSnapshot(
+                            transform,
+                            meshRenderer,
+                            world.GetComponent<MaterialComponent>(entity),
+                            snapshot))
+                        {
+                            m_RenderSnapshots.push_back(std::move(snapshot));
+                        }
+                    });
+            }
+
+            {
+                ZoneScopedN("RenderPrepare");
+
+                m_RenderPackets.resize(m_RenderSnapshots.size());
+
+                for (std::size_t i = 0; i < m_RenderSnapshots.size(); ++i)
+                {
+                    PrepareRenderPacket(
+                        m_RenderSnapshots[i],
+                        m_RenderPackets[i]);
+                }
+            }
+
+            {
+                ZoneScopedN("RenderSubmit");
+
+                for (const RenderPacket& packet : m_RenderPackets)
+                {
+                    SubmitRenderPacket(packet);
+                }
             }
         }
 
-        for (auto& [key, resource] : m_MeshResources)
+        if (!m_DebugCollidersEnabled)
+            return;
         {
-            (void)key;
-            if (resource != nullptr && resource->GetData().gpuHandle.IsValid())
-            {
-                renderer->DestroyMesh(resource->GetData().gpuHandle);
-                resource->GetData().gpuHandle = RenderMeshHandle::Invalid();
-                resource->GetData().gpuHandleVersion = 0;
-            }
+            ZoneScopedN("DebugColliders");
+
+            world.ForEach<TransformComponent, ColliderComponent>(
+                [&](Entity, TransformComponent& transform, ColliderComponent& collider)
+                {
+                    float mvp[16];
+                    TransformComponent debugTransform = transform;
+                    debugTransform.position.x += collider.offset.x;
+                    debugTransform.position.y += collider.offset.y;
+                    debugTransform.position.z += collider.offset.z;
+                    // Box colliders can be oriented; keep rotation for box debug draw.
+                    if (collider.type == ColliderType::Sphere)
+                    {
+                        const float radius = std::max(collider.halfExtents.x, std::max(collider.halfExtents.y, collider.halfExtents.z));
+                        debugTransform.scale = ecs::Vec3{ radius * 2.0f, radius * 2.0f, radius * 2.0f };
+                    }
+                    else
+                    {
+                        // Box colliders can be oriented; keep rotation for box debug draw.
+                        debugTransform.scale = ecs::Vec3{
+                            collider.halfExtents.x * 2.0f,
+                            collider.halfExtents.y * 2.0f,
+                            collider.halfExtents.z * 2.0f
+                        };
+                    }
+                    BuildMvp(
+                        mvp,
+                        debugTransform,
+                        m_CameraPosition,
+                        m_CameraYaw,
+                        m_CameraPitch,
+                        m_CameraVerticalFovRadians,
+                        m_CameraAspectRatio,
+                        m_CameraNearPlane,
+                        m_CameraFarPlane);
+                    m_Renderer->SetTestTransform(mvp);
+                    m_Renderer->SetTestColor(0.1f, 1.0f, 0.1f, 1.0f);
+                    m_Renderer->DrawTestCube();
+                });
         }
     }
 
-    m_MeshResources.clear();
-    m_TextureResources.clear();
-    m_ShaderResources.clear();
-    m_MaterialResources.clear();
-    m_FailedMeshKeys.clear();
-    m_FailedTextureKeys.clear();
-    m_FailedShaderKeys.clear();
-    m_FailedMaterialKeys.clear();
-    m_FailedMeshGpuVersions.clear();
-    m_FailedTextureGpuVersions.clear();
-    m_FailedShaderGpuVersions.clear();
-    m_LoggedMeshReuseKeys.clear();
-    m_LoggedTextureReuseKeys.clear();
-    m_LoggedShaderReuseKeys.clear();
-    m_ResourceOwnerRenderer = nullptr;
-}
-
-void RenderSystem::Update(World& world, float dt)
-{
-    (void)dt;
-    if (m_Renderer == nullptr)
-        return;
-
-    world.ForEach<TransformComponent, MeshRendererComponent>(
-        [&](Entity entity, TransformComponent& transform, MeshRendererComponent& meshRenderer)
-        {
-            if (!meshRenderer.visible)
-                return;
-
-            (void)TryDrawResourceMesh(
-                transform,
-                meshRenderer,
-                world.GetComponent<MaterialComponent>(entity));
-        });
-
-    if (!m_DebugCollidersEnabled)
-        return;
-
-    world.ForEach<TransformComponent, ColliderComponent>(
-        [&](Entity, TransformComponent& transform, ColliderComponent& collider)
-        {
-            float mvp[16];
-            TransformComponent debugTransform = transform;
-            debugTransform.position.x += collider.offset.x;
-            debugTransform.position.y += collider.offset.y;
-            debugTransform.position.z += collider.offset.z;
-            // Box colliders can be oriented; keep rotation for box debug draw.
-            if (collider.type == ColliderType::Sphere)
-            {
-                const float radius = std::max(collider.halfExtents.x, std::max(collider.halfExtents.y, collider.halfExtents.z));
-                debugTransform.scale = ecs::Vec3{ radius * 2.0f, radius * 2.0f, radius * 2.0f };
-            }
-            else
-            {
-                // Box colliders can be oriented; keep rotation for box debug draw.
-                debugTransform.scale = ecs::Vec3{
-                    collider.halfExtents.x * 2.0f,
-                    collider.halfExtents.y * 2.0f,
-                    collider.halfExtents.z * 2.0f
-                };
-            }
-            BuildMvp(
-                mvp,
-                debugTransform,
-                m_CameraPosition,
-                m_CameraYaw,
-                m_CameraPitch,
-                m_CameraVerticalFovRadians,
-                m_CameraAspectRatio,
-                m_CameraNearPlane,
-                m_CameraFarPlane);
-            m_Renderer->SetTestTransform(mvp);
-            m_Renderer->SetTestColor(0.1f, 1.0f, 0.1f, 1.0f);
-            m_Renderer->DrawTestCube();
-        });
-}
-
-bool RenderSystem::TryDrawResourceMesh(
-    const TransformComponent& transform,
-    const MeshRendererComponent& meshRenderer,
-    const MaterialComponent* materialComponent)
-{
-    if (m_Renderer == nullptr || m_ResourceManager == nullptr)
-        return false;
-
-    if (meshRenderer.meshPath.empty())
-        return false;
-
-    std::string texturePath = meshRenderer.texturePath;
-    std::string shaderPath = meshRenderer.shaderPath;
-    float tint[4] = { kWhiteTint[0], kWhiteTint[1], kWhiteTint[2], kWhiteTint[3] };
-
-    if (materialComponent != nullptr)
+    bool RenderSystem::TryBuildRenderSnapshot(
+        const TransformComponent& transform,
+        const MeshRendererComponent& meshRenderer,
+        const MaterialComponent* materialComponent,
+        RenderSnapshot& outSnapshot)
     {
-        if (!materialComponent->texturePath.empty())
-            texturePath = materialComponent->texturePath;
-        if (!materialComponent->shaderPath.empty())
-            shaderPath = materialComponent->shaderPath;
-        for (std::size_t i = 0; i < 4; ++i)
-            tint[i] *= materialComponent->tint[i];
-
-        if (!materialComponent->materialPath.empty())
-        {
-            const std::string materialKey = AssetPaths::NormalizeAssetKey(materialComponent->materialPath);
-            const auto material = materialKey.empty() ? nullptr : GetOrLoadMaterial(materialKey);
-            if (material != nullptr && material->IsUsable())
-            {
-                const auto& data = material->GetData();
-                if (texturePath.empty())
-                    texturePath = data.texturePath;
-                if (shaderPath.empty())
-                    shaderPath = data.shaderPath;
-                tint[0] *= data.baseColor[0];
-                tint[1] *= data.baseColor[1];
-                tint[2] *= data.baseColor[2];
-                tint[3] *= data.baseColor[3];
-            }
-        }
-    }
-
-    if (shaderPath.empty())
-        return false;
-
-    const std::string meshKey = AssetPaths::NormalizeAssetKey(meshRenderer.meshPath);
-    const std::string shaderKey = AssetPaths::NormalizeShaderKey(shaderPath);
-    if (meshKey.empty() || shaderKey.empty())
-        return false;
-
-    const RenderMeshHandle meshHandle = GetOrUploadMesh(meshKey);
-    RenderTextureHandle textureHandle = RenderTextureHandle::Invalid();
-    if (!texturePath.empty())
-    {
-        const std::string textureKey = AssetPaths::NormalizeAssetKey(texturePath);
-        if (textureKey.empty())
+        if (m_Renderer == nullptr || m_ResourceManager == nullptr)
             return false;
-        textureHandle = GetOrCreateTexture(textureKey);
-    }
-    else
-    {
-        textureHandle = GetOrCreateTexture("defaults/texture");
-    }
-    const RenderShaderHandle shaderHandle = GetOrCreateShader(shaderKey);
-    if (!meshHandle.IsValid() || !textureHandle.IsValid() || !shaderHandle.IsValid())
-        return false;
 
-    float mvp[16];
-    BuildMvp(
-        mvp,
-        transform,
-        m_CameraPosition,
-        m_CameraYaw,
-        m_CameraPitch,
-        m_CameraVerticalFovRadians,
-        m_CameraAspectRatio,
-        m_CameraNearPlane,
-        m_CameraFarPlane);
-    m_Renderer->SetTestTransform(mvp);
-    m_Renderer->SetTestColor(
-        tint[0],
-        tint[1],
-        tint[2],
-        tint[3]);
-    m_Renderer->BindShader(shaderHandle);
-    m_Renderer->BindTexture(0, textureHandle);
-    m_Renderer->DrawMesh(meshHandle);
-    return true;
-}
+        if (meshRenderer.meshPath.empty())
+            return false;
 
-RenderMeshHandle RenderSystem::GetOrUploadMesh(const std::string& key)
-{
-    auto resourceIt = m_MeshResources.find(key);
-    auto resource = resourceIt != m_MeshResources.end() ? resourceIt->second : m_ResourceManager->Load<MeshResource>(key);
-    if (resource == nullptr || !resource->IsUsable())
+        std::string texturePath = meshRenderer.texturePath;
+        std::string shaderPath = meshRenderer.shaderPath;
+        float tint[4] = { kWhiteTint[0], kWhiteTint[1], kWhiteTint[2], kWhiteTint[3] };
+
+        if (materialComponent != nullptr)
+        {
+            if (!materialComponent->texturePath.empty())
+                texturePath = materialComponent->texturePath;
+            if (!materialComponent->shaderPath.empty())
+                shaderPath = materialComponent->shaderPath;
+            for (std::size_t i = 0; i < 4; ++i)
+                tint[i] *= materialComponent->tint[i];
+
+            if (!materialComponent->materialPath.empty())
+            {
+                const std::string materialKey = AssetPaths::NormalizeAssetKey(materialComponent->materialPath);
+                const auto material = materialKey.empty() ? nullptr : GetOrLoadMaterial(materialKey);
+                if (material != nullptr && material->IsUsable())
+                {
+                    const auto& data = material->GetData();
+                    if (texturePath.empty())
+                        texturePath = data.texturePath;
+                    if (shaderPath.empty())
+                        shaderPath = data.shaderPath;
+                    tint[0] *= data.baseColor[0];
+                    tint[1] *= data.baseColor[1];
+                    tint[2] *= data.baseColor[2];
+                    tint[3] *= data.baseColor[3];
+                }
+            }
+        }
+
+        if (shaderPath.empty())
+            return false;
+
+        const std::string meshKey = AssetPaths::NormalizeAssetKey(meshRenderer.meshPath);
+        const std::string shaderKey = AssetPaths::NormalizeShaderKey(shaderPath);
+        if (meshKey.empty() || shaderKey.empty())
+            return false;
+
+        const RenderMeshHandle meshHandle = GetOrUploadMesh(meshKey);
+        RenderTextureHandle textureHandle = RenderTextureHandle::Invalid();
+        if (!texturePath.empty())
+        {
+            const std::string textureKey = AssetPaths::NormalizeAssetKey(texturePath);
+            if (textureKey.empty())
+                return false;
+            textureHandle = GetOrCreateTexture(textureKey);
+        }
+        else
+        {
+            textureHandle = GetOrCreateTexture("defaults/texture");
+        }
+        const RenderShaderHandle shaderHandle = GetOrCreateShader(shaderKey);
+        if (!meshHandle.IsValid() || !textureHandle.IsValid() || !shaderHandle.IsValid())
+            return false;
+
+        outSnapshot.transform = transform;
+
+        outSnapshot.mesh = meshHandle;
+        outSnapshot.texture = textureHandle;
+        outSnapshot.shader = shaderHandle;
+
+        outSnapshot.tint =
+        {
+            tint[0],
+            tint[1],
+            tint[2],
+            tint[3]
+        };
+
+        return true;
+    }
+
+    void RenderSystem::PrepareRenderPacket(
+        const RenderSnapshot& snapshot,
+        RenderPacket& outPacket) const
     {
-        m_FailedMeshKeys.insert(key);
+        BuildMvp(
+            outPacket.mvp.data(),
+            snapshot.transform,
+            m_CameraPosition,
+            m_CameraYaw,
+            m_CameraPitch,
+            m_CameraVerticalFovRadians,
+            m_CameraAspectRatio,
+            m_CameraNearPlane,
+            m_CameraFarPlane);
+
+        outPacket.mesh = snapshot.mesh;
+        outPacket.texture = snapshot.texture;
+        outPacket.shader = snapshot.shader;
+        outPacket.tint = snapshot.tint;
+    }
+
+    void RenderSystem::SubmitRenderPacket(
+        const RenderPacket& packet)
+    {
+        if (m_Renderer == nullptr)
+            return;
+
+        if (!packet.mesh.IsValid() ||
+            !packet.texture.IsValid() ||
+            !packet.shader.IsValid())
+        {
+            return;
+        }
+
+        m_Renderer->SetTestTransform(packet.mvp.data());
+
+        m_Renderer->SetTestColor(
+            packet.tint[0],
+            packet.tint[1],
+            packet.tint[2],
+            packet.tint[3]);
+
+        m_Renderer->BindShader(packet.shader);
+        m_Renderer->BindTexture(0, packet.texture);
+        m_Renderer->DrawMesh(packet.mesh);
+    }
+
+    RenderMeshHandle RenderSystem::GetOrUploadMesh(const std::string& key)
+    {
+        auto resourceIt = m_MeshResources.find(key);
+        auto resource =
+            resourceIt != m_MeshResources.end()
+            ? resourceIt->second
+            : m_ResourceManager->Get<MeshResource>(key);
+
+        if (resource == nullptr)
+        {
+            (void)m_ResourceManager->LoadAsync<MeshResource>(key);
+            resource =
+                m_ResourceManager->Get<MeshResource>(key);
+        }
+        auto& mesh = resource->GetData();
+        const std::uint64_t version =
+            resource->GetVersion();
+
+        if (mesh.gpuHandle.IsValid() &&
+            mesh.gpuHandleVersion == version)
+        {
+            m_MeshResources[key] = resource;
+            return mesh.gpuHandle;
+        }
+
+        QueueGpuFinalization(
+            GpuFinalizeKind::Mesh,
+            key,
+            version);
+
         return RenderMeshHandle::Invalid();
     }
-    auto& mesh = resource->GetData();
-    const std::uint64_t version = resource->GetVersion();
-    if (mesh.gpuHandle.IsValid() && mesh.gpuHandleVersion != resource->GetVersion())
+
+    RenderTextureHandle RenderSystem::GetOrCreateTexture(
+        const std::string& key)
     {
-        m_Renderer->DestroyMesh(mesh.gpuHandle);
-        mesh.gpuHandle = RenderMeshHandle::Invalid();
-        mesh.gpuHandleVersion = 0;
-        m_FailedMeshGpuVersions.erase(key);
-        m_LoggedMeshReuseKeys.erase(key);
-        Logger::Get().Info("RenderSystem: mesh resource version changed, reuploading key=" + key);
+        ResourceHandle<TextureResource> resource;
+
+        const auto resourceIt = m_TextureResources.find(key);
+
+        if (resourceIt != m_TextureResources.end())
+        {
+            resource = resourceIt->second;
+        }
+        else if (key == "defaults/texture")
+        {
+            resource =
+                m_ResourceManager->GetDefault<TextureResource>();
+        }
+        else
+        {
+            resource =
+                m_ResourceManager->Get<TextureResource>(key);
+
+            if (resource == nullptr)
+            {
+                (void)m_ResourceManager
+                    ->LoadAsync<TextureResource>(key);
+
+                resource =
+                    m_ResourceManager->Get<TextureResource>(key);
+            }
+        }
+
+        if (resource == nullptr || !resource->IsUsable())
+            return RenderTextureHandle::Invalid();
+
+        auto& texture = resource->GetData();
+        const std::uint64_t version = resource->GetVersion();
+
+        if (texture.gpuHandle.IsValid() &&
+            texture.gpuHandleVersion == version)
+        {
+            m_TextureResources[key] = resource;
+            return texture.gpuHandle;
+        }
+
+        QueueGpuFinalization(
+            GpuFinalizeKind::Texture,
+            key,
+            version);
+
+        return RenderTextureHandle::Invalid();
     }
-    if (mesh.gpuHandle.IsValid() && !m_LoggedMeshReuseKeys.contains(key))
+
+    RenderShaderHandle RenderSystem::GetOrCreateShader(const std::string& key)
     {
-        Logger::Get().Info(
-            "RenderSystem: reusing mesh GPU handle key=" + key +
-            " handle=" + std::to_string(mesh.gpuHandle.value));
-        m_LoggedMeshReuseKeys.insert(key);
+        auto resourceIt = m_ShaderResources.find(key);
+        auto resource =
+            resourceIt != m_ShaderResources.end()
+            ? resourceIt->second
+            : m_ResourceManager->Get<ShaderResource>(key);
+
+        if (resource == nullptr)
+        {
+            (void)m_ResourceManager->LoadAsync<ShaderResource>(key);
+            resource =
+                m_ResourceManager->Get<ShaderResource>(key);
+        }
+
+        auto& shader = resource->GetData();
+        const std::uint64_t version =
+            resource->GetVersion();
+
+        if (shader.gpuHandle.IsValid() &&
+            shader.gpuHandleVersion == version)
+        {
+            m_ShaderResources[key] = resource;
+            return shader.gpuHandle;
+        }
+
+        QueueGpuFinalization(
+            GpuFinalizeKind::Shader,
+            key,
+            version);
+
+        return RenderShaderHandle::Invalid();
     }
-    if (mesh.gpuHandle.IsValid())
+
+    ResourceHandle<MaterialResource> RenderSystem::GetOrLoadMaterial(const std::string& key)
     {
+        const auto cached = m_MaterialResources.find(key);
+        if (cached != m_MaterialResources.end())
+            return cached->second;
+
+        auto resource =
+            m_ResourceManager->Get<MaterialResource>(key);
+
+        if (resource == nullptr)
+        {
+            (void)m_ResourceManager->LoadAsync<MaterialResource>(key);
+            resource =
+                m_ResourceManager->Get<MaterialResource>(key);
+        }
+
+        m_FailedMaterialKeys.erase(key);
+
+        m_MaterialResources[key] = resource;
+        Logger::Get().Info("RenderSystem: loaded material resource key=" + key);
+        return resource;
+    }
+
+    std::string MakeGpuFinalizeToken(
+        int kind,
+        const std::string& key,
+        std::uint64_t version)
+    {
+        return std::to_string(kind) +
+            "#" + key +
+            "#" + std::to_string(version);
+    }
+
+    void RenderSystem::QueueGpuFinalization(
+        GpuFinalizeKind kind,
+        const std::string& key,
+        std::uint64_t version)
+    {
+        const std::string token =
+            MakeGpuFinalizeToken(
+                static_cast<int>(kind),
+                key,
+                version);
+
+        if (!m_PendingGpuFinalizations.insert(token).second)
+            return;
+
+        m_GpuFinalizeQueue.push_back(
+            GpuFinalizeRequest{
+                kind,
+                key,
+                version
+            });
+    }
+
+    std::size_t RenderSystem::PumpGpuFinalization(
+        std::size_t maxItems)
+    {
+        ZoneScopedN("GpuFinalizePump");
+
+        std::size_t processed = 0;
+
+        while (processed < maxItems &&
+            !m_GpuFinalizeQueue.empty())
+        {
+            GpuFinalizeRequest request =
+                std::move(m_GpuFinalizeQueue.front());
+
+            m_GpuFinalizeQueue.pop_front();
+
+            const std::string token =
+                MakeGpuFinalizeToken(
+                    static_cast<int>(request.kind),
+                    request.key,
+                    request.version);
+
+            m_PendingGpuFinalizations.erase(token);
+
+            switch (request.kind)
+            {
+            case GpuFinalizeKind::Mesh:
+                FinalizeMeshGpu(
+                    request.key,
+                    request.version);
+                break;
+
+            case GpuFinalizeKind::Texture:
+                FinalizeTextureGpu(
+                    request.key,
+                    request.version);
+                break;
+
+            case GpuFinalizeKind::Shader:
+                FinalizeShaderGpu(
+                    request.key,
+                    request.version);
+                break;
+            }
+
+            ++processed;
+        }
+
+        return processed;
+    }
+
+    void RenderSystem::FinalizeMeshGpu(
+        const std::string& key,
+        std::uint64_t requestedVersion)
+    {
+        ZoneScopedN("GpuFinalizeMesh");
+
+        if (m_Renderer == nullptr ||
+            m_ResourceManager == nullptr)
+        {
+            return;
+        }
+
+        auto resource =
+            m_ResourceManager->Get<MeshResource>(key);
+
+        if (resource == nullptr ||
+            !resource->IsUsable())
+        {
+            return;
+        }
+
+        const std::uint64_t currentVersion =
+            resource->GetVersion();
+
+        // ѕока запрос ждал в очереди, CPU resource мог обновитьс€.
+        if (currentVersion != requestedVersion)
+        {
+            QueueGpuFinalization(
+                GpuFinalizeKind::Mesh,
+                key,
+                currentVersion);
+
+            return;
+        }
+
+        auto& mesh = resource->GetData();
+
+        if (mesh.gpuHandle.IsValid() &&
+            mesh.gpuHandleVersion == currentVersion)
+        {
+            return;
+        }
+
+        if (mesh.gpuHandle.IsValid())
+        {
+            m_Renderer->DestroyMesh(mesh.gpuHandle);
+            mesh.gpuHandle = RenderMeshHandle::Invalid();
+            mesh.gpuHandleVersion = 0;
+        }
+
+        const RenderMeshHandle handle =
+            m_Renderer->UploadMesh(mesh.meshData);
+
+        if (!handle.IsValid())
+        {
+            m_FailedMeshGpuVersions[key] =
+                currentVersion;
+
+            return;
+        }
+
+        mesh.gpuHandle = handle;
+        mesh.gpuHandleVersion = currentVersion;
+
+        m_MeshResources[key] = resource;
+
         m_FailedMeshKeys.erase(key);
         m_FailedMeshGpuVersions.erase(key);
-        m_MeshResources[key] = resource;
-        return mesh.gpuHandle;
-    }
-    if (m_FailedMeshKeys.contains(key))
-        return RenderMeshHandle::Invalid();
-    if (const auto failedVersion = m_FailedMeshGpuVersions.find(key);
-        failedVersion != m_FailedMeshGpuVersions.end() && failedVersion->second == version)
-    {
-        return RenderMeshHandle::Invalid();
-    }
 
-    const RenderMeshHandle handle = m_Renderer->UploadMesh(mesh.meshData);
-    if (!handle.IsValid())
-    {
-        m_FailedMeshGpuVersions[key] = version;
-        return RenderMeshHandle::Invalid();
-    }
-
-    mesh.gpuHandle = handle;
-    mesh.gpuHandleVersion = resource->GetVersion();
-    m_FailedMeshKeys.erase(key);
-    m_FailedMeshGpuVersions.erase(key);
-    m_MeshResources[key] = resource;
-    Logger::Get().Info("RenderSystem: uploaded mesh resource key=" + key);
-    return mesh.gpuHandle;
-}
-
-RenderTextureHandle RenderSystem::GetOrCreateTexture(const std::string& key)
-{
-    auto resourceIt = m_TextureResources.find(key);
-    auto resource =
-        resourceIt != m_TextureResources.end()
-            ? resourceIt->second
-            : (key == "defaults/texture" ? m_ResourceManager->GetDefault<TextureResource>() : m_ResourceManager->Load<TextureResource>(key));
-    if (resource == nullptr || !resource->IsUsable())
-    {
-        m_FailedTextureKeys.insert(key);
-        return RenderTextureHandle::Invalid();
-    }
-    auto& texture = resource->GetData();
-    const std::uint64_t version = resource->GetVersion();
-    if (texture.gpuHandle.IsValid() && texture.gpuHandleVersion != resource->GetVersion())
-    {
-        m_Renderer->DestroyTexture(texture.gpuHandle);
-        texture.gpuHandle = RenderTextureHandle::Invalid();
-        texture.gpuHandleVersion = 0;
-        m_FailedTextureGpuVersions.erase(key);
-        m_LoggedTextureReuseKeys.erase(key);
-        Logger::Get().Info("RenderSystem: texture resource version changed, reuploading key=" + key);
-    }
-    if (texture.gpuHandle.IsValid() && !m_LoggedTextureReuseKeys.contains(key))
-    {
         Logger::Get().Info(
-            "RenderSystem: reusing texture GPU handle key=" + key +
-            " handle=" + std::to_string(texture.gpuHandle.value));
-        m_LoggedTextureReuseKeys.insert(key);
+            "RenderSystem: GPU finalized mesh key=" +
+            key);
     }
-    if (texture.gpuHandle.IsValid())
+
+    void RenderSystem::FinalizeTextureGpu(
+        const std::string& key,
+        std::uint64_t requestedVersion)
     {
+        ZoneScopedN("GpuFinalizeTexture");
+
+        if (m_Renderer == nullptr ||
+            m_ResourceManager == nullptr)
+        {
+            return;
+        }
+
+        ResourceHandle<TextureResource> resource;
+
+        if (key == "defaults/texture")
+        {
+            resource =
+                m_ResourceManager->GetDefault<TextureResource>();
+        }
+        else
+        {
+            resource =
+                m_ResourceManager->Get<TextureResource>(key);
+        }
+
+        if (resource == nullptr ||
+            !resource->IsUsable())
+        {
+            return;
+        }
+
+        const std::uint64_t currentVersion =
+            resource->GetVersion();
+
+        if (currentVersion != requestedVersion)
+        {
+            QueueGpuFinalization(
+                GpuFinalizeKind::Texture,
+                key,
+                currentVersion);
+
+            return;
+        }
+
+        auto& texture = resource->GetData();
+
+        if (texture.gpuHandle.IsValid() &&
+            texture.gpuHandleVersion == currentVersion)
+        {
+            return;
+        }
+
+        if (texture.gpuHandle.IsValid())
+        {
+            m_Renderer->DestroyTexture(texture.gpuHandle);
+            texture.gpuHandle =
+                RenderTextureHandle::Invalid();
+
+            texture.gpuHandleVersion = 0;
+        }
+
+        const RenderTextureHandle handle =
+            m_Renderer->CreateTexture2D(
+                texture.textureData);
+
+        if (!handle.IsValid())
+        {
+            m_FailedTextureGpuVersions[key] =
+                currentVersion;
+
+            return;
+        }
+
+        texture.gpuHandle = handle;
+        texture.gpuHandleVersion = currentVersion;
+
+        m_TextureResources[key] = resource;
+
         m_FailedTextureKeys.erase(key);
         m_FailedTextureGpuVersions.erase(key);
-        m_TextureResources[key] = resource;
-        return texture.gpuHandle;
-    }
-    if (m_FailedTextureKeys.contains(key))
-        return RenderTextureHandle::Invalid();
-    if (const auto failedVersion = m_FailedTextureGpuVersions.find(key);
-        failedVersion != m_FailedTextureGpuVersions.end() && failedVersion->second == version)
-    {
-        return RenderTextureHandle::Invalid();
-    }
 
-    const RenderTextureHandle handle = m_Renderer->CreateTexture2D(texture.textureData);
-    if (!handle.IsValid())
-    {
-        m_FailedTextureGpuVersions[key] = version;
-        return RenderTextureHandle::Invalid();
-    }
-
-    texture.gpuHandle = handle;
-    texture.gpuHandleVersion = resource->GetVersion();
-    m_FailedTextureKeys.erase(key);
-    m_FailedTextureGpuVersions.erase(key);
-    m_TextureResources[key] = resource;
-    Logger::Get().Info("RenderSystem: uploaded texture resource key=" + key);
-    return texture.gpuHandle;
-}
-
-RenderShaderHandle RenderSystem::GetOrCreateShader(const std::string& key)
-{
-    auto resourceIt = m_ShaderResources.find(key);
-    auto resource = resourceIt != m_ShaderResources.end() ? resourceIt->second : m_ResourceManager->Load<ShaderResource>(key);
-    if (resource == nullptr || !resource->IsUsable())
-    {
-        m_FailedShaderKeys.insert(key);
-        return RenderShaderHandle::Invalid();
-    }
-    auto& shader = resource->GetData();
-    const std::uint64_t version = resource->GetVersion();
-    if (shader.gpuHandle.IsValid() && shader.gpuHandleVersion != resource->GetVersion())
-    {
-        m_Renderer->DestroyShader(shader.gpuHandle);
-        shader.gpuHandle = RenderShaderHandle::Invalid();
-        shader.gpuHandleVersion = 0;
-        m_FailedShaderGpuVersions.erase(key);
-        m_LoggedShaderReuseKeys.erase(key);
-        Logger::Get().Info("RenderSystem: shader resource version changed, recreating key=" + key);
-    }
-    if (shader.gpuHandle.IsValid() && !m_LoggedShaderReuseKeys.contains(key))
-    {
         Logger::Get().Info(
-            "RenderSystem: reusing shader GPU handle key=" + key +
-            " handle=" + std::to_string(shader.gpuHandle.value));
-        m_LoggedShaderReuseKeys.insert(key);
+            "RenderSystem: GPU finalized texture key=" +
+            key);
     }
-    if (shader.gpuHandle.IsValid())
+
+    void RenderSystem::FinalizeShaderGpu(
+        const std::string& key,
+        std::uint64_t requestedVersion)
     {
+        ZoneScopedN("GpuFinalizeShader");
+
+        if (m_Renderer == nullptr ||
+            m_ResourceManager == nullptr)
+        {
+            return;
+        }
+
+        auto resource =
+            m_ResourceManager->Get<ShaderResource>(key);
+
+        if (resource == nullptr ||
+            !resource->IsUsable())
+        {
+            return;
+        }
+
+        const std::uint64_t currentVersion =
+            resource->GetVersion();
+
+        if (currentVersion != requestedVersion)
+        {
+            QueueGpuFinalization(
+                GpuFinalizeKind::Shader,
+                key,
+                currentVersion);
+
+            return;
+        }
+
+        auto& shader = resource->GetData();
+
+        if (shader.gpuHandle.IsValid() &&
+            shader.gpuHandleVersion == currentVersion)
+        {
+            return;
+        }
+
+        if (shader.gpuHandle.IsValid())
+        {
+            m_Renderer->DestroyShader(
+                shader.gpuHandle);
+
+            shader.gpuHandle =
+                RenderShaderHandle::Invalid();
+
+            shader.gpuHandleVersion = 0;
+        }
+
+        const RenderShaderHandle handle =
+            m_Renderer->CreateShaderProgram(shader);
+
+        if (!handle.IsValid())
+        {
+            m_FailedShaderGpuVersions[key] =
+                currentVersion;
+
+            return;
+        }
+
+        shader.gpuHandle = handle;
+        shader.gpuHandleVersion = currentVersion;
+
+        m_ShaderResources[key] = resource;
+
         m_FailedShaderKeys.erase(key);
         m_FailedShaderGpuVersions.erase(key);
-        m_ShaderResources[key] = resource;
-        return shader.gpuHandle;
+
+        Logger::Get().Info(
+            "RenderSystem: GPU finalized shader key=" +
+            key);
     }
-    if (m_FailedShaderKeys.contains(key))
-        return RenderShaderHandle::Invalid();
-    if (const auto failedVersion = m_FailedShaderGpuVersions.find(key);
-        failedVersion != m_FailedShaderGpuVersions.end() && failedVersion->second == version)
-    {
-        return RenderShaderHandle::Invalid();
-    }
-
-    const RenderShaderHandle handle = m_Renderer->CreateShaderProgram(shader);
-    if (!handle.IsValid())
-    {
-        m_FailedShaderGpuVersions[key] = version;
-        return RenderShaderHandle::Invalid();
-    }
-
-    shader.gpuHandle = handle;
-    shader.gpuHandleVersion = resource->GetVersion();
-    m_FailedShaderKeys.erase(key);
-    m_FailedShaderGpuVersions.erase(key);
-    m_ShaderResources[key] = resource;
-    Logger::Get().Info("RenderSystem: created shader resource key=" + key);
-    return shader.gpuHandle;
-}
-
-ResourceHandle<MaterialResource> RenderSystem::GetOrLoadMaterial(const std::string& key)
-{
-    const auto cached = m_MaterialResources.find(key);
-    if (cached != m_MaterialResources.end())
-        return cached->second;
-
-    auto resource = m_ResourceManager->Load<MaterialResource>(key);
-    if (resource == nullptr || !resource->IsUsable())
-    {
-        m_FailedMaterialKeys.insert(key);
-        return nullptr;
-    }
-    m_FailedMaterialKeys.erase(key);
-
-    m_MaterialResources[key] = resource;
-    Logger::Get().Info("RenderSystem: loaded material resource key=" + key);
-    return resource;
-}
 }

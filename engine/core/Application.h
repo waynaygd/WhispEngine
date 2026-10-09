@@ -21,6 +21,7 @@ class IWindow;
 class IRenderAdapter;
 class IGameState;
 class ResourceManager;
+class JobSystem;
 namespace ecs { class PhysicsSystem; }
 
 enum class UpdateMode { 
@@ -83,6 +84,11 @@ private:
     void UpdateCameraController(float dt);
     void UpdateRenderSystemCamera(IWindow* window);
     void UpdateRenderSystemCameraAspect(float aspectRatio);
+    void SetupRenderStressScene();
+    void SetupPhysicsStressScene();
+    void RunAsyncResourceStressTest();
+    void RunSyncResourceStressTest();
+    bool m_AsyncResourceStressStarted = false;
 
     struct WindowContext
     {
@@ -121,6 +127,7 @@ private:
     std::vector<WindowContext> m_Windows;
     AppConfig m_Config;
     std::unique_ptr<ResourceManager> m_ResourceManager;
+    std::unique_ptr<JobSystem> m_JobSystem;
 
     ecs::World m_World;
     ecs::PhysicsSystem* m_PhysicsSystem = nullptr;

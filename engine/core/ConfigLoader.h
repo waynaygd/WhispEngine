@@ -56,7 +56,7 @@ struct AppConfig
         int substeps = 2;
         float restitution = 0.05f;
         float friction = 0.85f;
-        int solverIterations = 4;
+        int solverIterations = 12;
         float sphereMaxSpeed = 9.0f;
         float spherePenetrationEpsilon = 0.0005f;
         float sphereVelocityEpsilon = 0.05f;
