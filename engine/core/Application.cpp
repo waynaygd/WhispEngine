@@ -1243,7 +1243,7 @@ bool Application::Initialize()
     });
     SetupEcsRuntimeDemo();
     // SetupRenderStressScene();
-    // SetupPhysicsStressScene();
+    SetupPhysicsStressScene();
     InitializeConfigHotReload();
 
     m_IsRunning = true;
@@ -1602,7 +1602,7 @@ void Application::SetupRenderStressScene()
 
 void Application::SetupPhysicsStressScene()
 {
-    constexpr int bodyCount = 20000;
+    constexpr int bodyCount = 500;
 
     for (int i = 0; i < bodyCount; ++i)
     {
@@ -1612,10 +1612,19 @@ void Application::SetupPhysicsStressScene()
             m_World.AddComponent<ecs::TransformComponent>(entity);
 
         transform.position = ecs::Vec3{
-            static_cast<float>(i % 100) * 0.25f,
-            10.0f + static_cast<float>(i / 100) * 0.25f,
+            static_cast<float>(i % 25) * 2.0f,
+            10.0f + static_cast<float>(i / 25) * 2.0f,
             0.0f
         };
+
+        auto& collider =
+            m_World.AddComponent<ecs::ColliderComponent>(entity);
+
+        collider.type = ecs::ColliderType::Box;
+        collider.halfExtents = ecs::Vec3{
+            0.5f, 0.5f, 0.5f
+        };
+        collider.autoFitFromMesh = false;
 
         auto& rigidbody =
             m_World.AddComponent<ecs::RigidbodyComponent>(entity);
