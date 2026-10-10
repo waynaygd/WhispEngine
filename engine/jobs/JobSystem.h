@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <functional>
+#include <vector>
 
 namespace enki
 {
@@ -13,6 +14,8 @@ namespace enki
 class JobSystem
 {
 public:
+    // Submit, query, wait and shutdown from the initializing thread only.
+    // Jobs operate on their assigned data; nested/external submission is not supported.
     JobSystem();
     ~JobSystem();
 
@@ -47,6 +50,10 @@ public:
     void WaitAll();
 
 private:
+    // Scheduler APIs are used by the initializing thread. Retain submitted
+    // tasks even when a caller drops its handle before completion.
+    void Retain(const TaskHandle& task);
+    std::vector<TaskHandle> m_InFlight;
     std::unique_ptr<enki::TaskScheduler> m_Scheduler;
     bool m_Initialized = false;
 };

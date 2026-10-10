@@ -341,6 +341,7 @@ bool EditorLayer::IsPointInsideViewport(double x, double y) const
 
 void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
 {
+    ZoneScopedN("EditorLayer");
     RefreshAssetLists(dt);
 
     m_ViewportPixelWidth = 0;
@@ -351,6 +352,56 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     ImGui::DockSpaceOverViewport(0, nullptr, ImGuiDockNodeFlags_PassthruCentralNode);
 
     DrawMainMenu(app);
+    ImGui::SetNextWindowSize(ImVec2(340, 330), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Physics Stress Test")) {
+        static int selection = 2;
+        constexpr int counts[] = {100, 250, 500, 1000};
+        ImGui::Combo("Cubes", &selection, "100\0" "250\0" "500\0" "1000\0");
+        if (ImGui::Button("Create")) app.SetupPhysicsStressScene(counts[selection]);
+        ImGui::SameLine();
+        if (ImGui::Button("Clear")) app.ClearPhysicsStressScene();
+        ImGui::SameLine();
+        if (ImGui::Button("Restart")) app.SetupPhysicsStressScene(counts[selection]);
+        ImGui::Text("Stress entities (with floor): %zu", app.GetStressEntityCount());
+        bool instancing=app.IsGpuInstancingEnabled();
+        if(ImGui::Checkbox("GPU Instancing", &instancing))app.SetGpuInstancingEnabled(instancing);
+        const auto& render=app.GetRenderStatistics();
+        ImGui::Text("Visible ready objects: %zu", render.visibleObjects);
+        ImGui::Text("Draws: %llu / Instanced: %llu / Instances: %llu",
+            static_cast<unsigned long long>(render.submitted.drawCalls),static_cast<unsigned long long>(render.submitted.instancedDrawCalls),static_cast<unsigned long long>(render.submitted.renderedInstances));
+        ImGui::Text("Instance batches: %llu / Capacity: %llu",static_cast<unsigned long long>(render.submitted.instancedDrawCalls),static_cast<unsigned long long>(render.submitted.instanceBufferCapacity));
+        ImGui::Text("Scene upload: %llu bytes",static_cast<unsigned long long>(render.submitted.uploadBytes));
+        ImGui::Text("Gather %.3f / Prepare %.3f / Submit %.3f ms",render.gatherMs,render.prepareMs,render.submitMs);
+        auto& interpolation = app.GetRenderInterpolation();
+        bool interpolate = interpolation.IsEnabled();
+        if(ImGui::Checkbox("Render Interpolation", &interpolate)) interpolation.SetEnabled(interpolate);
+        ImGui::Text("Alpha: %.3f  Interpolated bodies: %zu", interpolation.Alpha(), interpolation.Count());
+        bool physicsDebugPose = app.IsPhysicsDebugPose();
+        if(ImGui::Checkbox("Physics Debug Pose (colliders)", &physicsDebugPose)) app.SetPhysicsDebugPose(physicsDebugPose);
+        if (ImGui::Button(app.IsEditorPlayMode() ? "Stop##stress" : "Play##stress"))
+            app.SetEditorPlayMode(!app.IsEditorPlayMode());
+        if (auto* physics = app.GetPhysicsSystem()) {
+            bool parallel = physics->IsParallel();
+            if (ImGui::Checkbox("Parallel (unchecked = Serial)", &parallel)) physics->SetParallel(parallel);
+            const auto& frame = app.GetPhysicsFrameStatistics();
+            const auto& stats = frame.physics;
+            ImGui::Text("Bodies: %zu  Sleeping: %zu", stats.bodies, stats.sleeping);
+            ImGui::Text("Pairs: %zu  Contacts: %zu (%zu points)", stats.pairs, stats.contacts, stats.contactPoints);
+            ImGui::Text("Substeps: %d  Velocity iterations: %d", stats.substeps, stats.solverIterations);
+            ImGui::Text("Physics/frame: %.3f ms  Last tick: %.3f ms", stats.totalMs, frame.lastTickMs);
+            ImGui::Text("60 Hz / max 4 ticks; this frame: %d", frame.ticks);
+            ImGui::Text("Backlog: %.3f ms / Dropped: %.3f s", frame.accumulatorSeconds * 1000, frame.totalDroppedSeconds);
+            ImGui::Text("Internal substeps/frame: %d  Active: %zu", frame.internalSubsteps, stats.activeBodies);
+            ImGui::Text("Broadphase rebuild/reuse: %zu/%zu", stats.broadphaseRebuilds, stats.broadphaseReuses);
+            ImGui::Text("Integrate %.2f / Broadphase %.2f ms", stats.integrateMs, stats.broadphaseMs);
+            ImGui::Text("Narrowphase %.2f / Solver %.2f ms", stats.narrowphaseMs, stats.solverMs);
+            ImGui::Text("Pose %.2f / Projection %.2f ms", stats.poseMs, stats.projectionMs);
+        }
+        const float frameDt = app.GetFrameDeltaTime();
+        ImGui::Text("Frame: %.2f ms  FPS: %.1f", frameDt * 1000, frameDt > 0 ? 1 / frameDt : 0);
+        ImGui::TextWrapped("Create replaces the demo. Load Scene restores it. Stop pauses; Restart restores the layout. Pair/contact counts are peak per substep.");
+    }
+    ImGui::End();
     HandleEditorShortcuts(app);
 
     if (m_ShowHierarchy)
@@ -571,8 +622,12 @@ void EditorLayer::DrawSceneHierarchy(Application& app)
         m_SelectedEntity = entities.empty() ? ecs::Entity{} : entities.front();
     }
 
-    for (const ecs::Entity& entity : entities)
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(entities.size()));
+    while (clipper.Step())
+    for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
     {
+        const ecs::Entity entity = entities[row];
         auto* tag = world.GetComponent<ecs::TagComponent>(entity);
         const std::string label =
             (tag != nullptr && !tag->name.empty())
@@ -728,6 +783,7 @@ void EditorLayer::DrawInspector(Application& app)
 
 void EditorLayer::DrawStatistics(Application& app, float dt)
 {
+    dt = app.GetFrameDeltaTime();
     m_FpsTimer += dt;
     ++m_FpsFrames;
     if (m_FpsTimer >= 1.0f)

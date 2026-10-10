@@ -14,4 +14,9 @@ void SystemPipeline::Clear()
 {
     m_Systems.clear();
 }
+void SystemPipeline::UpdatePhase(World& world, float dt, bool fixed)
+{
+    for (const auto& system : m_Systems)
+        if (system->IsFixedUpdate() == fixed) system->Update(world, dt);
+}
 }

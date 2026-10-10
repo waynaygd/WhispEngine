@@ -8,7 +8,10 @@
 
 #include "ConfigLoader.h"
 #include "Time.h"
+#include "FixedStepClock.h"
+#include "PhysicsFrameStatistics.h"
 #include "../ecs/World.h"
+#include "../ecs/systems/PhysicsSystem.h"
 #include "../ecs/systems/RenderSystem.h"
 #include "../render/RenderFactory.h"
 #include "../platform/IWindow.h"
@@ -38,7 +41,9 @@ public:
     bool Initialize();  
     int Run();
     void Shutdown();
-    void SetUpdateMode(UpdateMode m) { m_UpdateMode = m; }
+    void SetUpdateMode(UpdateMode m) {
+        if (m_UpdateMode != m) { m_UpdateMode = m; ResetPhysicsClock(); }
+    }
 
     IWindow* GetWindow() { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
     ecs::World& GetWorld() { return m_World; }
@@ -61,6 +66,28 @@ public:
     float GetCameraFarPlane() const { return m_Camera.farPlane; }
     bool IsEditorPlayMode() const { return m_EditorPlayMode; }
     void SetEditorPlayMode(bool enabled);
+    void SetupPhysicsStressScene(int count = 500);
+    void ClearPhysicsStressScene();
+    std::size_t GetStressEntityCount() const { return m_StressEntities.size(); }
+    ecs::PhysicsSystem* GetPhysicsSystem() { return m_PhysicsSystem; }
+    bool IsGpuInstancingEnabled() const { return m_GpuInstancing; }
+    void SetGpuInstancingEnabled(bool enabled) { m_GpuInstancing=enabled;if(m_RenderSystem)m_RenderSystem->SetInstancingEnabled(enabled); }
+    const ecs::RenderSystem::Statistics& GetRenderStatistics() const { return m_RenderSystem->GetStatistics(); }
+    void SetRenderBenchmarkOutput(std::string path) { m_RenderDiagnosticOutput=std::move(path);m_RenderBenchmark=true;m_FrameLimit=1300; }
+    float GetFrameDeltaTime() const { return m_Time.GetFrameDeltaTime(); }
+    const PhysicsFrameStatistics& GetPhysicsFrameStatistics() const { return m_PhysicsFrame; }
+    ecs::RenderInterpolation& GetRenderInterpolation() { return m_RenderInterpolation; }
+    void NotifyTeleport(ecs::Entity entity) { m_RenderInterpolation.ResetEntity(m_World, entity); }
+    bool IsPhysicsDebugPose() const { return m_PhysicsDebugPose; }
+    void SetPhysicsDebugPose(bool enabled) { m_PhysicsDebugPose = enabled; if(m_RenderSystem) m_RenderSystem->SetPhysicsDebugPose(enabled); }
+    void SetFrameLimit(std::uint32_t frames) { m_FrameLimit = frames; }
+    void SetDiagnosticOutput(std::string path, bool lifecycle = false) {
+        m_DiagnosticOutput = std::move(path); m_DiagnosticLifecycle = lifecycle;
+    }
+    void WaitForTracyConnection() { m_WaitForTracy = true; }
+    void SetDiagnosticSlowFrame(unsigned frame, unsigned milliseconds) {
+        m_SlowFrame = frame; m_SlowFrameMilliseconds = milliseconds;
+    }
     void ToggleDebugColliders();
     bool IsInputActionActive(const std::string& action) const;
     bool SaveCurrentScene(std::string* outError = nullptr);
@@ -70,6 +97,11 @@ public:
 
 
 private:
+    void ResetPhysicsClock() {
+        m_FixedClock.Reset(); m_FixedSimulationSeconds = 0;
+        m_ResetPhysicsDelta = true;
+        m_RenderInterpolation.Clear();
+    }
     static std::vector<EcsDemoEntityConfig> BuildDefaultEcsDemoEntities();
     void RunEcsBootstrapCheck();
     void RunResourceBootstrapCheck();
@@ -85,7 +117,6 @@ private:
     void UpdateRenderSystemCamera(IWindow* window);
     void UpdateRenderSystemCameraAspect(float aspectRatio);
     void SetupRenderStressScene();
-    void SetupPhysicsStressScene();
     void RunAsyncResourceStressTest();
     void RunSyncResourceStressTest();
     bool m_AsyncResourceStressStarted = false;
@@ -132,7 +163,9 @@ private:
     ecs::World m_World;
     ecs::PhysicsSystem* m_PhysicsSystem = nullptr;
     ecs::RenderSystem* m_RenderSystem = nullptr;
+    ecs::RenderInterpolation m_RenderInterpolation;
     std::vector<ecs::Entity> m_EcsDebugEntities;
+    std::vector<ecs::Entity> m_StressEntities;
     float m_EcsDebugLogTimer = 0.0f;
     std::filesystem::path m_ConfigWatchPath;
     std::filesystem::path m_SceneWatchPath;
@@ -142,9 +175,15 @@ private:
     bool m_HasSceneWatch = false;
 
     Time m_Time;
+    FixedStepClock m_FixedClock;
+    PhysicsFrameStatistics m_PhysicsFrame;
+    double m_FixedSimulationSeconds = 0;
+    bool m_ResetPhysicsDelta = true;
     StateMachine m_StateMachine;
     CameraControllerState m_Camera;
     bool m_DebugCollidersEnabled = false;
+    bool m_PhysicsDebugPose = false;
+    bool m_GpuInstancing = true;
     bool m_EditorPlayMode = false;
     ecs::EventBus m_EventBus;
     InputManager m_InputManager;
@@ -154,4 +193,11 @@ private:
     UpdateMode m_UpdateMode = UpdateMode::Variable;
 
     bool m_IsRunning = false;
+    std::uint32_t m_FrameLimit = 0;
+    std::string m_DiagnosticOutput;
+    std::string m_RenderDiagnosticOutput;
+    bool m_RenderBenchmark=false;
+    bool m_DiagnosticLifecycle = false;
+    bool m_WaitForTracy = false;
+    unsigned m_SlowFrame = UINT32_MAX, m_SlowFrameMilliseconds = 0;
 };

@@ -4,6 +4,11 @@
 
 #include <TaskScheduler.h>
 #include <algorithm>
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#else
+#define ZoneScopedN(name) ((void)0)
+#endif
 
 JobSystem::JobSystem() = default;
 
@@ -18,7 +23,14 @@ bool JobSystem::Initialize()
         return true;
 
     m_Scheduler = std::make_unique<enki::TaskScheduler>();
-    m_Scheduler->Initialize();
+    enki::TaskSchedulerConfig config;
+#if defined(TRACY_ENABLE)
+    config.profilerCallbacks.threadStart = [](std::uint32_t index) {
+        const auto name = "enkiTS worker " + std::to_string(index);
+        tracy::SetThreadName(name.c_str());
+    };
+#endif
+    m_Scheduler->Initialize(config);
 
     m_Initialized = true;
 
@@ -38,6 +50,7 @@ void JobSystem::Shutdown()
     if (m_Scheduler != nullptr)
     {
         m_Scheduler->WaitforAllAndShutdown();
+        m_InFlight.clear();
         m_Scheduler.reset();
     }
 
@@ -78,6 +91,7 @@ JobSystem::TaskHandle JobSystem::Execute(std::function<void()> job)
             job();
         });
 
+    Retain(task);
     m_Scheduler->AddTaskSetToPipe(task.get());
 
     return task;
@@ -88,6 +102,7 @@ JobSystem::TaskHandle JobSystem::Dispatch(
     std::uint32_t minRange,
     RangeJob job)
 {
+    ZoneScopedN("JobDispatch");
     if (!m_Initialized ||
         m_Scheduler == nullptr ||
         !job ||
@@ -118,6 +133,7 @@ JobSystem::TaskHandle JobSystem::Dispatch(
 
     task->m_MinRange = minRange;
 
+    Retain(task);
     m_Scheduler->AddTaskSetToPipe(
         task.get());
 
@@ -134,6 +150,7 @@ bool JobSystem::IsComplete(const TaskHandle& task) const
 
 void JobSystem::Wait(const TaskHandle& task)
 {
+    ZoneScopedN("JobWait");
     if (m_Scheduler == nullptr || task == nullptr)
         return;
 
@@ -146,4 +163,11 @@ void JobSystem::WaitAll()
         return;
 
     m_Scheduler->WaitforAll();
+    m_InFlight.clear();
+}
+
+void JobSystem::Retain(const TaskHandle& task)
+{
+    std::erase_if(m_InFlight, [](const TaskHandle& pending) { return pending->GetIsComplete(); });
+    m_InFlight.push_back(task);
 }

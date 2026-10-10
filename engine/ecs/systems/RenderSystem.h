@@ -3,7 +3,9 @@
 #include "ISystem.h"
 #include "../MathTypes.h"
 #include "../components/TransformComponent.h"
+#include "../RenderInterpolation.h"
 #include "../../render/RenderResourceHandles.h"
+#include "../../render/RenderInstanceData.h"
 #include "../../resources/Resource.h"
 
 #include <array>
@@ -39,12 +41,22 @@ public:
     void SetCameraProjection(float verticalFovRadians, float aspectRatio, float nearPlane, float farPlane);
     void SetResourceManager(ResourceManager* resourceManager) { m_ResourceManager = resourceManager; }
     void SetDebugCollidersEnabled(bool enabled) { m_DebugCollidersEnabled = enabled; }
+    void SetInterpolation(RenderInterpolation* interpolation) { m_Interpolation = interpolation; }
+    void SetPhysicsDebugPose(bool enabled) { m_PhysicsDebugPose = enabled; }
+    void SetInstancingEnabled(bool enabled) { m_InstancingEnabled = enabled; }
+    bool IsInstancingEnabled() const { return m_InstancingEnabled; }
+    struct Statistics {
+        std::size_t visibleObjects=0;
+        double gatherMs=0,prepareMs=0,batchMs=0,submitMs=0;
+        RenderSubmissionStatistics submitted;
+    };
+    const Statistics& GetStatistics() const { return m_Statistics; }
     void ReleaseGpuResources();
 
 private:
     struct RenderSnapshot
     {
-        TransformComponent transform{};
+        RenderPose pose{};
 
         RenderMeshHandle mesh = RenderMeshHandle::Invalid();
         RenderTextureHandle texture = RenderTextureHandle::Invalid();
@@ -55,17 +67,15 @@ private:
 
     struct RenderPacket
     {
-        std::array<float, 16> mvp{};
+        RenderInstanceData instance{};
 
         RenderMeshHandle mesh = RenderMeshHandle::Invalid();
         RenderTextureHandle texture = RenderTextureHandle::Invalid();
         RenderShaderHandle shader = RenderShaderHandle::Invalid();
 
-        std::array<float, 4> tint = { 1.0f, 1.0f, 1.0f, 1.0f };
     };
 
     bool TryBuildRenderSnapshot(
-        const TransformComponent& transform,
         const MeshRendererComponent& meshRenderer,
         const MaterialComponent* materialComponent,
         RenderSnapshot& outSnapshot);
@@ -107,9 +117,16 @@ private:
     std::unordered_set<std::string> m_LoggedTextureReuseKeys;
     std::unordered_set<std::string> m_LoggedShaderReuseKeys;
     bool m_DebugCollidersEnabled = false;
+    bool m_PhysicsDebugPose = false;
+    RenderInterpolation* m_Interpolation = nullptr;
 
     std::vector<RenderSnapshot> m_RenderSnapshots;
     std::vector<RenderPacket> m_RenderPackets;
+    struct Batch { std::size_t begin=0,count=0; };
+    std::vector<Batch> m_Batches;
+    std::vector<RenderInstanceData> m_InstanceData;
+    bool m_InstancingEnabled=true;
+    Statistics m_Statistics;
 
     enum class GpuFinalizeKind
     {

@@ -15,6 +15,7 @@
 #include "../../resources/TextureResource.h"
 
 #include <cmath>
+#include <chrono>
 #include <tracy/Tracy.hpp>
 
 namespace
@@ -88,78 +89,6 @@ void MultiplyMatrix(const float* lhs, const float* rhs, float* out16)
         out16[i] = result[i];
 }
 
-void BuildScaleMatrix(const ecs::Vec3& scale, float* out16)
-{
-    SetIdentity(out16);
-    out16[0] = scale.x;
-    out16[5] = scale.y;
-    out16[10] = scale.z;
-}
-
-void BuildRotationX(float angle, float* out16)
-{
-    SetIdentity(out16);
-    const float c = std::cos(angle);
-    const float s = std::sin(angle);
-    out16[5] = c;
-    out16[6] = s;
-    out16[9] = -s;
-    out16[10] = c;
-}
-
-void BuildRotationY(float angle, float* out16)
-{
-    SetIdentity(out16);
-    const float c = std::cos(angle);
-    const float s = std::sin(angle);
-    out16[0] = c;
-    out16[2] = -s;
-    out16[8] = s;
-    out16[10] = c;
-}
-
-void BuildRotationZ(float angle, float* out16)
-{
-    SetIdentity(out16);
-    const float c = std::cos(angle);
-    const float s = std::sin(angle);
-    out16[0] = c;
-    out16[1] = s;
-    out16[4] = -s;
-    out16[5] = c;
-}
-
-void BuildTranslationMatrix(const ecs::Vec3& position, float* out16)
-{
-    SetIdentity(out16);
-    out16[12] = position.x;
-    out16[13] = position.y;
-    out16[14] = position.z;
-}
-
-void BuildModelMatrix(float* out16, const ecs::TransformComponent& transform)
-{
-    float scaleMatrix[16];
-    float rotateX[16];
-    float rotateY[16];
-    float rotateZ[16];
-    float translation[16];
-    float temp0[16];
-    float temp1[16];
-    float temp2[16];
-
-    BuildScaleMatrix(transform.scale, scaleMatrix);
-    BuildRotationX(transform.rotation.x, rotateX);
-    BuildRotationY(transform.rotation.y, rotateY);
-    BuildRotationZ(transform.rotation.z, rotateZ);
-    BuildTranslationMatrix(transform.position, translation);
-
-    MultiplyMatrix(rotateX, scaleMatrix, temp0);
-    MultiplyMatrix(rotateY, temp0, temp1);
-    MultiplyMatrix(rotateZ, temp1, temp2);
-    MultiplyMatrix(translation, temp2, out16);
-}
-
 void BuildViewMatrix(
     float* out16,
     const ecs::Vec3& cameraPosition,
@@ -211,21 +140,22 @@ void BuildPerspectiveMatrix(
 
 void BuildMvp(
     float* out16,
-    const ecs::TransformComponent& transform,
+    const ecs::RenderPose& pose,
     const ecs::Vec3& cameraPosition,
     float cameraYaw,
     float cameraPitch,
     float verticalFovRadians,
     float aspectRatio,
     float nearPlane,
-    float farPlane)
+    float farPlane, float* outModel = nullptr)
 {
     float modelMatrix[16];
     float viewMatrix[16];
     float projectionMatrix[16];
     float viewModel[16];
 
-    BuildModelMatrix(modelMatrix, transform);
+    ecs::BuildRenderModelMatrix(modelMatrix, pose);
+    if(outModel) std::copy(modelMatrix, modelMatrix+16, outModel);
     BuildViewMatrix(viewMatrix, cameraPosition, cameraYaw, cameraPitch);
     BuildPerspectiveMatrix(projectionMatrix, verticalFovRadians, aspectRatio, nearPlane, farPlane);
     MultiplyMatrix(viewMatrix, modelMatrix, viewModel);
@@ -331,6 +261,7 @@ namespace ecs {
         ZoneScopedN("RenderSystem");
 
         (void)dt;
+        m_Statistics = {};
 
         if (m_Renderer == nullptr)
             return;
@@ -341,6 +272,8 @@ namespace ecs {
         PumpGpuFinalization(
             maxGpuFinalizationsPerFrame);
 
+        const auto submittedBefore = m_Renderer->GetSubmissionStatistics();
+        const auto elapsed = [](auto start) { return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count(); };
         {
             ZoneScopedN("RenderEntities");
 
@@ -349,6 +282,7 @@ namespace ecs {
 
             {
                 ZoneScopedN("RenderGather");
+                const auto start = std::chrono::steady_clock::now();
 
                 world.ForEach<TransformComponent, MeshRendererComponent>(
                     [&](Entity entity,
@@ -361,18 +295,24 @@ namespace ecs {
                         RenderSnapshot snapshot{};
 
                         if (TryBuildRenderSnapshot(
-                            transform,
                             meshRenderer,
                             world.GetComponent<MaterialComponent>(entity),
                             snapshot))
                         {
+                            {
+                                ZoneScopedN("RenderInterpolationResolve");
+                                snapshot.pose = m_Interpolation ? m_Interpolation->Resolve(entity, transform) : RenderPose::From(transform);
+                            }
                             m_RenderSnapshots.push_back(std::move(snapshot));
                         }
                     });
+                m_Statistics.gatherMs = elapsed(start);
+                m_Statistics.visibleObjects = m_RenderSnapshots.size();
             }
 
             {
                 ZoneScopedN("RenderPrepare");
+                const auto start = std::chrono::steady_clock::now();
 
                 m_RenderPackets.resize(m_RenderSnapshots.size());
 
@@ -382,28 +322,61 @@ namespace ecs {
                         m_RenderSnapshots[i],
                         m_RenderPackets[i]);
                 }
+                m_Statistics.prepareMs = elapsed(start);
             }
 
             {
-                ZoneScopedN("RenderSubmit");
-
-                for (const RenderPacket& packet : m_RenderPackets)
-                {
-                    SubmitRenderPacket(packet);
+                ZoneScopedN("RenderBatchBuild");
+                const auto start = std::chrono::steady_clock::now();
+                m_Batches.clear();
+                m_Batches.reserve(m_RenderPackets.size());
+                m_InstanceData.resize(m_RenderPackets.size());
+                // Consecutive compatible packets only: retain all draw/pass ordering.
+                for (std::size_t i=0;i<m_RenderPackets.size();++i) {
+                    m_InstanceData[i]=m_RenderPackets[i].instance;
+                    const auto& packet=m_RenderPackets[i];
+                    if(i>0 && packet.mesh==m_RenderPackets[i-1].mesh &&
+                        packet.texture==m_RenderPackets[i-1].texture && packet.shader==m_RenderPackets[i-1].shader)
+                        ++m_Batches.back().count;
+                    else m_Batches.push_back({i,1});
                 }
+                m_Statistics.batchMs=elapsed(start);
+            }
+            {
+                ZoneScopedN("RenderSubmit");
+                const auto start = std::chrono::steady_clock::now();
+                for(const auto& batch:m_Batches) {
+                    const auto& packet=m_RenderPackets[batch.begin];
+                    if(m_InstancingEnabled && batch.count>1 && m_Renderer->SupportsInstancing(packet.shader)) {
+                        m_Renderer->BindShader(packet.shader);
+                        m_Renderer->BindTexture(0,packet.texture);
+                        if(m_Renderer->DrawMeshInstanced(packet.mesh,std::span<const RenderInstanceData>(m_InstanceData.data()+batch.begin,batch.count)))continue;
+                    }
+                    ZoneScopedN("RenderFallbackDraw");
+                    for(std::size_t i=batch.begin;i<batch.begin+batch.count;++i)SubmitRenderPacket(m_RenderPackets[i]);
+                }
+                m_Statistics.submitMs=elapsed(start);
             }
         }
 
-        if (!m_DebugCollidersEnabled)
-            return;
+        const auto finishStatistics = [&] {
+        const auto submitted = m_Renderer->GetSubmissionStatistics();
+        m_Statistics.submitted=submitted;
+        m_Statistics.submitted.drawCalls-=submittedBefore.drawCalls;
+        m_Statistics.submitted.instancedDrawCalls-=submittedBefore.instancedDrawCalls;
+        m_Statistics.submitted.renderedInstances-=submittedBefore.renderedInstances;
+        m_Statistics.submitted.uploadBytes-=submittedBefore.uploadBytes;
+        m_Statistics.submitted.instanceBufferGrowths-=submittedBefore.instanceBufferGrowths;
+        };
+        if (!m_DebugCollidersEnabled) { finishStatistics(); return; }
         {
             ZoneScopedN("DebugColliders");
 
             world.ForEach<TransformComponent, ColliderComponent>(
-                [&](Entity, TransformComponent& transform, ColliderComponent& collider)
+                [&](Entity entity, TransformComponent& transform, ColliderComponent& collider)
                 {
                     float mvp[16];
-                    TransformComponent debugTransform = transform;
+                    RenderPose debugTransform = m_Interpolation && !m_PhysicsDebugPose ? m_Interpolation->Resolve(entity, transform) : RenderPose::From(transform);
                     debugTransform.position.x += collider.offset.x;
                     debugTransform.position.y += collider.offset.y;
                     debugTransform.position.z += collider.offset.z;
@@ -437,10 +410,10 @@ namespace ecs {
                     m_Renderer->DrawTestCube();
                 });
         }
+        finishStatistics();
     }
 
     bool RenderSystem::TryBuildRenderSnapshot(
-        const TransformComponent& transform,
         const MeshRendererComponent& meshRenderer,
         const MaterialComponent* materialComponent,
         RenderSnapshot& outSnapshot)
@@ -508,7 +481,6 @@ namespace ecs {
         if (!meshHandle.IsValid() || !textureHandle.IsValid() || !shaderHandle.IsValid())
             return false;
 
-        outSnapshot.transform = transform;
 
         outSnapshot.mesh = meshHandle;
         outSnapshot.texture = textureHandle;
@@ -530,20 +502,20 @@ namespace ecs {
         RenderPacket& outPacket) const
     {
         BuildMvp(
-            outPacket.mvp.data(),
-            snapshot.transform,
+            outPacket.instance.mvp.data(),
+            snapshot.pose,
             m_CameraPosition,
             m_CameraYaw,
             m_CameraPitch,
             m_CameraVerticalFovRadians,
             m_CameraAspectRatio,
             m_CameraNearPlane,
-            m_CameraFarPlane);
+            m_CameraFarPlane, outPacket.instance.model.data());
 
         outPacket.mesh = snapshot.mesh;
         outPacket.texture = snapshot.texture;
         outPacket.shader = snapshot.shader;
-        outPacket.tint = snapshot.tint;
+        outPacket.instance.tint = snapshot.tint;
     }
 
     void RenderSystem::SubmitRenderPacket(
@@ -559,13 +531,13 @@ namespace ecs {
             return;
         }
 
-        m_Renderer->SetTestTransform(packet.mvp.data());
+        m_Renderer->SetTestTransform(packet.instance.mvp.data());
 
         m_Renderer->SetTestColor(
-            packet.tint[0],
-            packet.tint[1],
-            packet.tint[2],
-            packet.tint[3]);
+            packet.instance.tint[0],
+            packet.instance.tint[1],
+            packet.instance.tint[2],
+            packet.instance.tint[3]);
 
         m_Renderer->BindShader(packet.shader);
         m_Renderer->BindTexture(0, packet.texture);
@@ -586,6 +558,8 @@ namespace ecs {
             resource =
                 m_ResourceManager->Get<MeshResource>(key);
         }
+        if (resource == nullptr || resource->IsLoading() || !resource->IsUsable())
+            return RenderMeshHandle::Invalid();
         auto& mesh = resource->GetData();
         const std::uint64_t version =
             resource->GetVersion();
@@ -672,6 +646,8 @@ namespace ecs {
                 m_ResourceManager->Get<ShaderResource>(key);
         }
 
+        if (resource == nullptr || resource->IsLoading() || !resource->IsUsable())
+            return RenderShaderHandle::Invalid();
         auto& shader = resource->GetData();
         const std::uint64_t version =
             resource->GetVersion();
@@ -831,6 +807,8 @@ namespace ecs {
             return;
         }
 
+        if (resource == nullptr || resource->IsLoading() || !resource->IsUsable())
+            return;
         auto& mesh = resource->GetData();
 
         if (mesh.gpuHandle.IsValid() &&
@@ -990,6 +968,8 @@ namespace ecs {
             return;
         }
 
+        if (resource == nullptr || resource->IsLoading() || !resource->IsUsable())
+            return;
         auto& shader = resource->GetData();
 
         if (shader.gpuHandle.IsValid() &&

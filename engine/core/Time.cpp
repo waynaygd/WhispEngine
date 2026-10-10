@@ -11,6 +11,7 @@ float Time::Tick()
     std::chrono::duration<float> delta = now - m_LastTime;
 
     m_DeltaTime = delta.count();
+    m_FrameDeltaTime = m_DeltaTime;
 
     if (m_DeltaTime > 0.1f)
         m_DeltaTime = 0.1f;

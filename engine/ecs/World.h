@@ -59,6 +59,8 @@ public:
     {
         m_Systems.Clear();
     }
+    void UpdateFixedSystems(float dt) { m_Systems.UpdatePhase(*this, dt, true); }
+    void UpdateFrameSystems(float dt) { m_Systems.UpdatePhase(*this, dt, false); }
 
     void Clear();
     [[nodiscard]] std::string DebugDescribeEntity(Entity entity) const;

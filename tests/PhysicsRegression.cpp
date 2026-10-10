@@ -4,6 +4,10 @@
 #include "ecs/components/RigidbodyComponent.h"
 #include "ecs/components/ColliderComponent.h"
 #include "jobs/JobSystem.h"
+#include "ecs/PhysicsStressScene.h"
+#include "core/PhysicsDiagnosticSample.h"
+#include "core/FixedStepClock.h"
+#include "ecs/RenderInterpolation.h"
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -38,6 +42,7 @@ static bool Near(
 static void Require(bool yes, const char* message) { if (!yes) throw std::runtime_error(message); }
 struct Scene
 {
+    explicit Scene(EventBus* events = nullptr) : physics(events,9.81f,0.985f,3,0.05f,0.85f,12) {}
     World world;
     PhysicsSystem physics{nullptr,9.81f,0.985f,3,0.05f,0.85f,12}; // actual app configuration
     Entity Add(Vec3 pos, Vec3 half, bool fixed=false, ColliderType type=ColliderType::Box, Vec3 rotation={})
@@ -776,7 +781,11 @@ struct TimingStats
     double medianMs = 0.0;
     double p95Ms = 0.0;
     double p99Ms = 0.0;
+    double maxMs = 0.0;
 };
+static bool g_CollectDiagnostics = false;
+static std::string g_DiagnosticPhase;
+static std::vector<PhysicsDiagnosticSample> g_DiagnosticSamples;
 
 static TimingStats CalculateTimingStats(
     std::vector<double> samples)
@@ -815,7 +824,7 @@ static TimingStats CalculateTimingStats(
     return TimingStats{
         percentile(0.50),
         percentile(0.95),
-        percentile(0.99)
+        percentile(0.99), samples.back()
     };
 }
 
@@ -920,6 +929,9 @@ static void MeasurePhysicsScene(
 
         samples.push_back(
             milliseconds);
+        if (g_CollectDiagnostics) g_DiagnosticSamples.push_back({g_DiagnosticPhase,
+            mode == PhysicsBenchmarkMode::Parallel, static_cast<unsigned>(g_DiagnosticSamples.size()),
+            milliseconds, scene.physics.GetStatistics()});
     }
 }
 
@@ -959,6 +971,7 @@ static void PhysicsParallelBenchmark(
     {
         Scene serial;
         Scene parallel;
+        g_DiagnosticPhase = "LegacyBenchmark_R" + std::to_string(repetition);
 
         PopulatePhysicsStressScene(
             serial);
@@ -1052,6 +1065,7 @@ static void PhysicsParallelBenchmark(
         << "  p99    = "
         << serial.p99Ms
         << " ms\n"
+        << "  max    = " << serial.maxMs << " ms\n"
         << '\n'
         << "Parallel frame time:\n"
         << "  median = "
@@ -1063,6 +1077,7 @@ static void PhysicsParallelBenchmark(
         << "  p99    = "
         << parallel.p99Ms
         << " ms\n"
+        << "  max    = " << parallel.maxMs << " ms\n"
         << '\n'
         << "Median speedup: "
         << speedup
@@ -1070,6 +1085,228 @@ static void PhysicsParallelBenchmark(
         << "==============================\n";
 
     jobs.Shutdown();
+}
+
+static void StressLifecycle()
+{
+    World world;
+    std::vector<Entity> entities;
+    const auto unrelated = world.CreateEntity();
+    for (int count : {100, 250, 500, 1000}) {
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            CreatePhysicsStressScene(world, entities, count);
+            Require(world.GetAliveCount() == count + 2, "stress creation count");
+            for (auto e : entities) {
+                Require(world.HasComponent<TransformComponent>(e) && world.HasComponent<ColliderComponent>(e) &&
+                    world.HasComponent<RigidbodyComponent>(e) && world.HasComponent<MeshRendererComponent>(e) &&
+                    world.HasComponent<MaterialComponent>(e), "stress missing visual/physics component");
+            }
+            const auto old = entities.back();
+            CreatePhysicsStressScene(world, entities, count);
+            Require(!world.IsAlive(old), "stress restart resurrected old handle");
+            ClearPhysicsStressScene(world, entities);
+            Require(world.GetAliveCount() == 1 && world.IsAlive(unrelated), "stress cleanup removed unrelated entities");
+        }
+    }
+    world.Clear();
+    world.CreateEntity();
+    Require(!world.IsAlive(unrelated), "World Clear resurrected stale entity");
+    JobSystem jobs;
+    jobs.Initialize();
+    std::atomic<int> completed{0};
+    for (int i = 0; i < 200; ++i) (void)jobs.Execute([&] { ++completed; });
+    jobs.WaitAll();
+    Require(completed == 200, "discarded task handle lost work");
+    (void)jobs.Execute([&] { ++completed; });
+    jobs.Shutdown();
+    Require(completed == 201, "shutdown did not drain tasks");
+    jobs.Initialize(); jobs.Shutdown();
+}
+
+static void VisualStressBenchmark(bool endurance)
+{
+    JobSystem jobs; jobs.Initialize();
+    for (int count : {100, 250, 500, 1000}) {
+        Scene serial, parallel;
+        if (endurance && count != 500) continue;
+        std::vector<Entity> a, b;
+        CreatePhysicsStressScene(serial.world, a, count);
+        CreatePhysicsStressScene(parallel.world, b, count);
+        serial.physics.SetParallel(false);
+        parallel.physics.SetJobSystem(&jobs);
+        std::vector<double> st, pt;
+        PhysicsSystem::Statistics sum{};
+        const int frames = endurance && count == 500 ? 7200 : 600;
+        g_DiagnosticPhase = "Stress_" + std::to_string(count);
+        for (int frame = 0; frame < frames; ++frame) {
+            // Alternate the ordering to reduce order bias.
+            auto update = [&](Scene& scene, std::vector<double>& samples) {
+                scene.physics.Update(scene.world, 1.0f / 60.0f);
+                samples.push_back(scene.physics.GetStatistics().totalMs);
+                if (g_CollectDiagnostics) g_DiagnosticSamples.push_back({g_DiagnosticPhase,
+                    &scene == &parallel, static_cast<unsigned>(frame),
+                    scene.physics.GetStatistics().totalMs, scene.physics.GetStatistics()});
+            };
+            if (frame % 2) { update(parallel, pt); update(serial, st); }
+            else { update(serial, st); update(parallel, pt); }
+            const auto& stats = parallel.physics.GetStatistics();
+            sum.integrateMs += stats.integrateMs; sum.broadphaseMs += stats.broadphaseMs;
+            sum.narrowphaseMs += stats.narrowphaseMs; sum.solverMs += stats.solverMs;
+            sum.poseMs += stats.poseMs; sum.projectionMs += stats.projectionMs;
+            sum.substeps = std::max(sum.substeps, stats.substeps);
+            sum.contacts = std::max(sum.contacts, stats.contacts);
+            if (frame % 600 == 599) {
+                const auto window = CalculateTimingStats(std::vector<double>(pt.end() - 600, pt.end()));
+                std::cout << "stress window count=" << count << " seconds=" << (frame+1)/60
+                    << " parallel median=" << window.medianMs << " p99=" << window.p99Ms
+                    << " substeps=" << stats.substeps << " sleeping=" << stats.sleeping << std::endl;
+            }
+        }
+        for (std::size_t i = 1; i < a.size(); ++i) {
+            Require(Near(serial.T(a[i]).position, parallel.T(b[i]).position), "stress serial/parallel pose mismatch");
+            Require(Near(serial.R(a[i]).velocity, parallel.R(b[i]).velocity), "stress serial/parallel velocity mismatch");
+            Require(Near(serial.T(a[i]).rotation, parallel.T(b[i]).rotation), "stress serial/parallel rotation mismatch");
+            Require(Near(serial.R(a[i]).angularVelocity, parallel.R(b[i]).angularVelocity), "stress angular velocity mismatch");
+            Require(std::isfinite(Length(parallel.T(b[i]).position)) && parallel.T(b[i]).position.y > -0.1f,
+                "stress body escaped floor or became non-finite");
+        }
+        const auto ss = CalculateTimingStats(st), ps = CalculateTimingStats(pt);
+        std::cout << "stress count=" << count << " frames=" << frames
+            << " Serial median/p95/p99=" << ss.medianMs << '/' << ss.p95Ms << '/' << ss.p99Ms
+            << " Parallel=" << ps.medianMs << '/' << ps.p95Ms << '/' << ps.p99Ms
+            << " maxSerial/Parallel=" << ss.maxMs << '/' << ps.maxMs
+            << " maxSubsteps=" << sum.substeps << " peakContacts=" << sum.contacts << '\n'
+            << "parallel stage mean ms: integrate=" << sum.integrateMs/frames
+            << " broadphase=" << sum.broadphaseMs/frames << " narrowphase=" << sum.narrowphaseMs/frames
+            << " solver=" << sum.solverMs/frames << " pose=" << sum.poseMs/frames
+            << " projection=" << sum.projectionMs/frames << std::endl;
+        for (int i = 0; i < 10; ++i) {
+            parallel.physics.SetEnabled(false);
+            const auto before = parallel.T(b.back()).position;
+            parallel.physics.Update(parallel.world, 1.0f/60);
+            Require(Near(before, parallel.T(b.back()).position), "Stop did not pause physics");
+            Require(parallel.physics.GetStatistics().bodies == count + 1, "paused body statistics lost live bodies");
+            parallel.physics.SetEnabled(true);
+            parallel.physics.Update(parallel.world, 1.0f/60);
+        }
+        ClearPhysicsStressScene(serial.world, a); ClearPhysicsStressScene(parallel.world, b);
+        serial.physics.ResetState(); parallel.physics.ResetState();
+        Require(serial.world.GetAliveCount() == 0 && parallel.world.GetAliveCount() == 0, "stress leaked entities");
+    }
+    jobs.Shutdown();
+}
+
+static void DiagnoseRunaway()
+{
+    Scene scene; scene.Ground();
+    // Original stress layout extends to x=48, outside the demo floor (x=+-4).
+    const auto escaped = scene.Add({48, 10, 0}, {.5f, .5f, .5f});
+    for (int frame = 0; frame < 3600; ++frame) {
+        scene.physics.Update(scene.world, 1.0f/60);
+        if ((frame + 1) % 600 == 0)
+            std::cout << "runaway seconds=" << (frame + 1)/60 << " y=" << scene.T(escaped).position.y
+                << " speed=" << Length(scene.R(escaped).velocity)
+                << " substeps=" << scene.physics.GetStatistics().substeps << '\n';
+    }
+}
+
+static void BroadphaseCacheRegression()
+{
+    Scene scene;
+    scene.physics.SetBroadphaseValidation(true);
+    auto floor=scene.Ground(); auto cube=scene.Add({0,1,0},{.2f,.2f,.2f});
+    scene.Run(4);
+    scene.physics.Update(scene.world,1.0f/60);
+    auto stats=scene.physics.GetStatistics();
+    Require(stats.broadphaseRebuilds==0 && stats.broadphaseReuses==8,"rest broadphase was rebuilt");
+    Require(stats.broadphaseBufferGrowths==0 && stats.aabbComputations==0,"rest broadphase allocates/recomputes AABB");
+    scene.T(floor).position.y=-2;
+    scene.physics.Update(scene.world,1.0f/60);
+    Require(scene.physics.GetStatistics().broadphaseRebuilds>0,"moved static did not invalidate grid");
+    Require(!scene.R(cube).sleeping,"moved support did not wake sleeping body");
+    scene.world.GetComponent<ColliderComponent>(cube)->offset.x=.7f;
+    scene.world.GetComponent<ColliderComponent>(cube)->halfExtents={.3f,.2f,.1f};
+    scene.T(cube).rotation={.1f,.3f,.5f};
+    scene.physics.Update(scene.world,1.0f/60);
+    scene.world.GetComponent<ColliderComponent>(cube)->type=ColliderType::Sphere;
+    scene.R(cube).isStatic=true;
+    scene.physics.Update(scene.world,1.0f/60);
+    scene.world.DestroyEntity(cube);
+    cube=scene.Add({0,0,0},{.2f,.2f,.2f});
+    scene.physics.Update(scene.world,1.0f/60);
+    scene.world.Clear(); // Intentionally no ResetState: snapshots must detect generations.
+    floor=scene.Ground(); cube=scene.Add({0,.2f,0},{.2f,.2f,.2f});
+    scene.physics.Update(scene.world,1.0f/60);
+    Require(scene.physics.GetStatistics().aabbComputations>=2,"Clear left stale geometry");
+    scene.world.Clear(); scene.physics.Update(scene.world,1.0f/60);
+    Require(scene.physics.GetStatistics().pairs==0,"Clear left stale pairs");
+    // Dense pairs force flat seen-table growth; both occupied cells and overflow,
+    // rotated boxes/spheres, negative coordinates and changing geometry hit oracle.
+    for(int i=0;i<80;++i) scene.Add({float(i%5)*.15f-1,float((i/5)%4)*.15f,float(i/20)*.15f},
+        i<4 ? Vec3{2,2,2} : Vec3{.13f,.17f,.21f}, i%9==0,
+        i%3 ? ColliderType::Box : ColliderType::Sphere,{.1f*float(i%3),.17f,.03f*float(i%4)});
+    for(int i=0;i<20;++i) scene.physics.Update(scene.world,1.0f/60);
+    scene.physics.ResetState(); scene.physics.Update(scene.world,1.0f/60);
+    std::cout << "Broadphase cache/oracle regression passed\n";
+}
+static void FixedTimestepRegression()
+{
+    JobSystem jobs; Require(jobs.Initialize(),"fixed jobs init");
+    struct State { Vec3 p,r,v,w; bool sleeping; };
+    std::vector<State> reference;
+    std::vector<std::pair<Entity, Entity>> referenceEvents;
+    for(bool parallel : {false,true}) for(int fps : {30,60,120,144}) {
+        EventBus events; std::vector<std::pair<Entity, Entity>> collisionEvents;
+        events.SubscribeCollision([&](const CollisionEvent& event){collisionEvents.emplace_back(event.a,event.b);});
+        Scene scene(&events); scene.physics.SetParallel(parallel); scene.physics.SetJobSystem(&jobs);
+        std::vector<Entity> entities; CreatePhysicsStressScene(scene.world,entities,300);
+        FixedStepClock clock; RenderInterpolation interpolation; int ticks=0;
+        for(int frame=0;frame<fps*4;++frame) {
+            const auto plan=clock.Advance(1.0/fps);
+            Require(plan.droppedSeconds==0,"fixed normal frame lost time");
+            for(int tick=0;tick<plan.ticks;++tick) {
+                interpolation.BeginTick(scene.world);
+                scene.physics.Update(scene.world,float(FixedStepClock::TickSeconds));
+                interpolation.EndTick(scene.world);++ticks;
+            }
+            interpolation.SetEnabled(fps != 30 && frame % 120 < 60);
+            interpolation.SetFrame(scene.world,true,clock.Accumulator()/FixedStepClock::TickSeconds);
+            for(auto e:entities) {
+                const auto before=scene.T(e);const auto renderPose=interpolation.Resolve(e,before);
+                Require(std::isfinite(renderPose.position.x) && Near(before.position,scene.T(e).position)&&Near(before.rotation,scene.T(e).rotation),"interpolation changed physics Transform");
+            }
+        }
+        Require(ticks==240 && clock.Accumulator()<1e-9,"render rate changed tick count");
+        std::vector<State> states;
+        for(auto e:entities) states.push_back({scene.T(e).position,scene.T(e).rotation,scene.R(e).velocity,scene.R(e).angularVelocity,scene.R(e).sleeping});
+        if(reference.empty()) { reference=states; referenceEvents=collisionEvents; }
+        else for(std::size_t i=0;i<states.size();++i) {
+            Require(Near(states[i].p,reference[i].p)&&Near(states[i].r,reference[i].r)&&Near(states[i].v,reference[i].v)&&Near(states[i].w,reference[i].w)&&states[i].sleeping==reference[i].sleeping,"fixed result depends on visual FPS/mode");
+        }
+        Require(collisionEvents==referenceEvents,"fixed collision event sequence depends on render FPS/mode");
+        auto stall=clock.Advance(2.0);
+        Require(stall.ticks==4 && std::abs(stall.droppedSeconds-(2.0-4.0/60))<1e-9,"slow frame policy");
+        Require(clock.Accumulator()<FixedStepClock::TickSeconds && clock.Advance(0).ticks==0,"unbounded catch-up");
+        clock.Advance(.01); clock.Advance(5,false);
+        Require(clock.Accumulator()==0 && clock.Advance(.005).ticks==0,"pause accumulated time");
+        clock.Reset(); Require(clock.DroppedSeconds()==0 && clock.Accumulator()==0,"restart clock reset");
+        std::cout << "fixed fps="<<fps<<" parallel="<<parallel<<" ticks="<<ticks<<" events="<<collisionEvents.size()<<" passed\n";
+    }
+    // A callback may clear ECS after jobs finish; no cached component references.
+    EventBus events; Scene scene(&events); bool cleared=false;
+    events.SubscribeCollision([&](const CollisionEvent&){if(!cleared){scene.world.Clear();cleared=true;}});
+    scene.Ground();scene.Add({0,.19f,0},{.2f,.2f,.2f});
+    scene.physics.Update(scene.world,1.0f/60);
+    Require(cleared && scene.world.GetAliveCount()==0,"collision callback clear failed");
+    scene.physics.Update(scene.world,1.0f/60);
+    jobs.Shutdown();
+}
+static void FixedSystemPhaseRegression()
+{
+    struct Counter : ISystem { bool fixed; int count=0; explicit Counter(bool f):fixed(f){} const char* Name() const override{return "Counter";} bool IsFixedUpdate() const override{return fixed;} void Update(World&,float) override{++count;} };
+    World world;auto& fixed=world.AddSystem<Counter>(true);auto& frame=world.AddSystem<Counter>(false);
+    world.UpdateFrameSystems(.01f);world.UpdateFrameSystems(.01f);world.UpdateFixedSystems(1.0f/60);
+    Require(fixed.count==1 && frame.count==2,"frame/fixed stages run twice or skip systems");
 }
 
 int main(
@@ -1081,10 +1318,22 @@ int main(
         {
             const std::string mode =
                 argv[1];
+            g_CollectDiagnostics = argc > 2;
+            auto saveDiagnostics = [&] {
+                if (g_CollectDiagnostics) Require(SavePhysicsDiagnostics(argv[2], g_DiagnosticSamples), "cannot save diagnostics CSV");
+            };
+            if (mode == "--diagnose-runaway") { DiagnoseRunaway(); return 0; }
 
             if (mode == "--benchmark")
             {
                 PhysicsParallelBenchmark(false);
+                saveDiagnostics();
+                return 0;
+            }
+            if (mode == "--stress" || mode == "--stress-long") {
+                StressLifecycle();
+                VisualStressBenchmark(mode == "--stress-long");
+                saveDiagnostics();
                 return 0;
             }
 
@@ -1095,8 +1344,9 @@ int main(
             }
         }
 
+        BroadphaseCacheRegression(); FixedTimestepRegression(); FixedSystemPhaseRegression();
         RestAndTilt(); Pyramid(1.0f/60); Pyramid(1.0f/30); Pyramid(1.0f/144); Pyramid(1.0f/60,true);
-        WakeAndAir(); Spheres(); BroadphaseAndFast(); WorldAngularVelocity(); UndampedImpacts(); ParallelIntegration(); ParallelNarrowphase();
+        WakeAndAir(); Spheres(); BroadphaseAndFast(); WorldAngularVelocity(); UndampedImpacts(); ParallelIntegration(); ParallelNarrowphase(); StressLifecycle();
         std::cout<<"All physics regression scenarios passed\n"; return 0;
     } catch(const std::exception& e) {std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}
 }

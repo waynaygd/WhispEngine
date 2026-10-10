@@ -55,8 +55,16 @@ bool World::IsAlive(Entity entity) const
 
 void World::Clear()
 {
-    m_Slots.clear();
     m_FreeIndices.clear();
+    // Keep generations across a reset: old editor/physics handles must never
+    // alias newly created entities after Clear().
+    for (std::size_t i = 0; i < m_Slots.size(); ++i)
+    {
+        auto& slot = m_Slots[i];
+        if (slot.alive) ++slot.generation;
+        slot.alive = false;
+        m_FreeIndices.push_back(static_cast<std::uint32_t>(i));
+    }
     for (auto& [type, storage] : m_ComponentStorages)
     {
         (void)type;

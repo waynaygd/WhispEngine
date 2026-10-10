@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.20)
 project(WhispEngine LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -69,18 +69,37 @@ if (WHISP_BUILD_PHYSICS_TESTS)
     engine/ecs/World.cpp
     engine/ecs/systems/SystemPipeline.cpp
     engine/ecs/systems/PhysicsSystem.cpp)
-target_sources(PhysicsRegression PRIVATE
+  target_sources(PhysicsRegression PRIVATE
     engine/jobs/JobSystem.cpp
     engine/core/Logger.cpp
-)
+  )
   target_include_directories(PhysicsRegression PRIVATE engine)
+  target_link_libraries(PhysicsRegression PRIVATE enkiTS)
   if (ENABLE_TRACY)
-    target_link_libraries(PhysicsRegression PRIVATE
-    TracyClient
-    enkiTS
-)
+    target_link_libraries(PhysicsRegression PRIVATE Tracy::TracyClient)
   endif()
   add_test(NAME PhysicsRegression COMMAND PhysicsRegression)
+  add_executable(ResourceRegression tests/ResourceRegression.cpp)
+  target_link_libraries(ResourceRegression PRIVATE Engine)
+  if (ENABLE_TRACY)
+    target_link_libraries(ResourceRegression PRIVATE Tracy::TracyClient)
+  endif()
+  add_test(NAME ResourceRegression COMMAND ResourceRegression)
+  add_executable(RenderInterpolationRegression tests/RenderInterpolationRegression.cpp)
+  target_link_libraries(RenderInterpolationRegression PRIVATE Engine)
+  if (ENABLE_TRACY)
+    target_link_libraries(RenderInterpolationRegression PRIVATE Tracy::TracyClient)
+  endif()
+  add_test(NAME RenderInterpolationRegression COMMAND RenderInterpolationRegression)
+  add_executable(GpuInstancingRegression tests/GpuInstancingRegression.cpp)
+  target_link_libraries(GpuInstancingRegression PRIVATE Engine)
+  if (ENABLE_TRACY)
+    target_link_libraries(GpuInstancingRegression PRIVATE Tracy::TracyClient)
+  endif()
+  if (WIN32 AND ENABLE_DX12)
+    target_compile_definitions(GpuInstancingRegression PRIVATE ENABLE_DX12=1)
+  endif()
+  add_test(NAME GpuInstancingRegression COMMAND GpuInstancingRegression)
 endif()
 
 add_executable(WhispEngine WhispEngine.cpp)

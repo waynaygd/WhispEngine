@@ -1,6 +1,8 @@
 #pragma once
 
 #include "RenderResourceHandles.h"
+#include "RenderInstanceData.h"
+#include <span>
 
 #include <cstdint>
 
@@ -88,6 +90,10 @@ public:
     {
         (void)handle;
     }
+    virtual bool SupportsInstancing(RenderShaderHandle) const { return false; }
+    // False means no instanced command was recorded: caller may use normal draws.
+    virtual bool DrawMeshInstanced(RenderMeshHandle, std::span<const RenderInstanceData>) { return false; }
+    virtual RenderSubmissionStatistics GetSubmissionStatistics() const { return {}; }
 
     virtual void DrawTestTriangle() = 0;
     virtual void DrawTestLine() = 0;

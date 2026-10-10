@@ -41,6 +41,11 @@ public:
 	void BindShader(RenderShaderHandle handle) override;
 	void BindTexture(std::uint32_t slot, RenderTextureHandle handle) override;
 	void DrawMesh(RenderMeshHandle handle) override;
+    bool SupportsInstancing(RenderShaderHandle handle) const override;
+    bool DrawMeshInstanced(RenderMeshHandle handle, std::span<const RenderInstanceData> instances) override;
+    RenderSubmissionStatistics GetSubmissionStatistics() const override;
+    // Diagnostics only, after EndFrame and before Present; waits for readback.
+    std::vector<std::uint8_t> ReadBackFramePixels();
 
 private:
 	bool CreateDevice(HWND hwnd);
@@ -92,6 +97,7 @@ private:
 	{
 		Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature;
 		Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineState;
+        Microsoft::WRL::ComPtr<ID3D12PipelineState> instancedPipelineState;
 	};
 
 	struct ViewportTarget
@@ -155,6 +161,18 @@ private:
 	uint8_t* m_CbMapped[FrameCount][MaxDrawsPerFrame] = {};
 	D3D12_GPU_VIRTUAL_ADDRESS m_CbGpu[FrameCount][MaxDrawsPerFrame] = {};
 	UINT m_DrawCbIndex = 0;
+    struct InstancePage {
+        Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+        std::uint8_t* mapped=nullptr;
+        std::size_t capacity=0,used=0;
+    };
+    std::vector<InstancePage> m_InstancePages[FrameCount];
+    std::size_t m_InstancePageIndex=0;
+    UINT64 m_InstanceFrameFence[FrameCount]{};
+    RenderSubmissionStatistics m_SubmissionStatistics;
+    bool m_FrameRecording=false;
+    std::vector<Microsoft::WRL::ComPtr<IUnknown>> m_RetiredResources[FrameCount];
+    std::vector<UINT> m_RetiredTextureDescriptors[FrameCount];
 	static constexpr UINT MaxTextures = 128;
 	std::unordered_map<std::uint64_t, UploadedMesh> m_UploadedMeshes;
 	std::uint64_t m_NextMeshHandle = 1;

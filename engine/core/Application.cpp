@@ -14,6 +14,11 @@
 #include "../ecs/components/VelocityComponent.h"
 #include "../ecs/systems/BoundsBounceSystem.h"
 #include "../ecs/systems/PhysicsSystem.h"
+#include "../ecs/PhysicsStressScene.h"
+#include "PhysicsDiagnosticSample.h"
+#include "RenderDiagnosticSample.h"
+#include <chrono>
+#include <thread>
 #include "../platform/GlfwWindow.h"
 #include "../render/IRenderAdapter.h"
 #include "../resources/ResourceManager.h"
@@ -411,6 +416,8 @@ void Application::RunEcsBootstrapCheck()
 
 void Application::SetupEcsRuntimeDemo()
 {
+    ClearPhysicsStressScene();
+    m_World.Clear();
     m_World.ClearSystems();
     m_PhysicsSystem = &m_World.AddSystem<ecs::PhysicsSystem>(
         &m_EventBus,
@@ -429,6 +436,9 @@ void Application::SetupEcsRuntimeDemo()
     m_PhysicsSystem->SetEnabled(m_EditorPlayMode);
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
+    m_RenderSystem->SetInterpolation(&m_RenderInterpolation);
+    m_RenderSystem->SetPhysicsDebugPose(m_PhysicsDebugPose);
+    m_RenderSystem->SetInstancingEnabled(m_GpuInstancing);
     m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled);
 
     m_EcsDebugEntities.clear();
@@ -1093,6 +1103,7 @@ void Application::SetEditorPlayMode(bool enabled)
     if (m_EditorPlayMode == enabled)
         return;
 
+    ResetPhysicsClock();
     m_EditorPlayMode = enabled;
     if (m_PhysicsSystem != nullptr)
         m_PhysicsSystem->SetEnabled(enabled);
@@ -1243,7 +1254,7 @@ bool Application::Initialize()
     });
     SetupEcsRuntimeDemo();
     // SetupRenderStressScene();
-    SetupPhysicsStressScene();
+    // Stress scene is created explicitly from the editor panel.
     InitializeConfigHotReload();
 
     m_IsRunning = true;
@@ -1257,13 +1268,59 @@ bool Application::Initialize()
 
 int Application::Run()
 {
-    double accumulator = 0.0;
-    const double fixedDt = 1.0 / 60.0;
-    const int maxSteps = 5;
+    ResetPhysicsClock();
 
+    if (m_WaitForTracy) {
+#if defined(TRACY_ENABLE)
+        Logger::Get().Info("Diagnostics: waiting for Tracy connection (30 seconds)");
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (!TracyIsConnected && std::chrono::steady_clock::now() < deadline) {
+            if (GetWindow()) GetWindow()->PollEvents();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        if (!TracyIsConnected) { Logger::Get().Error("Diagnostics: Tracy connection timed out"); return 2; }
+        m_Time.Initialize();
+#else
+        Logger::Get().Error("Diagnostics: Tracy is disabled"); return 2;
+#endif
+    }
+    std::vector<RenderDiagnosticSample> renderSamples;
+    if(m_RenderBenchmark)renderSamples.reserve(1200);
+    std::vector<PhysicsDiagnosticSample> samples;
+    if (!m_DiagnosticOutput.empty()) samples.reserve(m_FrameLimit ? std::min(m_FrameLimit, 50000u) : 1000);
+    const char* diagnosticPhase = "Visual";
+    std::uint32_t frameCount = 0;
     while (m_IsRunning)
     {
+        if (m_FrameLimit != 0 && frameCount >= m_FrameLimit) break;
+        const auto frameStart = std::chrono::steady_clock::now();
+        const auto currentFrame = frameCount++;
         ZoneScopedN("Frame");
+        if(m_RenderBenchmark)SetGpuInstancingEnabled(currentFrame>=100 && ((currentFrame-100)/300)%2==1);
+        if (m_DiagnosticLifecycle) {
+            switch (currentFrame) {
+            case 0: SetupPhysicsStressScene(500); SetEditorPlayMode(true); diagnosticPhase = "InitialDrop"; break;
+            case 120: SetEditorPlayMode(false); diagnosticPhase = "Stopped"; break;
+            case 132: SetEditorPlayMode(true); diagnosticPhase = "Resumed"; break;
+            case 240: m_PhysicsSystem->SetParallel(false); diagnosticPhase = "Serial"; break;
+            case 360: m_PhysicsSystem->SetParallel(true); diagnosticPhase = "Parallel"; break;
+            case 480: SetupPhysicsStressScene(500); diagnosticPhase = "Restart"; break;
+            case 600: SetEditorPlayMode(false); diagnosticPhase = "StoppedAfterRestart"; break;
+            case 612: ClearPhysicsStressScene(); diagnosticPhase = "Cleared"; break;
+            case 624: SetupPhysicsStressScene(500); SetEditorPlayMode(true); diagnosticPhase = "Recreated"; break;
+            case 744:
+                if (auto* window = dynamic_cast<GlfwWindow*>(GetWindow()))
+                    glfwSetWindowShouldClose(window->GetGlfwHandle(), GLFW_TRUE);
+                break;
+            }
+            // These checks use the same public operations as the ImGui panel.
+            if (currentFrame == 612 && (GetStressEntityCount() != 0 || m_World.GetAliveCount() != 0)) {
+                Logger::Get().Error("Diagnostics: Clear left scene entities"); return 3;
+            }
+            if ((currentFrame == 0 || currentFrame == 480 || currentFrame == 624) && GetStressEntityCount() != 501) {
+                Logger::Get().Error("Diagnostics: Create/Restart count mismatch"); return 3;
+            }
+        }
 
         if (!m_Windows.empty())
             m_Windows[0].window->PollEvents();
@@ -1308,6 +1365,19 @@ int Application::Run()
             }
 
             prevF7 = f7;
+
+
+            static bool prevF = false;
+
+            const bool f =
+                glfwGetKey(w, GLFW_KEY_F) == GLFW_PRESS;
+
+            if (f && !prevF)
+            {
+                SpawnPhysicsProjectile();
+            }
+
+            prevF = f;
         }
 
         bool anyAlive = false;
@@ -1316,6 +1386,8 @@ int Application::Run()
 
         if (!anyAlive) break;
 
+        if (currentFrame == m_SlowFrame)
+            std::this_thread::sleep_for(std::chrono::milliseconds(m_SlowFrameMilliseconds));
         float dt = m_Time.Tick();
 
         {
@@ -1362,31 +1434,49 @@ int Application::Run()
 
             UpdateCameraController(dt);
 
-            if (m_UpdateMode == UpdateMode::Fixed)
-            {
-                accumulator += dt;
-
-                int steps = 0;
-                while (accumulator >= fixedDt && steps < maxSteps)
-                {
-                    m_StateMachine.Update(*this, fixedDt);
-                    m_StateMachine.ApplyPending(*this);
-
-                    accumulator -= fixedDt;
-                    ++steps;
-                }
-            }
-            else
-            {
+            if (m_UpdateMode == UpdateMode::Variable) {
                 m_StateMachine.Update(*this, dt);
                 m_StateMachine.ApplyPending(*this);
             }
         }
+        {
+            ZoneScopedN("PhysicsFixedFrame");
+            m_ActiveCollisionPairs.clear();
+            m_PhysicsFrame = {};
+            const double physicsDelta = m_ResetPhysicsDelta ? 0.0 : m_Time.GetFrameDeltaTime();
+            m_ResetPhysicsDelta = false;
+            const auto plan = m_FixedClock.Advance(physicsDelta,
+                m_EditorPlayMode || m_UpdateMode == UpdateMode::Fixed);
+            m_PhysicsFrame.droppedSeconds = plan.droppedSeconds;
+            for (int tick = 0; tick < plan.ticks; ++tick) {
+                ZoneScopedN("PhysicsFixedTick");
+                if (m_UpdateMode == UpdateMode::Fixed) {
+                    m_StateMachine.Update(*this, float(FixedStepClock::TickSeconds));
+                    m_StateMachine.ApplyPending(*this);
+                }
+                if (m_EditorPlayMode && m_PhysicsSystem) {
+                    m_RenderInterpolation.BeginTick(m_World);
+                    m_World.UpdateFixedSystems(float(FixedStepClock::TickSeconds));
+                    m_RenderInterpolation.EndTick(m_World);
+                    m_PhysicsFrame.AddTick(m_PhysicsSystem->GetStatistics());
+                    m_FixedSimulationSeconds += FixedStepClock::TickSeconds;
+                }
+                if (m_ResetPhysicsDelta) break;
+            }
+            if (m_PhysicsFrame.ticks == 0 && m_PhysicsSystem) {
+                m_PhysicsSystem->Update(m_World, 0);
+                m_PhysicsFrame.physics = m_PhysicsSystem->GetStatistics();
+            }
+            m_PhysicsFrame.accumulatorSeconds = m_FixedClock.Accumulator();
+            m_PhysicsFrame.totalDroppedSeconds = m_FixedClock.DroppedSeconds();
+            m_PhysicsFrame.simulationSeconds = m_FixedSimulationSeconds;
+        }
+        UpdateEcs(dt);
 
         static float fpsTimer = 0.0f;
         static int fpsFrames = 0;
 
-        fpsTimer += dt;
+        fpsTimer += m_Time.GetFrameDeltaTime();
         fpsFrames++;
 
         if (fpsTimer >= 1.0f)
@@ -1402,13 +1492,13 @@ int Application::Run()
                     "%s | FPS: %.1f | dt: %.3f ms",
                     wc.baseTitle.c_str(),
                     fps,
-                    dt * 1000.0f);
+                    m_Time.GetFrameDeltaTime() * 1000.0f);
 
                 wc.window->SetTitle(title);
             }
 
             std::ostringstream ss;
-            ss << "FPS=" << fps << " dt(ms)=" << dt * 1000.0f;
+            ss << "FPS=" << fps << " dt(ms)=" << m_Time.GetFrameDeltaTime() * 1000.0f;
             Logger::Get().Info(ss.str());
 
             fpsTimer = 0.0f;
@@ -1439,7 +1529,6 @@ int Application::Run()
 
                 if (renderSceneToViewport)
                 {
-                    m_ActiveCollisionPairs.clear();
                     if (m_RenderSystem != nullptr)
                     {
                         m_RenderSystem->SetRenderAdapter(wc.renderer.get());
@@ -1448,9 +1537,10 @@ int Application::Run()
 
                     {
                         ZoneScopedN("WorldSystems");
-                        m_World.UpdateSystems(dt);
+                        m_RenderInterpolation.SetFrame(m_World, m_EditorPlayMode,
+                            m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
+                        m_World.UpdateFrameSystems(dt);
                     }
-                    UpdateEcs(dt);
                     m_StateMachine.Render(*this, *wc.renderer);
                     wc.renderer->EndViewportRender();
                 }
@@ -1459,7 +1549,6 @@ int Application::Run()
 
                 if (!renderSceneToViewport)
                 {
-                    m_ActiveCollisionPairs.clear();
                     if (m_RenderSystem != nullptr)
                     {
                         m_RenderSystem->SetRenderAdapter(wc.renderer.get());
@@ -1468,10 +1557,11 @@ int Application::Run()
 
                     {
                         ZoneScopedN("WorldSystems");
-                        m_World.UpdateSystems(dt);
+                        m_RenderInterpolation.SetFrame(m_World, m_EditorPlayMode,
+                            m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
+                        m_World.UpdateFrameSystems(dt);
                     }
 
-                    UpdateEcs(dt);
                     m_StateMachine.Render(*this, *wc.renderer);
                 }
 
@@ -1490,8 +1580,20 @@ int Application::Run()
             }
         }
 
+        if (!m_DiagnosticOutput.empty() && m_PhysicsSystem) {
+            const double frameMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frameStart).count();
+            samples.push_back({diagnosticPhase, m_PhysicsSystem->IsParallel(), currentFrame, frameMs, m_PhysicsFrame.physics, m_PhysicsFrame});
+        }
+        if(m_RenderBenchmark && currentFrame>=100 && m_RenderSystem) {
+            const auto ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-frameStart).count();
+            renderSamples.push_back({currentFrame,m_GpuInstancing,ms,m_RenderSystem->GetStatistics()});
+        }
         FrameMark;
     }
+    if (!m_DiagnosticOutput.empty() && !SavePhysicsDiagnostics(m_DiagnosticOutput, samples)) {
+        Logger::Get().Error("Diagnostics: cannot write CSV " + m_DiagnosticOutput); return 4;
+    }
+    if(m_RenderBenchmark && !SaveRenderDiagnostics(m_RenderDiagnosticOutput,renderSamples))return 4;
     return 0;
 }
 
@@ -1540,6 +1642,7 @@ void Application::Shutdown()
     m_PhysicsSystem = nullptr;
     m_RenderSystem = nullptr;
     m_EcsDebugEntities.clear();
+    m_StressEntities.clear();
     m_EcsDebugLogTimer = 0.0f;
     m_World.Clear();
     Logger::Get().Shutdown();
@@ -1600,53 +1703,27 @@ void Application::SetupRenderStressScene()
         " render entities");
 }
 
-void Application::SetupPhysicsStressScene()
+void Application::ClearPhysicsStressScene()
 {
-    constexpr int bodyCount = 500;
-
-    for (int i = 0; i < bodyCount; ++i)
-    {
-        const ecs::Entity entity = m_World.CreateEntity();
-
-        auto& transform =
-            m_World.AddComponent<ecs::TransformComponent>(entity);
-
-        transform.position = ecs::Vec3{
-            static_cast<float>(i % 25) * 2.0f,
-            10.0f + static_cast<float>(i / 25) * 2.0f,
-            0.0f
-        };
-
-        auto& collider =
-            m_World.AddComponent<ecs::ColliderComponent>(entity);
-
-        collider.type = ecs::ColliderType::Box;
-        collider.halfExtents = ecs::Vec3{
-            0.5f, 0.5f, 0.5f
-        };
-        collider.autoFitFromMesh = false;
-
-        auto& rigidbody =
-            m_World.AddComponent<ecs::RigidbodyComponent>(entity);
-
-        rigidbody.isStatic = false;
-        rigidbody.simulatePhysics = true;
-        rigidbody.useGravity = true;
-        rigidbody.mass = 1.0f;
-
-        rigidbody.velocity = ecs::Vec3{
-            0.1f,
-            0.0f,
-            0.0f
-        };
-    }
-
-    Logger::Get().Info(
-        "Physics stress scene: spawned " +
-        std::to_string(bodyCount) +
-        " dynamic bodies");
+    ResetPhysicsClock();
+    ecs::ClearPhysicsStressScene(m_World, m_StressEntities);
+    m_ActiveCollisionPairs.clear();
+    if (m_PhysicsSystem) m_PhysicsSystem->ResetState();
 }
 
+void Application::SetupPhysicsStressScene(int count)
+{
+    ClearPhysicsStressScene();
+    // Replace tracked demo bodies so their speed/size cannot drive the stress timestep.
+    for (auto entity : m_EcsDebugEntities) m_World.DestroyEntity(entity);
+    m_EcsDebugEntities.clear();
+    ecs::CreatePhysicsStressScene(m_World, m_StressEntities, count);
+    m_Camera.position = {22.0f, 20.0f, 0.0f};
+    m_Camera.yaw = std::atan2(-22.0f, 30.0f);
+    m_Camera.pitch = -0.35f;
+    m_Camera.farPlane = 150.0f;
+    Logger::Get().Info("Physics stress scene: " + std::to_string(m_StressEntities.size() - 1) + " visible cubes");
+}
 void Application::RunAsyncResourceStressTest()
 {
     if (m_AsyncResourceStressStarted)

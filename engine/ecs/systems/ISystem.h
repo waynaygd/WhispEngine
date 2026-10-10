@@ -10,6 +10,7 @@ public:
     virtual ~ISystem() = default;
 
     virtual const char* Name() const = 0;
+    virtual bool IsFixedUpdate() const { return false; }
     virtual void Update(World& world, float dt) = 0;
 };
 }
