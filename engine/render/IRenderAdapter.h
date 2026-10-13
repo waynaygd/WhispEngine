@@ -1,7 +1,13 @@
 #pragma once
+#include <string>
 
 #include "RenderResourceHandles.h"
 #include "RenderInstanceData.h"
+#include "Shadows.h"
+#include "MaterialState.h"
+#include "Environment.h"
+#include "SceneLights.h"
+struct EnvironmentResource;
 #include <span>
 
 #include <cstdint>
@@ -86,6 +92,33 @@ public:
         (void)handle;
     }
 
+    // Prepared instance spans are immutable until EndMainPass. A backend may reuse
+    // their upload ranges across the shadow and main passes of this scene.
+    virtual bool BeginShadowPass(const ShadowFrame&) { return false; }
+    virtual void DrawShadowMesh(RenderMeshHandle, const RenderInstanceData&) {}
+    virtual bool DrawShadowMeshInstanced(RenderMeshHandle, std::span<const RenderInstanceData>) { return false; }
+    virtual void EndShadowPass() {}
+    virtual void BeginMainPass() {}
+    virtual void EndMainPass() {}
+    virtual std::uint64_t GetShadowPreviewTextureId() const { return 0; }
+    virtual bool SaveFrameImage(const std::string&) { return false; }
+    virtual RenderGpuTimings GetGpuTimings() const { return {}; }
+    virtual void SetMeshRange(const RenderMeshRange&) {}
+    virtual void SetMaterialState(const MaterialRenderState&) {}
+    virtual void SetModelMatrix(const std::array<float,16>&) {}
+    virtual void SetSurfaceParameters(const std::array<float,4>&) {}
+    virtual void SetTextureParameters(const std::array<float,4>&) {}
+    virtual void SetBaseColor(const std::array<float,4>&) {}
+    virtual void SetCameraPosition(const std::array<float,4>&) {}
+    virtual void SetLighting(const LightingConstants&) {}
+    virtual void SetSceneLights(std::span<const GpuSceneLight>,LightRenderingMode,const SceneLightDiagnostics& = {}) {}
+    virtual SceneLightDiagnostics GetSceneLightDiagnostics() const {return {};}
+
+    virtual void SetEnvironmentSettings(const EnvironmentSettings&) {}
+    virtual bool UploadEnvironment(const EnvironmentResource&,std::uint64_t) { return false; }
+    virtual void ReleaseEnvironment() {}
+    virtual EnvironmentDiagnostics GetEnvironmentDiagnostics() const { return {}; }
+    virtual void SetNormalMatrix(const std::array<float,12>&) {}
     virtual void DrawMesh(RenderMeshHandle handle)
     {
         (void)handle;

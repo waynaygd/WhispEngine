@@ -35,6 +35,7 @@ inline void CreatePhysicsStressScene(World& world, std::vector<Entity>& entities
         rb.isStatic = fixed; rb.simulatePhysics = true; rb.useGravity = !fixed; rb.mass = 1.0f;
         world.AddComponent<MeshRendererComponent>(entity).meshPath = "models/validation_cube.obj";
         auto& material = world.AddComponent<MaterialComponent>(entity);
+        material.materialPath = "materials/stress.material.json";
         material.shaderPath = "dx12/textured.hlsl";
         material.texturePath = "defaults/texture";
         material.tint[0] = fixed ? 0.35f : 0.25f + 0.07f * (index % 5);

@@ -1,4 +1,8 @@
 #pragma once
+#include "../../render/Environment.h"
+#include "../../render/SceneLights.h"
+#include "../../resources/EnvironmentResource.h"
+#include "../../resources/Resource.h"
 
 #include "ISystem.h"
 #include "../MathTypes.h"
@@ -6,6 +10,8 @@
 #include "../RenderInterpolation.h"
 #include "../../render/RenderResourceHandles.h"
 #include "../../render/RenderInstanceData.h"
+#include "../../render/Shadows.h"
+#include "../../render/MaterialState.h"
 #include "../../resources/Resource.h"
 
 #include <array>
@@ -19,6 +25,7 @@
 class IRenderAdapter;
 class ResourceManager;
 struct MeshResource;
+struct MeshData;
 struct TextureResource;
 struct ShaderResource;
 struct MaterialResource;
@@ -43,11 +50,19 @@ public:
     void SetDebugCollidersEnabled(bool enabled) { m_DebugCollidersEnabled = enabled; }
     void SetInterpolation(RenderInterpolation* interpolation) { m_Interpolation = interpolation; }
     void SetPhysicsDebugPose(bool enabled) { m_PhysicsDebugPose = enabled; }
+    void SetShadowSettings(const ShadowSettings* settings) { m_ShadowSettings=settings; }
+    void SetEnvironmentSettings(const EnvironmentSettings* settings){m_EnvironmentSettings=settings;}
+    void SetLightRenderingMode(LightRenderingMode mode){m_LightRenderingMode=mode;}
+    void SetLightingSettings(const LightingSettings* settings) { m_LightingSettings=settings; }
+    void SetTextureMapMask(unsigned mask){m_TextureMapMask=mask&7;}
+    void SetShadingModelOverride(int mode) { m_ShadingModelOverride=mode; }
     void SetInstancingEnabled(bool enabled) { m_InstancingEnabled = enabled; }
     bool IsInstancingEnabled() const { return m_InstancingEnabled; }
     struct Statistics {
         std::size_t visibleObjects=0;
-        double gatherMs=0,prepareMs=0,batchMs=0,submitMs=0;
+        std::size_t materialCacheHits=0,materialCacheMisses=0,visibleSubmeshes=0;
+        double materialResolveMs=0;
+        double gatherMs=0,prepareMs=0,batchMs=0,submitMs=0,shadowPrepareMs=0,shadowMs=0;
         RenderSubmissionStatistics submitted;
     };
     const Statistics& GetStatistics() const { return m_Statistics; }
@@ -58,10 +73,15 @@ private:
     {
         RenderPose pose{};
 
+        RenderMeshRange range;
+        MaterialRenderState materialState;
+        bool castShadows=true;
         RenderMeshHandle mesh = RenderMeshHandle::Invalid();
+        std::array<RenderTextureHandle,3> maps{};
         RenderTextureHandle texture = RenderTextureHandle::Invalid();
         RenderShaderHandle shader = RenderShaderHandle::Invalid();
 
+        std::array<float,4> surface{0,.5f,0,0},baseColor{1,1,1,1},textureParameters{1,1,0,1};
         std::array<float, 4> tint = { 1.0f, 1.0f, 1.0f, 1.0f };
     };
 
@@ -69,7 +89,11 @@ private:
     {
         RenderInstanceData instance{};
 
+        RenderMeshRange range;
+        MaterialRenderState materialState;
+        bool castShadows=true;
         RenderMeshHandle mesh = RenderMeshHandle::Invalid();
+        std::array<RenderTextureHandle,3> maps{};
         RenderTextureHandle texture = RenderTextureHandle::Invalid();
         RenderShaderHandle shader = RenderShaderHandle::Invalid();
 
@@ -78,7 +102,7 @@ private:
     bool TryBuildRenderSnapshot(
         const MeshRendererComponent& meshRenderer,
         const MaterialComponent* materialComponent,
-        RenderSnapshot& outSnapshot);
+        RenderSnapshot& outSnapshot, const MeshData& mesh, RenderMeshHandle meshHandle, std::size_t submeshIndex);
 
     void PrepareRenderPacket(
         const RenderSnapshot& snapshot,
@@ -88,7 +112,7 @@ private:
         const RenderPacket& packet);
 
     RenderMeshHandle GetOrUploadMesh(const std::string& key);
-    RenderTextureHandle GetOrCreateTexture(const std::string& key);
+    RenderTextureHandle GetOrCreateTexture(const std::string& key,bool optionalMap=false);
     RenderShaderHandle GetOrCreateShader(const std::string& key);
     ResourceHandle<MaterialResource> GetOrLoadMaterial(const std::string& key);
 
@@ -123,9 +147,21 @@ private:
     std::vector<RenderSnapshot> m_RenderSnapshots;
     std::vector<RenderPacket> m_RenderPackets;
     struct Batch { std::size_t begin=0,count=0; };
-    std::vector<Batch> m_Batches;
+    std::vector<Batch> m_Batches, m_ShadowBatches;
+    ShadowSettings m_DefaultShadows;
+    const ShadowSettings* m_ShadowSettings=nullptr;
     std::vector<RenderInstanceData> m_InstanceData;
+    unsigned m_TextureMapMask=7;
+    int m_ShadingModelOverride=-1;
     bool m_InstancingEnabled=true;
+    const EnvironmentSettings* m_EnvironmentSettings=nullptr;
+    std::string m_EnvironmentKey,m_RequestedEnvironment;
+    ResourceHandle<EnvironmentResource> m_EnvironmentAsset;
+    std::uint64_t m_EnvironmentVersion=0,m_FailedEnvironmentVersion=0;
+    std::string m_FailedEnvironmentKey;
+    LightRenderingMode m_LightRenderingMode=LightRenderingMode::Tiled;
+    LightingSettings m_DefaultLighting;
+    const LightingSettings* m_LightingSettings=nullptr;
     Statistics m_Statistics;
 
     enum class GpuFinalizeKind

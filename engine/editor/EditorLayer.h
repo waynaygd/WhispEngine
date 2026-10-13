@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../ecs/Entity.h"
+#include "../ecs/components/LightComponent.h"
 #include "../ecs/components/ColliderComponent.h"
 #include "../ecs/components/MaterialComponent.h"
 #include "../ecs/components/MeshRendererComponent.h"
@@ -23,6 +24,15 @@ class EditorLayer
 {
 public:
     void Render(Application& app, IRenderAdapter* renderer, float dt);
+    void SetLightGizmosVisible(bool v){m_ShowLightGizmos=v;}
+    void ResetHistory(){m_UndoStack.clear();m_RedoStack.clear();m_SelectedEntity={};}
+    ecs::Entity CreateLight(Application&,LightType);
+    void DeleteSelectedLight(Application&);
+    void SelectEntity(ecs::Entity e){m_SelectedEntity=e;}
+    ecs::Entity GetSelectedEntity()const{return m_SelectedEntity;}
+    void RecordEdit(Application& app,const std::string& label){PushUndoBeforeChange(app,label);}
+    void UndoEdit(Application& app){Undo(app);}
+    void RedoEdit(Application& app){Redo(app);}
     int GetViewportPixelWidth() const { return m_ViewportPixelWidth; }
     int GetViewportPixelHeight() const { return m_ViewportPixelHeight; }
     bool IsViewportHovered() const { return m_ViewportHovered; }
@@ -32,6 +42,10 @@ private:
     struct EntitySnapshot
     {
         ecs::Entity entity{};
+        bool alive=false;
+        std::optional<ecs::DirectionalLightComponent> directional;
+        std::optional<ecs::PointLightComponent> point;
+        std::optional<ecs::SpotLightComponent> spot;
         std::optional<ecs::TagComponent> tag;
         std::optional<ecs::TransformComponent> transform;
         std::optional<ecs::MeshRendererComponent> meshRenderer;
@@ -55,9 +69,11 @@ private:
     void DrawViewport(Application& app, IRenderAdapter* renderer);
     void DrawAssetBrowser(Application& app);
     void DrawMaterialEditor(Application& app);
+    void DrawLightGizmos(Application&,IRenderAdapter*,const ImVec2&,const ImVec2&);
+    bool m_ShowLightGizmos=true,m_LightXray=false;
     void DrawGizmo(Application& app, const ImVec2& viewportMin, const ImVec2& viewportSize);
-    EntitySnapshot CaptureSelectedEntity(Application& app) const;
-    void RestoreSnapshot(Application& app, const EntitySnapshot& snapshot);
+    EntitySnapshot CaptureSelectedEntity(Application& app,ecs::Entity entity={}) const;
+    ecs::Entity RestoreSnapshot(Application& app, const EntitySnapshot& snapshot);
     void PushUndo(const std::string& label, const EntitySnapshot& snapshot);
     void PushUndoBeforeChange(Application& app, const std::string& label);
     void Undo(Application& app);
@@ -74,6 +90,8 @@ private:
     bool m_ShowViewport = true;
     bool m_ShowAssetBrowser = true;
     bool m_ShowMaterialEditor = true;
+    std::string m_EditingMaterial,m_MaterialError,m_NewMaterialKey="materials/new.material.json";
+    bool m_MaterialDirty=false;
     bool m_ShowDemoWindow = false;
     float m_FpsTimer = 0.0f;
     int m_FpsFrames = 0;

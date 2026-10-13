@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "name": "material_green",
+  "shaderPath": "dx12/textured.hlsl",
+  "texturePath": "textures/material_test.png",
+  "baseColor": [
+    0.125,
+    1,
+    0.25,
+    1
+  ],
+  "surfaceMode": "Opaque",
+  "alphaCutoff": 0.5,
+  "doubleSided": false,
+  "castShadows": true,
+  "receiveShadows": true
+}

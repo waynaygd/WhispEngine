@@ -1,4 +1,7 @@
 #include "SceneSerializer.h"
+#include "LightSerialization.h"
+#include "../ecs/components/LightComponent.h"
+#include "../resources/MaterialSerialization.h"
 
 #include "../core/Logger.h"
 #include "../ecs/World.h"
@@ -46,11 +49,13 @@ void ReadVec3(const nlohmann::json& json, const char* key, ecs::Vec3& out)
 nlohmann::json EntityToJson(const EcsDemoEntityConfig& entity)
 {
     nlohmann::json json;
+    if(entity.light)json["light"]=LightToJson(*entity.light);
     json["tag"] = entity.tag;
     json["meshPath"] = entity.meshPath;
     json["texturePath"] = entity.texturePath;
     json["shaderPath"] = entity.shaderPath;
     json["materialPath"] = entity.materialPath;
+    json["slotMaterials"]=entity.slotMaterials;json["materialOverrides"]=MaterialOverridesToJson(entity.materialOverrides);
     json["color"] = ColorToJson(entity.materialTint);
     json["visible"] = entity.visible;
     json["bounce"] = entity.bounce;
@@ -75,10 +80,13 @@ nlohmann::json EntityToJson(const EcsDemoEntityConfig& entity)
 EcsDemoEntityConfig EntityFromJson(const nlohmann::json& json)
 {
     EcsDemoEntityConfig entity;
+    if(json.contains("light"))entity.light=LightFromJson(json["light"]);
     entity.tag = json.value("tag", std::string());
     entity.meshPath = json.value("meshPath", std::string());
     entity.texturePath = json.value("texturePath", std::string());
     entity.shaderPath = json.value("shaderPath", std::string());
+    if(json.contains("materialOverrides"))entity.materialOverrides=MaterialOverridesFromJson(json.at("materialOverrides"));
+    if(json.contains("slotMaterials"))entity.slotMaterials=json.at("slotMaterials").get<std::vector<std::string>>();
     entity.materialPath = json.value("materialPath", std::string());
     if (json.contains("color") && json["color"].is_array())
     {
@@ -135,9 +143,12 @@ bool SceneSerializer::LoadEntityConfigs(
         return false;
     }
 
-    outEntities.clear();
-    for (const auto& entityJson : entities)
-        outEntities.push_back(EntityFromJson(entityJson));
+    try {
+        if(scene.is_object()&&scene.value("version",1)!=1&&scene.value("version",1)!=2&&scene.value("version",1)!=3)throw std::runtime_error("unsupported scene version");
+        std::vector<EcsDemoEntityConfig> loaded;
+        for(const auto& entityJson:entities)loaded.push_back(EntityFromJson(entityJson));
+        outEntities=std::move(loaded);
+    } catch(const std::exception& e) {SetError(outError,e.what());return false;}
 
     Logger::Get().Info(
         "SceneSerializer: loaded scene=" + path.string() +
@@ -154,7 +165,7 @@ bool SceneSerializer::SaveEntityConfigs(
     std::filesystem::create_directories(path.parent_path(), ec);
 
     nlohmann::json scene;
-    scene["version"] = 1;
+    scene["version"] = 3;
     scene["entities"] = nlohmann::json::array();
     for (const auto& entity : entities)
         scene["entities"].push_back(EntityToJson(entity));
@@ -177,10 +188,18 @@ bool SceneSerializer::SaveWorld(
     std::string* outError)
 {
     std::vector<EcsDemoEntityConfig> entities;
-    world.ForEach<ecs::TransformComponent, ecs::MeshRendererComponent>(
-        [&](ecs::Entity entity, ecs::TransformComponent& transform, ecs::MeshRendererComponent& meshRenderer)
+    world.ForEach<ecs::TransformComponent>(
+        [&](ecs::Entity entity, ecs::TransformComponent& transform)
         {
+            auto* mesh=world.GetComponent<ecs::MeshRendererComponent>(entity);
+            LightType lightType;auto* light=ecs::GetLightParameters(world,entity,&lightType);
+            if(!mesh&&!light)return;
             EcsDemoEntityConfig config;
+            if(light){config.light=SceneLightDescription{lightType,*light,false};
+                if(auto* d=world.GetComponent<ecs::DirectionalLightComponent>(entity))config.light->primary=d->primary;
+                config.simulatePhysics=false;config.bounce=false;}
+            ecs::MeshRendererComponent emptyMesh;
+            auto& meshRenderer=mesh?*mesh:emptyMesh;
             if (const auto* tag = world.GetComponent<ecs::TagComponent>(entity))
                 config.tag = tag->name;
             config.meshPath = meshRenderer.meshPath;
@@ -190,6 +209,7 @@ bool SceneSerializer::SaveWorld(
             if (const auto* material = world.GetComponent<ecs::MaterialComponent>(entity))
             {
                 config.materialPath = material->materialPath;
+                config.slotMaterials=material->slotMaterials;config.materialOverrides=material->overrides;
                 config.shaderPath = material->shaderPath.empty() ? config.shaderPath : material->shaderPath;
                 config.texturePath = material->texturePath.empty() ? config.texturePath : material->texturePath;
                 for (std::size_t i = 0; i < config.materialTint.size(); ++i)

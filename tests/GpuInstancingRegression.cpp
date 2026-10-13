@@ -21,11 +21,13 @@ struct BatchRecorder:IRenderAdapter {
     RenderSubmissionStatistics stats;bool failInstanced=false;
     bool Initialize(IWindow*)override{return true;}void BeginFrame()override{draws.clear();stats={};}
     void Clear(float,float,float,float)override{}void SetTestTransform(const float* p)override{std::copy(p,p+16,pending.mvp.begin());}
+    void SetNormalMatrix(const std::array<float,12>& n)override{pending.normal=n;}
+    LightingConstants lighting;void SetLighting(const LightingConstants& c)override{lighting=c;}
     void SetTestColor(float r,float g,float b,float a)override{pending.tint={r,g,b,a};}
     RenderMeshHandle UploadMesh(const MeshData&)override{return {nextMesh++};}
     RenderTextureHandle CreateTexture2D(const TextureData&)override{return {nextTexture++};}
     RenderShaderHandle CreateShaderProgram(const ShaderResource& s)override{auto n=nextShader++;if(s.vertexSource.find("WHISP_INSTANCE_LAYOUT_V1")!=std::string::npos)supported.push_back(n);return {n};}
-    void BindShader(RenderShaderHandle s)override{shader=s;}void BindTexture(std::uint32_t,RenderTextureHandle t)override{texture=t;}
+    void BindShader(RenderShaderHandle s)override{shader=s;}void BindTexture(std::uint32_t slot,RenderTextureHandle t)override{if(slot==0)texture=t;}
     bool SupportsInstancing(RenderShaderHandle s)const override{return std::find(supported.begin(),supported.end(),s.value)!=supported.end();}
     bool DrawMeshInstanced(RenderMeshHandle mesh,std::span<const RenderInstanceData> data)override{
         if(failInstanced)return false;
@@ -38,7 +40,8 @@ struct BatchRecorder:IRenderAdapter {
     std::vector<RenderInstanceData> Flatten()const{std::vector<RenderInstanceData> result;for(const auto& d:draws)result.insert(result.end(),d.instances.begin(),d.instances.end());return result;}
 };
 static void SharedPath() {
-    BatchRecorder adapter;ResourceManager resources(nullptr);RenderSystem render;
+    BatchRecorder adapter;ResourceManager resources(nullptr);resources.Load<MaterialResource>("materials/stress.material.json");RenderSystem render;
+    LightingSettings lighting;render.SetLightingSettings(&lighting);
     render.SetResourceManager(&resources);render.SetRenderAdapter(&adapter);
     resources.Load<MeshResource>("models/validation_cube.obj");resources.Load<ShaderResource>("dx12/textured.hlsl");resources.Load<TextureResource>("defaults/texture");
     World world;std::vector<Entity> entities;RenderInterpolation interpolation;render.SetInterpolation(&interpolation);
@@ -54,7 +57,7 @@ static void SharedPath() {
             Check(ordinary.size()==std::size_t(count+1),"ordinary missing ready objects");
             render.SetInstancingEnabled(true);adapter.BeginFrame();render.Update(world,0);const auto batched=adapter.Flatten();
             Check(adapter.draws.size()==1&&adapter.stats.instancedDrawCalls==1&&batched.size()==ordinary.size(),"compatible scene not one real submission");
-            for(std::size_t n=0;n<ordinary.size();++n)Check(ordinary[n].mvp==batched[n].mvp&&ordinary[n].tint==batched[n].tint,"instance MVP/tint differs from ordinary path");
+            for(std::size_t n=0;n<ordinary.size();++n)Check(ordinary[n].mvp==batched[n].mvp&&ordinary[n].tint==batched[n].tint&&ordinary[n].normal==batched[n].normal,"instance MVP/tint differs from ordinary path");
             Check(render.GetStatistics().submitted.drawCalls==1&&render.GetStatistics().submitted.renderedInstances==std::size_t(count+1),"actual adapter submission stats lost");
             bool distinct=false;for(const auto& p:batched)if(p.tint!=batched[0].tint)distinct=true;
             Check(distinct,"individual tint collapsed");
@@ -63,7 +66,7 @@ static void SharedPath() {
             std::array<float,16> expected;
             BuildRenderModelMatrix(expected.data(),interpolation.Resolve(entity,*world.GetComponent<TransformComponent>(entity)));
             const auto submitted=adapter.Flatten();
-            Check(std::any_of(submitted.begin(),submitted.end(),[&](const auto& d){return d.model==expected;}),message);
+            Check(std::any_of(submitted.begin(),submitted.end(),[&](const auto& d){return d.model==expected && d.normal==BuildNormalMatrix(expected);}),message);
         };
         compare();checkModel(entities.back(),"interpolated model lost");
         interpolation.SetEnabled(false);compare();checkModel(entities.back(),"non-interpolated model lost");interpolation.SetEnabled(true);
@@ -73,6 +76,10 @@ static void SharedPath() {
         compare();checkModel(entities.back(),"teleport or individual scale retained stale model");
         interpolation.SetFrame(world,false,.5);compare();checkModel(entities.back(),"pause retained stale model");
         interpolation.SetFrame(world,true,.5);compare();checkModel(entities.back(),"resume retained stale model");
+        lighting.directional.direction={0,-5,0};lighting.ambientIntensity=.13f;compare();
+        Check(adapter.lighting.directionEnabled[1]==-1&&adapter.lighting.ambientIntensity[3]==.13f,"lighting settings not submitted");
+        lighting.enabled=false;compare();Check(adapter.lighting.directionEnabled[3]==0,"unlit settings lost");
+        lighting.enabled=true;
         const auto before=*world.GetComponent<TransformComponent>(entities.back());
         render.SetCameraProjection(1.047f,1.2f,.01f,150);adapter.BeginFrame();render.Update(world,0);auto first=adapter.Flatten();
         render.SetCameraProjection(1.047f,2.f,.01f,150);adapter.BeginFrame();render.Update(world,0);auto second=adapter.Flatten();
@@ -90,6 +97,7 @@ static void SharedPath() {
         checkModel(replacement,"generation reuse retained old model");
         adapter.failInstanced=true;adapter.BeginFrame();render.Update(world,0);Check(adapter.stats.instancedDrawCalls==0&&adapter.stats.drawCalls==std::size_t(count+1),"failed instance upload did not fallback");adapter.failInstanced=false;
         world.Clear();interpolation.SetFrame(world,true,.5);adapter.BeginFrame();render.Update(world,0);Check(adapter.draws.empty()&&render.GetStatistics().visibleObjects==0,"Clear retained instance data");
+        Check(adapter.lighting.ambientIntensity[3]==.13f,"Clear reset runtime lighting");
     }
     CreatePhysicsStressScene(world,entities,12);
     auto altered=entities[4];world.GetComponent<MeshRendererComponent>(altered)->meshPath="models/missing-instancing.obj";
@@ -108,6 +116,13 @@ static void SharedPath() {
     auto unique=world.CreateEntity();world.AddComponent<TransformComponent>(unique);world.AddComponent<MeshRendererComponent>(unique).meshPath="models/validation_cube.obj";
     world.AddComponent<MaterialComponent>(unique).shaderPath="dx12/textured.hlsl";adapter.BeginFrame();render.Update(world,0);
     render.ReleaseGpuResources();render.SetRenderAdapter(nullptr);
+    {
+        RenderSystem recreated;recreated.SetResourceManager(&resources);recreated.SetRenderAdapter(&adapter);recreated.SetLightingSettings(&lighting);
+        lighting.directional.direction={0,0,-7};lighting.ambientIntensity=.31f;lighting.enabled=false;
+        for(int warm=0;warm<10;++warm){adapter.BeginFrame();recreated.Update(world,0);}
+        Check(adapter.lighting.directionEnabled[2]==-1&&adapter.lighting.directionEnabled[3]==0&&adapter.lighting.ambientIntensity[3]==.31f,"recreated RenderSystem lost runtime lighting");
+        recreated.ReleaseGpuResources();recreated.SetRenderAdapter(nullptr);
+    }
     std::cout<<"Shared instancing batches/matrices/tints/cameras/generations/clear/fallback regression passed\n";
 }
 
@@ -115,7 +130,7 @@ static void SharedPath() {
 static void Dx12Pixels() {
     GlfwWindow window;Check(window.Create(320,240,"WhispEngine instancing regression"),"DX12 test window");
     Dx12RenderAdapter adapter;Check(adapter.Initialize(&window),"DX12 initialization");
-    ResourceManager resources(nullptr);
+    ResourceManager resources(nullptr);resources.Load<MaterialResource>("materials/stress.material.json");
     const auto meshResource=resources.Load<MeshResource>("models/validation_cube.obj");
     const auto shaderResource=resources.Load<ShaderResource>("dx12/textured.hlsl");
     const auto textureResource=resources.Load<TextureResource>("textures/validation_checker.png");
@@ -124,23 +139,27 @@ static void Dx12Pixels() {
     Check(mesh.IsValid()&&shader.IsValid()&&texture.IsValid()&&adapter.SupportsInstancing(shader),"instanced DX12 shader unavailable");
     World world;std::vector<Entity> entities;RenderInterpolation history;
     CreatePhysicsStressScene(world,entities,500);history.BeginTick(world);
-    for(auto e:entities) {auto& t=*world.GetComponent<TransformComponent>(e);if(!world.GetComponent<RigidbodyComponent>(e)->isStatic){t.position.y-=.1f;t.rotation={.1f,.2f,.3f};}}
+    for(auto e:entities) {auto& t=*world.GetComponent<TransformComponent>(e);if(!world.GetComponent<RigidbodyComponent>(e)->isStatic){t.position.y-=.1f;t.rotation={.1f*float(e.index%3),.2f*float(e.index%5),.3f*float(e.index%7)};t.scale={.7f+.1f*float(e.index%3),.6f+.1f*float(e.index%5),.8f};}}
     history.EndTick(world);history.SetFrame(world,true,.5);
     std::vector<RenderInstanceData> instances;
     for(auto e:entities){RenderInstanceData data;BuildRenderModelMatrix(data.model.data(),history.Resolve(e,*world.GetComponent<TransformComponent>(e)));
         // Orthographic clip transform chosen for a deterministic, visible GPU test.
-        data.mvp=data.model;for(int column=0;column<4;++column){data.mvp[column*4]*=.07f;data.mvp[column*4+1]*=.07f;data.mvp[column*4+2]*=.005f;}
+        data.normal=BuildNormalMatrix(data.model);data.mvp=data.model;for(int column=0;column<4;++column){data.mvp[column*4]*=.07f;data.mvp[column*4+1]*=.07f;data.mvp[column*4+2]*=.005f;}
         data.mvp[13]-=.45f;data.tint={.2f+float(e.index%5)*.1f,.6f,.8f,1};instances.push_back(data);}
     auto frame=[&](bool enabled) {
         window.PollEvents();adapter.BeginFrame();adapter.Clear(.08f,.1f,.13f,1);adapter.BindShader(shader);adapter.BindTexture(0,texture);
         if(enabled)Check(adapter.DrawMeshInstanced(mesh,instances),"real instanced command failed");
-        else for(const auto& data:instances){adapter.SetTestTransform(data.mvp.data());adapter.SetTestColor(data.tint[0],data.tint[1],data.tint[2],data.tint[3]);adapter.DrawMesh(mesh);}
+        else for(const auto& data:instances){adapter.SetNormalMatrix(data.normal);adapter.SetTestTransform(data.mvp.data());adapter.SetTestColor(data.tint[0],data.tint[1],data.tint[2],data.tint[3]);adapter.DrawMesh(mesh);}
         const auto stats=adapter.GetSubmissionStatistics();Check(stats.renderedInstances==instances.size()&&stats.drawCalls==(enabled?1:instances.size()),"real DX12 draw statistics");
         adapter.EndFrame();auto pixels=adapter.ReadBackFramePixels();adapter.Present();return pixels;
     };
     const auto ordinary=frame(false),instanced=frame(true);Check(ordinary==instanced,"GPU pixels differ between ordinary and instanced paths");
     std::size_t varied=0;for(std::size_t p=4;p<ordinary.size();p+=4)if(std::memcmp(ordinary.data(),ordinary.data()+p,4)!=0)++varied;
     Check(varied>100,"GPU comparison rendered only clear color");
+    LightingSettings light;adapter.SetLighting(BuildLightingConstants(light));
+    Check(frame(false)==frame(true),"lit 501 cubes ordinary/instanced differ");
+    light.directional.direction={.7f,-.3f,-1};adapter.SetLighting(BuildLightingConstants(light));
+    Check(frame(false)==frame(true),"changed light batch mismatch");
     for(int n=0;n<6;++n)frame(true);const auto growth=adapter.GetSubmissionStatistics().instanceBufferCapacity;
     glfwSetWindowSize(window.GetGlfwHandle(),400,280);for(int n=0;n<4;++n)frame(true);
     Check(adapter.GetSubmissionStatistics().instanceBufferCapacity==growth,"Resize leaked instance pages");
@@ -149,7 +168,7 @@ static void Dx12Pixels() {
     const auto resizedOrdinary=frame(false);
     adapter.BeginFrame();adapter.Clear(.08f,.1f,.13f,1);adapter.BindShader(fallback);adapter.BindTexture(0,texture);
     Check(!adapter.DrawMeshInstanced(mesh,instances),"unsupported pipeline recorded instance command");
-    for(const auto& data:instances){adapter.SetTestTransform(data.mvp.data());adapter.SetTestColor(data.tint[0],data.tint[1],data.tint[2],data.tint[3]);adapter.DrawMesh(mesh);}
+    for(const auto& data:instances){adapter.SetNormalMatrix(data.normal);adapter.SetTestTransform(data.mvp.data());adapter.SetTestColor(data.tint[0],data.tint[1],data.tint[2],data.tint[3]);adapter.DrawMesh(mesh);}
     adapter.EndFrame();const auto fallbackPixels=adapter.ReadBackFramePixels();adapter.Present();Check(resizedOrdinary==fallbackPixels,"untagged shader normal fallback pixels differ");
     adapter.DestroyShader(fallback);
     ShaderResource wrongContract=shaderResource->GetData();

@@ -1,0 +1,12 @@
+# Analytic inclined receiver, y=.15*x+.1*z; diagnostic double-sided open geometry.
+v -2 -0.5 -2
+v -2 -0.1 2
+v 2 0.5 2
+v 2 0.1 -2
+vn -0.14762035 0.98413566 -0.09841357
+vt 0 0
+vt 0 1
+vt 1 1
+vt 1 0
+f 1/1/1 2/2/1 3/3/1
+f 1/1/1 3/3/1 4/4/1

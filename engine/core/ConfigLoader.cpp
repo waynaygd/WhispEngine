@@ -1,4 +1,6 @@
 #include "ConfigLoader.h"
+#include "../scene/LightSerialization.h"
+#include "../resources/MaterialSerialization.h"
 #include "Logger.h"
 
 #include <fstream>
@@ -125,10 +127,13 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
             for (const auto& je : demo["initialEntities"])
             {
                 EcsDemoEntityConfig entityCfg;
+                if(je.contains("light"))entityCfg.light=LightFromJson(je["light"]);
                 entityCfg.tag = je.value("tag", std::string());
                 entityCfg.meshPath = je.value("meshPath", std::string());
                 entityCfg.texturePath = je.value("texturePath", std::string());
                 entityCfg.shaderPath = je.value("shaderPath", std::string());
+                if(je.contains("materialOverrides"))entityCfg.materialOverrides=MaterialOverridesFromJson(je.at("materialOverrides"));
+                if(je.contains("slotMaterials"))entityCfg.slotMaterials=je.at("slotMaterials").get<std::vector<std::string>>();
                 entityCfg.materialPath = je.value("materialPath", std::string());
                 ReadColor4(je, "color", entityCfg.materialTint);
                 entityCfg.visible = je.value("visible", true);

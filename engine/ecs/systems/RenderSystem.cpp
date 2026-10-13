@@ -1,4 +1,5 @@
 #include "RenderSystem.h"
+#include "../LightGather.h"
 
 #include "../World.h"
 #include "../components/MaterialComponent.h"
@@ -15,6 +16,7 @@
 #include "../../resources/TextureResource.h"
 
 #include <cmath>
+#include <tuple>
 #include <chrono>
 #include <tracy/Tracy.hpp>
 
@@ -242,6 +244,8 @@ namespace ecs {
         m_MeshResources.clear();
         m_TextureResources.clear();
         m_ShaderResources.clear();
+        m_EnvironmentAsset.reset();m_RequestedEnvironment.clear();m_EnvironmentKey.clear();m_EnvironmentVersion=0;m_FailedEnvironmentKey.clear();m_FailedEnvironmentVersion=0;
+        if(m_Renderer)m_Renderer->ReleaseEnvironment();
         m_MaterialResources.clear();
         m_FailedMeshKeys.clear();
         m_FailedTextureKeys.clear();
@@ -262,9 +266,31 @@ namespace ecs {
 
         (void)dt;
         m_Statistics = {};
+        LightCamera lightCamera;
+        BuildViewMatrix(lightCamera.view.data(),m_CameraPosition,m_CameraYaw,m_CameraPitch);
+        BuildPerspectiveMatrix(lightCamera.projection.data(),m_CameraVerticalFovRadians,m_CameraAspectRatio,m_CameraNearPlane,m_CameraFarPlane);
+        lightCamera.nearPlane=m_CameraNearPlane;lightCamera.farPlane=m_CameraFarPlane;
+        auto lights=GatherSceneLights(world,m_LightingSettings?*m_LightingSettings:m_DefaultLighting,lightCamera,m_Interpolation);
+        if(m_Renderer){m_Renderer->SetCameraPosition({m_CameraPosition.x,m_CameraPosition.y,m_CameraPosition.z,0});
+            m_Renderer->SetLighting(BuildLightingConstants(lights.lighting));
+            m_Renderer->SetSceneLights(lights.lights,m_LightRenderingMode,lights.diagnostics);}
 
         if (m_Renderer == nullptr)
             return;
+        if(m_EnvironmentSettings){
+            m_Renderer->SetEnvironmentSettings(*m_EnvironmentSettings);
+            if(m_ResourceManager&&m_EnvironmentSettings->enabled){
+                const auto& key=m_EnvironmentSettings->assetPath;
+                if(!m_EnvironmentAsset||m_RequestedEnvironment!=key){
+                    m_RequestedEnvironment=key;m_EnvironmentAsset=m_ResourceManager->LoadAsync<EnvironmentResource>(key).get();
+                    m_ResourceManager->WatchForHotReload<EnvironmentResource>(key);
+                }
+                auto asset=m_EnvironmentAsset;
+                if(asset&&asset->IsLoaded()&&!asset->GetData().placeholder&&(m_EnvironmentKey!=asset->GetKey()||m_EnvironmentVersion!=asset->GetVersion())&&(m_FailedEnvironmentKey!=asset->GetKey()||m_FailedEnvironmentVersion!=asset->GetVersion())){
+                    if(m_Renderer->UploadEnvironment(asset->GetData(),asset->GetVersion())){m_EnvironmentKey=asset->GetKey();m_EnvironmentVersion=asset->GetVersion();m_FailedEnvironmentKey.clear();}else{m_FailedEnvironmentKey=asset->GetKey();m_FailedEnvironmentVersion=asset->GetVersion();}
+                }
+            }
+        }
 
         constexpr std::size_t
             maxGpuFinalizationsPerFrame = 1;
@@ -292,22 +318,24 @@ namespace ecs {
                         if (!meshRenderer.visible)
                             return;
 
-                        RenderSnapshot snapshot{};
-
-                        if (TryBuildRenderSnapshot(
-                            meshRenderer,
-                            world.GetComponent<MaterialComponent>(entity),
-                            snapshot))
-                        {
-                            {
-                                ZoneScopedN("RenderInterpolationResolve");
-                                snapshot.pose = m_Interpolation ? m_Interpolation->Resolve(entity, transform) : RenderPose::From(transform);
+                        const auto key=AssetPaths::NormalizeAssetKey(meshRenderer.meshPath);
+                        const auto meshHandle=GetOrUploadMesh(key);if(!meshHandle.IsValid())return;
+                        const auto resource=m_MeshResources.find(key);
+                        if(resource==m_MeshResources.end())return;
+                        const auto& mesh=resource->second->GetData().meshData;
+                        const auto count=std::max(std::size_t(1),mesh.submeshes.size());
+                        const auto pose=m_Interpolation?m_Interpolation->Resolve(entity,transform):RenderPose::From(transform);
+                        bool visible=false;
+                        for(std::size_t slot=0;slot<count;++slot) {
+                            RenderSnapshot snapshot{};
+                            if(TryBuildRenderSnapshot(meshRenderer,world.GetComponent<MaterialComponent>(entity),snapshot,mesh,meshHandle,slot)) {
+                                snapshot.pose=pose;m_RenderSnapshots.push_back(std::move(snapshot));visible=true;
                             }
-                            m_RenderSnapshots.push_back(std::move(snapshot));
                         }
+                        if(visible)++m_Statistics.visibleObjects;
                     });
                 m_Statistics.gatherMs = elapsed(start);
-                m_Statistics.visibleObjects = m_RenderSnapshots.size();
+                m_Statistics.visibleSubmeshes = m_RenderSnapshots.size();
             }
 
             {
@@ -331,25 +359,68 @@ namespace ecs {
                 m_Batches.clear();
                 m_Batches.reserve(m_RenderPackets.size());
                 m_InstanceData.resize(m_RenderPackets.size());
-                // Consecutive compatible packets only: retain all draw/pass ordering.
+                // All supported surfaces are opaque: order by compatible state/range.
+                const auto batchKey=[](const RenderPacket& p) {return std::tuple(p.mesh.value,p.shader.value,p.texture.value,p.maps[0].value,p.maps[1].value,p.maps[2].value,
+                    p.range.firstIndex,p.range.indexCount,p.materialState.doubleSided,p.materialState.receiveShadows,p.materialState.reverseWinding);};
+                std::stable_sort(m_RenderPackets.begin(),m_RenderPackets.end(),[&](const auto& a,const auto& b){return batchKey(a)<batchKey(b);});
                 for (std::size_t i=0;i<m_RenderPackets.size();++i) {
                     m_InstanceData[i]=m_RenderPackets[i].instance;
                     const auto& packet=m_RenderPackets[i];
                     if(i>0 && packet.mesh==m_RenderPackets[i-1].mesh &&
-                        packet.texture==m_RenderPackets[i-1].texture && packet.shader==m_RenderPackets[i-1].shader)
+                        packet.maps==m_RenderPackets[i-1].maps && packet.texture==m_RenderPackets[i-1].texture && packet.shader==m_RenderPackets[i-1].shader &&
+                        packet.range==m_RenderPackets[i-1].range && packet.materialState==m_RenderPackets[i-1].materialState)
                         ++m_Batches.back().count;
                     else m_Batches.push_back({i,1});
                 }
                 m_Statistics.batchMs=elapsed(start);
             }
             {
+                ZoneScopedN("ShadowPrepare");
+                const auto start=std::chrono::steady_clock::now();
+                m_ShadowBatches.clear();
+                for(std::size_t i=0;i<m_RenderPackets.size();++i) {
+                    if(!m_RenderPackets[i].castShadows)continue;
+                    if(!m_ShadowBatches.empty()&&m_ShadowBatches.back().begin+m_ShadowBatches.back().count==i &&
+                        m_RenderPackets[i].mesh==m_RenderPackets[i-1].mesh && m_RenderPackets[i].range==m_RenderPackets[i-1].range &&
+                        m_RenderPackets[i].materialState.doubleSided==m_RenderPackets[i-1].materialState.doubleSided &&
+                        m_RenderPackets[i].materialState.reverseWinding==m_RenderPackets[i-1].materialState.reverseWinding)++m_ShadowBatches.back().count;
+                    else m_ShadowBatches.push_back({i,1});
+                }
+                m_Statistics.shadowPrepareMs=elapsed(start);
+            }
+            {
+                ZoneScopedN("ShadowPass");
+                const auto start=std::chrono::steady_clock::now();
+                auto settings=SanitizeShadowSettings(m_ShadowSettings?*m_ShadowSettings:m_DefaultShadows);
+                settings.enabled=settings.enabled&&lights.primaryCastShadows;
+                const auto light=BuildLightingConstants(lights.lighting);
+                const auto frame=BuildCameraDirectionalShadowFrame(light,settings,
+                    {m_CameraPosition.x,m_CameraPosition.y,m_CameraPosition.z},m_CameraYaw,m_CameraPitch,
+                    m_CameraVerticalFovRadians,m_CameraAspectRatio,m_CameraNearPlane,m_CameraFarPlane);
+                if(m_Renderer->BeginShadowPass(frame)) {
+                    for(const auto& batch:m_ShadowBatches) {
+                        const auto& packet=m_RenderPackets[batch.begin];
+                        m_Renderer->SetMeshRange(packet.range);m_Renderer->SetMaterialState(packet.materialState);
+                        const auto mesh=packet.mesh;
+                        if(m_InstancingEnabled&&batch.count>1&&m_Renderer->DrawShadowMeshInstanced(mesh,
+                            std::span<const RenderInstanceData>(m_InstanceData.data()+batch.begin,batch.count)))continue;
+                        for(std::size_t i=batch.begin;i<batch.begin+batch.count;++i)m_Renderer->DrawShadowMesh(mesh,m_InstanceData[i]);
+                    }
+                    m_Renderer->EndShadowPass();
+                }
+                m_Statistics.shadowMs=elapsed(start);
+            }
+            m_Renderer->BeginMainPass();
+            {
                 ZoneScopedN("RenderSubmit");
                 const auto start = std::chrono::steady_clock::now();
                 for(const auto& batch:m_Batches) {
                     const auto& packet=m_RenderPackets[batch.begin];
+                    m_Renderer->SetMeshRange(packet.range);m_Renderer->SetMaterialState(packet.materialState);
                     if(m_InstancingEnabled && batch.count>1 && m_Renderer->SupportsInstancing(packet.shader)) {
                         m_Renderer->BindShader(packet.shader);
                         m_Renderer->BindTexture(0,packet.texture);
+                        for(unsigned i=0;i<3;++i)m_Renderer->BindTexture(i+1,packet.maps[i]);
                         if(m_Renderer->DrawMeshInstanced(packet.mesh,std::span<const RenderInstanceData>(m_InstanceData.data()+batch.begin,batch.count)))continue;
                     }
                     ZoneScopedN("RenderFallbackDraw");
@@ -357,15 +428,21 @@ namespace ecs {
                 }
                 m_Statistics.submitMs=elapsed(start);
             }
+            m_Renderer->EndMainPass();
         }
 
         const auto finishStatistics = [&] {
         const auto submitted = m_Renderer->GetSubmissionStatistics();
         m_Statistics.submitted=submitted;
         m_Statistics.submitted.drawCalls-=submittedBefore.drawCalls;
+        m_Statistics.submitted.outputDrawCalls-=submittedBefore.outputDrawCalls;
         m_Statistics.submitted.instancedDrawCalls-=submittedBefore.instancedDrawCalls;
         m_Statistics.submitted.renderedInstances-=submittedBefore.renderedInstances;
         m_Statistics.submitted.uploadBytes-=submittedBefore.uploadBytes;
+        m_Statistics.submitted.frameConstantUploadBytes-=submittedBefore.frameConstantUploadBytes;
+        m_Statistics.submitted.shadowDrawCalls-=submittedBefore.shadowDrawCalls;
+        m_Statistics.submitted.shadowInstancedDrawCalls-=submittedBefore.shadowInstancedDrawCalls;
+        m_Statistics.submitted.shadowCasters-=submittedBefore.shadowCasters;
         m_Statistics.submitted.instanceBufferGrowths-=submittedBefore.instanceBufferGrowths;
         };
         if (!m_DebugCollidersEnabled) { finishStatistics(); return; }
@@ -413,88 +490,65 @@ namespace ecs {
         finishStatistics();
     }
 
-    bool RenderSystem::TryBuildRenderSnapshot(
-        const MeshRendererComponent& meshRenderer,
-        const MaterialComponent* materialComponent,
-        RenderSnapshot& outSnapshot)
+    bool RenderSystem::TryBuildRenderSnapshot(const MeshRendererComponent& meshRenderer,
+        const MaterialComponent* component,RenderSnapshot& snapshot,const MeshData& mesh,RenderMeshHandle meshHandle,std::size_t submeshIndex)
     {
-        if (m_Renderer == nullptr || m_ResourceManager == nullptr)
-            return false;
-
-        if (meshRenderer.meshPath.empty())
-            return false;
-
-        std::string texturePath = meshRenderer.texturePath;
-        std::string shaderPath = meshRenderer.shaderPath;
-        float tint[4] = { kWhiteTint[0], kWhiteTint[1], kWhiteTint[2], kWhiteTint[3] };
-
-        if (materialComponent != nullptr)
-        {
-            if (!materialComponent->texturePath.empty())
-                texturePath = materialComponent->texturePath;
-            if (!materialComponent->shaderPath.empty())
-                shaderPath = materialComponent->shaderPath;
-            for (std::size_t i = 0; i < 4; ++i)
-                tint[i] *= materialComponent->tint[i];
-
-            if (!materialComponent->materialPath.empty())
-            {
-                const std::string materialKey = AssetPaths::NormalizeAssetKey(materialComponent->materialPath);
-                const auto material = materialKey.empty() ? nullptr : GetOrLoadMaterial(materialKey);
-                if (material != nullptr && material->IsUsable())
-                {
-                    const auto& data = material->GetData();
-                    if (texturePath.empty())
-                        texturePath = data.texturePath;
-                    if (shaderPath.empty())
-                        shaderPath = data.shaderPath;
-                    tint[0] *= data.baseColor[0];
-                    tint[1] *= data.baseColor[1];
-                    tint[2] *= data.baseColor[2];
-                    tint[3] *= data.baseColor[3];
-                }
-            }
+        ZoneScopedN("MaterialResolve");
+        const auto start=std::chrono::steady_clock::now();
+        const auto finish=[&](bool result) {m_Statistics.materialResolveMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();return result;};
+        if(!m_Renderer||!m_ResourceManager||meshRenderer.meshPath.empty())return finish(false);
+        snapshot.mesh=meshHandle;
+        MaterialResource material;std::size_t slot=0;
+        if(submeshIndex<mesh.submeshes.size()) {
+            const auto& submesh=mesh.submeshes[submeshIndex];slot=submesh.materialSlot;
+            snapshot.range={submesh.firstIndex,submesh.indexCount};
+            if(!submesh.indexCount)return finish(false);
+            if(slot<mesh.materials.size())material=mesh.materials[slot];
         }
-
-        if (shaderPath.empty())
-            return false;
-
-        const std::string meshKey = AssetPaths::NormalizeAssetKey(meshRenderer.meshPath);
-        const std::string shaderKey = AssetPaths::NormalizeShaderKey(shaderPath);
-        if (meshKey.empty() || shaderKey.empty())
-            return false;
-
-        const RenderMeshHandle meshHandle = GetOrUploadMesh(meshKey);
-        RenderTextureHandle textureHandle = RenderTextureHandle::Invalid();
-        if (!texturePath.empty())
-        {
-            const std::string textureKey = AssetPaths::NormalizeAssetKey(texturePath);
-            if (textureKey.empty())
-                return false;
-            textureHandle = GetOrCreateTexture(textureKey);
+        std::string asset;
+        if(component) {
+            asset=component->materialPath;
+            if(slot<component->slotMaterials.size()&&!component->slotMaterials[slot].empty())asset=component->slotMaterials[slot];
         }
-        else
-        {
-            textureHandle = GetOrCreateTexture("defaults/texture");
+        if(!asset.empty()) {
+            const auto key=AssetPaths::NormalizeAssetKey(asset);
+            if(m_MaterialResources.count(key))++m_Statistics.materialCacheHits;else ++m_Statistics.materialCacheMisses;
+            const auto resource=key.empty()?nullptr:GetOrLoadMaterial(key);
+            if(!resource||resource->IsLoading())return finish(false);
+            if(resource->IsUsable())material=resource->GetData();
         }
-        const RenderShaderHandle shaderHandle = GetOrCreateShader(shaderKey);
-        if (!meshHandle.IsValid() || !textureHandle.IsValid() || !shaderHandle.IsValid())
-            return false;
-
-
-        outSnapshot.mesh = meshHandle;
-        outSnapshot.texture = textureHandle;
-        outSnapshot.shader = shaderHandle;
-
-        outSnapshot.tint =
-        {
-            tint[0],
-            tint[1],
-            tint[2],
-            tint[3]
-        };
-
-        return true;
+        if(component)ApplyMaterialOverrides(material,component->overrides);
+        // Legacy scene paths are explicit overrides; preserve their existing priority.
+        if(!meshRenderer.shaderPath.empty())material.shaderPath=meshRenderer.shaderPath;
+        if(!meshRenderer.texturePath.empty())material.texturePath=meshRenderer.texturePath;
+        if(component) {
+            if(!component->shaderPath.empty())material.shaderPath=component->shaderPath;
+            if(!component->texturePath.empty())material.texturePath=component->texturePath;
+        }
+        if(material.surfaceMode!=MaterialSurfaceMode::Opaque) {
+            const auto diagnostic=material.sourcePath+"#unsupported-surface";
+            if(m_FailedMaterialKeys.insert(diagnostic).second)Logger::Get().Warn("Material surface mode unsupported; omitted: "+material.sourcePath);
+            return finish(false);
+        }
+        const bool hasUV0=submeshIndex>=mesh.submeshes.size()||mesh.submeshes[submeshIndex].hasUV0;
+        snapshot.texture=GetOrCreateTexture(material.texturePath.empty()||material.textureTexCoords[0]!=0||!hasUV0?"defaults/texture":AssetPaths::NormalizeAssetKey(material.texturePath));
+        snapshot.textureParameters={material.normalScale,material.occlusionStrength,0,1};
+        const std::string* paths[3]={&material.normalTexturePath,&material.metallicRoughnessTexturePath,&material.occlusionTexturePath};
+        for(int i=0;i<3;++i)if(hasUV0 && !paths[i]->empty() && material.textureTexCoords[i+1]==0) {
+            snapshot.maps[i]=GetOrCreateTexture(m_TextureResources.count(*paths[i])?*paths[i]:AssetPaths::NormalizeAssetKey(*paths[i]),true);
+            if(snapshot.maps[i].IsValid()&&(m_TextureMapMask&(1<<i)))snapshot.textureParameters[2]+=float(1<<i);
+        }
+        const auto shaderKey=AssetPaths::NormalizeShaderKey(material.shaderPath);
+        snapshot.shader=GetOrCreateShader(shaderKey);
+        const auto shaderSource=m_ResourceManager->Get<ShaderResource>(shaderKey);
+        const bool colorPipeline=shaderSource && shaderSource->GetData().fragmentSource.find("PBR_COLOR_PIPELINE_V1")!=std::string::npos;
+        for(int i=0;i<4;++i) {
+            snapshot.tint[i]=(colorPipeline?1.f:material.baseColor[i])*(component?component->tint[i]:1.f);
+            snapshot.baseColor[i]=colorPipeline?material.baseColor[i]:1.f;
+        }
+        snapshot.surface={material.metallic,material.roughness,float(m_ShadingModelOverride>=0?m_ShadingModelOverride:int(material.shadingModel)),0};
+        snapshot.materialState={material.doubleSided,material.receiveShadows};snapshot.castShadows=material.castShadows;
+        return finish(snapshot.texture.IsValid()&&snapshot.shader.IsValid());
     }
 
     void RenderSystem::PrepareRenderPacket(
@@ -512,10 +566,21 @@ namespace ecs {
             m_CameraNearPlane,
             m_CameraFarPlane, outPacket.instance.model.data());
 
+        outPacket.range=snapshot.range;outPacket.materialState=snapshot.materialState;outPacket.castShadows=snapshot.castShadows;
         outPacket.mesh = snapshot.mesh;
-        outPacket.texture = snapshot.texture;
+        outPacket.texture = snapshot.texture;outPacket.maps=snapshot.maps;
+        outPacket.instance.textureParameters=snapshot.textureParameters;
         outPacket.shader = snapshot.shader;
         outPacket.instance.tint = snapshot.tint;
+        outPacket.instance.surface=snapshot.surface;outPacket.instance.baseColor=snapshot.baseColor;
+        outPacket.instance.normal = BuildNormalMatrix(outPacket.instance.model);
+        const auto& m=outPacket.instance.model;
+        const double determinant=double(m[0])*(double(m[5])*m[10]-double(m[9])*m[6])
+            -double(m[4])*(double(m[1])*m[10]-double(m[9])*m[2])
+            +double(m[8])*(double(m[1])*m[6]-double(m[5])*m[2]);
+        outPacket.instance.textureParameters[3]=determinant<0?-1.f:1.f;
+        outPacket.materialState.reverseWinding=!outPacket.materialState.doubleSided && determinant<0;
+
     }
 
     void RenderSystem::SubmitRenderPacket(
@@ -523,6 +588,20 @@ namespace ecs {
     {
         if (m_Renderer == nullptr)
             return;
+        if(m_EnvironmentSettings){
+            m_Renderer->SetEnvironmentSettings(*m_EnvironmentSettings);
+            if(m_ResourceManager&&m_EnvironmentSettings->enabled){
+                const auto& key=m_EnvironmentSettings->assetPath;
+                if(!m_EnvironmentAsset||m_RequestedEnvironment!=key){
+                    m_RequestedEnvironment=key;m_EnvironmentAsset=m_ResourceManager->LoadAsync<EnvironmentResource>(key).get();
+                    m_ResourceManager->WatchForHotReload<EnvironmentResource>(key);
+                }
+                auto asset=m_EnvironmentAsset;
+                if(asset&&asset->IsLoaded()&&!asset->GetData().placeholder&&(m_EnvironmentKey!=asset->GetKey()||m_EnvironmentVersion!=asset->GetVersion())&&(m_FailedEnvironmentKey!=asset->GetKey()||m_FailedEnvironmentVersion!=asset->GetVersion())){
+                    if(m_Renderer->UploadEnvironment(asset->GetData(),asset->GetVersion())){m_EnvironmentKey=asset->GetKey();m_EnvironmentVersion=asset->GetVersion();m_FailedEnvironmentKey.clear();}else{m_FailedEnvironmentKey=asset->GetKey();m_FailedEnvironmentVersion=asset->GetVersion();}
+                }
+            }
+        }
 
         if (!packet.mesh.IsValid() ||
             !packet.texture.IsValid() ||
@@ -531,7 +610,13 @@ namespace ecs {
             return;
         }
 
+        m_Renderer->SetMeshRange(packet.range);m_Renderer->SetMaterialState(packet.materialState);
         m_Renderer->SetTestTransform(packet.instance.mvp.data());
+        m_Renderer->SetNormalMatrix(packet.instance.normal);
+        m_Renderer->SetModelMatrix(packet.instance.model);
+        m_Renderer->SetSurfaceParameters(packet.instance.surface);
+        m_Renderer->SetBaseColor(packet.instance.baseColor);
+        m_Renderer->SetTextureParameters(packet.instance.textureParameters);
 
         m_Renderer->SetTestColor(
             packet.instance.tint[0],
@@ -541,6 +626,7 @@ namespace ecs {
 
         m_Renderer->BindShader(packet.shader);
         m_Renderer->BindTexture(0, packet.texture);
+        for(unsigned i=0;i<3;++i)m_Renderer->BindTexture(i+1,packet.maps[i]);
         m_Renderer->DrawMesh(packet.mesh);
     }
 
@@ -580,7 +666,7 @@ namespace ecs {
     }
 
     RenderTextureHandle RenderSystem::GetOrCreateTexture(
-        const std::string& key)
+        const std::string& key,bool optionalMap)
     {
         ResourceHandle<TextureResource> resource;
 
@@ -610,7 +696,7 @@ namespace ecs {
             }
         }
 
-        if (resource == nullptr || !resource->IsUsable())
+        if (resource == nullptr || !resource->IsUsable() || (optionalMap && resource->IsFailed()))
             return RenderTextureHandle::Invalid();
 
         auto& texture = resource->GetData();

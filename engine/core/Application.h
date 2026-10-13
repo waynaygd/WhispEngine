@@ -14,6 +14,7 @@
 #include "../ecs/systems/PhysicsSystem.h"
 #include "../ecs/systems/RenderSystem.h"
 #include "../render/RenderFactory.h"
+#include "../render/IRenderAdapter.h"
 #include "../platform/IWindow.h"
 #include "../game/StateMachine.h"
 #include "../ecs/events/EventBus.h"
@@ -46,6 +47,7 @@ public:
     }
 
     IWindow* GetWindow() { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
+    editor::EditorLayer& GetEditorLayer(){return m_EditorLayer;}
     ecs::World& GetWorld() { return m_World; }
     const ecs::World& GetWorld() const { return m_World; }
     ResourceManager* GetResourceManager() { return m_ResourceManager.get(); }
@@ -66,13 +68,41 @@ public:
     float GetCameraFarPlane() const { return m_Camera.farPlane; }
     bool IsEditorPlayMode() const { return m_EditorPlayMode; }
     void SetEditorPlayMode(bool enabled);
+    void SetupMaterialDemoScene(int copies=1);
+    void SetupShadowQualityDemoScene();
+    void SetupPbrDemoScene();
+    void SetupPbrTexturesDemoScene();
+    void SetupPbrTexturesBenchmarkScene(int count);
+    void SetPbrTextureMask(unsigned mask){m_PbrTextureMask=mask&7;if(m_RenderSystem)m_RenderSystem->SetTextureMapMask(mask);}
+    unsigned GetPbrTextureMask()const{return m_PbrTextureMask;}
+    void SetPbrTexturesBenchmarkOutput(std::string path){SetRenderBenchmarkOutput(std::move(path));m_PbrTexturesBenchmark=true;m_FrameLimit=2500;}
     void SetupPhysicsStressScene(int count = 500);
     void ClearPhysicsStressScene();
     std::size_t GetStressEntityCount() const { return m_StressEntities.size(); }
     ecs::PhysicsSystem* GetPhysicsSystem() { return m_PhysicsSystem; }
+    ShadowSettings& GetShadowSettings() { return m_ShadowSettings; }
+    EnvironmentSettings& GetEnvironmentSettings(){return m_EnvironmentSettings;}
+    ecs::Entity CreateLightEntity(LightType type);
+    bool DestroySceneEntity(ecs::Entity);
+    void SetLightRenderingMode(LightRenderingMode mode){m_LightMode=mode;if(m_RenderSystem)m_RenderSystem->SetLightRenderingMode(mode);}
+    LightRenderingMode GetLightRenderingMode() const {return m_LightMode;}
+    SceneLightDiagnostics GetLightDiagnostics() const {return m_Windows.empty()?SceneLightDiagnostics{}:m_Windows.front().renderer->GetSceneLightDiagnostics();}
+    void SetupLightDemoScene();
+    void SetupLightStressScene(int count=100,bool overlapping=false,int objects=100);
+    void SetLightBenchmarkOutput(std::string p){SetRenderBenchmarkOutput(std::move(p));m_LightBenchmark=true;m_FrameLimit=1300;m_EditorLayer.SetLightGizmosVisible(false);}
+    void SetupIblDemoScene();
+    void SetupIblBenchmarkScene(int count);
+    void SetIblBenchmarkOutput(std::string p){SetRenderBenchmarkOutput(std::move(p));m_IblBenchmark=true;m_FrameLimit=2500;}
+    LightingSettings& GetLightingSettings() { return m_LightingSettings; }
     bool IsGpuInstancingEnabled() const { return m_GpuInstancing; }
     void SetGpuInstancingEnabled(bool enabled) { m_GpuInstancing=enabled;if(m_RenderSystem)m_RenderSystem->SetInstancingEnabled(enabled); }
     const ecs::RenderSystem::Statistics& GetRenderStatistics() const { return m_RenderSystem->GetStatistics(); }
+    void SetFrameCaptureOutput(std::string path) {m_FrameCaptureOutput=std::move(path);}
+    int GetShadingModelOverride() const { return m_ShadingModelOverride; }
+    void SetShadingModelOverride(int mode) { m_ShadingModelOverride=mode;if(m_RenderSystem)m_RenderSystem->SetShadingModelOverride(mode); }
+    void SetPbrBenchmarkOutput(std::string path) { SetRenderBenchmarkOutput(std::move(path));m_PbrBenchmark=true;m_FrameLimit=1300; }
+    void SetShadowBenchmarkOutput(std::string path) { SetRenderBenchmarkOutput(std::move(path));m_ShadowBenchmark=true;m_FrameLimit=1900; }
+    void SetLightingBenchmarkOutput(std::string path) { SetRenderBenchmarkOutput(std::move(path));m_LightingBenchmark=true;m_FrameLimit=2500; }
     void SetRenderBenchmarkOutput(std::string path) { m_RenderDiagnosticOutput=std::move(path);m_RenderBenchmark=true;m_FrameLimit=1300; }
     float GetFrameDeltaTime() const { return m_Time.GetFrameDeltaTime(); }
     const PhysicsFrameStatistics& GetPhysicsFrameStatistics() const { return m_PhysicsFrame; }
@@ -184,6 +214,13 @@ private:
     bool m_DebugCollidersEnabled = false;
     bool m_PhysicsDebugPose = false;
     bool m_GpuInstancing = true;
+    LightRenderingMode m_LightMode=LightRenderingMode::Tiled;
+    EnvironmentSettings m_EnvironmentSettings;
+    bool m_LightBenchmark=false;
+    bool m_IblBenchmark=false;
+    unsigned m_IblBenchmarkStart=0;
+    LightingSettings m_LightingSettings;
+    ShadowSettings m_ShadowSettings;
     bool m_EditorPlayMode = false;
     ecs::EventBus m_EventBus;
     InputManager m_InputManager;
@@ -196,7 +233,14 @@ private:
     std::uint32_t m_FrameLimit = 0;
     std::string m_DiagnosticOutput;
     std::string m_RenderDiagnosticOutput;
+    std::string m_FrameCaptureOutput;
     bool m_RenderBenchmark=false;
+    bool m_LightingBenchmark=false;
+    bool m_ShadowBenchmark=false;
+    bool m_PbrBenchmark=false,m_PbrTexturesBenchmark=false;
+    unsigned m_PbrTextureMask=7;
+    int m_ShadingModelOverride=-1;
+    RenderGpuTimings m_LastGpuTimings{};
     bool m_DiagnosticLifecycle = false;
     bool m_WaitForTracy = false;
     unsigned m_SlowFrame = UINT32_MAX, m_SlowFrameMilliseconds = 0;

@@ -4,6 +4,8 @@
 #include "../../core/Logger.h"
 
 #include <stb_image.h>
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
 
 #include <array>
 #include <cstdint>
@@ -396,6 +398,33 @@ bool LoadDds(
 ResourceLoadResult<TextureResource> TextureLoader::Load(const std::string& normalizedKey, const std::filesystem::path& resolvedPath)
 {
     ResourceLoadResult<TextureResource> result;
+    if(const auto fragment=normalizedKey.find("#embedded/");fragment!=std::string::npos) {
+        try {
+            const auto number=normalizedKey.substr(fragment+10);
+            if(number.empty()||number.find_first_not_of("0123456789")!=std::string::npos)throw std::runtime_error("invalid embedded texture index");
+            const auto index=std::stoul(number);
+            Assimp::Importer importer;const auto utf8=AssetPaths::ToUtf8String(resolvedPath);
+            const auto* scene=importer.ReadFile(utf8,0);
+            if(!scene||index>=scene->mNumTextures)throw std::runtime_error("embedded texture unavailable");
+            const auto* source=scene->mTextures[index];TextureResource texture;
+            texture.name=normalizedKey;texture.sourcePath=normalizedKey;texture.placeholder=false;
+            auto& data=texture.textureData;
+            if(source->mHeight==0) {
+                int width=0,height=0,channels=0;
+                auto* pixels=stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(source->pcData),int(source->mWidth),&width,&height,&channels,4);
+                if(!pixels)throw std::runtime_error("embedded image decode failed");
+                data.width=width;data.height=height;data.sourceChannelCount=channels;
+                data.pixels.assign(pixels,pixels+std::size_t(width)*height*4);stbi_image_free(pixels);
+            } else {
+                data.width=int(source->mWidth);data.height=int(source->mHeight);
+                data.pixels.resize(std::size_t(data.width)*data.height*4);
+                for(std::size_t i=0;i<data.pixels.size()/4;++i) {const auto& t=source->pcData[i];data.pixels[i*4]=t.r;data.pixels[i*4+1]=t.g;data.pixels[i*4+2]=t.b;data.pixels[i*4+3]=t.a;}
+            }
+            result.success=true;result.data=std::move(texture);
+        } catch(const std::exception& e) {result.errorMessage=e.what();}
+        return result;
+    }
+
 
     if (normalizedKey.empty())
     {

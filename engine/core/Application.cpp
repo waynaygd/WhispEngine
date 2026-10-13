@@ -1,4 +1,5 @@
 #include "Application.h"
+#include "../ecs/components/LightComponent.h"
 #include "AssetDependencyValidation.h"
 #include "AssetPaths.h"
 #include "Logger.h"
@@ -273,6 +274,9 @@ void Application::PreloadSceneResourcesAsync(const std::vector<EcsDemoEntityConf
         if (!materialKey.empty() && materialKeys.insert(materialKey).second)
             (void)m_ResourceManager->LoadAsync<MaterialResource>(materialKey);
 
+        for(const auto& slot:entity.slotMaterials) {const auto key=AssetPaths::NormalizeAssetKey(slot);if(!key.empty()&&materialKeys.insert(key).second)(void)m_ResourceManager->LoadAsync<MaterialResource>(key);}
+        if(entity.materialOverrides.texturePath&&!entity.materialOverrides.texturePath->empty())(void)m_ResourceManager->LoadAsync<TextureResource>(*entity.materialOverrides.texturePath);
+        if(entity.materialOverrides.shaderPath&&!entity.materialOverrides.shaderPath->empty())(void)m_ResourceManager->LoadAsync<ShaderResource>(*entity.materialOverrides.shaderPath);
         const std::string textureKey = AssetPaths::NormalizeAssetKey(entity.texturePath);
         if (!textureKey.empty() && textureKeys.insert(textureKey).second)
             (void)m_ResourceManager->LoadAsync<TextureResource>(textureKey);
@@ -439,6 +443,10 @@ void Application::SetupEcsRuntimeDemo()
     m_RenderSystem->SetInterpolation(&m_RenderInterpolation);
     m_RenderSystem->SetPhysicsDebugPose(m_PhysicsDebugPose);
     m_RenderSystem->SetInstancingEnabled(m_GpuInstancing);
+    m_RenderSystem->SetShadingModelOverride(m_ShadingModelOverride);m_RenderSystem->SetTextureMapMask(m_PbrTextureMask);
+    m_RenderSystem->SetLightingSettings(&m_LightingSettings);m_RenderSystem->SetLightRenderingMode(m_LightMode);
+    m_RenderSystem->SetEnvironmentSettings(&m_EnvironmentSettings);
+    m_RenderSystem->SetShadowSettings(&m_ShadowSettings);
     m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled);
 
     m_EcsDebugEntities.clear();
@@ -732,6 +740,12 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
 {
     const ecs::Entity entity = m_World.CreateEntity();
     const std::size_t entityOrdinal = m_EcsDebugEntities.size();
+    if(entityCfg.light){
+        auto& t=m_World.AddComponent<ecs::TransformComponent>(entity);
+        t.position=entityCfg.position;t.rotation=entityCfg.rotation;t.scale=entityCfg.scale;
+        m_World.AddComponent<ecs::TagComponent>(entity).name=entityCfg.tag;
+        ecs::AddSceneLight(m_World,entity,*entityCfg.light);return entity;
+    }
 
     auto& transform = m_World.AddComponent<ecs::TransformComponent>(entity);
     transform.position = entityCfg.position;
@@ -749,13 +763,16 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     meshRenderer.meshPath = entityCfg.meshPath;
     meshRenderer.visible = entityCfg.visible;
 
-    if (!entityCfg.materialPath.empty() ||
+    if (!entityCfg.slotMaterials.empty() || entityCfg.materialOverrides.shaderPath || entityCfg.materialOverrides.texturePath ||
+        entityCfg.materialOverrides.doubleSided || entityCfg.materialOverrides.castShadows || entityCfg.materialOverrides.receiveShadows ||
+        !entityCfg.materialPath.empty() ||
         !entityCfg.texturePath.empty() ||
         !entityCfg.shaderPath.empty() ||
         HasNonDefaultTint(entityCfg.materialTint))
     {
         auto& material = m_World.AddComponent<ecs::MaterialComponent>(entity);
         material.materialPath = entityCfg.materialPath;
+        material.slotMaterials=entityCfg.slotMaterials;material.overrides=entityCfg.materialOverrides;
         material.texturePath = entityCfg.texturePath;
         material.shaderPath = entityCfg.shaderPath;
         for (std::size_t i = 0; i < entityCfg.materialTint.size(); ++i)
@@ -1285,10 +1302,12 @@ int Application::Run()
 #endif
     }
     std::vector<RenderDiagnosticSample> renderSamples;
-    if(m_RenderBenchmark)renderSamples.reserve(1200);
+    if(m_RenderBenchmark)renderSamples.reserve(m_ShadowBenchmark?1800:(m_LightingBenchmark?2400:1200));
     std::vector<PhysicsDiagnosticSample> samples;
     if (!m_DiagnosticOutput.empty()) samples.reserve(m_FrameLimit ? std::min(m_FrameLimit, 50000u) : 1000);
     const char* diagnosticPhase = "Visual";
+    const auto lifecycleShadowSettings=m_ShadowSettings;
+    const auto lifecycleEnvironmentSettings=m_EnvironmentSettings;
     std::uint32_t frameCount = 0;
     while (m_IsRunning)
     {
@@ -1296,7 +1315,18 @@ int Application::Run()
         const auto frameStart = std::chrono::steady_clock::now();
         const auto currentFrame = frameCount++;
         ZoneScopedN("Frame");
-        if(m_RenderBenchmark)SetGpuInstancingEnabled(currentFrame>=100 && ((currentFrame-100)/300)%2==1);
+        if(m_RenderBenchmark) {
+            if(m_IblBenchmark&&!m_IblBenchmarkStart&&!m_Windows.empty()&&m_Windows.front().renderer->GetEnvironmentDiagnostics().gpuBytes){m_IblBenchmarkStart=currentFrame+100;m_FrameLimit=m_IblBenchmarkStart+2400;}
+            const auto warmup=m_IblBenchmark?m_IblBenchmarkStart:100;
+            const auto block=currentFrame>=warmup?(currentFrame-warmup)/300:0;
+            if(!m_LightBenchmark&&!m_PbrTexturesBenchmark&&!m_IblBenchmark)SetGpuInstancingEnabled(currentFrame>=100 && block%2==1);
+            if(m_IblBenchmark){unsigned mask=(!m_IblBenchmarkStart||currentFrame<m_IblBenchmarkStart)?3:block%4;m_EnvironmentSettings.enabled=mask!=0;m_EnvironmentSettings.diffuse=(mask&1)!=0;m_EnvironmentSettings.specular=(mask&2)!=0;}
+            if(m_LightBenchmark)SetLightRenderingMode(block%2?LightRenderingMode::Tiled:LightRenderingMode::Forward);
+            if(m_LightingBenchmark)m_LightingSettings.enabled=block%4>=2;
+            if(m_PbrTexturesBenchmark){const unsigned masks[]={0,1,6,7};SetPbrTextureMask(masks[block%4]);SetShadingModelOverride(1);m_LightingSettings.enabled=true;m_ShadowSettings.enabled=true;m_ShadowSettings.pcf=true;}
+            if(m_PbrBenchmark){SetGpuInstancingEnabled(true);SetShadingModelOverride(block%2);m_LightingSettings.enabled=true;m_ShadowSettings.enabled=true;m_ShadowSettings.pcf=true;}
+            if(m_ShadowBenchmark){m_LightingSettings.enabled=true;m_ShadowSettings.enabled=block%6>=2;m_ShadowSettings.pcf=block%6>=4;}
+        }
         if (m_DiagnosticLifecycle) {
             switch (currentFrame) {
             case 0: SetupPhysicsStressScene(500); SetEditorPlayMode(true); diagnosticPhase = "InitialDrop"; break;
@@ -1312,6 +1342,10 @@ int Application::Run()
                 if (auto* window = dynamic_cast<GlfwWindow*>(GetWindow()))
                     glfwSetWindowShouldClose(window->GetGlfwHandle(), GLFW_TRUE);
                 break;
+            }
+            if(m_EnvironmentSettings!=lifecycleEnvironmentSettings){Logger::Get().Error("Diagnostics: lifecycle changed environment settings");return 3;}
+            if(m_ShadowSettings!=lifecycleShadowSettings) {
+                Logger::Get().Error("Diagnostics: lifecycle changed shadow settings");return 3;
             }
             // These checks use the same public operations as the ImGui panel.
             if (currentFrame == 612 && (GetStressEntityCount() != 0 || m_World.GetAliveCount() != 0)) {
@@ -1519,6 +1553,21 @@ int Application::Run()
                     m_EditorLayer.Render(*this, wc.renderer.get(), dt);
                 }
 
+                // Diagnostics own the comparison switches after editor input as well.
+                // Ordinary runs continue to apply UI edits immediately.
+                if(m_LightingBenchmark||m_ShadowBenchmark||m_PbrBenchmark||m_PbrTexturesBenchmark) {
+                    if(m_IblBenchmark&&!m_IblBenchmarkStart&&!m_Windows.empty()&&m_Windows.front().renderer->GetEnvironmentDiagnostics().gpuBytes){m_IblBenchmarkStart=currentFrame+100;m_FrameLimit=m_IblBenchmarkStart+2400;}
+            const auto warmup=m_IblBenchmark?m_IblBenchmarkStart:100;
+            const auto block=currentFrame>=warmup?(currentFrame-warmup)/300:0;
+                    if(!m_LightBenchmark&&!m_PbrTexturesBenchmark&&!m_IblBenchmark)SetGpuInstancingEnabled(currentFrame>=100 && block%2==1);
+                    if(m_IblBenchmark){unsigned mask=(!m_IblBenchmarkStart||currentFrame<m_IblBenchmarkStart)?3:block%4;m_EnvironmentSettings.enabled=mask!=0;m_EnvironmentSettings.diffuse=(mask&1)!=0;m_EnvironmentSettings.specular=(mask&2)!=0;}
+            if(m_LightBenchmark)SetLightRenderingMode(block%2?LightRenderingMode::Tiled:LightRenderingMode::Forward);
+            if(m_LightingBenchmark)m_LightingSettings.enabled=block%4>=2;
+            if(m_PbrTexturesBenchmark){const unsigned masks[]={0,1,6,7};SetPbrTextureMask(masks[block%4]);SetShadingModelOverride(1);m_LightingSettings.enabled=true;m_ShadowSettings.enabled=true;m_ShadowSettings.pcf=true;}
+            if(m_PbrBenchmark){SetGpuInstancingEnabled(true);SetShadingModelOverride(block%2);m_LightingSettings.enabled=true;m_ShadowSettings.enabled=true;m_ShadowSettings.pcf=true;}
+                    if(m_ShadowBenchmark){m_LightingSettings.enabled=true;m_ShadowSettings.enabled=block%6>=2;m_ShadowSettings.pcf=block%6>=4;}
+                }
+
                 const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
                 const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();
                 const bool renderSceneToViewport =
@@ -1569,10 +1618,13 @@ int Application::Run()
                     wc.renderer->RenderEditorUiFrame();
 
                 wc.renderer->EndFrame();
+                if(!m_FrameCaptureOutput.empty()&&m_FrameLimit&&currentFrame+1==m_FrameLimit)
+                    if(!wc.renderer->SaveFrameImage(m_FrameCaptureOutput))Logger::Get().Warn("Frame capture unavailable");
 
                 {
                     ZoneScopedN("Present");
                     wc.renderer->Present();
+                    m_LastGpuTimings=wc.renderer->GetGpuTimings();
                 }
 
                 if (m_RenderSystem != nullptr)
@@ -1584,9 +1636,9 @@ int Application::Run()
             const double frameMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frameStart).count();
             samples.push_back({diagnosticPhase, m_PhysicsSystem->IsParallel(), currentFrame, frameMs, m_PhysicsFrame.physics, m_PhysicsFrame});
         }
-        if(m_RenderBenchmark && currentFrame>=100 && m_RenderSystem) {
+        if(m_RenderBenchmark && currentFrame>=(m_IblBenchmark?m_IblBenchmarkStart:100) && (!m_IblBenchmark||m_IblBenchmarkStart) && m_RenderSystem) {
             const auto ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-frameStart).count();
-            renderSamples.push_back({currentFrame,m_GpuInstancing,ms,m_RenderSystem->GetStatistics()});
+            renderSamples.push_back({currentFrame,m_GpuInstancing,ms,m_RenderSystem->GetStatistics(),m_LightingSettings.enabled,m_ShadowSettings.enabled,m_ShadowSettings.pcf,m_ShadowSettings.resolution,m_LastGpuTimings,m_ShadingModelOverride,m_PbrTextureMask,unsigned(m_EnvironmentSettings.enabled?((m_EnvironmentSettings.diffuse?1:0)|(m_EnvironmentSettings.specular?2:0)):0),m_Windows.empty()?EnvironmentDiagnostics{}:m_Windows.front().renderer->GetEnvironmentDiagnostics(),GetLightDiagnostics()});
         }
         FrameMark;
     }
@@ -1705,6 +1757,7 @@ void Application::SetupRenderStressScene()
 
 void Application::ClearPhysicsStressScene()
 {
+    ecs::ClearSceneLights(m_World);std::erase_if(m_EcsDebugEntities,[&](auto e){return !m_World.IsAlive(e);});m_EditorLayer.ResetHistory();
     ResetPhysicsClock();
     ecs::ClearPhysicsStressScene(m_World, m_StressEntities);
     m_ActiveCollisionPairs.clear();
@@ -1724,6 +1777,99 @@ void Application::SetupPhysicsStressScene(int count)
     m_Camera.farPlane = 150.0f;
     Logger::Get().Info("Physics stress scene: " + std::to_string(m_StressEntities.size() - 1) + " visible cubes");
 }
+void Application::SetupMaterialDemoScene(int copies)
+{
+    ClearPhysicsStressScene();for(auto entity:m_EcsDebugEntities)m_World.DestroyEntity(entity);m_EcsDebugEntities.clear();
+    copies=std::clamp(copies,1,500);
+    for(int i=0;i<copies;++i)for(int model=0;model<2;++model) {
+        EcsDemoEntityConfig config;config.tag=(model?"glTF":"OBJ")+std::string(" Material Slots ")+std::to_string(i);
+        config.meshPath=model?"models/material_slots.gltf":"models/material_slots.obj";
+        config.scale={1,1,1};config.simulatePhysics=false;config.useGravity=false;config.bounce=false;
+        config.position=copies==1?ecs::Vec3{model?1.5f:-1.5f,0,3}:ecs::Vec3{(i%10-4.5f)*6.f+model*2.8f,(i/100)*2.f,10.f+(i/10%10)*3.f};
+        m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(config));
+    }
+    m_Camera.position=copies==1?ecs::Vec3{0,0,2}:ecs::Vec3{22,20,-12};
+    m_Camera.yaw=copies==1?0:std::atan2(-22.f,42.f);m_Camera.pitch=copies==1?0:-.35f;m_Camera.farPlane=150;
+    if(m_ResourceManager){(void)m_ResourceManager->LoadAsync<MeshResource>("models/material_slots.obj");(void)m_ResourceManager->LoadAsync<MeshResource>("models/material_slots.gltf");(void)m_ResourceManager->LoadAsync<ShaderResource>("dx12/textured.hlsl");}
+}
+
+void Application::SetupPbrDemoScene()
+{
+    ClearPhysicsStressScene();for(auto entity:m_EcsDebugEntities)m_World.DestroyEntity(entity);m_EcsDebugEntities.clear();
+    for(int row=0;row<3;++row)for(int column=0;column<5;++column) {
+        EcsDemoEntityConfig config;config.tag="PBR metallic="+std::to_string(row*.5f)+" roughness="+std::to_string(.1f+column*.2f);
+        config.meshPath="models/pbr_sphere.obj";config.shaderPath="dx12/textured.hlsl";config.texturePath="defaults/texture";
+        config.position={float(column-2)*2.5f,float(2-row)*2.5f+1,8};config.scale={1,1,1};
+        config.simulatePhysics=false;config.useGravity=false;config.bounce=false;
+        config.materialTint[0]=.9f;config.materialTint[1]=.55f;config.materialTint[2]=.22f;
+        config.materialOverrides.shadingModel=ShadingModel::PBR;config.materialOverrides.metallic=row*.5f;config.materialOverrides.roughness=.1f+column*.2f;
+        m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(config));
+    }
+    EcsDemoEntityConfig floor;floor.tag="PBR floor";floor.meshPath="models/validation_cube.obj";floor.texturePath="defaults/texture";floor.shaderPath="dx12/textured.hlsl";
+    floor.position={0,-.15f,8};floor.scale={18,.3f,12};floor.simulatePhysics=false;floor.useGravity=false;floor.bounce=false;
+    floor.materialOverrides.shadingModel=ShadingModel::PBR;floor.materialOverrides.roughness=.8f;
+    m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(floor));
+    m_Camera.position={0,4,-8};m_Camera.yaw=0;m_Camera.pitch=-.06f;m_Camera.farPlane=150;
+    m_LightingSettings.directional.direction={-.3f,-.5f,1};m_LightingSettings.directional.color={1,1,1};m_LightingSettings.directional.intensity=2;
+    m_LightingSettings.ambientIntensity=.15f;m_ShadowSettings.enabled=true;
+    if(m_ResourceManager)(void)m_ResourceManager->LoadAsync<MeshResource>("models/pbr_sphere.obj");
+    SetShadingModelOverride(-1);SetEditorPlayMode(false);
+}
+
+void Application::SetupPbrTexturesBenchmarkScene(int count)
+{
+    SetupPhysicsStressScene(count);SetEditorPlayMode(false);
+    m_World.ForEach<ecs::MeshRendererComponent,ecs::MaterialComponent>([](ecs::Entity,auto&,auto& material) {
+        material.overrides.shadingModel=ShadingModel::PBR;material.overrides.metallic=.7f;material.overrides.roughness=.7f;
+        material.overrides.normalTexturePath="textures/pbr_normal.png";
+        material.overrides.metallicRoughnessTexturePath="textures/pbr_orm.png";
+        material.overrides.occlusionTexturePath="textures/pbr_orm.png";
+    });
+}
+void Application::SetupPbrTexturesDemoScene()
+{
+    SetupPbrDemoScene();
+    m_World.ForEach<ecs::MeshRendererComponent,ecs::MaterialComponent>([](ecs::Entity,auto& mesh,auto& material) {
+        if(mesh.meshPath!="models/pbr_sphere.obj")return;
+        mesh.texturePath="textures/pbr_base.png";material.texturePath.clear();
+        material.overrides.normalTexturePath="textures/pbr_normal.png";
+        material.overrides.metallicRoughnessTexturePath="textures/pbr_orm.png";
+        material.overrides.occlusionTexturePath="textures/pbr_orm.png";
+        material.overrides.occlusionStrength=.8f;
+    });
+    for(int i=0;i<2;++i) {
+        EcsDemoEntityConfig config;config.tag=i?"Embedded glTF mirrored node":"External glTF authored tangent";
+        config.meshPath=i?"models/pbr_textures_embedded.gltf":"models/pbr_textures.gltf";
+        config.position={i?2.5f:-2.5f,8.5f,8};config.scale={1,1,1};config.simulatePhysics=false;config.useGravity=false;config.bounce=false;
+        m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(config));
+    }
+    m_Camera.position={0,5,-12};SetPbrTextureMask(7);
+}
+
+void Application::SetupShadowQualityDemoScene()
+{
+    ClearPhysicsStressScene();for(auto entity:m_EcsDebugEntities)m_World.DestroyEntity(entity);m_EcsDebugEntities.clear();
+    auto add=[&](const char* tag,const char* mesh,ecs::Vec3 position,ecs::Vec3 scale,ecs::Vec3 rotation,std::array<float,4> tint,bool imported=false) {
+        EcsDemoEntityConfig config;config.tag=tag;config.meshPath=mesh;config.position=position;config.scale=scale;config.rotation=rotation;
+        config.simulatePhysics=false;config.useGravity=false;config.bounce=false;
+        if(!imported){config.shaderPath="dx12/textured.hlsl";config.texturePath="defaults/texture";for(int i=0;i<4;++i)config.materialTint[i]=tint[i];}
+        if(std::string(mesh)=="models/shadow_inclined.obj")config.materialOverrides.doubleSided=true;
+        m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(config));
+        if(m_ResourceManager)(void)m_ResourceManager->LoadAsync<MeshResource>(mesh);
+    };
+    add("Receiver floor","models/validation_cube.obj",{0,-.1f,8},{18,.2f,18},{},{.7f,.7f,.7f,1});
+    add("Contact cube","models/validation_cube.obj",{-4,.5f,6},{1,1,1},{},{1,.6f,.2f,1});
+    add("Rotated nonuniform","models/validation_cube.obj",{-1,1.3f,6},{1.6f,1.2f,.8f},{.2f,.5f,.3f},{.4f,1,.5f,1});
+    add("Negative scale","models/validation_cube.obj",{2,.7f,6},{-1,1.4f,1},{0,.4f,0},{1,.4f,.4f,1});
+    add("Blue inclined plane","models/shadow_inclined.obj",{-4,1,10},{1,1,1},{},{.15f,.4f,1,1});
+    add("African head OBJ","models/african_head.obj",{0,1.3f,10},{1.2f,1.2f,1.2f},{},{.8f,.7f,.6f,1});
+    add("Sphere glTF","models/lighting_sphere.gltf",{3.7f,-1.6f,7.4f},{.65f,.65f,.65f},{},{.6f,.5f,1,1});
+    add("Material slots OBJ","models/material_slots.obj",{0,1,13},{1,1,1},{},{1,1,1,1},true);
+    add("Material slots glTF","models/material_slots.gltf",{3,1,13},{1,1,1},{},{1,1,1,1},true);
+    m_Camera.position={11,9,-3};m_Camera.yaw=std::atan2(-11.f,11.f);m_Camera.pitch=-.42f;m_Camera.farPlane=150;
+    SetEditorPlayMode(false);
+}
+
 void Application::RunAsyncResourceStressTest()
 {
     if (m_AsyncResourceStressStarted)
@@ -1847,4 +1993,42 @@ void Application::RunSyncResourceStressTest()
 
     Logger::Get().Info(
         "Sync resource stress: complete");
+}
+ecs::Entity Application::CreateLightEntity(LightType type){
+    EcsDemoEntityConfig c;c.tag=type==LightType::Directional?"Directional Light":type==LightType::Point?"Point Light":"Spot Light";
+    const float cp=std::cos(m_Camera.pitch);
+    c.position={m_Camera.position.x+3*std::sin(m_Camera.yaw)*cp,m_Camera.position.y+3*std::sin(m_Camera.pitch),m_Camera.position.z+3*std::cos(m_Camera.yaw)*cp};c.scale={1,1,1};
+    c.rotation=type==LightType::Directional?ecs::Vec3{1.1f,-.7f,0}:ecs::Vec3{-m_Camera.pitch,m_Camera.yaw,0};
+    c.light=SceneLightDescription{};c.light->type=type;c.light->parameters.castShadows=type==LightType::Directional;
+    c.simulatePhysics=false;c.bounce=false;auto e=SpawnEcsDemoEntity(c);m_EcsDebugEntities.push_back(e);return e;
+}
+bool Application::DestroySceneEntity(ecs::Entity e){bool result=m_World.DestroyEntity(e);std::erase(m_EcsDebugEntities,e);std::erase(m_StressEntities,e);return result;}
+void Application::SetupIblDemoScene(){SetupPbrTexturesDemoScene();m_EnvironmentSettings.enabled=true;m_EnvironmentSettings.toneMapping=true;m_LightingSettings.directional.enabled=false;m_LightingSettings.ambientIntensity=0;SetEditorPlayMode(false);}
+
+void Application::SetupIblBenchmarkScene(int count){SetupPbrTexturesBenchmarkScene(count);m_EnvironmentSettings.enabled=true;SetShadingModelOverride(1);m_ResourceManager->LoadAsync<EnvironmentResource>(m_EnvironmentSettings.assetPath);}
+
+void Application::SetupLightStressScene(int count,bool overlapping,int objects)
+{
+    count=std::clamp(count,0,16384);SetupPbrTexturesBenchmarkScene(objects);
+    m_LightingSettings.enabled=true;m_LightingSettings.directional.enabled=false;m_LightingSettings.ambientIntensity=0;
+    m_ShadowSettings.enabled=false;m_EnvironmentSettings.enabled=true;m_EnvironmentSettings.intensity=.15f;SetShadingModelOverride(1);
+    for(int i=0;i<count;++i){
+        auto type=i%3==0?LightType::Spot:LightType::Point;auto e=CreateLightEntity(type);
+        auto& t=*m_World.GetComponent<ecs::TransformComponent>(e);
+        t.position=overlapping?ecs::Vec3{0,7,30}:ecs::Vec3{float(i%20-10)*1.2f,3+float(i/400)*1.5f,19+float(i/20%20)*1.2f};
+        t.rotation={1.570796327f,0,0};auto& l=*ecs::GetLightParameters(m_World,e);
+        l.range=overlapping?45.f:3.f;l.intensity=overlapping?12.f/std::max(1,count):4.f;
+        l.color={i%3==0?1.f:.2f,i%3==1?1.f:.2f,i%3==2?1.f:.2f};l.innerAngle=25;l.outerAngle=45;
+    }
+    m_EditorLayer.ResetHistory();
+}
+
+void Application::SetupLightDemoScene(){
+    SetupIblDemoScene();m_EnvironmentSettings.intensity=.25f;m_ShadowSettings.enabled=true;
+    auto dir=CreateLightEntity(LightType::Directional);auto& d=*m_World.GetComponent<ecs::DirectionalLightComponent>(dir);d.primary=true;d.intensity=.7f;
+    auto& dt=*m_World.GetComponent<ecs::TransformComponent>(dir);dt.position={-4,5,8};dt.rotation={1.1f,-.7f,0};
+    auto point=CreateLightEntity(LightType::Point);auto& p=*m_World.GetComponent<ecs::PointLightComponent>(point);p.range=8;p.color={1,.15f,.04f};p.intensity=18;
+    m_World.GetComponent<ecs::TransformComponent>(point)->position={-2,3,6};
+    auto spot=CreateLightEntity(LightType::Spot);auto& l=*m_World.GetComponent<ecs::SpotLightComponent>(spot);l.range=12;l.color={.08f,.3f,1};l.intensity=30;l.innerAngle=20;l.outerAngle=40;
+    auto& t=*m_World.GetComponent<ecs::TransformComponent>(spot);t.position={3,5,4};t.rotation={.7f,-.35f,0};m_EditorLayer.ResetHistory();m_EditorLayer.SelectEntity(spot);
 }

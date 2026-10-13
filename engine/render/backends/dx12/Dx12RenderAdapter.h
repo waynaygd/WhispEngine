@@ -1,3 +1,5 @@
+#include <map>
+#include <cstring>
 #pragma once
 #include "../../IRenderAdapter.h"
 
@@ -41,13 +43,72 @@ public:
 	void BindShader(RenderShaderHandle handle) override;
 	void BindTexture(std::uint32_t slot, RenderTextureHandle handle) override;
 	void DrawMesh(RenderMeshHandle handle) override;
+    void SetEnvironmentSettings(const EnvironmentSettings& s) override {m_EnvironmentSettings=SanitizeEnvironment(s);}
+    void SetSceneLights(std::span<const GpuSceneLight>,LightRenderingMode,const SceneLightDiagnostics& = {}) override;
+    SceneLightDiagnostics GetSceneLightDiagnostics() const override {return m_SceneLightDiagnostics;}
+    std::vector<std::uint32_t> ReadBackLightTiles();
+    bool UploadEnvironment(const EnvironmentResource&,std::uint64_t) override;
+    void ReleaseEnvironment() override;
+    EnvironmentDiagnostics GetEnvironmentDiagnostics() const override {return m_EnvironmentDiagnostics;}
+    std::vector<float> ReadBackHdrPixels();
+    std::vector<float> ReadBackEnvironment(unsigned resource,unsigned subresource=0);
+    void SetSurfaceParameters(const std::array<float,4>& p) override { m_Surface=p; }
+    void SetTextureParameters(const std::array<float,4>& p) override { m_TextureParameters=p; }
+    void SetBaseColor(const std::array<float,4>& p) override { m_BaseColor=p; }
+    void SetCameraPosition(const std::array<float,4>& p) override { if(std::memcmp(m_Camera.data(),p.data(),sizeof(p))!=0){m_Camera=p;m_FrameConstantsDirty=true;} }
+    void SetLighting(const LightingConstants& c) override { if(std::memcmp(&m_Lighting,&c,sizeof(c))!=0){m_Lighting=c;m_FrameConstantsDirty=true;} }
+    void SetNormalMatrix(const std::array<float,12>& n) override { m_Normal=n; }
     bool SupportsInstancing(RenderShaderHandle handle) const override;
     bool DrawMeshInstanced(RenderMeshHandle handle, std::span<const RenderInstanceData> instances) override;
     RenderSubmissionStatistics GetSubmissionStatistics() const override;
     // Diagnostics only, after EndFrame and before Present; waits for readback.
     std::vector<std::uint8_t> ReadBackFramePixels();
+    std::vector<std::uint8_t> ReadBackViewportPixels();
+
+
+    void SetMeshRange(const RenderMeshRange& range) override {m_MeshRange=range;}
+    void SetMaterialState(const MaterialRenderState& state) override {m_MaterialState=state;}
+    void SetModelMatrix(const std::array<float,16>& m) override { m_Model=m; }
+    bool BeginShadowPass(const ShadowFrame&) override;
+    void DrawShadowMesh(RenderMeshHandle,const RenderInstanceData&) override;
+    bool DrawShadowMeshInstanced(RenderMeshHandle,std::span<const RenderInstanceData>) override;
+    void EndShadowPass() override;
+    void BeginMainPass() override;
+    void EndMainPass() override;
+    std::uint64_t GetShadowPreviewTextureId() const override;
+    RenderGpuTimings GetGpuTimings() const override { return m_GpuTimings; }
+    std::vector<float> ReadBackShadowDepth();
+    unsigned GetValidationErrorCount() const;
+    void ReleaseShadowResources();
+    bool SaveFrameImage(const std::string&) override;
 
 private:
+    struct LightFrameResources {
+        Microsoft::WRL::ComPtr<ID3D12Resource> lights,counts,indices,stats,readback;
+        std::uint64_t lightCapacity=0,tileCapacity=0;
+        bool pending=false,optimized=false;
+        UINT count=0,tilesX=1,tilesY=1,width=1,height=1;
+    };
+    std::vector<LightFrameResources> m_LightFrames[2];
+    std::vector<GpuSceneLight> m_PendingLights;
+    SceneLightDiagnostics m_SceneLightDiagnostics;
+    LightRenderingMode m_LightMode=LightRenderingMode::Tiled;
+    UINT m_LightPassCursor=0,m_ActiveLightPass=UINT_MAX;
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_LightCullRoot;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_LightCullPso;
+    Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_LightTimeHeap;
+    bool m_LightCullAttempted=false;
+    std::string m_LightCullError;
+    static constexpr UINT LightTileCapacity=256,MaxLightPasses=32,MaxSceneLights=16384;
+    void PrepareSceneLights();
+    void BindSceneLights();
+    void CollectSceneLights(UINT);
+    void ReleaseSceneLights();
+    bool EnsureLightCulling();
+    RenderMeshRange m_MeshRange;
+    MaterialRenderState m_MaterialState;
+    std::array<float,4> m_Surface{0,.5f,0,0},m_BaseColor{1,1,1,1},m_Camera{0,0,-2.25f,0};
+    UINT MaterialIndexCount(UINT total) const {return m_MeshRange.firstIndex<=total?(m_MeshRange.indexCount?((m_MeshRange.indexCount<=total-m_MeshRange.firstIndex)?m_MeshRange.indexCount:0):total-m_MeshRange.firstIndex):0;}
 	bool CreateDevice(HWND hwnd);
 	bool CreateCommandObjects();
 	bool CreateSwapchain(HWND hwnd);
@@ -74,6 +135,47 @@ private:
 	static constexpr UINT FrameCount = 2;
     static constexpr UINT MaxDrawsPerFrame = 2048;
 
+
+    bool EnsureShadowPipeline(const ShadowSettings&);
+    bool EnsureShadowTarget(UINT);
+    void BindShadows();
+    bool UploadInstances(std::span<const RenderInstanceData>,D3D12_VERTEX_BUFFER_VIEW&);
+    void InitializeGpuTiming();
+    void CollectGpuTiming(UINT);
+    void ShadowTimestamp(UINT);
+    struct ShadowTarget {
+        Microsoft::WRL::ComPtr<ID3D12Resource> depth;
+        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> heap;
+        D3D12_CPU_DESCRIPTOR_HANDLE dsv{};
+        D3D12_GPU_DESCRIPTOR_HANDLE srv{};
+        UINT descriptor=UINT_MAX,resolution=0;
+    };
+    ShadowTarget m_ShadowTargets[FrameCount];
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_ShadowRoot;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_ShadowPso,m_ShadowInstancePso,m_ShadowDoublePso,m_ShadowDoubleInstancePso;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_ShadowMirrorPso,m_ShadowMirrorInstancePso;
+    Microsoft::WRL::ComPtr<ID3DBlob> m_ShadowVs,m_ShadowInstanceVs;
+    int m_ShadowDepthBias=-1;
+    float m_ShadowSlopeBias=-1;
+    std::string m_LastShadowError;
+    bool m_ShadowResourceWarning=false;
+    ShadowConstants m_ShadowConstants{};
+    UINT m_NullShadowDescriptor=UINT_MAX;
+    D3D12_GPU_DESCRIPTOR_HANDLE m_NullShadowSrv{};
+    bool m_ShadowActive=false,m_PreparedScene=false;
+    UINT m_LastShadowSlot=0;
+    std::array<float,16> m_Model{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+    struct CachedInstances { const RenderInstanceData* data; std::size_t count; D3D12_VERTEX_BUFFER_VIEW view; };
+    std::vector<CachedInstances> m_CachedInstances;
+    static constexpr UINT TimingQueries=66;
+    Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_TimeHeap;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_TimeReadback[FrameCount];
+    UINT64 m_TimeFrequency=0;
+    UINT m_TimePassCount=0,m_TimeCurrentPass=UINT_MAX;
+    UINT m_TimePending[FrameCount]{};
+    bool m_TimeOverflow=false,m_TimeComplete[FrameCount]{};
+    RenderGpuTimings m_GpuTimings{};
+
 	struct UploadedMesh
 	{
 		Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer;
@@ -88,6 +190,7 @@ private:
 		Microsoft::WRL::ComPtr<ID3D12Resource> texture;
 		UINT width = 0;
 		UINT height = 0;
+        UINT64 allocationBytes=0;
 		UINT descriptorIndex = 0;
 		D3D12_CPU_DESCRIPTOR_HANDLE cpuSrvHandle{};
 		D3D12_GPU_DESCRIPTOR_HANDLE gpuSrvHandle{};
@@ -97,7 +200,11 @@ private:
 	{
 		Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature;
 		Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineState;
+        bool srgbBaseColor=false;
+        std::array<Microsoft::WRL::ComPtr<ID3D12PipelineState>,6> hdrStates;
         Microsoft::WRL::ComPtr<ID3D12PipelineState> instancedPipelineState;
+        Microsoft::WRL::ComPtr<ID3D12PipelineState> doublePipelineState,doubleInstancedPipelineState;
+        Microsoft::WRL::ComPtr<ID3D12PipelineState> mirrorPipelineState,mirrorInstancedPipelineState;
 	};
 
 	struct ViewportTarget
@@ -112,6 +219,7 @@ private:
 		D3D12_GPU_DESCRIPTOR_HANDLE srvGpu{};
 		UINT width = 0;
 		UINT height = 0;
+        UINT64 allocationBytes=0;
 		UINT srvDescriptorIndex = UINT_MAX;
 		bool rendering = false;
 	};
@@ -166,14 +274,56 @@ private:
         std::uint8_t* mapped=nullptr;
         std::size_t capacity=0,used=0;
     };
+    void BindFrameConstants();
+    std::vector<InstancePage> m_FrameConstantPages[FrameCount];
+    std::size_t m_FrameConstantPageIndex=0;
+    D3D12_GPU_VIRTUAL_ADDRESS m_FrameConstantAddress=0;
+    std::array<std::uint8_t,768> m_LastFrameConstants{};
+    bool m_FrameConstantsDirty=true;
     std::vector<InstancePage> m_InstancePages[FrameCount];
     std::size_t m_InstancePageIndex=0;
     UINT64 m_InstanceFrameFence[FrameCount]{};
     RenderSubmissionStatistics m_SubmissionStatistics;
     bool m_FrameRecording=false;
+    struct EnvironmentGpu {
+        std::array<Microsoft::WRL::ComPtr<ID3D12Resource>,4> textures;
+        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptors;
+    };
+    EnvironmentGpu m_EnvironmentGpu;
+    EnvironmentSettings m_EnvironmentSettings;
+    EnvironmentDiagnostics m_EnvironmentDiagnostics;
+    D3D12_GPU_DESCRIPTOR_HANDLE m_EnvironmentTable{};
+    bool BindEnvironment();
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_CachedBrdfGpu;
+    void InitializeEnvironmentFallback();
+    struct HdrTarget {
+        Microsoft::WRL::ComPtr<ID3D12Resource> color;
+        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptors,rtvs;
+        D3D12_CPU_DESCRIPTOR_HANDLE rtv{};
+        UINT width=0,height=0;
+    };
+    HdrTarget m_HdrTargets[FrameCount];
+    bool m_HdrActive=false;
+    float m_SceneClear[4]={.08f,.08f,.12f,1};
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_OutputRoot;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_OutputPso;
+    void BeginHdrScene();
+    void EndHdrScene();
+    void ReleaseHdrTargets();
+    std::vector<float> ReadBackFloatTexture(ID3D12Resource*,unsigned,unsigned);
+
     std::vector<Microsoft::WRL::ComPtr<IUnknown>> m_RetiredResources[FrameCount];
     std::vector<UINT> m_RetiredTextureDescriptors[FrameCount];
 	static constexpr UINT MaxTextures = 128;
+    static constexpr UINT MaterialTablesPerFrame=8192;
+    std::map<std::array<std::uint64_t,5>,D3D12_GPU_DESCRIPTOR_HANDLE> m_MaterialTables;
+    UINT m_MaterialTableCount=0;
+    std::array<std::uint64_t,5> m_LastMaterialTableKey{};
+    D3D12_GPU_DESCRIPTOR_HANDLE m_LastMaterialTable{};
+    unsigned m_MaterialAvailableMaps=0;
+    std::array<RenderTextureHandle,3> m_BoundMaps{};
+    std::array<float,4> m_TextureParameters{1,1,0,1};
+    bool BindMaterialTextures(bool srgb);
 	std::unordered_map<std::uint64_t, UploadedMesh> m_UploadedMeshes;
 	std::uint64_t m_NextMeshHandle = 1;
 	std::unordered_map<std::uint64_t, UploadedTexture> m_UploadedTextures;
@@ -193,6 +343,8 @@ private:
 		0,0,1,0,
 		0,0,0,1
 	};
+	LightingConstants m_Lighting{};
+    std::array<float,12> m_Normal{1,0,0,0,0,1,0,0,0,0,1,0};
 	float m_PendingColor[4] = { 1,1,1,1 };
 };
 #endif

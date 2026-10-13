@@ -1,7 +1,10 @@
 #pragma once
+#include "../render/SceneLights.h"
+#include <optional>
 #include <array>
 #include <string>
 #include <vector>
+#include "../resources/MaterialResource.h"
 
 #include "../ecs/MathTypes.h"
 #include "../ecs/components/MeshRendererComponent.h"
@@ -18,11 +21,14 @@ struct WindowConfig
 
 struct EcsDemoEntityConfig
 {
+    std::optional<SceneLightDescription> light;
     std::string tag;
     std::string meshPath;
     std::string texturePath;
     std::string shaderPath;
     std::string materialPath;
+    std::vector<std::string> slotMaterials;
+    MaterialOverrides materialOverrides;
     std::array<float, 4> materialTint = { 1.0f, 1.0f, 1.0f, 1.0f };
     bool visible = true;
     bool bounce = true;
