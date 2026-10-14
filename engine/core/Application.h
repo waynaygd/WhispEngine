@@ -11,6 +11,8 @@
 #include "FixedStepClock.h"
 #include "PhysicsFrameStatistics.h"
 #include "../ecs/World.h"
+#include "../ecs/MutationQueue.h"
+#include "../scene/SceneSettings.h"
 #include "../ecs/systems/PhysicsSystem.h"
 #include "../ecs/systems/RenderSystem.h"
 #include "../render/RenderFactory.h"
@@ -47,9 +49,13 @@ public:
     }
 
     IWindow* GetWindow() { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
+    IRenderAdapter* GetRenderAdapter(){return m_Windows.empty()?nullptr:m_Windows.front().renderer.get();}
     editor::EditorLayer& GetEditorLayer(){return m_EditorLayer;}
-    ecs::World& GetWorld() { return m_World; }
-    const ecs::World& GetWorld() const { return m_World; }
+    ecs::World& GetWorld() { return m_RuntimeWorld?*m_RuntimeWorld:m_World; }
+    ecs::World& GetEditorWorld(){return m_World;}
+    ecs::MutationQueue& GetMutationQueue(){return m_Mutations;}
+    void ApplyStructuralCommands(){if(m_Mutations.Apply(GetWorld())&&m_PhysicsSystem)m_PhysicsSystem->ResetState();}
+    const ecs::World& GetWorld() const { return m_RuntimeWorld?*m_RuntimeWorld:m_World; }
     ResourceManager* GetResourceManager() { return m_ResourceManager.get(); }
     const ResourceManager* GetResourceManager() const { return m_ResourceManager.get(); }
     void EnterGameplayScene();
@@ -68,6 +74,11 @@ public:
     float GetCameraFarPlane() const { return m_Camera.farPlane; }
     bool IsEditorPlayMode() const { return m_EditorPlayMode; }
     void SetEditorPlayMode(bool enabled);
+    void SetEditorPaused(bool paused);
+    bool IsEditorPaused()const{return m_EditorPaused;}
+    bool IsSimulationRunning()const{return m_EditorPlayMode&&!m_EditorPaused;}
+    ecs::Entity MapToRuntime(ecs::Entity editorEntity)const{auto i=m_CloneMapping.find(editorEntity);return i==m_CloneMapping.end()||!m_RuntimeWorld||!m_RuntimeWorld->IsAlive(i->second)?ecs::Entity{}:i->second;}
+    double GetLastWorldCloneMs()const{return m_LastCloneMs;}
     void SetupMaterialDemoScene(int copies=1);
     void SetupShadowQualityDemoScene();
     void SetupPbrDemoScene();
@@ -107,7 +118,7 @@ public:
     float GetFrameDeltaTime() const { return m_Time.GetFrameDeltaTime(); }
     const PhysicsFrameStatistics& GetPhysicsFrameStatistics() const { return m_PhysicsFrame; }
     ecs::RenderInterpolation& GetRenderInterpolation() { return m_RenderInterpolation; }
-    void NotifyTeleport(ecs::Entity entity) { m_RenderInterpolation.ResetEntity(m_World, entity); }
+    void NotifyTeleport(ecs::Entity entity) { m_RenderInterpolation.ResetEntity(GetWorld(), entity); }
     bool IsPhysicsDebugPose() const { return m_PhysicsDebugPose; }
     void SetPhysicsDebugPose(bool enabled) { m_PhysicsDebugPose = enabled; if(m_RenderSystem) m_RenderSystem->SetPhysicsDebugPose(enabled); }
     void SetFrameLimit(std::uint32_t frames) { m_FrameLimit = frames; }
@@ -122,6 +133,18 @@ public:
     bool IsInputActionActive(const std::string& action) const;
     bool SaveCurrentScene(std::string* outError = nullptr);
     bool LoadCurrentScene(std::string* outError = nullptr);
+    bool SaveSceneAs(const std::string& key,bool overwrite=false,std::string* error=nullptr);
+    bool OpenScene(const std::string& key,std::string* error=nullptr);
+    void NewScene();
+    const std::string& GetSceneKey()const{return m_SceneKey;}
+    SceneSettings GetSceneSettings()const;
+    bool SetSceneSettings(const SceneSettings&,std::string* error=nullptr);
+    ecs::Entity CreateEmptyEntity(const std::string& name="Entity");
+    void NotifyEditorMutation(ecs::Entity entity={});
+    void FocusEntity(ecs::Entity entity);
+    void SetCameraNavigation(float speed,float sensitivity){m_Camera.moveSpeed=std::clamp(speed,.2f,25.f);m_Camera.mouseSensitivity=std::clamp(sensitivity,.0001f,.02f);}
+    float GetCameraMoveSpeed()const{return m_Camera.moveSpeed;}
+    float GetCameraSensitivity()const{return m_Camera.mouseSensitivity;}
 
     void RequestStateChange(std::unique_ptr<IGameState> s);
 
@@ -190,7 +213,16 @@ private:
     std::unique_ptr<ResourceManager> m_ResourceManager;
     std::unique_ptr<JobSystem> m_JobSystem;
 
-    ecs::World m_World;
+    ecs::World m_World; // Editor data and shared system/GPU-cache owner.
+    std::unique_ptr<ecs::World> m_RuntimeWorld;
+    ecs::World::CloneMap m_CloneMapping;
+    ecs::MutationQueue m_Mutations;
+    std::vector<ecs::Entity> m_EditDebugEntities,m_EditStressEntities;
+    LightingSettings m_EditLighting;
+    EnvironmentSettings m_EditEnvironment;
+    ShadowSettings m_EditShadows;
+    bool m_EditorPaused=false;
+    double m_LastCloneMs=0;
     ecs::PhysicsSystem* m_PhysicsSystem = nullptr;
     ecs::RenderSystem* m_RenderSystem = nullptr;
     ecs::RenderInterpolation m_RenderInterpolation;
@@ -234,6 +266,7 @@ private:
     std::string m_DiagnosticOutput;
     std::string m_RenderDiagnosticOutput;
     std::string m_FrameCaptureOutput;
+    std::string m_SceneKey;
     bool m_RenderBenchmark=false;
     bool m_LightingBenchmark=false;
     bool m_ShadowBenchmark=false;

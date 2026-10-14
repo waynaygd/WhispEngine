@@ -1283,7 +1283,11 @@ static void FixedTimestepRegression()
         else for(std::size_t i=0;i<states.size();++i) {
             Require(Near(states[i].p,reference[i].p)&&Near(states[i].r,reference[i].r)&&Near(states[i].v,reference[i].v)&&Near(states[i].w,reference[i].w)&&states[i].sleeping==reference[i].sleeping,"fixed result depends on visual FPS/mode");
         }
-        Require(collisionEvents==referenceEvents,"fixed collision event sequence depends on render FPS/mode");
+        // Different simulation Worlds have different identities; compare the full local
+        // event sequence while independently checking ownership of every emitted handle.
+        for(const auto& event:collisionEvents)Require(event.first.world==scene.world.GetIdentity()&&event.second.world==scene.world.GetIdentity(),"collision event references a foreign World");
+        const auto sameLocal=[](Entity a,Entity b){return a.index==b.index&&a.generation==b.generation;};
+        Require(std::equal(collisionEvents.begin(),collisionEvents.end(),referenceEvents.begin(),referenceEvents.end(),[&](const auto& a,const auto& b){return sameLocal(a.first,b.first)&&sameLocal(a.second,b.second);}),"fixed collision event sequence depends on render FPS/mode");
         auto stall=clock.Advance(2.0);
         Require(stall.ticks==4 && std::abs(stall.droppedSeconds-(2.0-4.0/60))<1e-9,"slow frame policy");
         Require(clock.Accumulator()<FixedStepClock::TickSeconds && clock.Advance(0).ticks==0,"unbounded catch-up");

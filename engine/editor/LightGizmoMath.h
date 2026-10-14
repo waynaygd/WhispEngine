@@ -24,4 +24,13 @@ inline bool HitLightIcon(float x,float y,float u,float v,float width,float heigh
 {
     float dx=x-u*width,dy=y-v*height;return dx*dx+dy*dy<=radius*radius;
 }
+inline std::optional<std::array<float,4>> ProjectEditorLine(ecs::Vec3 a,ecs::Vec3 b,const LightCamera& c){
+    auto camera=[&](ecs::Vec3 p){const auto& m=c.view;return ecs::Vec3{m[0]*p.x+m[4]*p.y+m[8]*p.z+m[12],m[1]*p.x+m[5]*p.y+m[9]*p.z+m[13],m[2]*p.x+m[6]*p.y+m[10]*p.z+m[14]};};
+    a=camera(a);b=camera(b);float lo=0,hi=1,dz=b.z-a.z;
+    if(std::abs(dz)<1e-8f){if(a.z<c.nearPlane||a.z>c.farPlane)return {};}
+    else {float t0=(c.nearPlane-a.z)/dz,t1=(c.farPlane-a.z)/dz;if(t0>t1)std::swap(t0,t1);lo=std::max(lo,t0);hi=std::min(hi,t1);if(lo>hi)return {};}
+    auto point=[&](float t){float z=a.z+dz*t;return std::array<float,2>{.5f+.5f*c.projection[0]*(a.x+(b.x-a.x)*t)/z,.5f-.5f*c.projection[5]*(a.y+(b.y-a.y)*t)/z};};
+    auto x=point(lo),y=point(hi);for(float v:{x[0],x[1],y[0],y[1]})if(!std::isfinite(v))return {};
+    return std::array<float,4>{x[0],x[1],y[0],y[1]};
+}
 }

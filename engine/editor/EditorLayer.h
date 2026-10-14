@@ -1,6 +1,11 @@
 #pragma once
 
 #include "../ecs/Entity.h"
+#include "../ecs/ComponentRegistry.h"
+#include "../scene/SceneSettings.h"
+#include "EditorPreferences.h"
+#include "InputRouting.h"
+#include "../core/Logger.h"
 #include "../ecs/components/LightComponent.h"
 #include "../ecs/components/ColliderComponent.h"
 #include "../ecs/components/MaterialComponent.h"
@@ -13,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 class Application;
 class IRenderAdapter;
@@ -23,9 +29,38 @@ namespace editor
 class EditorLayer
 {
 public:
+    struct Statistics {double uiMs=0,hierarchyMs=0,inspectorMs=0;};
+    const Statistics& GetStatistics()const{return m_Statistics;}
     void Render(Application& app, IRenderAdapter* renderer, float dt);
+    void InitializePreferences(Application&);
+    void PersistPreferences(Application&);
+    void ResetLayout(){m_ResetLayout=true;}
+    void SetFixedDiagnosticLayout(bool fixed){m_FixedDiagnosticLayout=fixed;if(fixed){m_ShowStatistics=m_ShowMaterialEditor=true;}}
+    InputOwner InputOwnership(bool right,bool left,bool camera,bool play)const{return RouteInput({m_ViewportFocused,m_ViewportHovered,m_InputTextActive,m_ModalActive,m_ToolActive,false,camera,right,left,play});}
+    bool BlocksCamera()const{return m_ToolActive||m_InputTextActive||m_ModalActive;}
+    bool OwnsViewportKeyboard()const{return m_ViewportFocused&&!BlocksCamera();}
     void SetLightGizmosVisible(bool v){m_ShowLightGizmos=v;}
-    void ResetHistory(){m_UndoStack.clear();m_RedoStack.clear();m_SelectedEntity={};}
+    void EnterRuntime(const ecs::World::CloneMap&);
+    void LeaveRuntime();
+    void ResetHistory(){m_UndoStack.clear();m_RedoStack.clear();m_SelectedEntity={};m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;}
+    void FinishTransaction(Application&);
+    void CancelTransaction(Application&);
+    bool HasPendingTransaction()const{return m_Transaction.has_value();}
+    bool IsSceneDirty()const{return m_ExternalDirty||m_Revision!=m_SavedRevision||m_Transaction.has_value();}
+    void MarkSaved(){m_SavedRevision=m_Revision;m_ExternalDirty=false;}
+    void MarkDirty(){m_ExternalDirty=true;}
+    ecs::Entity CreateEntity(Application&,const std::string& name="Entity");
+    bool DeleteEntity(Application&,ecs::Entity);
+    ecs::Entity DuplicateEntity(Application&,ecs::Entity);
+    bool RenameEntity(Application&,ecs::Entity,const std::string&);
+    bool AddComponent(Application&,ecs::Entity,ecs::ComponentTypeId);
+    bool RemoveComponent(Application&,ecs::Entity,ecs::ComponentTypeId);
+    bool ResetComponent(Application&,ecs::Entity,ecs::ComponentTypeId);
+    bool AssignAsset(Application&,ecs::Entity,ecs::AssetKind,const std::string&);
+    bool SetProperty(Application&,ecs::Entity,ecs::ComponentTypeId,const std::string&,const ecs::PropertyValue&,bool transactional=true);
+    void BeginSceneTransaction(Application&,const std::string& label="Scene settings");
+    std::size_t UndoCount()const{return m_UndoStack.size();}
+    const std::string& GetError()const{return m_EditorError;}
     ecs::Entity CreateLight(Application&,LightType);
     void DeleteSelectedLight(Application&);
     void SelectEntity(ecs::Entity e){m_SelectedEntity=e;}
@@ -39,30 +74,33 @@ public:
     bool IsPointInsideViewport(double x, double y) const;
 
 private:
-    struct EntitySnapshot
-    {
+    struct EntitySnapshot {
         ecs::Entity entity{};
+        std::uint64_t world=0;
         bool alive=false;
-        std::optional<ecs::DirectionalLightComponent> directional;
-        std::optional<ecs::PointLightComponent> point;
-        std::optional<ecs::SpotLightComponent> spot;
-        std::optional<ecs::TagComponent> tag;
-        std::optional<ecs::TransformComponent> transform;
-        std::optional<ecs::MeshRendererComponent> meshRenderer;
-        std::optional<ecs::MaterialComponent> material;
-        std::optional<ecs::RigidbodyComponent> rigidbody;
-        std::optional<ecs::ColliderComponent> collider;
+        nlohmann::json components=nlohmann::json::object();
+        std::optional<SceneSettings> settings;
+        std::vector<EntitySnapshot> related;
     };
-
-    struct UndoRecord
-    {
-        std::string label;
-        EntitySnapshot snapshot;
-    };
+    struct UndoRecord {std::string label;EntitySnapshot snapshot;std::uint64_t before=0,after=0;};
+    struct PendingTransaction {std::string label;EntitySnapshot before;};
+    std::optional<PendingTransaction> m_Transaction;
+    std::uint64_t m_Revision=0,m_SavedRevision=0,m_NextRevision=0;
+    bool m_ExternalDirty=false;
+    EntitySnapshot CaptureLike(Application&,const EntitySnapshot&)const;
+    void BeginTransaction(const std::string&,EntitySnapshot);
+    void RemapHistory(ecs::Entity,ecs::Entity);
+    void CommitUndo(Application&,const std::string&,EntitySnapshot);
 
     void RefreshAssetLists(float dt);
     void HandleEditorShortcuts(Application& app);
     void DrawMainMenu(Application& app);
+    void DrawToolbar(Application&);
+    void ConfigureDocking();
+    void DrawConsole(Application&,IRenderAdapter*);
+    void DrawSceneSettings(Application&,IRenderAdapter*,float dt);
+    void DrawSceneDialogs(Application&);
+    void DrawViewportOverlays(Application&,const ImVec2&,const ImVec2&);
     void DrawSceneHierarchy(Application& app);
     void DrawInspector(Application& app);
     void DrawStatistics(Application& app, float dt);
@@ -74,7 +112,7 @@ private:
     void DrawGizmo(Application& app, const ImVec2& viewportMin, const ImVec2& viewportSize);
     EntitySnapshot CaptureSelectedEntity(Application& app,ecs::Entity entity={}) const;
     ecs::Entity RestoreSnapshot(Application& app, const EntitySnapshot& snapshot);
-    void PushUndo(const std::string& label, const EntitySnapshot& snapshot);
+
     void PushUndoBeforeChange(Application& app, const std::string& label);
     void Undo(Application& app);
     void Redo(Application& app);
@@ -93,6 +131,18 @@ private:
     std::string m_EditingMaterial,m_MaterialError,m_NewMaterialKey="materials/new.material.json";
     bool m_MaterialDirty=false;
     bool m_ShowDemoWindow = false;
+    bool m_ShowSceneSettings=true,m_ShowConsole=true,m_ShowGrid=true,m_Snapping=false;
+    bool m_ResetLayout=true,m_FixedDiagnosticLayout=false,m_ViewportFocused=false,m_ToolActive=false,m_InputTextActive=false,m_ModalActive=false;
+    float m_SnapTranslation=1,m_SnapRotation=15,m_SnapScale=.1f;
+    Statistics m_Statistics;
+    std::string m_AssetDirectory;
+    std::string m_HierarchyFilter,m_AssetFilter,m_ConsoleFilter,m_RenameBuffer,m_SceneDialogKey="scenes/new_scene.json";
+    int m_AssetKindFilter=0,m_SceneDialogAction=0;
+    ecs::Entity m_RenameTarget{};
+    bool m_SceneDialogRequested=false,m_RenameRequested=false,m_ConsoleInfo=true,m_ConsoleWarning=true,m_ConsoleError=true;
+    std::uint64_t m_ConsoleRevision=UINT64_MAX;
+    std::vector<Logger::Entry> m_ConsoleMessages;
+    std::vector<std::string> m_EnvironmentAssets;
     float m_FpsTimer = 0.0f;
     int m_FpsFrames = 0;
     float m_AverageFps = 0.0f;
@@ -112,9 +162,13 @@ private:
     std::vector<std::string> m_ShaderAssets;
     std::string m_SelectedAsset;
     std::string m_SelectedAssetKind;
+    struct HistoryContext {ecs::Entity selected;std::vector<UndoRecord> undo,redo;std::uint64_t revision,saved,next;bool external;};
+    std::optional<HistoryContext> m_EditHistory;
     std::vector<UndoRecord> m_UndoStack;
     std::vector<UndoRecord> m_RedoStack;
     bool m_GizmoUndoCaptured = false;
-    static constexpr std::size_t MaxUndoRecords = 64;
+    std::string m_EditorError;
+    std::unordered_map<unsigned,ecs::PropertyValue> m_PropertyDrafts;
+    static constexpr std::size_t MaxUndoRecords = 128;
 };
 }

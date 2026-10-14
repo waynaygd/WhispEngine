@@ -31,6 +31,7 @@ add_library(Engine
   core/Time.cpp
   core/Logger.cpp
   ecs/World.cpp
+  ecs/ComponentRegistry.cpp
   ecs/systems/BoundsBounceSystem.cpp
   ecs/systems/MotionSystem.cpp
   ecs/systems/PhysicsSystem.cpp
@@ -46,7 +47,13 @@ add_library(Engine
   resources/loaders/EnvironmentLoader.cpp
   resources/loaders/ShaderLoader.cpp
   scene/SceneSerializer.cpp
+  scene/SceneSettings.cpp
   editor/EditorLayer.cpp
+  editor/EditorTransactions.cpp
+  editor/EditorInspector.cpp
+  editor/EditorPreferences.cpp
+  editor/EditorUi.cpp
+  editor/EditorAssets.cpp
   editor/LightGizmos.cpp
   render/RenderFactory.cpp
   platform/GlfwWindow.cpp

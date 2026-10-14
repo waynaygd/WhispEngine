@@ -14,7 +14,9 @@ int main(int argc, char** argv)
     for(int i=1;i<argc;++i){if(std::strcmp(argv[i],"--light-overlap")==0)overlap=true;if(std::strcmp(argv[i],"--light-objects")==0&&i+1<argc)lightObjects=std::atoi(argv[++i]);}
     // Optional repeatable visual smoke/benchmark run. Normal startup is unchanged.
     for (int i = 1; i < argc; ++i) {
-        if(std::strcmp(argv[i],"--light-demo")==0)app.SetupLightDemoScene();
+        if(std::strcmp(argv[i],"--fixed-editor-layout")==0){app.GetEditorLayer().SetFixedDiagnosticLayout(true);auto entities=app.GetWorld().Entities();if(!entities.empty())app.GetEditorLayer().SelectEntity(entities.front());}
+        else if(std::strcmp(argv[i],"--editor2-demo")==0){app.GetEditorLayer().ResetLayout();app.GetEditorLayer().SetLightGizmosVisible(true);app.SetupLightDemoScene();}
+        else if(std::strcmp(argv[i],"--light-demo")==0)app.SetupLightDemoScene();
         else if(std::strcmp(argv[i],"--light-stress")==0){int count=100;if(i+1<argc&&argv[i+1][0]!='-')count=std::atoi(argv[++i]);app.SetupLightStressScene(count,overlap,lightObjects);}
         else if(std::strcmp(argv[i],"--light-benchmark")==0&&i+2<argc){app.SetupLightStressScene(std::atoi(argv[++i]),overlap,lightObjects);app.SetLightBenchmarkOutput(argv[++i]);}
         else if(std::strcmp(argv[i],"--forward-lights")==0)app.SetLightRenderingMode(LightRenderingMode::Forward);

@@ -11,6 +11,7 @@ public:
     void ChangeState(std::unique_ptr<IGameState> newState); 
     void ApplyPending(Application& app);                    
 
+    void Clear(Application& app);
     void Update(Application& app, float dt);
     void Render(Application& app, IRenderAdapter& renderer);
 
