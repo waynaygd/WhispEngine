@@ -1,5 +1,6 @@
 #include "../ecs/ComponentRegistry.h"
 #include "Application.h"
+#include "../editor/SunSynchronization.h"
 #include "../ecs/components/LightComponent.h"
 #include "AssetDependencyValidation.h"
 #include "AssetPaths.h"
@@ -1552,6 +1553,7 @@ int Application::Run()
                         ZoneScopedN("WorldSystems");
                         m_RenderInterpolation.SetFrame(GetWorld(), IsSimulationRunning(),
                             m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
+                        editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);
                         m_World.UpdateFrameSystemsOn(GetWorld(),dt);
                     }
                     m_StateMachine.Render(*this, *wc.renderer);
@@ -1572,6 +1574,7 @@ int Application::Run()
                         ZoneScopedN("WorldSystems");
                         m_RenderInterpolation.SetFrame(GetWorld(), IsSimulationRunning(),
                             m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
+                        editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);
                         m_World.UpdateFrameSystemsOn(GetWorld(),dt);
                     }
 
@@ -2002,6 +2005,11 @@ void Application::SetupLightDemoScene(){
 }
 
 namespace {
+std::filesystem::path SafeScenePath(const std::string& key,bool output){
+    const auto staged=AssetPaths::ResolveAssetRoot();if(output)return editor::AssetImport::SafeTarget(staged,key);
+    for(const auto& root:{staged,editor::AssetImport::ProjectRoot()}){auto candidate=editor::AssetImport::SafeTarget(root,key);if(std::filesystem::is_regular_file(candidate))return candidate;}
+    return editor::AssetImport::SafeTarget(staged,key);
+}
 bool SceneKeyValid(const std::string& key){
     if(!key.starts_with("scenes/")||std::filesystem::u8path(key).extension()!=".json")return false;
     return ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::None);
@@ -2013,7 +2021,7 @@ SceneSettings Application::GetSceneSettings()const{
 }
 bool Application::SetSceneSettings(const SceneSettings& s,std::string* error){
     try{(void)SceneSettingsToJson(s);const bool enabled=m_LightingSettings.enabled;const int debug=m_ShadowSettings.debugMode;
-        m_LightingSettings=s.lighting;m_LightingSettings.enabled=enabled;m_EnvironmentSettings=s.environment;m_ShadowSettings=s.shadows;m_Background=s.background;m_ShadowSettings.debugMode=debug;return true;
+        m_LightingSettings=s.lighting;m_LightingSettings.enabled=enabled;m_EnvironmentSettings=s.environment;m_ShadowSettings=s.shadows;m_Background=s.background;m_ShadowSettings.debugMode=debug;editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);return true;
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }
 bool Application::SaveSceneAs(const std::string& key,bool overwrite,std::string* error){
@@ -2021,18 +2029,18 @@ bool Application::SaveSceneAs(const std::string& key,bool overwrite,std::string*
     if(!SceneKeyValid(key)){if(error)*error="Scene key must be a portable scenes/*.json path";return false;}
     try{
         m_EditorLayer.FinishTransaction(*this);auto document=SceneSerializer::CaptureWorld(m_World,GetSceneSettings());
-        if(!SceneSerializer::WriteAtomic(AssetPaths::ResolveAssetOutputPath(key),document,error,overwrite))return false;
-        m_SceneKey=key;m_Config.ecsDemo.sceneFile=key;m_EditorLayer.MarkSaved();InitializeConfigHotReload();return true;
+        if(!SceneSerializer::WriteAtomic(SafeScenePath(key,true),document,error,overwrite))return false;
+        m_SceneKey=key;m_Config.ecsDemo.sceneFile=key;m_EditorLayer.MarkSaved();m_EditorLayer.RememberScene(key);InitializeConfigHotReload();return true;
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }
 bool Application::OpenScene(const std::string& key,std::string* error){
     if(!SceneKeyValid(key)){if(error)*error="Scene key must be a portable scenes/*.json path";return false;}
     // Parse/validate completely before changing modes or discarding the current scene.
-    ecs::World staged;SceneSettings settings;auto path=AssetPaths::ResolveAssetPath(key);
+    ecs::World staged;SceneSettings settings;std::filesystem::path path;try{path=SafeScenePath(key,false);}catch(const std::exception& e){if(error)*error=e.what();return false;}
     if(!SceneSerializer::LoadWorld(path,staged,settings,error))return false;
     SetEditorPlayMode(false);m_Mutations.Clear();if(m_PhysicsSystem)m_PhysicsSystem->ResetState();ResetPhysicsClock();
     m_World.ReplaceData(staged);m_EcsDebugEntities=m_World.Entities();m_StressEntities.clear();m_ActiveCollisionPairs.clear();
-    SetSceneSettings(settings);m_SceneKey=key;m_Config.ecsDemo.sceneFile=key;m_EditorLayer.ResetHistory();m_EditorLayer.MarkSaved();InitializeConfigHotReload();return true;
+    SetSceneSettings(settings);m_SceneKey=key;m_Config.ecsDemo.sceneFile=key;m_EditorLayer.ResetHistory();m_EditorLayer.MarkSaved();m_EditorLayer.RememberScene(key);InitializeConfigHotReload();return true;
 }
 void Application::NewScene(){
     SetEditorPlayMode(false);ClearPhysicsStressScene();m_World.Clear();m_EcsDebugEntities.clear();m_StressEntities.clear();m_Mutations.Clear();

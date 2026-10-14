@@ -2,11 +2,13 @@
 #include <nlohmann/json.hpp>
 #include <filesystem>
 #include <string>
+#include <vector>
 #include "../render/EditorVisuals.h"
 namespace editor {
 struct EditorPreferences {
     bool hierarchy=true,inspector=true,viewport=true,assets=true,material=false,settings=true,console=true,diagnostics=false;
     EditorVisualSettings visuals;
+    std::vector<std::string> recentScenes;
     bool assetGrid=false;
     bool visualPanel=false,backgroundOverride=false,projectileTestInput=false;
     bool grid=true,lightGizmos=true,xray=false,snapping=false;

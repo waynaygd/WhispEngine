@@ -1,6 +1,8 @@
+#include "PrecisionInputs.h"
 #include "EditorLayer.h"
 #include "EditorWidgets.h"
 #include "LightGizmoMath.h"
+#include "SunSynchronization.h"
 #include "../platform/GlfwWindow.h"
 #include <GLFW/glfw3.h>
 #include "../core/Application.h"
@@ -12,6 +14,9 @@ EditorVisualFrame EditorLayer::BuildVisualFrame(const Application& app)const{
     if(!viewport)if(auto* window=dynamic_cast<const GlfwWindow*>(app.GetWindow()))glfwGetFramebufferSize(window->GetGlfwHandle(),&width,&height);
     f.active=width>1&&height>1;f.play=app.IsEditorPlayMode();f.showGrid=viewport&&m_ShowGrid;f.settings=m_VisualSettings;f.backgroundEnabled=m_SkyDiagnosticEnabled;
     if(f.play||!m_BackgroundOverride){static_cast<SceneBackground&>(f.settings)=app.GetSceneBackground();if(f.settings.useIblEnvironment){f.settings.cubemap=app.GetEnvironmentSettings().assetPath;f.settings.skyRotation=app.GetEnvironmentSettings().rotationDegrees;}}
+    if(f.settings.sunSync==SunSyncMode::LightDrivesSky){auto& world=const_cast<ecs::World&>(app.GetWorld());auto primary=PrimarySun(world);if(primary.IsValid()){
+        auto rays=ecs::LightDirection(ecs::RenderPose::From(*world.GetComponent<ecs::TransformComponent>(primary)));f.sunDirection={-rays.x,-rays.y,-rays.z};f.sunColor=SanitizeLight(*world.GetComponent<ecs::DirectionalLightComponent>(primary)).color;f.sunVisible=true;
+    }}
     f.aspect=float(std::max(1,width))/std::max(1,height);f.tanHalfFov=std::tan(app.GetCameraVerticalFovRadians()*.5f);f.nearPlane=app.GetCameraNearPlane();f.farPlane=app.GetCameraFarPlane();
     const auto p=app.GetCameraPosition();f.camera={p.x,p.y,p.z};const auto c=GizmoCamera(p,app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),f.aspect,f.nearPlane,f.farPlane);
     f.right={c.view[0],c.view[4],c.view[8]};f.up={c.view[1],c.view[5],c.view[9]};f.forward={c.view[2],c.view[6],c.view[10]};return f;
@@ -35,16 +40,16 @@ void EditorLayer::DrawEditorVisualSettings(Application& app,IRenderAdapter* rend
     if(ImGui::CollapsingHeader("Infinite grid",ImGuiTreeNodeFlags_DefaultOpen)){
         ImGui::Checkbox("Show grid",&m_ShowGrid);bool hideInPlay=true;ImGui::BeginDisabled();ImGui::Checkbox("Hide grid in Play",&hideInPlay);ImGui::EndDisabled();
         if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Editor-only helper: always hidden in Play, including Pause.");
-        ImGui::DragFloat("Minor spacing",&s.minorSpacing,.05f,.01f,1000);s.majorSpacing=std::max(s.majorSpacing,s.minorSpacing);
-        ImGui::DragFloat("Major spacing",&s.majorSpacing,.5f,s.minorSpacing,10000);ImGui::SliderFloat("Line opacity",&s.gridOpacity,0,1);ImGui::DragFloat("Fade distance",&s.fadeDistance,1,1,100000);
+        PrecisionDragFloat("Minor spacing",&s.minorSpacing,.05f,.01f,1000);s.majorSpacing=std::max(s.majorSpacing,s.minorSpacing);
+        PrecisionDragFloat("Major spacing",&s.majorSpacing,.5f,s.minorSpacing,10000);PrecisionSliderFloat("Line opacity",&s.gridOpacity,0,1);PrecisionDragFloat("Fade distance",&s.fadeDistance,1,1,100000);
     }
     if(ImGui::CollapsingHeader("Background",ImGuiTreeNodeFlags_DefaultOpen)){
         int mode=int(s.background);if(ImGui::Combo("Mode",&mode,"Solid clear color\0Procedural gradient\0Cubemap skybox\0"))s.background=EditorBackground(mode);
-        ImGui::SliderFloat("Intensity",&s.skyIntensity,0,8);
+        PrecisionSliderFloat("Intensity",&s.skyIntensity,0,8);
         if(s.background==EditorBackground::Solid)LinearColorEdit("Solid color",s.solid.data(),3);
-        else if(s.background==EditorBackground::Gradient){LinearColorEdit("Top",s.top.data(),3);LinearColorEdit("Horizon",s.horizon.data(),3);LinearColorEdit("Ground tint",s.bottom.data(),3);ImGui::SliderFloat("Gradient blend",&s.gradientBlend,.1f,4);}
+        else if(s.background==EditorBackground::Gradient){LinearColorEdit("Top",s.top.data(),3);LinearColorEdit("Horizon",s.horizon.data(),3);LinearColorEdit("Ground tint",s.bottom.data(),3);PrecisionSliderFloat("Gradient blend",&s.gradientBlend,.1f,4);}
         else{
-            ImGui::InputText("HDR environment",&s.cubemap);AcceptAssetDrop(ecs::AssetKind::Environment,s.cubemap);ImGui::SliderFloat("Sky rotation",&s.skyRotation,-180,180);
+            ImGui::InputText("HDR environment",&s.cubemap);AcceptAssetDrop(ecs::AssetKind::Environment,s.cubemap);PrecisionSliderFloat("Sky rotation",&s.skyRotation,-180,180);
             if(ImGui::Button("Use scene environment"))s.cubemap=app.GetEnvironmentSettings().assetPath;
             ImGui::TextWrapped("HDR assets are converted to a GPU cubemap by the existing Environment loader. Sky and scene IBL settings are independent.");
             if(auto* resources=app.GetResourceManager())if(auto asset=resources->Get<EnvironmentResource>(s.cubemap)){if(asset->IsLoading())ImGui::TextDisabled("Loading sky asynchronously...");if(asset->IsFailed())ImGui::TextWrapped("%s",asset->GetErrorMessage().c_str());}

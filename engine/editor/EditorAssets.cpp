@@ -1,5 +1,6 @@
 #include "EditorLayer.h"
 #include "EditorWidgets.h"
+#include "AssetImport.h"
 #include "../core/Application.h"
 #include "../resources/ResourceManager.h"
 #include <imgui.h>
@@ -9,6 +10,11 @@
 #include <chrono>
 #include "../scene/SceneSerializer.h"
 namespace editor {
+bool EditorLayer::OpenMaterial(Application& app,const std::string& key){
+    m_ShowMaterialEditor=m_FocusMaterial=true;
+    if(m_MaterialDirty&&key!=m_EditingMaterial){m_MaterialError="Save or Revert the current material before switching assets";return false;}
+    m_EditingMaterial=key;m_SelectedAsset=key;m_SelectedAssetKind="Material";if(auto* r=app.GetResourceManager())r->LoadAsync<MaterialResource>(key);return true;
+}
 bool EditorLayer::AssignAsset(Application& app,ecs::Entity e,ecs::AssetKind kind,const std::string& key){
     if(!ecs::ComponentRegistry::ValidateAssetKey(key,kind,&m_EditorError))return false;
     FinishTransaction(app);
@@ -52,9 +58,10 @@ void EditorLayer::DrawAssetBrowser(Application& app){
     struct Timing {double& ms;std::chrono::steady_clock::time_point start;~Timing(){ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}} timing{m_Statistics.assetBrowserMs,start};
     ImGui::SetNextWindowSizeConstraints(ImVec2(280,180),ImVec2(FLT_MAX,FLT_MAX));if(!ImGui::Begin("Asset Browser",&m_ShowAssetBrowser)){ImGui::End();return;}
     const auto& types=m_AssetCatalog.Types();auto* resources=app.GetResourceManager();
-    auto openMaterial=[&](const std::string& key){if(m_MaterialDirty&&key!=m_EditingMaterial){m_EditorError="Save or revert the current material first";return;}m_EditingMaterial=key;m_SelectedAsset=key;m_SelectedAssetKind="Material";m_ShowMaterialEditor=true;if(resources)resources->LoadAsync<MaterialResource>(key);};
+    auto openMaterial=[&](const std::string& key){OpenMaterial(app,key);};
     auto action=[&](int kind,const std::string& key){m_AssetAction=kind;m_AssetActionSource=key;m_AssetActionKey=key;m_AssetActionRequested=true;m_EditorError.clear();};
     ImGui::BeginDisabled(app.IsEditorPlayMode());if(ImGui::Button("Create Material")){std::string directory=m_AssetDirectory.starts_with("materials")?m_AssetDirectory:"materials";action(1,directory+"/new.material.json");}ImGui::EndDisabled();
+    ImGui::SameLine();ImGui::BeginDisabled(app.IsEditorPlayMode());if(ImGui::Button("Import Asset...")){m_ImportPopup=true;m_ImportPreview.clear();}ImGui::EndDisabled();
     ImGui::SameLine();if(ImGui::Button("Refresh"))m_AssetListsDirty=true;ImGui::SameLine();ImGui::Checkbox("Grid",&m_AssetGrid);
     ImGui::SetNextItemWidth(std::max(100.f,ImGui::GetContentRegionAvail().x*.55f));ImGui::InputTextWithHint("##search","Search assets",&m_AssetFilter);ImGui::SameLine();ImGui::SetNextItemWidth(130);
     if(ImGui::BeginCombo("##type",m_AssetKindFilter>0&&m_AssetKindFilter<=int(types.size())?types[m_AssetKindFilter-1].name.c_str():"All types")){
@@ -64,7 +71,12 @@ void EditorLayer::DrawAssetBrowser(Application& app){
     for(const auto& part:std::filesystem::u8path(m_AssetDirectory)){if(!breadcrumb.empty())breadcrumb+="/";breadcrumb+=part.string();ImGui::SameLine();ImGui::TextDisabled("/");ImGui::SameLine();ImGui::PushID(breadcrumb.c_str());if(ImGui::SmallButton(part.string().c_str()))m_AssetDirectory=breadcrumb;ImGui::PopID();}
     ImGui::BeginChild("Directories",ImVec2(std::clamp(ImGui::GetContentRegionAvail().x*.2f,100.f,210.f),0),ImGuiChildFlags_Borders);
     if(ImGui::Selectable("All assets",m_AssetDirectory.empty()))m_AssetDirectory.clear();
-    for(const auto& folder:m_AssetCatalog.Folders())if(ImGui::Selectable(folder.c_str(),m_AssetDirectory==folder))m_AssetDirectory=folder;ImGui::EndChild();ImGui::SameLine();ImGui::BeginChild("Content");
+    for(const auto& folder:m_AssetCatalog.Folders()){
+        if(ImGui::Selectable(folder.c_str(),m_AssetDirectory==folder))m_AssetDirectory=folder;
+        if(ImGui::BeginPopupContextItem(folder.c_str())){if(ImGui::MenuItem("New Folder",nullptr,false,!app.IsEditorPlayMode())){m_FolderParent=folder;m_FolderPopup=true;}ImGui::EndPopup();}
+    }
+    if(ImGui::BeginPopupContextWindow("FolderRoot",ImGuiPopupFlags_MouseButtonRight|ImGuiPopupFlags_NoOpenOverItems)){if(ImGui::MenuItem("New Folder",nullptr,false,!app.IsEditorPlayMode())){m_FolderParent=m_AssetDirectory;m_FolderPopup=true;}ImGui::EndPopup();}
+    ImGui::EndChild();ImGui::SameLine();ImGui::BeginChild("Content");
     std::vector<const AssetEntry*> rows;for(const auto& row:m_AssetCatalog.Entries()){
         if(m_AssetKindFilter&&int(row.type)+1!=m_AssetKindFilter)continue;if(!m_AssetDirectory.empty()&&!row.key.starts_with(m_AssetDirectory+"/"))continue;
         if(!m_AssetFilter.empty()&&std::search(row.key.begin(),row.key.end(),m_AssetFilter.begin(),m_AssetFilter.end(),[](unsigned char a,unsigned char b){return std::tolower(a)==std::tolower(b);})==row.key.end())continue;rows.push_back(&row);
@@ -90,6 +102,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
     }
     ImGui::Separator();ImGui::TextWrapped("Selected: %s",m_SelectedAsset.empty()?"None":m_SelectedAsset.c_str());
     if(!m_SelectedAsset.empty())for(auto& type:types)if(type.name==m_SelectedAssetKind){ImGui::Text("%s %s / %s",type.icon.c_str(),type.name.c_str(),AssetLoadState(resources,type.kind,m_SelectedAsset));if(type.kind!=ecs::AssetKind::None&&ImGui::Button("Assign selected to entity"))AssignAsset(app,m_SelectedEntity,type.kind,m_SelectedAsset);}
+    if(m_SelectedAssetKind=="Mesh"&&!m_SelectedAsset.empty()&&!app.IsEditorPlayMode()&&ImGui::Button("Create Model Entity")){CreateModelEntity(app,m_SelectedAsset,std::filesystem::u8path(m_SelectedAsset).stem().string());}
     if(m_SelectedAssetKind=="Material"&&!m_SelectedAsset.empty()&&ImGui::Button("Open selected material"))openMaterial(m_SelectedAsset);
     if(resources&&!m_SelectedAsset.empty()){
         if(ImGui::Button("Load preview metadata")){
@@ -117,6 +130,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
             if(ok){if(resources&&m_AssetAction!=1)resources->Unload<MaterialResource>(m_AssetActionSource);if(m_AssetAction!=3)openMaterial(m_AssetActionKey);else{m_SelectedAsset.clear();if(m_EditingMaterial==m_AssetActionSource)m_EditingMaterial.clear();}m_AssetListsDirty=true;ImGui::CloseCurrentPopup();}
         }ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::EndPopup();
     }
+    DrawImportDialogs(app);
     ImGui::End();
 }
 }

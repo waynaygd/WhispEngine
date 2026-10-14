@@ -1,4 +1,5 @@
 #include "AssetCatalog.h"
+#include "AssetImport.h"
 #include "../core/AssetPaths.h"
 #include "../resources/loaders/MaterialLoader.h"
 #include <fstream>
@@ -22,7 +23,7 @@ void CheckReferences(const std::string& key){
 }
 AssetCatalog::AssetCatalog(){
     Register({"Mesh","[M]","models",ecs::AssetKind::Mesh,{".obj",".fbx",".gltf",".glb"}});
-    Register({"Texture","[T]","textures",ecs::AssetKind::Texture,{".png",".jpg",".jpeg",".bmp",".tga",".dds"}});
+    Register({"Texture","[T]","",ecs::AssetKind::Texture,{".png",".jpg",".jpeg",".bmp",".tga",".dds"}});
     Register({"Material","[Mat]","materials",ecs::AssetKind::Material,{".json",".material"}});
     Register({"Shader","[S]","",ecs::AssetKind::Shader,{".hlsl"},true});
     Register({"Environment","[HDR]","environments",ecs::AssetKind::Environment,{".hdr"}});
@@ -34,10 +35,12 @@ void AssetCatalog::Register(AssetType type){
 }
 void AssetCatalog::Refresh(){
     std::vector<AssetEntry> ready;std::set<std::string> dirs;
-    for(std::size_t i=0;i<types.size();++i){auto& type=types[i];const auto root=type.shaderRoot?AssetPaths::ResolveShaderRoot():AssetPaths::ResolveAssetRoot();const auto directory=root/type.folder;
+    for(std::size_t i=0;i<types.size();++i){auto& type=types[i];const std::set<std::filesystem::path> roots=type.shaderRoot?std::set<std::filesystem::path>{AssetPaths::ResolveShaderRoot()}:std::set<std::filesystem::path>{AssetPaths::ResolveAssetRoot(),AssetImport::ProjectRoot()};for(const auto& root:roots){const auto directory=root/type.folder;
         if(!std::filesystem::exists(directory))continue;
         if(!type.folder.empty())dirs.insert(type.folder);
-        for(const auto& item:std::filesystem::recursive_directory_iterator(directory,std::filesystem::directory_options::skip_permission_denied)){
+        for(std::filesystem::recursive_directory_iterator walk(directory,std::filesystem::directory_options::skip_permission_denied),end;walk!=end;++walk){const auto& item=*walk;
+            try{(void)AssetImport::SafeTarget(root,AssetPaths::ToUtf8String(item.path().lexically_relative(root)));}catch(...){if(item.is_directory())walk.disable_recursion_pending();continue;}
+            if(item.is_directory()&&!std::filesystem::is_symlink(item.symlink_status()))dirs.insert(AssetPaths::ToUtf8String(item.path().lexically_relative(root)));
             if(!item.is_regular_file()||std::filesystem::is_symlink(item.symlink_status()))continue;
             auto ext=item.path().extension().string();std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});
             if(std::find(type.extensions.begin(),type.extensions.end(),ext)==type.extensions.end())continue;
@@ -45,7 +48,8 @@ void AssetCatalog::Refresh(){
             auto folder=std::filesystem::u8path(key).parent_path();while(!folder.empty()){dirs.insert(folder.generic_string());folder=folder.parent_path();}
         }
     }
-    std::sort(ready.begin(),ready.end(),[](auto& a,auto& b){return a.key<b.key;});entries=std::move(ready);folders=std::move(dirs);++revision;
+    }
+    std::sort(ready.begin(),ready.end(),[](auto& a,auto& b){return a.key<b.key;});ready.erase(std::unique(ready.begin(),ready.end(),[](const auto& a,const auto& b){return a.key==b.key&&a.type==b.type;}),ready.end());entries=std::move(ready);folders=std::move(dirs);++revision;
 }
 std::filesystem::path AssetCatalog::SafeMaterialPath(const std::string& key){
     if(std::any_of(key.begin(),key.end(),[](unsigned char c){return c<32;})||key.empty()||!key.starts_with("materials/")||!ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::Material)||std::filesystem::u8path(key).extension()!=".json")throw std::runtime_error("Use a portable materials/*.json key");

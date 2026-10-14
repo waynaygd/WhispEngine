@@ -5,7 +5,12 @@
 #include <string>
 
 enum class EditorBackground { Solid,Gradient,Cubemap };
+enum class SunSyncMode {Independent,LightDrivesSky,SkyDrivesLight};
 struct SceneBackground {
+    SunSyncMode sunSync=SunSyncMode::Independent;
+    bool sunMetadata=false;
+    std::array<float,3> sunDirection{0,1,0};
+    float sunRadius=.53f,sunIntensity=1;
     EditorBackground background=EditorBackground::Gradient;
     std::array<float,3> solid{.008f,.012f,.02f},top{.045f,.12f,.25f},horizon{.34f,.43f,.55f},bottom{.055f,.065f,.085f};
     float skyIntensity=1,gradientBlend=.65f,skyRotation=0;
@@ -28,6 +33,8 @@ struct EditorVisualFrame {
     EditorVisualSettings settings;
     bool active=false,play=false,showGrid=true,backgroundEnabled=true;
     std::array<float,3> camera{0,4,-6},right{1,0,0},up{0,1,0},forward{0,0,1};
+    std::array<float,3> sunDirection{0,1,0},sunColor{1,1,1};
+    bool sunVisible=false;
     float tanHalfFov=.57735027f,aspect=1,nearPlane=.01f,farPlane=1000;
 };
 inline bool EditorGridVisible(const EditorVisualFrame& f){return f.active&&f.settings.enabled&&f.showGrid&&f.settings.gridOpacity>0&&!f.play;}

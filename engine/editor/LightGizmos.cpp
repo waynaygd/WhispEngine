@@ -59,7 +59,9 @@ Occluder Bounds(ResourceHandle<MeshResource> mesh,const ecs::RenderPose& pose){
 }
 void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2& origin,const ImVec2& size)
 {
+    if(m_LightPointerCaptured&&!ImGui::IsMouseDown(0)){FinishTransaction(app);m_LightPointerCaptured=false;}
     if(app.IsEditorPlayMode())return;
+    if(m_ModalActive){if(m_LightPointerCaptured){CancelTransaction(app);m_LightPointerCaptured=false;}return;}
     if(!m_ShowLightGizmos||size.x<=1||size.y<=1)return;
     auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),size.x/size.y,app.GetCameraNearPlane(),app.GetCameraFarPlane());
     auto& world=app.GetWorld();std::vector<Occluder> occluders;
@@ -70,19 +72,20 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
     });
     auto* draw=ImGui::GetWindowDrawList();draw->PushClipRect(origin,ImVec2(origin.x+size.x,origin.y+size.y),true);
     auto project=[&](V p)->std::optional<ImVec2>{auto q=ProjectGizmo(p,camera);if(!q)return {};return ImVec2(origin.x+(*q)[0]*size.x,origin.y+(*q)[1]*size.y);};
-    auto line=[&](V a,V b,ImU32 color){auto x=project(a),y=project(b);if(x&&y)draw->AddLine(*x,*y,color,1.5f);};
+    auto line=[&](V a,V b,ImU32 color){auto q=ProjectEditorLine(a,b,camera);if(q)draw->AddLine(ImVec2(origin.x+(*q)[0]*size.x,origin.y+(*q)[1]*size.y),ImVec2(origin.x+(*q)[2]*size.x,origin.y+(*q)[3]*size.y),color,1.5f);};
     ecs::Entity hit;float hitZ=INFINITY;
     world.ForEach<ecs::TransformComponent>([&](ecs::Entity entity,auto& transform){
         LightType type;auto* light=ecs::GetLightParameters(world,entity,&type);if(!light)return;
-        auto pose=app.GetRenderInterpolation().Resolve(entity,transform);auto q=ProjectGizmo(pose.position,camera);if(!q)return;
+        auto pose=app.GetRenderInterpolation().Resolve(entity,transform);auto q=ProjectGizmo(pose.position,camera);const bool selected=entity==m_SelectedEntity;if(!q&&!selected)return;
         if(!m_LightXray&&Occluded(app.GetCameraPosition(),pose.position,occluders))return;
-        const bool selected=entity==m_SelectedEntity;auto p=SanitizeLight(*light);auto icon=*project(pose.position);
+        auto p=SanitizeLight(*light);ImVec2 icon=q?*project(pose.position):ImVec2{};
         ImU32 color=selected?IM_COL32(255,240,80,255):ImGui::ColorConvertFloat4ToU32(ImVec4(LinearToSrgb(p.color[0]),LinearToSrgb(p.color[1]),LinearToSrgb(p.color[2]),p.enabled?1.f:.4f));
-        draw->AddCircle(icon,7,color,16,2);if(selected)draw->AddCircle(icon,11,color,20,1);
+        if(q){draw->AddCircle(icon,7,color,16,2);if(selected)draw->AddCircle(icon,11,color,20,1);
         if(type==LightType::Directional){for(int j=0;j<8;++j){float a=j*.785398f;draw->AddLine(ImVec2(icon.x+9*std::cos(a),icon.y+9*std::sin(a)),ImVec2(icon.x+13*std::cos(a),icon.y+13*std::sin(a)),color,1.5f);}}
         else if(type==LightType::Point){draw->AddLine(ImVec2(icon.x-4,icon.y+8),ImVec2(icon.x+4,icon.y+8),color,2);}
         else {draw->AddTriangle(ImVec2(icon.x-6,icon.y-5),ImVec2(icon.x+6,icon.y-5),ImVec2(icon.x,icon.y+6),color,1.5f);}
         auto mouse=ImGui::GetMousePos();if(HitLightIcon(mouse.x-origin.x,mouse.y-origin.y,(*q)[0],(*q)[1],size.x,size.y)&&(*q)[2]<hitZ){hit=entity;hitZ=(*q)[2];}
+        }
         if(!selected)return;
         auto d=ecs::LightDirection(pose);V right=std::abs(d.y)<.95f?Cross({0,1,0},d):Cross({1,0,0},d);right=Scale(right,1/std::sqrt(Dot(right,right)));V up=Cross(d,right);
         if(type==LightType::Directional){line(pose.position,Add(pose.position,Scale(d,2)),color);return;}
@@ -91,37 +94,41 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
             for(int j=0;j<48;++j){auto ring=[&](int k){float a=k*6.2831853f/48;return Add(tip,Add(Scale(right,radius*std::cos(a)),Scale(up,radius*std::sin(a))));};line(ring(j),ring(j+1),color);if(j%12==0)line(pose.position,ring(j),color);}}}
         // Range and cone handles edit the component, never Transform or physics.
         auto handle=[&](V base,V axis,float value,int which){
+            if(ImGuizmo::IsUsing()||(!m_LightPointerCaptured&&(app.IsCameraControlActive()||ImGui::IsMouseDown(1))))return;
             auto start=project(base),end=project(Add(base,Scale(axis,value)));if(!start||!end)return;
             float dx=end->x-start->x,dy=end->y-start->y,length=std::sqrt(dx*dx+dy*dy);if(length<8||value<.001f)return;
-            draw->AddRectFilled(ImVec2(end->x-4,end->y-4),ImVec2(end->x+4,end->y+4),color);
-            ImGui::PushID(int(entity.index));ImGui::PushID(which);ImGui::SetCursorScreenPos(ImVec2(end->x-6,end->y-6));ImGui::InvisibleButton("LightHandle",ImVec2(12,12));
-            if(ImGui::IsItemActivated())PushUndoBeforeChange(app,"Light range/cone handle");
-            if(ImGui::IsItemActive()&&ImGui::IsMouseDragging(0)){
+            const float dpi=ImGui::GetStyle().FontScaleDpi;draw->AddRectFilled(ImVec2(end->x-4*dpi,end->y-4*dpi),ImVec2(end->x+4*dpi,end->y+4*dpi),color);
+            ImGui::PushID(int(entity.index));ImGui::PushID(which);ImGui::SetCursorScreenPos(ImVec2(end->x-6*dpi,end->y-6*dpi));ImGui::InvisibleButton("LightHandle",ImVec2(12*dpi,12*dpi));
+            m_LightHandleHovered|=ImGui::IsItemHovered()&&m_ViewportHovered;
+            if(ImGui::IsItemHovered()&&m_ViewportHovered)draw->AddRect(ImVec2(end->x-6*dpi,end->y-6*dpi),ImVec2(end->x+6*dpi,end->y+6*dpi),IM_COL32(255,255,220,255));
+            if(ImGui::IsItemActivated()&&m_ViewportHovered){PushUndoBeforeChange(app,"Light range/cone handle");m_LightPointerCaptured=true;}
+            if(m_LightPointerCaptured&&ImGui::IsItemActive()&&ImGui::IsMouseDragging(0)){
                 auto delta=ImGui::GetIO().MouseDelta;float next=std::max(.001f,value+(delta.x*dx+delta.y*dy)/length*(value/length));
                 if(which==0)light->range=next;else {float angle=std::asin(std::min(1.f,next/p.range))*57.2957795f;if(which==1)light->innerAngle=angle;else light->outerAngle=angle;}
                 *light=SanitizeLight(*light);
             }
-            if(ImGui::IsItemDeactivatedAfterEdit())FinishTransaction(app);
+            if(ImGui::IsItemDeactivated()&&!ImGui::IsMouseDown(0)){FinishTransaction(app);m_LightPointerCaptured=false;}
             ImGui::PopID();ImGui::PopID();
         };
         V cameraRight{camera.view[0],camera.view[4],camera.view[8]};
         handle(pose.position,type==LightType::Point?cameraRight:d,p.range,0);
         if(type==LightType::Spot){for(int which=1;which<=2;++which){float a=(which==1?p.innerAngle:p.outerAngle)*.0174532925f;V tip=Add(pose.position,Scale(d,p.range*std::cos(a)));handle(tip,right,p.range*std::sin(a),which);}}
     });
-    if(hit.IsValid()&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&!ImGuizmo::IsOver()&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive())m_SelectedEntity=hit;
+    if(hit.IsValid()&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&!ImGuizmo::IsOver()&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){FinishTransaction(app);m_PropertyDrafts.clear();m_SelectedEntity=hit;m_LightIconClicked=true;}
     draw->PopClipRect();
 }
 }
 
 namespace editor {
 void EditorLayer::DrawViewportOverlays(Application& app,const ImVec2& origin,const ImVec2& size){
+    if(m_LightPointerCaptured&&!ImGui::IsMouseDown(0)){FinishTransaction(app);m_LightPointerCaptured=false;}
     if(app.IsEditorPlayMode())return;
     if(size.x<=1||size.y<=1)return;const auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),size.x/size.y,app.GetCameraNearPlane(),app.GetCameraFarPlane());
     auto* draw=ImGui::GetWindowDrawList();draw->PushClipRect(origin,ImVec2(origin.x+size.x,origin.y+size.y),true);
     auto project=[&](V p)->std::optional<ImVec2>{auto v=ProjectGizmo(p,camera);if(!v)return {};return ImVec2(origin.x+(*v)[0]*size.x,origin.y+(*v)[1]*size.y);};
     auto line=[&](V a,V b,ImU32 color){auto q=ProjectEditorLine(a,b,camera);if(q)draw->AddLine(ImVec2(origin.x+(*q)[0]*size.x,origin.y+(*q)[1]*size.y),ImVec2(origin.x+(*q)[2]*size.x,origin.y+(*q)[3]*size.y),color);};
     auto& world=app.GetWorld();auto* resources=app.GetResourceManager();
-    if(resources&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&!ImGuizmo::IsOver()&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
+    if(resources&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&!m_LightHandleHovered&&!m_LightPointerCaptured&&!m_LightIconClicked&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&!ImGuizmo::IsOver()&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
         auto mouse=ImGui::GetMousePos();float x=((mouse.x-origin.x)/size.x*2-1)/camera.projection[0],y=(1-(mouse.y-origin.y)/size.y*2)/camera.projection[5];
         V ray{camera.view[0]*x+camera.view[1]*y+camera.view[2],camera.view[4]*x+camera.view[5]*y+camera.view[6],camera.view[8]*x+camera.view[9]*y+camera.view[10]};ray=Scale(ray,1/std::sqrt(Dot(ray,ray)));
         float nearest=app.GetCameraFarPlane();ecs::Entity hit;
@@ -130,7 +137,7 @@ void EditorLayer::DrawViewportOverlays(Application& app,const ImVec2& origin,con
             auto bounds=Bounds(mesh,app.GetRenderInterpolation().Resolve(e,t));if(bounds.inverse==std::array<float,12>{})return;
             float distance=HitDistance(app.GetCameraPosition(),ray,bounds,nearest);if(distance<nearest){nearest=distance;hit=e;}
         });
-        if(hit.IsValid()){FinishTransaction(app);m_SelectedEntity=hit;}
+        FinishTransaction(app);m_PropertyDrafts.clear();m_SelectedEntity=hit;
     }
     if(resources&&world.IsAlive(m_SelectedEntity))if(auto* m=world.GetComponent<ecs::MeshRendererComponent>(m_SelectedEntity))if(auto* t=world.GetComponent<ecs::TransformComponent>(m_SelectedEntity)){
         auto mesh=resources->Get<MeshResource>(m->meshPath);if(mesh&&mesh->IsLoaded()&&!mesh->GetData().meshData.vertices.empty()){

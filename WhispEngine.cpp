@@ -15,6 +15,11 @@ int main(int argc, char** argv)
     // Optional repeatable visual smoke/benchmark run. Normal startup is unchanged.
     for (int i = 1; i < argc; ++i) {
         if(std::strcmp(argv[i],"--editor-benchmark")==0&&i+1<argc)app.SetRenderBenchmarkOutput(argv[++i]);
+        else if(std::strcmp(argv[i],"--primitive-demo")==0){
+            app.NewScene();auto& editor=app.GetEditorLayer();auto sun=editor.CreateLight(app,LightType::Directional);app.GetWorld().GetComponent<ecs::DirectionalLightComponent>(sun)->primary=true;app.GetWorld().GetComponent<ecs::TransformComponent>(sun)->rotation={.35f,3.14159265f,0};
+            int index=0;for(const char* type:{"cube","sphere","cylinder","cone","plane"}){auto e=editor.CreatePrimitive(app,type);auto& t=*app.GetWorld().GetComponent<ecs::TransformComponent>(e);t.position={float(index-2)*1.4f,0,4};if(index==4){t.position={0,-.51f,4};t.scale={12,1,12};}++index;}
+            auto settings=app.GetSceneSettings();settings.background.sunSync=SunSyncMode::LightDrivesSky;settings.background.sunRadius=2;settings.background.sunIntensity=4;app.SetSceneSettings(settings);editor.ClearSelection();
+        }
         else if(std::strcmp(argv[i],"--sky-off")==0)app.GetEditorLayer().SetSkyDiagnosticEnabled(false);
         else if(std::strcmp(argv[i],"--asset-grid")==0)app.GetEditorLayer().SetAssetGrid(true);
         else if(std::strcmp(argv[i],"--diagnostic-viewport")==0&&i+2<argc){int w=std::atoi(argv[++i]);int h=std::atoi(argv[++i]);app.GetEditorLayer().SetDiagnosticViewport(w,h);}

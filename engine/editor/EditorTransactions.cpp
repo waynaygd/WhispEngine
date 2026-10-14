@@ -1,4 +1,6 @@
 #include "EditorLayer.h"
+#include <imgui.h>
+#include <ImGuizmo.h>
 #include "../core/Application.h"
 #include "../core/Logger.h"
 #include "../ecs/components/SceneIdentityComponent.h"
@@ -16,7 +18,7 @@ EditorLayer::EntitySnapshot EditorLayer::CaptureLike(Application& app,const Enti
     if(sample.settings)result.settings=app.GetSceneSettings();for(const auto& related:sample.related)result.related.push_back(CaptureLike(app,related));return result;
 }
 void EditorLayer::RemapHistory(ecs::Entity oldEntity,ecs::Entity replacement){
-    auto remap=[&](auto&& self,EntitySnapshot& s)->void{if(s.entity==oldEntity)s.entity=replacement;for(auto& item:s.related)self(self,item);};
+    auto remap=[&](auto&& self,EntitySnapshot& s)->void{if(s.entity==oldEntity)s.entity=replacement;if(s.previousSelection==oldEntity)s.previousSelection=replacement;for(auto& item:s.related)self(self,item);};
     for(auto* stack:{&m_UndoStack,&m_RedoStack})for(auto& record:*stack)remap(remap,record.snapshot);
     if(m_Transaction)remap(remap,m_Transaction->before);
 }
@@ -26,7 +28,7 @@ ecs::Entity EditorLayer::RestoreSnapshot(Application& app,const EntitySnapshot& 
     if(owner!=world.GetIdentity())throw std::runtime_error("Undo transaction belongs to a different World");
     if(snapshot.settings){std::string error;if(!app.SetSceneSettings(*snapshot.settings,&error))throw std::runtime_error(error);}
     if(entity.IsValid()){
-        if(!snapshot.alive){if(world.IsAlive(entity))app.DestroySceneEntity(entity);if(m_SelectedEntity==entity)m_SelectedEntity={};}
+        if(!snapshot.alive){if(world.IsAlive(entity))app.DestroySceneEntity(entity);if(m_SelectedEntity==entity)m_SelectedEntity=world.IsAlive(snapshot.previousSelection)?snapshot.previousSelection:ecs::Entity{};}
         else {
             if(snapshot.components.contains("SceneIdentity")){
                 const auto& id=snapshot.components.at("SceneIdentity").at("value");
@@ -62,11 +64,11 @@ void EditorLayer::CommitUndo(Application& app,const std::string& label,EntitySna
     if(m_UndoStack.size()>MaxUndoRecords)m_UndoStack.erase(m_UndoStack.begin());m_RedoStack.clear();
 }
 void EditorLayer::FinishTransaction(Application& app){
-    if(!m_Transaction)return;auto pending=std::move(*m_Transaction);m_Transaction.reset();CommitUndo(app,pending.label,std::move(pending.before));
+    if(!m_Transaction)return;auto pending=std::move(*m_Transaction);m_Transaction.reset();CommitUndo(app,pending.label,std::move(pending.before));if(pending.label=="Duplicate and move")m_DuplicateDrag=false;
 }
 void EditorLayer::CancelTransaction(Application& app){
     if(!m_Transaction)return;auto pending=std::move(*m_Transaction);m_Transaction.reset();
-    try{RestoreSnapshot(app,pending.before);}catch(const std::exception& e){m_EditorError=e.what();Logger::Get().Error(m_EditorError);}m_GizmoUndoCaptured=false;
+    try{RestoreSnapshot(app,pending.before);if(m_DuplicateDrag){m_SelectedEntity=app.GetWorld().IsAlive(m_DragOriginal)?m_DragOriginal:ecs::Entity{};m_DuplicateDrag=false;}}catch(const std::exception& e){m_EditorError=e.what();Logger::Get().Error(m_EditorError);}m_GizmoUndoCaptured=false;m_DuplicateDrag=false;m_LightPointerCaptured=false;
 }
 void EditorLayer::Undo(Application& app){
     FinishTransaction(app);if(m_UndoStack.empty())return;auto record=std::move(m_UndoStack.back());m_UndoStack.pop_back();
@@ -91,6 +93,38 @@ ecs::Entity EditorLayer::DuplicateEntity(Application& app,ecs::Entity source){
     if(auto* tag=app.GetWorld().GetComponent<ecs::TagComponent>(e))tag->name+=" Copy";
     m_SelectedEntity=e;EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Duplicate entity",before);return e;
 }
+bool EditorLayer::CopyEntity(Application& app,ecs::Entity source){
+    if(app.IsEditorPlayMode()||!app.GetWorld().IsAlive(source))return false;
+    m_Clipboard=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),source);m_Clipboard.erase("SceneIdentity");return true;
+}
+ecs::Entity EditorLayer::PasteEntity(Application& app){
+    if(app.IsEditorPlayMode()||!m_Clipboard.is_object())return {};
+    FinishTransaction(app);auto e=app.CreateEmptyEntity();
+    try{ecs::ComponentRegistry::Builtins().Restore(app.GetWorld(),e,m_Clipboard);if(!app.GetWorld().HasComponent<ecs::SceneIdentityComponent>(e))app.GetWorld().AddComponent<ecs::SceneIdentityComponent>(e);app.GetWorld().GetComponent<ecs::SceneIdentityComponent>(e)->value=ecs::NewSceneIdentity();}
+    catch(const std::exception& ex){app.DestroySceneEntity(e);m_EditorError=ex.what();return {};}
+    m_SelectedEntity=e;app.NotifyEditorMutation(e);EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Paste entity",before);return e;
+}
+ecs::Entity EditorLayer::BeginDuplicateDrag(Application& app){
+    if(app.IsEditorPlayMode()||m_DuplicateDrag||!app.GetWorld().IsAlive(m_SelectedEntity))return {};
+    FinishTransaction(app);m_DragOriginal=m_SelectedEntity;
+    auto values=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),m_SelectedEntity);values.erase("SceneIdentity");
+    auto e=app.CreateEmptyEntity();ecs::ComponentRegistry::Builtins().Restore(app.GetWorld(),e,values);
+    if(!app.GetWorld().HasComponent<ecs::SceneIdentityComponent>(e))app.GetWorld().AddComponent<ecs::SceneIdentityComponent>(e);
+    app.GetWorld().GetComponent<ecs::SceneIdentityComponent>(e)->value=ecs::NewSceneIdentity();
+    m_SelectedEntity=e;m_DuplicateDrag=true;EntitySnapshot before;before.entity=e;before.world=e.world;before.previousSelection=m_DragOriginal;BeginTransaction("Duplicate and move",before);return e;
+}
+ecs::Entity EditorLayer::CreatePrimitive(Application& app,const std::string& type){
+    if(app.IsEditorPlayMode()||(type!="cube"&&type!="sphere"&&type!="cylinder"&&type!="cone"&&type!="plane"))return {};
+    auto e=CreateModelEntity(app,"models/primitives/"+type+".obj",type);if(e.IsValid())app.GetWorld().GetComponent<ecs::MaterialComponent>(e)->materialPath="materials/default_primitive.material.json";return e;
+}
+ecs::Entity EditorLayer::CreateModelEntity(Application& app,const std::string& key,const std::string& name){
+    if(app.IsEditorPlayMode()||key.empty()||!ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::Mesh,&m_EditorError))return {};
+    FinishTransaction(app);auto e=app.CreateEmptyEntity(name);
+    auto& mesh=app.GetWorld().AddComponent<ecs::MeshRendererComponent>(e);mesh.meshPath=key;
+    app.GetWorld().AddComponent<ecs::MaterialComponent>(e);m_SelectedEntity=e;
+    EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Create model",before);app.NotifyEditorMutation(e);return e;
+}
+
 bool EditorLayer::RenameEntity(Application& app,ecs::Entity e,const std::string& name){
     FinishTransaction(app);if(!app.GetWorld().IsAlive(e))return false;auto before=CaptureSelectedEntity(app,e);
     if(!app.GetWorld().HasComponent<ecs::TagComponent>(e))app.GetWorld().AddComponent<ecs::TagComponent>(e);
@@ -115,11 +149,13 @@ bool EditorLayer::SetProperty(Application& app,ecs::Entity e,ecs::ComponentTypeI
     if(transactional)CommitUndo(app,"Edit property",std::move(before));return true;
 }
 void EditorLayer::EnterRuntime(const ecs::World::CloneMap& mapping){
+    ImGuizmo::Enable(false);m_ToolActive=false;m_CancelGizmoUntilRelease=true;
     m_EditHistory=HistoryContext{m_SelectedEntity,std::move(m_UndoStack),std::move(m_RedoStack),m_Revision,m_SavedRevision,m_NextRevision,m_ExternalDirty};
     auto found=mapping.find(m_SelectedEntity);m_SelectedEntity=found==mapping.end()?ecs::Entity{}:found->second;
-    m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_GizmoUndoCaptured=false;
+    m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_GizmoUndoCaptured=false;m_DuplicateDrag=false;m_LightPointerCaptured=false;
 }
 void EditorLayer::LeaveRuntime(){
+    ImGuizmo::Enable(false);m_ToolActive=m_DuplicateDrag=m_LightPointerCaptured=false;m_CancelGizmoUntilRelease=true;
     m_UndoStack.clear();m_RedoStack.clear();m_SelectedEntity={};m_Transaction.reset();m_PropertyDrafts.clear();m_GizmoUndoCaptured=false;
     if(m_EditHistory){m_SelectedEntity=m_EditHistory->selected;m_UndoStack=std::move(m_EditHistory->undo);m_RedoStack=std::move(m_EditHistory->redo);m_Revision=m_EditHistory->revision;m_SavedRevision=m_EditHistory->saved;m_NextRevision=m_EditHistory->next;m_ExternalDirty=m_EditHistory->external;m_EditHistory.reset();}
 }

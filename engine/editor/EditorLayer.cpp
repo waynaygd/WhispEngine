@@ -1,3 +1,4 @@
+#include "PrecisionInputs.h"
 #include "EditorWidgets.h"
 #include "EditorLayer.h"
 #include "../scene/SceneSerializer.h"
@@ -314,7 +315,9 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     RefreshAssetLists(dt);
     if(m_Transaction&&!m_Transaction->before.settings&&m_Transaction->before.entity!=m_SelectedEntity)FinishTransaction(app);
     m_InputTextActive=ImGui::GetIO().WantTextInput;m_ModalActive=ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel);
-    if((ImGui::GetIO().AppFocusLost||ImGui::IsKeyPressed(ImGuiKey_Escape,false))&&m_Transaction){CancelTransaction(app);m_PropertyDrafts.clear();}
+    if(m_LightPointerCaptured&&!ImGui::IsMouseDown(0)){FinishTransaction(app);m_LightPointerCaptured=false;}
+    m_EscapeConsumed=false;
+    if((ImGui::GetIO().AppFocusLost||ImGui::IsKeyPressed(ImGuiKey_Escape,false))&&m_Transaction){CancelTransaction(app);m_PropertyDrafts.clear();m_CancelGizmoUntilRelease=true;m_LightPointerCaptured=false;m_EscapeConsumed=true;}
     ConfigureDocking();DrawToolbar(app);
 
 
@@ -322,7 +325,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     m_ViewportPixelHeight = 0;
     m_ViewportHovered = false;
     m_ViewportHasBounds = false;
-    m_ViewportFocused=false;
+    m_ViewportFocused=false;m_HierarchyFocused=false;
     DrawMainMenu(app);DrawSceneDialogs(app);
     if(m_ShowSceneSettings)DrawSceneSettings(app,renderer,dt);
     if(m_ShowVisualSettings)DrawEditorVisualSettings(app,renderer);
@@ -386,6 +389,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
         DrawInspector(app);
     if (m_ShowStatistics)
         DrawStatistics(app, dt);
+    m_InputTextActive=ImGui::IsAnyItemActive();m_ModalActive=ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel);
     if (m_ShowViewport)
         DrawViewport(app, renderer);
     else
@@ -406,7 +410,12 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
 }
 
 void EditorLayer::HandleEditorShortcuts(Application& app){
-    const auto& io=ImGui::GetIO();if(io.WantTextInput||m_ModalActive)return;
+    const auto& io=ImGui::GetIO();if(io.WantTextInput||m_ModalActive||m_EscapeConsumed)return;
+    if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)&&!app.IsEditorPlayMode()){
+        if(HasPendingTransaction()){CancelTransaction(app);m_LightPointerCaptured=false;m_CancelGizmoUntilRelease=true;}else if((m_ViewportFocused||m_HierarchyFocused)&&!m_InputTextActive&&!app.IsCameraControlActive())ClearSelection();return;
+    }
+    const bool entityKeys=!app.IsEditorPlayMode()&&(m_ViewportFocused||m_HierarchyFocused)&&!m_InputTextActive&&!m_ToolActive&&!app.IsCameraControlActive();
+    if(entityKeys){if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_C,false))CopyEntity(app,m_SelectedEntity);if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_V,false))PasteEntity(app);if(ImGui::IsKeyPressed(ImGuiKey_Delete,false))DeleteEntity(app,m_SelectedEntity);}
     if(io.KeyCtrl){
         if(ImGui::IsKeyPressed(ImGuiKey_Z,false))Undo(app);
         if(ImGui::IsKeyPressed(ImGuiKey_Y,false))Redo(app);
@@ -418,7 +427,7 @@ void EditorLayer::HandleEditorShortcuts(Application& app){
     if(ImGui::IsKeyPressed(ImGuiKey_W,false))m_GizmoOperation=0;
     if(ImGui::IsKeyPressed(ImGuiKey_E,false))m_GizmoOperation=1;
     if(ImGui::IsKeyPressed(ImGuiKey_R,false))m_GizmoOperation=2;
-    if(ImGui::IsKeyPressed(ImGuiKey_Delete,false))DeleteEntity(app,m_SelectedEntity);
+
 }
 
 void EditorLayer::RefreshAssetLists(float dt)
@@ -544,15 +553,20 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
 
     m_ViewportHovered=ImGui::IsItemHovered();
     if(m_ViewportHovered&&ImGui::IsMouseClicked(1))ImGui::SetWindowFocus();
-    DrawViewportOverlays(app,contentMin,viewportSize);
+    if(m_ViewportHovered&&ImGui::IsMouseClicked(0))ImGui::SetWindowFocus();
+    m_LightHandleHovered=m_LightIconClicked=false;
     DrawLightGizmos(app,renderer,contentMin,viewportSize);
-    DrawGizmo(app, contentMin, viewportSize);
+    ImGui::GetWindowDrawList()->PushClipRect(contentMin,ImVec2(contentMin.x+viewportSize.x,contentMin.y+viewportSize.y),true);
+    if(!m_LightPointerCaptured&&!m_LightHandleHovered)DrawGizmo(app, contentMin, viewportSize);
+    ImGui::GetWindowDrawList()->PopClipRect();
+    DrawViewportOverlays(app,contentMin,viewportSize);
     m_ToolActive=ImGuizmo::IsUsing()||(m_Transaction&&!m_Transaction->before.settings);
     ImGui::End();
 }
 
 void EditorLayer::DrawMaterialEditor(Application& app)
 {
+    if(m_FocusMaterial){ImGui::SetNextWindowFocus();ImGui::SetNextWindowCollapsed(false);m_FocusMaterial=false;}
     ImGui::SetNextWindowSize(ImVec2(390,480),ImGuiCond_FirstUseEver);
     if(!ImGui::Begin("Material Editor",&m_ShowMaterialEditor)){ImGui::End();return;}
     if(app.IsEditorPlayMode())ImGui::TextWrapped("Stop Play before modifying shared material assets.");
@@ -590,8 +604,8 @@ void EditorLayer::DrawMaterialEditor(Application& app)
         changed|=DrawResourceCombo("Normal texture (linear)",data.normalTexturePath,m_TextureAssets,true);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,data.normalTexturePath);
         changed|=DrawResourceCombo("MR texture (G rough / B metal)",data.metallicRoughnessTexturePath,m_TextureAssets,true);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,data.metallicRoughnessTexturePath);
         changed|=DrawResourceCombo("AO texture (R)",data.occlusionTexturePath,m_TextureAssets,true);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,data.occlusionTexturePath);
-        changed|=ImGui::SliderFloat("Normal scale",&data.normalScale,0,4);
-        changed|=ImGui::SliderFloat("AO strength",&data.occlusionStrength,0,1);
+        changed|=PrecisionSliderFloat("Normal scale",&data.normalScale,0,4);
+        changed|=PrecisionSliderFloat("AO strength",&data.occlusionStrength,0,1);
         const char* slotLabels[]={"Base UV set","Normal UV set","MR UV set","AO UV set"};
         for(int i=0;i<4;++i) {
             changed|=ImGui::InputInt(slotLabels[i],&data.textureTexCoords[i]);data.textureTexCoords[i]=std::clamp(data.textureTexCoords[i],0,7);
@@ -607,14 +621,14 @@ void EditorLayer::DrawMaterialEditor(Application& app)
         changed|=LinearColorEdit("Asset Base Color",data.baseColor,4);
         int shading=int(data.shadingModel);const char* shadingModels[]={"Lambert","PBR (GGX)"};
         if(ImGui::Combo("Shading Model",&shading,shadingModels,2)){data.shadingModel=ShadingModel(shading);changed=true;}
-        changed|=ImGui::SliderFloat("Metallic",&data.metallic,0,1);
-        changed|=ImGui::SliderFloat("Roughness",&data.roughness,0,1);
+        changed|=PrecisionSliderFloat("Metallic",&data.metallic,0,1);
+        changed|=PrecisionSliderFloat("Roughness",&data.roughness,0,1);
         if(data.shadingModel==ShadingModel::PBR)ImGui::TextWrapped("PBR uses direct GGX and optional scene IBL. Map values use their existing color semantics.");
         ImGui::TextUnformatted("Base Color factor is linear. BRDF roughness minimum: 0.04.");
         int mode=int(data.surfaceMode);const char* modes[]={"Opaque","Masked (unsupported)","Transparent (unsupported)"};
         if(ImGui::Combo("Surface Mode",&mode,modes,3)){data.surfaceMode=MaterialSurfaceMode(mode);changed=true;}
         if(data.surfaceMode!=MaterialSurfaceMode::Opaque)ImGui::TextWrapped("This surface mode is preserved in the asset but omitted from main and shadow passes.");
-        if(data.surfaceMode==MaterialSurfaceMode::Masked)changed|=ImGui::SliderFloat("Alpha Cutoff",&data.alphaCutoff,0,1);
+        if(data.surfaceMode==MaterialSurfaceMode::Masked)changed|=PrecisionSliderFloat("Alpha Cutoff",&data.alphaCutoff,0,1);
         changed|=ImGui::Checkbox("Double Sided",&data.doubleSided);
         changed|=ImGui::Checkbox("Cast Shadows",&data.castShadows);
         changed|=ImGui::Checkbox("Receive Shadows",&data.receiveShadows);
@@ -647,9 +661,12 @@ void EditorLayer::DrawMaterialEditor(Application& app)
 
 void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const ImVec2& viewportSize)
 {
+    if(m_ModalActive){if(m_GizmoUndoCaptured)CancelTransaction(app);m_GizmoUndoCaptured=false;m_CancelGizmoUntilRelease=true;ImGuizmo::Enable(false);return;}
+    if((app.IsCameraControlActive()||ImGui::IsMouseDown(1))&&!ImGuizmo::IsUsing())return;
     if (app.IsEditorPlayMode() || viewportSize.x <= 1.0f || viewportSize.y <= 1.0f)
         return;
 
+    if(m_CancelGizmoUntilRelease){ImGuizmo::Enable(false);if(ImGui::IsMouseDown(0))return;m_CancelGizmoUntilRelease=false;}ImGuizmo::Enable(true);
     auto& world = app.GetWorld();
     if (!m_SelectedEntity.IsValid() || !world.IsAlive(m_SelectedEntity))
         return;
@@ -685,11 +702,17 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
 
     const ImGuizmo::MODE mode = m_GizmoMode == 0 ? ImGuizmo::LOCAL : ImGuizmo::WORLD;
     float snapValue=m_GizmoOperation==0?m_SnapTranslation:m_GizmoOperation==1?m_SnapRotation:m_SnapScale;float snap[3]={snapValue,snapValue,snapValue};
-    if (ImGuizmo::Manipulate(view, projection, ToGizmoOperation(m_GizmoOperation), mode, matrix,nullptr,m_Snapping?snap:nullptr))
+    float originalMatrix[16];std::copy(matrix,matrix+16,originalMatrix);
+    const bool manipulated=ImGuizmo::Manipulate(view, projection, ToGizmoOperation(m_GizmoOperation), mode, matrix,nullptr,m_Snapping?snap:nullptr);
+    bool matrixChanged=false;for(int i=0;i<16;++i)matrixChanged|=std::abs(matrix[i]-originalMatrix[i])>1e-6f;
+    // ImGuizmo's previous delta may report "modified" on a later stationary drag.
+    // Duplicate only when the target matrix actually changes (including snapped movement).
+    if (manipulated&&matrixChanged)
     {
         if (!m_GizmoUndoCaptured)
         {
-            PushUndoBeforeChange(app,"Transform Gizmo");
+            if(m_GizmoOperation==0&&ImGui::GetIO().KeyAlt){auto copy=BeginDuplicateDrag(app);if(copy.IsValid())transform=world.GetComponent<ecs::TransformComponent>(copy);}
+            else PushUndoBeforeChange(app,"Transform Gizmo");
             m_GizmoUndoCaptured = true;
         }
 
@@ -708,7 +731,7 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
     }
     else if (!ImGuizmo::IsUsing())
     {
-        if(m_GizmoUndoCaptured)FinishTransaction(app);
+        if(m_GizmoUndoCaptured){FinishTransaction(app);m_DuplicateDrag=false;}
         m_GizmoUndoCaptured = false;
     }
 }
@@ -728,18 +751,23 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
                 ImGui::TableSetupColumn("Property",ImGuiTableColumnFlags_WidthFixed,90*ImGui::GetStyle().FontScaleDpi);ImGui::TableSetupColumn("Value",ImGuiTableColumnFlags_WidthStretch);
                 auto row=[&](const char* label,auto control){ImGui::TableNextRow();ImGui::TableSetColumnIndex(0);ImGui::AlignTextToFramePadding();ImGui::TextUnformatted(label);ImGui::TableSetColumnIndex(1);ImGui::SetNextItemWidth(-1);control();};
                 row("Mode",[&]{changed|=ImGui::Combo("##bgMode",&mode,"Solid\0Gradient\0HDR sky\0");});b.background=EditorBackground(mode);
-                row("Intensity",[&]{changed|=ImGui::SliderFloat("##skyIntensity",&b.skyIntensity,0,8);});
+                row("Intensity",[&]{changed|=PrecisionSliderFloat("##skyIntensity",&b.skyIntensity,0,8);});
                 if(b.background==EditorBackground::Solid)row("Color",[&]{changed|=LinearColorEdit("##bgSolid",b.solid.data(),3,ImGuiColorEditFlags_NoInputs);});
-                else if(b.background==EditorBackground::Gradient){row("Top",[&]{changed|=LinearColorEdit("##bgTop",b.top.data(),3,ImGuiColorEditFlags_NoInputs);});row("Horizon",[&]{changed|=LinearColorEdit("##bgHorizon",b.horizon.data(),3,ImGuiColorEditFlags_NoInputs);});row("Ground",[&]{changed|=LinearColorEdit("##bgBottom",b.bottom.data(),3,ImGuiColorEditFlags_NoInputs);});row("Blend",[&]{changed|=ImGui::SliderFloat("##bgBlend",&b.gradientBlend,.1f,4);});}
+                else if(b.background==EditorBackground::Gradient){row("Top",[&]{changed|=LinearColorEdit("##bgTop",b.top.data(),3,ImGuiColorEditFlags_NoInputs);});row("Horizon",[&]{changed|=LinearColorEdit("##bgHorizon",b.horizon.data(),3,ImGuiColorEditFlags_NoInputs);});row("Ground",[&]{changed|=LinearColorEdit("##bgBottom",b.bottom.data(),3,ImGuiColorEditFlags_NoInputs);});row("Blend",[&]{changed|=PrecisionSliderFloat("##bgBlend",&b.gradientBlend,.1f,4);});}
                 else{row("Use IBL",[&]{changed|=ImGui::Checkbox("##bgUseIbl",&b.useIblEnvironment);if(ImGui::IsItemHovered())ImGui::SetTooltip("Share the IBL HDR asset and rotation. Visible sky intensity stays independent.");});ImGui::BeginDisabled(b.useIblEnvironment);row("HDR asset",[&]{
                     const auto world=app.GetWorld().GetIdentity();if(!m_BackgroundAssetEditing||m_BackgroundDraftWorld!=world){m_BackgroundAssetDraft=b.cubemap;m_BackgroundDraftWorld=world;}
                     bool edited=ImGui::InputText("##bgAsset",&m_BackgroundAssetDraft);m_BackgroundAssetEditing=ImGui::IsItemActive();edited|=AcceptAssetDrop(ecs::AssetKind::Environment,m_BackgroundAssetDraft);
                     std::string error;const bool valid=ecs::ComponentRegistry::ValidateAssetKey(m_BackgroundAssetDraft,ecs::AssetKind::Environment,&error);
                     if(edited&&valid){b.cubemap=m_BackgroundAssetDraft;changed=true;}if(ImGui::IsItemHovered())ImGui::SetTooltip("%s",m_BackgroundAssetDraft.c_str());if(!valid)ImGui::TextWrapped("%s",error.c_str());
-                });row("Rotation",[&]{changed|=ImGui::SliderFloat("##bgRotation",&b.skyRotation,-180,180,"%.1f deg");});ImGui::EndDisabled();}
+                });row("Rotation",[&]{changed|=PrecisionSliderFloat("##bgRotation",&b.skyRotation,-180,180,"%.1f deg");});ImGui::EndDisabled();}
                 ImGui::EndTable();
             }
-            if(changed){std::string error;if(!app.SetSceneSettings(settings,&error))m_EditorError=error;}
+            int sync=int(b.sunSync);changed|=ImGui::Combo("Sun Sync",&sync,"Independent\0Light Drives Sky (disc)\0Sky Drives Light (metadata)\0");b.sunSync=SunSyncMode(sync);
+            changed|=ImGui::Checkbox("Explicit HDR sun metadata",&b.sunMetadata);
+            if(b.sunMetadata)changed|=PrecisionDragFloat3("Sun direction (sky space)",b.sunDirection.data(),.01f,-1,1,"%.6g",ImGuiSliderFlags_NoRoundToFormat);
+            if(b.sunSync==SunSyncMode::LightDrivesSky){changed|=PrecisionDragFloat("Sun diameter (deg)",&b.sunRadius,.01f,.01f,10,"%.6g",ImGuiSliderFlags_NoRoundToFormat);changed|=PrecisionDragFloat("Visible sun intensity",&b.sunIntensity,.01f,0,32,"%.6g",ImGuiSliderFlags_NoRoundToFormat);ImGui::TextWrapped("Disc follows primary light at any elevation. HDR rotation and precomputed IBL stay unchanged. Use an HDR without an existing sun to avoid two visible discs.");}
+            if(changed){BeginSceneTransaction(app,"Sky / Sun settings");std::string error;if(!app.SetSceneSettings(settings,&error))m_EditorError=error;else m_EditorError.clear();}
+            if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());
             ImGui::TextDisabled("Shared by Edit / Play");
         }
         auto& lighting=app.GetLightingSettings();
@@ -762,9 +790,9 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
         if(sceneLights.primaryEcs)ImGui::TextWrapped("Scene primary %u:%u. Edit its Inspector/rotation.",sceneLights.primaryIndex,sceneLights.primaryGeneration);
         ImGui::BeginDisabled(sceneLights.primaryEcs);
         ImGui::Checkbox("Enabled", &lighting.directional.enabled);
-        ImGui::DragFloat3("Direction (rays)",lighting.directional.direction.data(),.02f);
+        PrecisionDragFloat3("Direction (rays)",lighting.directional.direction.data(),.02f);
         LinearColorEdit("Color",lighting.directional.color.data(),3);
-        ImGui::SliderFloat("Intensity",&lighting.directional.intensity,0.f,3.f);
+        PrecisionSliderFloat("Intensity",&lighting.directional.intensity,0.f,3.f);
         ImGui::EndDisabled();
         ImGui::TreePop();}
         auto primary=SceneSerializer::PrimaryDirectionalId(app.GetWorld());
@@ -788,9 +816,9 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
             auto& env=app.GetEnvironmentSettings();ImGui::Checkbox("IBL Enabled",&env.enabled);
             ImGui::InputText("HDR asset",&env.assetPath);
             std::string dropped; if(AcceptAssetDrop(ecs::AssetKind::Environment,dropped))env.assetPath=dropped;
-            ImGui::DragFloat("Environment Intensity",&env.intensity,.05f,0,10000);
-            ImGui::SliderFloat("Environment Rotation",&env.rotationDegrees,-180,180);
-            ImGui::SliderFloat("Exposure (EV)",&env.exposure,-8,8);
+            PrecisionDragFloat("Environment Intensity",&env.intensity,.05f,0,10000);
+            PrecisionSliderFloat("Environment Rotation",&env.rotationDegrees,-180,180);
+            PrecisionSliderFloat("Exposure (EV)",&env.exposure,-8,8);
             ImGui::Checkbox("Tone Mapping (Reinhard)",&env.toneMapping);
             ImGui::Checkbox("Diffuse IBL",&env.diffuse);ImGui::Checkbox("Specular IBL",&env.specular);
             if(ImGui::Button("Reload HDR")&&app.GetResourceManager())app.GetResourceManager()->ReloadEnvironmentAsync(env.assetPath);
@@ -808,7 +836,7 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
         }
         ImGui::SeparatorText("Ambient Lighting");
         LinearColorEdit("Ambient Color",lighting.ambientColor.data(),3);
-        ImGui::SliderFloat("Ambient Intensity",&lighting.ambientIntensity,0.f,1.f);
+        PrecisionSliderFloat("Ambient Intensity",&lighting.ambientIntensity,0.f,1.f);
         if(ImGui::CollapsingHeader("Shadows (DX12)",ImGuiTreeNodeFlags_DefaultOpen)) {
         auto& shadows=app.GetShadowSettings();
         ImGui::Checkbox("Shadows enabled",&shadows.enabled);
@@ -817,28 +845,28 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
         ImGui::Text("Depth map: %.1f MiB",ShadowMapBytes(shadows)/1048576.);
         int filtering=shadows.pcf?(shadows.filterTaps==5?2:1):0;
         if(ImGui::Combo("Filtering",&filtering,"Hard (point)\0Legacy PCF 3x3\0Smooth tent 5x5\0")){shadows.pcf=filtering!=0;shadows.filterTaps=filtering==2?5:3;}
-        if(shadows.pcf)ImGui::SliderFloat("Radius (texels)",&shadows.filterRadius,0,2);
+        if(shadows.pcf)PrecisionSliderFloat("Radius (texels)",&shadows.filterRadius,0,2);
         ImGui::Checkbox("Fit near camera frustum",&shadows.cameraFitted);
         if(ImGui::Button("Restore shadow defaults"))shadows=ShadowSettings{};
         const unsigned resolutions[]={512,1024,2048,4096};
         int choice=2;for(int i=0;i<4;++i)if(shadows.resolution==resolutions[i])choice=i;
         if(ImGui::Combo("Resolution",&choice,"512\0" "1024\0" "2048\0" "4096\0"))shadows.resolution=resolutions[choice];
-        ImGui::SliderFloat(shadows.cameraFitted?"Minimum coverage":"Coverage",&shadows.coverage,2,150);
+        PrecisionSliderFloat(shadows.cameraFitted?"Minimum coverage":"Coverage",&shadows.coverage,2,150);
 
-        ImGui::SliderInt("Constant bias",&shadows.depthBias,0,1000);
+        PrecisionSliderInt("Constant bias",&shadows.depthBias,0,1000);
         if(ImGui::IsItemHovered())ImGui::SetTooltip("D32 rasterizer units; positive bias moves stored depth away from light.");
-        ImGui::SliderFloat("Slope Bias",&shadows.slopeBias,0,4);
+        PrecisionSliderFloat("Slope Bias",&shadows.slopeBias,0,4);
         if(ImGui::TreeNode("Advanced shadow settings")) {
-            ImGui::SliderFloat(shadows.cameraFitted?"Shadow distance":"Focus distance",&shadows.focusDistance,0,100);
-            ImGui::SliderFloat("Depth range",&shadows.depthRange,10,200);
-            ImGui::SliderFloat("Receiver Bias",&shadows.receiverBias,0,.003f,"%.5f");
-            ImGui::SliderFloat("Normal (texels)",&shadows.normalBias,0,2,"%.2f");
+            PrecisionSliderFloat(shadows.cameraFitted?"Shadow distance":"Focus distance",&shadows.focusDistance,0,100);
+            PrecisionSliderFloat("Depth range",&shadows.depthRange,10,200);
+            PrecisionSliderFloat("Receiver Bias",&shadows.receiverBias,0,.003f,"%.5f");
+            PrecisionSliderFloat("Normal (texels)",&shadows.normalBias,0,2,"%.2f");
             ImGui::Checkbox("Receiver plane correction",&shadows.receiverPlaneBias);
-            ImGui::SliderFloat("Coverage edge fade",&shadows.edgeFade,0,.2f);
+            PrecisionSliderFloat("Coverage edge fade",&shadows.edgeFade,0,.2f);
             ImGui::Combo("Shadow debug",&shadows.debugMode,"Shaded\0Visibility\0Coverage\0");
             ImGui::TreePop();
         }
-        ImGui::SliderFloat("Shadow Strength",&shadows.strength,0,1);
+        PrecisionSliderFloat("Shadow Strength",&shadows.strength,0,1);
         if(renderer) {
             const auto stats=app.GetRenderStatistics().submitted;
             const auto times=renderer->GetGpuTimings();

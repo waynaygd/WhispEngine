@@ -1,3 +1,5 @@
+#include "PrecisionInputs.h"
+#include "SunSynchronization.h"
 #include "EditorLayer.h"
 #include "EditorWidgets.h"
 #include "../core/Application.h"
@@ -16,12 +18,12 @@ bool Drawer(const ecs::PropertyDescriptor& p,ecs::PropertyValue& v){
     if(p.nullable){bool enabled=!std::holds_alternative<std::monostate>(v);if(ImGui::Checkbox("##override",&enabled)){v=enabled?Initial(p):ecs::PropertyValue{};changed=true;}if(ImGui::IsItemHovered())ImGui::SetTooltip("Override this property for the selected entity; unchecked inherits the material asset.");if(!enabled){ImGui::SameLine();ImGui::TextDisabled("Inherit");return changed;}ImGui::SameLine();}
     switch(p.kind){
     case K::Boolean:changed|=ImGui::Checkbox("##value",&std::get<bool>(v));break;
-    case K::Integer:{auto& x=std::get<int>(v);if(p.choices.empty())changed|=ImGui::DragInt("##value",&x,1,int(p.minimum),int(p.maximum));else if(ImGui::BeginCombo("##value",x>=0&&x<int(p.choices.size())?p.choices[x].c_str():"Invalid")){for(int i=0;i<int(p.choices.size());++i)if(ImGui::Selectable(p.choices[i].c_str(),x==i)){x=i;changed=true;}ImGui::EndCombo();}break;}
-    case K::Number:changed|=ImGui::DragFloat("##value",&std::get<float>(v),p.speed,p.minimum,p.maximum);break;
+    case K::Integer:{auto& x=std::get<int>(v);if(p.choices.empty())changed|=PrecisionDragInt("##value",&x,1,int(p.minimum),int(p.maximum));else if(ImGui::BeginCombo("##value",x>=0&&x<int(p.choices.size())?p.choices[x].c_str():"Invalid")){for(int i=0;i<int(p.choices.size());++i)if(ImGui::Selectable(p.choices[i].c_str(),x==i)){x=i;changed=true;}ImGui::EndCombo();}break;}
+    case K::Number:changed|=PrecisionDragFloat("##value",&std::get<float>(v),p.speed,p.minimum,p.maximum);break;
     case K::Vector:{auto& x=std::get<ecs::Vec3>(v);ImGui::BeginGroup();float* values[]={&x.x,&x.y,&x.z};const char* axes[]={"X","Y","Z"};const ImVec4 colors[]={{.85f,.32f,.32f,1},{.35f,.75f,.43f,1},{.36f,.57f,.95f,1}};
         const float available=ImGui::GetContentRegionAvail().x;const bool stacked=available<100*ImGui::GetStyle().FontScaleDpi;const float width=stacked?available:(available-2*ImGui::GetStyle().ItemSpacing.x)/3;
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,ImVec2(2,ImGui::GetStyle().FramePadding.y));
-        for(int i=0;i<3;++i){ImGui::PushID(i);if(i&&!stacked)ImGui::SameLine();ImGui::BeginGroup();ImGui::AlignTextToFramePadding();ImGui::TextColored(colors[i],"%s",axes[i]);const float axisWidth=ImGui::CalcTextSize(axes[i]).x;ImGui::SameLine(0,2);ImGui::SetNextItemWidth(std::max(20.f,width-axisWidth-2));changed|=ImGui::DragFloat("##axis",values[i],p.speed,p.minimum,p.maximum,"%.3g",ImGuiSliderFlags_NoRoundToFormat);if(ImGui::IsItemHovered())ImGui::SetTooltip("%s: %.7g",axes[i],*values[i]);ImGui::EndGroup();ImGui::PopID();}ImGui::PopStyleVar();ImGui::EndGroup();break;}
+        for(int i=0;i<3;++i){ImGui::PushID(i);if(i&&!stacked)ImGui::SameLine();ImGui::BeginGroup();ImGui::AlignTextToFramePadding();ImGui::TextColored(colors[i],"%s",axes[i]);const float axisWidth=ImGui::CalcTextSize(axes[i]).x;ImGui::SameLine(0,2);ImGui::SetNextItemWidth(std::max(20.f,width-axisWidth-2));changed|=PrecisionDragFloat("##axis",values[i],p.speed,p.minimum,p.maximum,"%.3g",ImGuiSliderFlags_NoRoundToFormat);ImGui::EndGroup();ImGui::PopID();}ImGui::PopStyleVar();ImGui::EndGroup();break;}
     case K::Color:{auto& color=std::get<std::array<float,4>>(v);if(p.key=="tint")changed|=ImGui::ColorEdit4("##value",color.data(),ImGuiColorEditFlags_NoInputs);else changed|=LinearColorEdit("##value",color.data(),p.colorComponents,ImGuiColorEditFlags_NoInputs);break;}
     case K::String:case K::Asset:changed|=ImGui::InputText("##value",&std::get<std::string>(v));break;
     case K::AssetList:{auto& list=std::get<std::vector<std::string>>(v);for(int i=0;i<int(list.size());++i){ImGui::PushID(i);changed|=ImGui::InputText("Slot",&list[i]);if(ImGui::BeginDragDropTarget()){if(auto* payload=ImGui::AcceptDragDropPayload("WHISP_ASSET"))if(payload->DataSize==sizeof(AssetPayload)){auto* data=static_cast<const AssetPayload*>(payload->Data);if(data->kind==p.asset){list[i]=data->key;changed=true;}}ImGui::EndDragDropTarget();}ImGui::SameLine();if(ImGui::SmallButton("X")){list.erase(list.begin()+i);changed=true;ImGui::PopID();break;}ImGui::PopID();}if(ImGui::SmallButton("Add slot")){list.emplace_back();changed=true;}break;}
@@ -40,7 +42,7 @@ void EditorLayer::DrawInspector(Application& app){
     ImGui::SetNextWindowSizeConstraints(ImVec2(270,180),ImVec2(FLT_MAX,FLT_MAX));
     if(!ImGui::Begin("Inspector",&m_ShowInspector)){ImGui::End();return;}
     auto& world=app.GetWorld();auto e=m_SelectedEntity;
-    if(!world.IsAlive(e)){ImGui::TextUnformatted("Select an entity");ImGui::End();return;}
+    if(!world.IsAlive(e)){ImGui::TextUnformatted("No entity selected");ImGui::End();return;}
     const auto* tag=world.GetComponent<ecs::TagComponent>(e);ImGui::SeparatorText(tag?tag->name.c_str():"Entity");
     if(app.IsEditorPlayMode())ImGui::TextWrapped("Runtime edits are discarded on Stop.");
     const auto& registry=ecs::ComponentRegistry::Builtins();ImGui::PushID(int(e.index));ImGui::PushID(int(e.generation));
@@ -57,8 +59,10 @@ void EditorLayer::DrawInspector(Application& app){
 
             ImGui::PushID(p.key.c_str());const auto id=ImGui::GetID("PropertyDraft");auto draft=m_PropertyDrafts.find(id);
             auto value=draft!=m_PropertyDrafts.end()?draft->second:p.get(world,e);
-            ImGui::BeginDisabled(p.readOnly);bool changed=Drawer(p,value);bool activated=ImGui::IsItemActivated();bool deactivated=ImGui::IsItemDeactivatedAfterEdit();ImGui::EndDisabled();
-            if(p.readOnly&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Readonly: %s",p.tooltip.c_str());else if(ImGui::IsItemHovered()&&!p.tooltip.empty())ImGui::SetTooltip("%s",p.tooltip.c_str());
+            const bool skyDriven=d.key=="Transform"&&p.key=="rotation"&&app.GetSceneBackground().sunSync==SunSyncMode::SkyDrivesLight&&app.GetSceneBackground().sunMetadata&&world.HasComponent<ecs::DirectionalLightComponent>(e)&&PrimarySun(world)==e;
+            const bool readOnly=p.readOnly||skyDriven;
+            ImGui::BeginDisabled(readOnly);bool changed=Drawer(p,value);bool activated=ImGui::IsItemActivated();bool deactivated=ImGui::IsItemDeactivatedAfterEdit();ImGui::EndDisabled();
+            if(skyDriven&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Sky Drives Light controls this orientation. Select Independent to edit it manually.");else if(p.readOnly&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Readonly: %s",p.tooltip.c_str());else if(ImGui::IsItemHovered()&&!p.tooltip.empty())ImGui::SetTooltip("%s",p.tooltip.c_str());
             if(activated||changed){if(!m_Transaction)PushUndoBeforeChange(app,"Edit "+d.label+" / "+p.label);m_PropertyDrafts[id]=value;}
             if(changed){if(SetProperty(app,e,d.id,p.key,value,false))m_EditorError.clear();else ImGui::TextColored(ImVec4(1,.45f,.35f,1),"%s",m_EditorError.c_str());}
             if(deactivated){FinishTransaction(app);m_PropertyDrafts.erase(id);}

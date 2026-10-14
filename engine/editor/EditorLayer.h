@@ -6,6 +6,7 @@
 #include "EditorPreferences.h"
 #include "InputRouting.h"
 #include "AssetCatalog.h"
+#include "SceneCatalog.h"
 #include "../core/Logger.h"
 #include "../ecs/components/LightComponent.h"
 #include "../ecs/components/ColliderComponent.h"
@@ -37,6 +38,8 @@ public:
     void SetProjectileTestInput(bool enabled){m_ProjectileTestInput=enabled;}
     void SetBackgroundOverride(bool enabled){m_BackgroundOverride=enabled;}
     void SetGridVisible(bool show){m_ShowGrid=show;}
+    void SetGizmoOperation(int operation){m_GizmoOperation=std::clamp(operation,0,2);}
+    void SetSnapping(bool enabled){m_Snapping=enabled;}
     void SetSkyDiagnosticEnabled(bool enabled){m_SkyDiagnosticEnabled=enabled;}
     void SetDiagnosticViewport(int w,int h){m_DiagnosticWidth=w;m_DiagnosticHeight=h;}
     void SetAssetGrid(bool grid){m_AssetGrid=grid;}
@@ -48,13 +51,13 @@ public:
     void PersistPreferences(Application&);
     void ResetLayout(){m_ResetLayout=true;}
     void SetFixedDiagnosticLayout(bool fixed){m_FixedDiagnosticLayout=fixed;if(fixed){m_ShowStatistics=m_ShowMaterialEditor=true;}}
-    InputOwner InputOwnership(bool right,bool left,bool camera,bool play)const{return RouteInput({m_ViewportFocused,m_ViewportHovered,m_InputTextActive,m_ModalActive,m_ToolActive,false,camera,right,left,play});}
+    InputOwner InputOwnership(bool right,bool left,bool camera,bool play)const{return RouteInput({m_ViewportFocused,m_ViewportHovered,m_InputTextActive,m_ModalActive,m_ToolActive&&!m_LightPointerCaptured,m_LightPointerCaptured||m_LightHandleHovered,camera,right,left,play});}
     bool BlocksCamera()const{return m_ToolActive||m_InputTextActive||m_ModalActive;}
     bool OwnsViewportKeyboard()const{return m_ViewportFocused&&!BlocksCamera();}
     void SetLightGizmosVisible(bool v){m_ShowLightGizmos=v;}
     void EnterRuntime(const ecs::World::CloneMap&);
     void LeaveRuntime();
-    void ResetHistory(){m_UndoStack.clear();m_RedoStack.clear();m_SelectedEntity={};m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;}
+    void ResetHistory(){m_UndoStack.clear();m_RedoStack.clear();m_SelectedEntity={};m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;}
     void FinishTransaction(Application&);
     void CancelTransaction(Application&);
     bool HasPendingTransaction()const{return m_Transaction.has_value();}
@@ -64,6 +67,18 @@ public:
     ecs::Entity CreateEntity(Application&,const std::string& name="Entity");
     bool DeleteEntity(Application&,ecs::Entity);
     ecs::Entity DuplicateEntity(Application&,ecs::Entity);
+    bool CopyEntity(Application&,ecs::Entity);
+    ecs::Entity PasteEntity(Application&);
+    ecs::Entity BeginDuplicateDrag(Application&);
+    ecs::Entity CreatePrimitive(Application&,const std::string& type);
+    ecs::Entity CreateModelEntity(Application&,const std::string& key,const std::string& name="Model");
+    void ClearSelection(){m_SelectedEntity={};m_PropertyDrafts.clear();}
+    enum class OpenDecision {Cancel,Discard,Save};
+    bool OpenSceneGuarded(Application&,const std::string&,OpenDecision,std::string* error=nullptr);
+    void RememberScene(const std::string&);
+    const auto& RecentScenes()const{return m_RecentScenes;}
+    bool OpenMaterial(Application&,const std::string&);
+
     bool RenameEntity(Application&,ecs::Entity,const std::string&);
     bool AddComponent(Application&,ecs::Entity,ecs::ComponentTypeId);
     bool RemoveComponent(Application&,ecs::Entity,ecs::ComponentTypeId);
@@ -78,7 +93,7 @@ public:
     const std::string& GetError()const{return m_EditorError;}
     ecs::Entity CreateLight(Application&,LightType);
     void DeleteSelectedLight(Application&);
-    void SelectEntity(ecs::Entity e){m_SelectedEntity=e;}
+    void SelectEntity(ecs::Entity e){if(e!=m_SelectedEntity)m_PropertyDrafts.clear();m_SelectedEntity=e;}
     ecs::Entity GetSelectedEntity()const{return m_SelectedEntity;}
     void RecordEdit(Application& app,const std::string& label){PushUndoBeforeChange(app,label);}
     void UndoEdit(Application& app){Undo(app);}
@@ -86,11 +101,13 @@ public:
     int GetViewportPixelWidth() const { return m_ViewportPixelWidth; }
     int GetViewportPixelHeight() const { return m_ViewportPixelHeight; }
     bool IsViewportHovered() const { return m_ViewportHovered; }
+    std::array<float,4> GetViewportBounds()const{return {m_ViewportMinX,m_ViewportMinY,m_ViewportMaxX,m_ViewportMaxY};}
+    bool HasLightPointerCapture()const{return m_LightPointerCaptured;}
     bool IsPointInsideViewport(double x, double y) const;
 
 private:
     struct EntitySnapshot {
-        ecs::Entity entity{};
+        ecs::Entity entity{},previousSelection{};
         std::uint64_t world=0;
         bool alive=false;
         nlohmann::json components=nlohmann::json::object();
@@ -132,6 +149,7 @@ private:
     void DrawStatistics(Application& app, float dt);
     void DrawViewport(Application& app, IRenderAdapter* renderer);
     void DrawAssetBrowser(Application& app);
+    void DrawImportDialogs(Application& app);
     void DrawMaterialEditor(Application& app);
     void DrawLightGizmos(Application&,IRenderAdapter*,const ImVec2&,const ImVec2&);
     bool m_ShowLightGizmos=true,m_LightXray=false;
@@ -198,6 +216,15 @@ private:
     std::vector<UndoRecord> m_UndoStack;
     std::vector<UndoRecord> m_RedoStack;
     bool m_GizmoUndoCaptured = false;
+    bool m_CancelGizmoUntilRelease=false,m_EscapeConsumed=false;
+    bool m_DuplicateDrag=false,m_HierarchyFocused=false,m_LightPointerCaptured=false,m_LightHandleHovered=false,m_LightIconClicked=false;
+    ecs::Entity m_DragOriginal{};
+    nlohmann::json m_Clipboard;
+    bool m_FocusMaterial=false;
+    std::vector<std::string> m_RecentScenes;
+    SceneCatalog m_SceneCatalog;
+    std::string m_SceneSearch,m_NewFolderName="NewFolder",m_FolderParent,m_ImportSource,m_ImportRoot,m_ImportTarget="models/imported/model",m_ImportPreview;
+    bool m_FolderPopup=false,m_ImportPopup=false;
     std::string m_EditorError;
     std::unordered_map<unsigned,ecs::PropertyValue> m_PropertyDrafts;
     static constexpr std::size_t MaxUndoRecords = 128;

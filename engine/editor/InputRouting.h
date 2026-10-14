@@ -14,8 +14,8 @@ struct ViewportInput {
 };
 inline InputOwner RouteInput(const ViewportInput& s){
     if(!s.focused||s.text||s.modal)return InputOwner::UI;
-    if(s.transform)return InputOwner::TransformGizmo;
     if(s.light)return InputOwner::LightGizmo;
+    if(s.transform)return InputOwner::TransformGizmo;
     if((s.camera||s.right)&&!s.left&&s.hovered)return InputOwner::Camera;
     if(s.left&&s.hovered)return InputOwner::Selection;
     return s.play?InputOwner::Runtime:InputOwner::None;

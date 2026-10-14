@@ -11,6 +11,8 @@ cbuffer Editor : register(b0) {
     float4 bottom;
     float4 background; // mode, intensity, blend exponent, rotation radians
     float4 solid;
+    float4 sunDirection; // xyz observer-to-sun, w cos angular radius (2 = hidden)
+    float4 sunColor; // rgb linear, w independent visible disc intensity
 };
 TextureCube<float4> sky : register(t0);
 SamplerState skySampler : register(s0);
@@ -25,7 +27,7 @@ float3 Output(float3 c){
     return lerp(12.92*c,1.055*pow(c,1.0/2.4)-.055,step(.0031308,c));
 }
 float4 SkyPS(Vertex v):SV_TARGET {
-    float3 d=normalize(Ray(v.ndc)),c;
+    float3 d=normalize(Ray(v.ndc)),worldRay=d,c;
     if(background.x>1.5){
         float sn=sin(background.w),cs=cos(background.w);
         d.xz=float2(cs*d.x+sn*d.z,-sn*d.x+cs*d.z);
@@ -34,7 +36,14 @@ float4 SkyPS(Vertex v):SV_TARGET {
         float blend=pow(saturate(abs(d.y)),background.z);
         c=lerp(horizon.rgb,d.y>=0?top.rgb:bottom.rgb,blend);
     }else c=solid.rgb;
-    return float4(Output(c*background.y),1);
+    c*=background.y;
+    [branch] if(sunDirection.w<1.5){
+        float alignment=dot(worldRay,sunDirection.xyz),width=max(fwidth(alignment),1e-7);
+        float disc=smoothstep(sunDirection.w-width,sunDirection.w+width,alignment);
+        // Visible helper replaces background radiance; it does not add a direct light or alter IBL.
+        c=lerp(c,sunColor.rgb*sunColor.w,disc);
+    }
+    return float4(Output(c),1);
 }
 float Coverage(float2 p,float spacing,float2 footprint,float width){
     float2 nearest=abs(frac(p/spacing+.5)-.5)*spacing;

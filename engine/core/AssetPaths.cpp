@@ -156,7 +156,12 @@ std::string NormalizeAssetKey(const std::filesystem::path& path)
     if (!path.is_absolute())
         return NormalizeRelativeKey(path);
 
-    return NormalizeKeyAgainstRoot(path, ResolveAssetRoot());
+    auto key=NormalizeKeyAgainstRoot(path,ResolveAssetRoot());if(!key.empty())return key;
+    // Authoring assets can live in engine/assets while the executable uses staged assets.
+    for(const auto& root:BuildSearchRoots())for(const auto& candidate:{root/"assets",root/"engine"/"assets"}){
+        if(!std::filesystem::is_directory(candidate))continue;key=NormalizeKeyAgainstRoot(path,NormalizeIfExists(candidate));if(!key.empty())return key;
+    }
+    return {};
 }
 
 std::string NormalizeShaderKey(const std::filesystem::path& path)
@@ -180,7 +185,11 @@ std::filesystem::path ResolveAssetPath(const std::filesystem::path& relativePath
     if (assetRoot.empty())
         return {};
 
-    return NormalizeIfExists(assetRoot / std::filesystem::path(key));
+    auto resolved=NormalizeIfExists(assetRoot/std::filesystem::u8path(key));if(!resolved.empty())return resolved;
+    for(const auto& root:BuildSearchRoots())for(const auto& candidate:{root/"assets",root/"engine"/"assets"}){
+        resolved=NormalizeIfExists(candidate/std::filesystem::u8path(key));if(!resolved.empty())return resolved;
+    }
+    return {};
 }
 
 std::filesystem::path ResolveAssetOutputPath(const std::filesystem::path& relativePath)

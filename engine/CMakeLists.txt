@@ -56,6 +56,8 @@ add_library(Engine
   editor/EditorVisualSettings.cpp
   editor/AssetCatalog.cpp
   editor/EditorAssets.cpp
+  editor/AssetImport.cpp
+  editor/EditorImportUi.cpp
   editor/LightGizmos.cpp
   render/RenderFactory.cpp
   platform/GlfwWindow.cpp
@@ -112,4 +114,8 @@ if (ENABLE_VULKAN)
     render/backends/vulkan/VkRenderAdapter.cpp
   )
   target_link_libraries(Engine PRIVATE Vulkan::Vulkan)
+endif()
+
+if(WIN32)
+  target_link_libraries(Engine PRIVATE comdlg32)
 endif()
