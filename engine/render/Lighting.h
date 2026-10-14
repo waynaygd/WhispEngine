@@ -10,12 +10,14 @@ struct DirectionalLight {
     std::array<float,3> color{1.f,.95f,.85f};
     float intensity=.85f;
     bool enabled=true;
+    bool operator==(const DirectionalLight&)const=default;
 };
 struct LightingSettings {
     bool enabled=true;
     DirectionalLight directional;
     std::array<float,3> ambientColor{1,1,1};
     float ambientIntensity=.25f;
+    bool operator==(const LightingSettings&)const=default;
 };
 struct LightingConstants {
     std::array<float,4> directionEnabled{};

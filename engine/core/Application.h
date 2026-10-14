@@ -49,6 +49,7 @@ public:
     }
 
     IWindow* GetWindow() { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
+    const IWindow* GetWindow()const { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
     IRenderAdapter* GetRenderAdapter(){return m_Windows.empty()?nullptr:m_Windows.front().renderer.get();}
     editor::EditorLayer& GetEditorLayer(){return m_EditorLayer;}
     ecs::World& GetWorld() { return m_RuntimeWorld?*m_RuntimeWorld:m_World; }
@@ -93,6 +94,8 @@ public:
     ecs::PhysicsSystem* GetPhysicsSystem() { return m_PhysicsSystem; }
     ShadowSettings& GetShadowSettings() { return m_ShadowSettings; }
     EnvironmentSettings& GetEnvironmentSettings(){return m_EnvironmentSettings;}
+    const EnvironmentSettings& GetEnvironmentSettings()const{return m_EnvironmentSettings;}
+    const SceneBackground& GetSceneBackground()const{return m_Background;}
     ecs::Entity CreateLightEntity(LightType type);
     bool DestroySceneEntity(ecs::Entity);
     void SetLightRenderingMode(LightRenderingMode mode){m_LightMode=mode;if(m_RenderSystem)m_RenderSystem->SetLightRenderingMode(mode);}
@@ -220,7 +223,9 @@ private:
     std::vector<ecs::Entity> m_EditDebugEntities,m_EditStressEntities;
     LightingSettings m_EditLighting;
     EnvironmentSettings m_EditEnvironment;
+    editor::ProjectileInput m_ProjectileInput;
     ShadowSettings m_EditShadows;
+    SceneBackground m_Background,m_EditBackground;
     bool m_EditorPaused=false;
     double m_LastCloneMs=0;
     ecs::PhysicsSystem* m_PhysicsSystem = nullptr;

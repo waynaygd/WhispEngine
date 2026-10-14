@@ -10,10 +10,22 @@ struct ShadowSettings {
     int depthBias=100;
     float slopeBias=1.f, receiverBias=.00002f, normalBias=.25f, strength=1.f;
     bool cameraFitted=true, receiverPlaneBias=true;
-    float filterRadius=1.f, edgeFade=.05f;
+    float filterRadius=1.5f, edgeFade=.05f;
+    int filterTaps=5; // 3: legacy point PCF, 5: continuous weighted tent PCF
     int debugMode=0; // 0 shaded, 1 visibility, 2 coverage (red outside, green inside)
     bool operator==(const ShadowSettings&) const=default;
 };
+enum class ShadowQuality {Low,Medium,High,Ultra,Custom};
+inline void ApplyShadowQuality(ShadowSettings& s,ShadowQuality q){
+    if(q==ShadowQuality::Custom)return;
+    s.pcf=q!=ShadowQuality::Low;s.filterTaps=q==ShadowQuality::Medium?3:5;
+    s.resolution=q==ShadowQuality::Low?512:q==ShadowQuality::Medium?1024:2048;
+    s.filterRadius=q==ShadowQuality::Ultra?2.f:1.5f;
+}
+inline ShadowQuality GetShadowQuality(const ShadowSettings& s){
+    for(int i=0;i<4;++i){auto copy=s;ApplyShadowQuality(copy,ShadowQuality(i));if(copy==s)return ShadowQuality(i);}return ShadowQuality::Custom;
+}
+inline std::uint64_t ShadowMapBytes(const ShadowSettings& s){return std::uint64_t(s.resolution)*s.resolution*4;}
 using ShadowMatrix=std::array<float,16>;
 using ShadowVector=std::array<float,3>;
 inline float ShadowDot(ShadowVector a,ShadowVector b) {return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];}
@@ -38,6 +50,7 @@ inline ShadowSettings SanitizeShadowSettings(ShadowSettings s) {
     s.depthRange=ShadowClamp(s.depthRange,2,1000,100);s.depthBias=std::clamp(s.depthBias,0,10000);
     s.slopeBias=ShadowClamp(s.slopeBias,0,8,1);s.receiverBias=ShadowClamp(s.receiverBias,0,.01f,.0003f);
     s.normalBias=ShadowClamp(s.normalBias,0,4,.25f);s.strength=ShadowClamp(s.strength,0,1,1);
+    s.filterTaps=s.filterTaps==3?3:5;
     s.filterRadius=ShadowClamp(s.filterRadius,0,2,1);s.edgeFade=ShadowClamp(s.edgeFade,0,.25f,.05f);
     s.debugMode=std::clamp(s.debugMode,0,2);return s;
 }
@@ -73,7 +86,7 @@ inline ShadowFrame BuildDirectionalShadowFrame(const LightingConstants& light,Sh
     frame.constants.lightVP=ShadowMultiply(frame.projection,frame.view);
     frame.constants.parameters={s.enabled&&light.directionEnabled[3]>.5f&&light.colorIntensity[3]>0&&s.strength>0?1.f:0.f,s.strength,s.pcf?1.f:0.f,float(s.debugMode)};
     frame.constants.sampling={1.f/s.resolution,s.receiverBias,s.normalBias*texel,s.filterRadius};
-    frame.constants.coverage={s.edgeFade,s.edgeFade,s.receiverPlaneBias?1.f:0.f,0};return frame;
+    frame.constants.coverage={s.edgeFade,s.edgeFade,s.receiverPlaneBias?1.f:0.f,float(s.filterTaps)};return frame;
 }
 // Fit a rotation-invariant sphere enclosing the near camera frustum. Quantize its
 // radius (not the individual corners) so yaw/pitch cannot pump the projection scale.

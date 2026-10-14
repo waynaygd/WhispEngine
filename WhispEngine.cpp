@@ -14,7 +14,20 @@ int main(int argc, char** argv)
     for(int i=1;i<argc;++i){if(std::strcmp(argv[i],"--light-overlap")==0)overlap=true;if(std::strcmp(argv[i],"--light-objects")==0&&i+1<argc)lightObjects=std::atoi(argv[++i]);}
     // Optional repeatable visual smoke/benchmark run. Normal startup is unchanged.
     for (int i = 1; i < argc; ++i) {
-        if(std::strcmp(argv[i],"--fixed-editor-layout")==0){app.GetEditorLayer().SetFixedDiagnosticLayout(true);auto entities=app.GetWorld().Entities();if(!entities.empty())app.GetEditorLayer().SelectEntity(entities.front());}
+        if(std::strcmp(argv[i],"--editor-benchmark")==0&&i+1<argc)app.SetRenderBenchmarkOutput(argv[++i]);
+        else if(std::strcmp(argv[i],"--sky-off")==0)app.GetEditorLayer().SetSkyDiagnosticEnabled(false);
+        else if(std::strcmp(argv[i],"--asset-grid")==0)app.GetEditorLayer().SetAssetGrid(true);
+        else if(std::strcmp(argv[i],"--diagnostic-viewport")==0&&i+2<argc){int w=std::atoi(argv[++i]);int h=std::atoi(argv[++i]);app.GetEditorLayer().SetDiagnosticViewport(w,h);}
+        else if(std::strcmp(argv[i],"--shadow-quality")==0&&i+1<argc){int q=std::clamp(std::atoi(argv[++i]),0,4);ApplyShadowQuality(app.GetShadowSettings(),ShadowQuality(q));}
+        else if(std::strcmp(argv[i],"--select-first")==0){auto entities=app.GetWorld().Entities();if(!entities.empty())app.GetEditorLayer().SelectEntity(entities.front());}
+        else if(std::strcmp(argv[i],"--scene-background-panel")==0)app.GetEditorLayer().ShowSceneBackground();
+        else if(std::strcmp(argv[i],"--play")==0)app.SetEditorPlayMode(true);
+        else if(std::strcmp(argv[i],"--no-editor-visuals")==0){app.GetEditorLayer().GetVisualSettings().enabled=false;app.GetEditorLayer().SetSkyDiagnosticEnabled(false);}
+        else if(std::strcmp(argv[i],"--editor-grid-only")==0){auto settings=app.GetSceneSettings();auto& s=settings.background;s.background=EditorBackground::Solid;app.SetSceneSettings(settings);}
+        else if(std::strcmp(argv[i],"--editor-gradient")==0){auto settings=app.GetSceneSettings();auto& s=settings.background;s.background=EditorBackground::Gradient;app.SetSceneSettings(settings);}
+        else if(std::strcmp(argv[i],"--editor-cubemap")==0&&i+1<argc){auto settings=app.GetSceneSettings();auto& s=settings.background;s.background=EditorBackground::Cubemap;s.cubemap=argv[++i];app.SetSceneSettings(settings);}
+        else if(std::strcmp(argv[i],"--editor-polish-demo")==0){app.SetupLightDemoScene();app.GetEditorLayer().ResetLayout();app.GetEditorLayer().ShowVisualSettings();app.GetEditorLayer().SetGridVisible(true);app.GetEditorLayer().GetVisualSettings().enabled=true;}
+        else if(std::strcmp(argv[i],"--fixed-editor-layout")==0){app.GetEditorLayer().SetFixedDiagnosticLayout(true);auto entities=app.GetWorld().Entities();if(!entities.empty())app.GetEditorLayer().SelectEntity(entities.front());}
         else if(std::strcmp(argv[i],"--editor2-demo")==0){app.GetEditorLayer().ResetLayout();app.GetEditorLayer().SetLightGizmosVisible(true);app.SetupLightDemoScene();}
         else if(std::strcmp(argv[i],"--light-demo")==0)app.SetupLightDemoScene();
         else if(std::strcmp(argv[i],"--light-stress")==0){int count=100;if(i+1<argc&&argv[i+1][0]!='-')count=std::atoi(argv[++i]);app.SetupLightStressScene(count,overlap,lightObjects);}

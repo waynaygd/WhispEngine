@@ -5,6 +5,7 @@
 #include "../scene/SceneSettings.h"
 #include "EditorPreferences.h"
 #include "InputRouting.h"
+#include "AssetCatalog.h"
 #include "../core/Logger.h"
 #include "../ecs/components/LightComponent.h"
 #include "../ecs/components/ColliderComponent.h"
@@ -29,8 +30,19 @@ namespace editor
 class EditorLayer
 {
 public:
-    struct Statistics {double uiMs=0,hierarchyMs=0,inspectorMs=0;};
+    struct Statistics {double uiMs=0,hierarchyMs=0,inspectorMs=0,assetBrowserMs=0;};
     const Statistics& GetStatistics()const{return m_Statistics;}
+    EditorVisualSettings& GetVisualSettings(){return m_VisualSettings;}
+    bool ProjectileTestEnabled()const{return m_ProjectileTestInput;}
+    void SetProjectileTestInput(bool enabled){m_ProjectileTestInput=enabled;}
+    void SetBackgroundOverride(bool enabled){m_BackgroundOverride=enabled;}
+    void SetGridVisible(bool show){m_ShowGrid=show;}
+    void SetSkyDiagnosticEnabled(bool enabled){m_SkyDiagnosticEnabled=enabled;}
+    void SetDiagnosticViewport(int w,int h){m_DiagnosticWidth=w;m_DiagnosticHeight=h;}
+    void SetAssetGrid(bool grid){m_AssetGrid=grid;}
+    void ShowSceneBackground(){m_ShowSceneSettings=true;m_FocusSceneSettings=true;}
+    void ShowVisualSettings(){m_ShowVisualSettings=true;m_FocusVisualSettings=true;}
+    EditorVisualFrame BuildVisualFrame(const Application&)const;
     void Render(Application& app, IRenderAdapter* renderer, float dt);
     void InitializePreferences(Application&);
     void PersistPreferences(Application&);
@@ -57,6 +69,9 @@ public:
     bool RemoveComponent(Application&,ecs::Entity,ecs::ComponentTypeId);
     bool ResetComponent(Application&,ecs::Entity,ecs::ComponentTypeId);
     bool AssignAsset(Application&,ecs::Entity,ecs::AssetKind,const std::string&);
+    bool CreateMaterialAsset(Application&,const std::string&,std::string* error=nullptr);
+    bool RenameMaterialAsset(Application&,const std::string&,const std::string&,bool confirmed,std::string* error=nullptr);
+    bool DeleteMaterialAsset(Application&,const std::string&,bool confirmed,std::string* error=nullptr);
     bool SetProperty(Application&,ecs::Entity,ecs::ComponentTypeId,const std::string&,const ecs::PropertyValue&,bool transactional=true);
     void BeginSceneTransaction(Application&,const std::string& label="Scene settings");
     std::size_t UndoCount()const{return m_UndoStack.size();}
@@ -96,6 +111,17 @@ private:
     void HandleEditorShortcuts(Application& app);
     void DrawMainMenu(Application& app);
     void DrawToolbar(Application&);
+    void DrawEditorVisualSettings(Application&,IRenderAdapter*);
+    void PrepareEditorSky(Application&,IRenderAdapter*);
+    EditorVisualSettings m_VisualSettings;
+    bool m_ShowVisualSettings=false,m_FocusVisualSettings=false;
+    bool m_BackgroundOverride=false,m_ProjectileTestInput=false,m_SkyDiagnosticEnabled=true,m_FocusSceneSettings=false;
+    int m_DiagnosticWidth=0,m_DiagnosticHeight=0;
+    std::string m_BackgroundAssetDraft;
+    bool m_BackgroundAssetEditing=false;
+    std::uint64_t m_BackgroundDraftWorld=0;
+    std::string m_RequestedSky;
+    std::uint64_t m_FailedSkyVersion=0;
     void ConfigureDocking();
     void DrawConsole(Application&,IRenderAdapter*);
     void DrawSceneSettings(Application&,IRenderAdapter*,float dt);
@@ -135,7 +161,12 @@ private:
     bool m_ResetLayout=true,m_FixedDiagnosticLayout=false,m_ViewportFocused=false,m_ToolActive=false,m_InputTextActive=false,m_ModalActive=false;
     float m_SnapTranslation=1,m_SnapRotation=15,m_SnapScale=.1f;
     Statistics m_Statistics;
+    AssetCatalog m_AssetCatalog;
+    bool m_AssetGrid=false,m_AssetActionRequested=false;
+    int m_AssetAction=0;
+    std::string m_AssetActionSource,m_AssetActionKey="materials/new.material.json";
     std::string m_AssetDirectory;
+    bool AssetReferenced(Application&,const std::string&)const;
     std::string m_HierarchyFilter,m_AssetFilter,m_ConsoleFilter,m_RenameBuffer,m_SceneDialogKey="scenes/new_scene.json";
     int m_AssetKindFilter=0,m_SceneDialogAction=0;
     ecs::Entity m_RenameTarget{};

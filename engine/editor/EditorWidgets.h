@@ -3,9 +3,9 @@
 #include "../ecs/ComponentRegistry.h"
 #include "../render/ColorPipeline.h"
 namespace editor {
-inline bool LinearColorEdit(const char* label,float* linear,int count){
+inline bool LinearColorEdit(const char* label,float* linear,int count,ImGuiColorEditFlags flags=0){
     float display[4]={1,1,1,1};for(int i=0;i<3;++i)display[i]=LinearToSrgb(linear[i]);if(count==4)display[3]=linear[3];
-    bool changed=count==4?ImGui::ColorEdit4(label,display):ImGui::ColorEdit3(label,display);
+    bool changed=count==4?ImGui::ColorEdit4(label,display,flags):ImGui::ColorEdit3(label,display,flags);
     if(changed){for(int i=0;i<3;++i)linear[i]=SrgbToLinear(display[i]);if(count==4)linear[3]=display[3];}return changed;
 }
 struct AssetPayload {ecs::AssetKind kind;char key[1024];};

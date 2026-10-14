@@ -211,6 +211,8 @@ add_custom_command(TARGET WhispEngine POST_BUILD
 # Keep incremental HLSL edits synchronized without requiring an executable relink.
 add_custom_target(MaterialShaderSources ALL
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/shaders/dx12
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/shaders/dx12/editor_visuals.hlsl ${CMAKE_BINARY_DIR}/shaders/dx12/editor_visuals.hlsl
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/shaders/dx12
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     ${CMAKE_SOURCE_DIR}/engine/shaders/dx12/textured.hlsl
     ${CMAKE_BINARY_DIR}/shaders/dx12/textured.hlsl
@@ -339,4 +341,31 @@ if(WHISP_BUILD_PHYSICS_TESTS)
         add_test(NAME Editor2Dx12Regression COMMAND Editor2Regression --dx12)
         set_tests_properties(Editor2Dx12Regression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" ENVIRONMENT "WHISP_DX12_DEBUG=1" RUN_SERIAL TRUE)
     endif()
+endif()
+
+if(WHISP_BUILD_PHYSICS_TESTS AND ENABLE_DX12)
+    add_executable(EditorVisualPolishRegression tests/EditorVisualPolishRegression.cpp)
+    target_link_libraries(EditorVisualPolishRegression PRIVATE Engine)
+    target_compile_definitions(EditorVisualPolishRegression PRIVATE ENABLE_DX12=1)
+    if(ENABLE_TRACY)
+        target_link_libraries(EditorVisualPolishRegression PRIVATE Tracy::TracyClient)
+    endif()
+    add_dependencies(EditorVisualPolishRegression MaterialShaderSources IblFixtures)
+    add_test(NAME EditorVisualPolishRegression COMMAND EditorVisualPolishRegression)
+    add_test(NAME EditorVisualPolishDx12Regression COMMAND EditorVisualPolishRegression --dx12)
+    add_test(NAME EditorVisualPolishShaderFallback COMMAND EditorVisualPolishRegression --shader-fallback)
+    set_tests_properties(EditorVisualPolishRegression EditorVisualPolishDx12Regression EditorVisualPolishShaderFallback PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" RUN_SERIAL TRUE ENVIRONMENT "WHISP_DX12_DEBUG=1")
+endif()
+
+if(WHISP_BUILD_PHYSICS_TESTS AND ENABLE_DX12)
+    add_executable(EditorUsabilityRegression tests/EditorUsabilityRegression.cpp)
+    target_link_libraries(EditorUsabilityRegression PRIVATE Engine DearImGui)
+    target_compile_definitions(EditorUsabilityRegression PRIVATE ENABLE_DX12=1)
+    if(ENABLE_TRACY)
+        target_link_libraries(EditorUsabilityRegression PRIVATE Tracy::TracyClient)
+    endif()
+    add_dependencies(EditorUsabilityRegression MaterialShaderSources IblFixtures)
+    add_test(NAME EditorUsabilityRegression COMMAND EditorUsabilityRegression)
+    add_test(NAME EditorUsabilityDx12Regression COMMAND EditorUsabilityRegression --dx12)
+    set_tests_properties(EditorUsabilityRegression EditorUsabilityDx12Regression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" RUN_SERIAL TRUE ENVIRONMENT "WHISP_DX12_DEBUG=1")
 endif()

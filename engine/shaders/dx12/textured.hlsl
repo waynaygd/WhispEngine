@@ -61,7 +61,21 @@ float Visibility(float3 position,float3 normal) {
     if(any(uv<0)||any(uv>1)||ndc.z<0||ndc.z>1)return 1;
     float depth=ndc.z-max(gShadowSampling.y,0.000005); // normalized D32 raster subpixel/transform roundoff floor
     float visibility=0;
-    if(gShadowParameters.z>.5) {
+    if(gShadowParameters.z>.5 && gShadowCoverage.w>4 && gShadowSampling.w>0) {
+        // Continuous tent weights anchored to texel centers, no randomized taps.
+        // Every point comparison receives its own geometric receiver-plane correction.
+        float2 texel=uv/gShadowSampling.x-.5;
+        float2 origin=floor(texel+.5),fraction=texel-origin;
+        float radius=clamp(gShadowSampling.w+.5,.5,2.5),weightSum=0;
+        [unroll] for(int y=-2;y<=2;++y) [unroll] for(int x=-2;x<=2;++x){
+            float2 delta=float2(x,y)-fraction;
+            float2 weights=max(0,radius-abs(delta));float weight=weights.x*weights.y;
+            float2 center=(origin+float2(x,y)+.5)*gShadowSampling.x;
+            float correction=dot(gradient,center-uv);
+            visibility+=weight*(any(center<0)||any(center>1)?1:gShadowMap.SampleCmpLevelZero(gShadowSampler,center,depth+correction));weightSum+=weight;
+        }
+        visibility/=max(weightSum,1e-6);
+    } else if(gShadowParameters.z>.5) {
         [unroll] for(int y=-1;y<=1;++y) [unroll] for(int x=-1;x<=1;++x) {
             float2 tap=uv+float2(x,y)*gShadowSampling.x*gShadowSampling.w;
             float2 center=(floor(tap/gShadowSampling.x)+.5)*gShadowSampling.x;

@@ -1,3 +1,4 @@
+#include "EditorTestPreferences.h"
 #define NOMINMAX
 #include "core/Application.h"
 #include "core/Logger.h"
@@ -123,7 +124,7 @@ static void Gpu(){
     std::cout<<"Editor2 DX12 viewport readback, owned physics isolation, batching, Pause/Resume, reload/resize, empty scene and debug validation passed\n";
 }
 #endif
-int main(int argc,char** argv){try{if(argc>2&&std::string(argv[1])=="--benchmark"){Benchmark(argv[2]);return 0;}Cpu();
+int main(int argc,char** argv){try{ScopedEditorPreferenceRestore preservePreferences;if(argc>2&&std::string(argv[1])=="--benchmark"){Benchmark(argv[2]);return 0;}Cpu();
 #if defined(ENABLE_DX12)
     if(argc>1&&std::string(argv[1])=="--dx12")Gpu();
 #endif

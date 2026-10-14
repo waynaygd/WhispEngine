@@ -16,6 +16,7 @@ struct EnvironmentResource
     unsigned width = 0, height = 0;
     std::vector<float> radiance;
     EnvironmentCube environment, irradiance, prefiltered;
+    EnvironmentCube sky; // Source-radiance cube; independent of IBL convolution resolution.
     std::shared_ptr<const std::vector<float>> brdfLut;
     unsigned lutResolution = 64;
     double preprocessMs = 0;

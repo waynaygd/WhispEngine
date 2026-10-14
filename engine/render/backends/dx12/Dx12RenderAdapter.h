@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
+struct GLFWwindow;
 class Dx12RenderAdapter final : public IRenderAdapter
 {
 public:
@@ -73,6 +74,9 @@ public:
     void DrawShadowMesh(RenderMeshHandle,const RenderInstanceData&) override;
     bool DrawShadowMeshInstanced(RenderMeshHandle,std::span<const RenderInstanceData>) override;
     void EndShadowPass() override;
+    void SetEditorVisuals(const EditorVisualFrame& f) override {m_EditorVisualFrame=f;m_EditorVisualDiagnostics={};}
+    bool UploadEditorSky(const EnvironmentResource&,std::uint64_t) override;
+    EditorVisualDiagnostics GetEditorVisualDiagnostics()const override{return m_EditorVisualDiagnostics;}
     void BeginMainPass() override;
     void EndMainPass() override;
     std::uint64_t GetShadowPreviewTextureId() const override;
@@ -83,6 +87,20 @@ public:
     bool SaveFrameImage(const std::string&) override;
 
 private:
+    GLFWwindow* m_EditorUiWindow=nullptr;
+    float m_EditorUiScale=1;
+    EditorVisualFrame m_EditorVisualFrame;
+    EditorVisualDiagnostics m_EditorVisualDiagnostics;
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_EditorVisualRoot;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_EditorVisualPso[2][2];
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_EditorSky;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_EditorSkySrv;
+    std::string m_EditorSkyKey,m_EditorVisualError;
+    std::uint64_t m_EditorSkyVersion=0;
+    bool m_EditorVisualAttempted=false;
+    bool EnsureEditorVisualPipeline();
+    void DrawEditorVisual(bool grid);
+    void ReleaseEditorVisuals();
     struct LightFrameResources {
         Microsoft::WRL::ComPtr<ID3D12Resource> lights,counts,indices,stats,readback;
         std::uint64_t lightCapacity=0,tileCapacity=0;

@@ -277,7 +277,8 @@ void Dx12RenderAdapter::ReleaseHdrTargets()
 }
 void Dx12RenderAdapter::BeginHdrScene()
 {
-    if (!m_EnvironmentSettings.enabled)
+    const bool hdrSky=m_EditorVisualFrame.active&&m_EditorVisualFrame.backgroundEnabled&&m_EditorVisualFrame.settings.background==EditorBackground::Cubemap;
+    if (!m_EnvironmentSettings.enabled&&!hdrSky)
         return;
     ZoneScopedN("HdrSceneBegin");
     UINT w = m_ViewportTarget.rendering ? m_ViewportTarget.width : m_Width,

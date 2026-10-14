@@ -6,6 +6,7 @@
 #include "Shadows.h"
 #include "MaterialState.h"
 #include "Environment.h"
+#include "EditorVisuals.h"
 #include "SceneLights.h"
 struct EnvironmentResource;
 #include <span>
@@ -98,6 +99,9 @@ public:
     virtual void DrawShadowMesh(RenderMeshHandle, const RenderInstanceData&) {}
     virtual bool DrawShadowMeshInstanced(RenderMeshHandle, std::span<const RenderInstanceData>) { return false; }
     virtual void EndShadowPass() {}
+    virtual void SetEditorVisuals(const EditorVisualFrame&) {}
+    virtual bool UploadEditorSky(const EnvironmentResource&,std::uint64_t){return false;}
+    virtual EditorVisualDiagnostics GetEditorVisualDiagnostics()const{return {};}
     virtual void BeginMainPass() {}
     virtual void EndMainPass() {}
     virtual std::uint64_t GetShadowPreviewTextureId() const { return 0; }

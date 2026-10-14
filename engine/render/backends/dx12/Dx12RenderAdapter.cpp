@@ -1,4 +1,5 @@
 #include "Dx12RenderAdapter.h"
+#include "../../../editor/EditorTheme.h"
 #ifdef _WIN32
 
 #include "../../../core/Logger.h"
@@ -1069,7 +1070,8 @@ bool Dx12RenderAdapter::InitializeEditorUi(IWindow* window)
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
-    ImGui::StyleColorsDark();
+    float dpiX=1,dpiY=1;glfwGetWindowContentScale(glfwWin->GetGlfwHandle(),&dpiX,&dpiY);
+    m_EditorUiWindow=glfwWin->GetGlfwHandle();m_EditorUiScale=(std::max)(dpiX,dpiY);editor::ApplyEditorTheme(m_EditorUiScale);
 
     if (!ImGui_ImplGlfw_InitForOther(glfwWin->GetGlfwHandle(), true))
     {
@@ -1105,6 +1107,8 @@ void Dx12RenderAdapter::BeginEditorUiFrame()
     if (!m_EditorUiInitialized)
         return;
 
+    float dpiX=1,dpiY=1;glfwGetWindowContentScale(m_EditorUiWindow,&dpiX,&dpiY);const float dpi=(std::max)(dpiX,dpiY);
+    if(std::abs(dpi-m_EditorUiScale)>.01f){m_EditorUiScale=dpi;editor::ApplyEditorTheme(dpi);}
     ImGui_ImplDX12_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
@@ -1998,7 +2002,7 @@ void Dx12RenderAdapter::Shutdown()
 
     m_FrameRecording=false;
     ReleaseSceneLights();
-    ReleaseEnvironment();m_CachedBrdfGpu.Reset();ReleaseHdrTargets();m_OutputPso.Reset();m_OutputRoot.Reset();
+    ReleaseEditorVisuals();ReleaseEnvironment();m_CachedBrdfGpu.Reset();ReleaseHdrTargets();m_OutputPso.Reset();m_OutputRoot.Reset();
     ReleaseShadowResources();m_ShadowVs.Reset();m_ShadowInstanceVs.Reset();m_ShadowPso.Reset();m_ShadowInstancePso.Reset();m_ShadowDoublePso.Reset();m_ShadowDoubleInstancePso.Reset();m_ShadowMirrorPso.Reset();m_ShadowMirrorInstancePso.Reset();m_ShadowRoot.Reset();
     m_TimeHeap.Reset();for(auto& resource:m_TimeReadback)resource.Reset();m_TimeFrequency=0;
     std::fill(std::begin(m_TimePending),std::end(m_TimePending),0);

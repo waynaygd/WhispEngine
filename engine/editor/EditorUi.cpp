@@ -21,12 +21,14 @@ const char* EntityKind(const ecs::World& w,ecs::Entity e){
 void EditorLayer::InitializePreferences(Application& app){
     EditorPreferences p;std::string error;if(LoadPreferences("editor-preferences.json",p,&error))m_ResetLayout=false;else if(!error.empty())Logger::Get().Warn(error);
     m_ShowHierarchy=p.hierarchy;m_ShowInspector=p.inspector;m_ShowViewport=p.viewport;m_ShowAssetBrowser=p.assets;m_ShowMaterialEditor=p.material;m_ShowSceneSettings=p.settings;m_ShowConsole=p.console;m_ShowStatistics=p.diagnostics;
-    m_ShowGrid=p.grid;m_ShowLightGizmos=p.lightGizmos;m_LightXray=p.xray;m_Snapping=p.snapping;m_GizmoOperation=p.operation;m_GizmoMode=p.space;
+    m_AssetGrid=p.assetGrid;m_BackgroundOverride=p.backgroundOverride;m_ProjectileTestInput=p.projectileTestInput;
+    m_ShowVisualSettings=p.visualPanel;m_VisualSettings=p.visuals;m_ShowGrid=p.grid;m_ShowLightGizmos=p.lightGizmos;m_LightXray=p.xray;m_Snapping=p.snapping;m_GizmoOperation=p.operation;m_GizmoMode=p.space;
     m_SnapTranslation=p.translationSnap;m_SnapRotation=p.rotationSnap;m_SnapScale=p.scaleSnap;app.SetCameraNavigation(p.cameraSpeed,p.cameraSensitivity);
 }
 void EditorLayer::PersistPreferences(Application& app){
     EditorPreferences p;p.hierarchy=m_ShowHierarchy;p.inspector=m_ShowInspector;p.viewport=m_ShowViewport;p.assets=m_ShowAssetBrowser;p.material=m_ShowMaterialEditor;p.settings=m_ShowSceneSettings;p.console=m_ShowConsole;p.diagnostics=m_ShowStatistics;
-    p.grid=m_ShowGrid;p.lightGizmos=m_ShowLightGizmos;p.xray=m_LightXray;p.snapping=m_Snapping;p.operation=m_GizmoOperation;p.space=m_GizmoMode;
+    p.assetGrid=m_AssetGrid;p.backgroundOverride=m_BackgroundOverride;p.projectileTestInput=m_ProjectileTestInput;
+    p.visualPanel=m_ShowVisualSettings;p.visuals=m_VisualSettings;p.grid=m_ShowGrid;p.lightGizmos=m_ShowLightGizmos;p.xray=m_LightXray;p.snapping=m_Snapping;p.operation=m_GizmoOperation;p.space=m_GizmoMode;
     p.translationSnap=m_SnapTranslation;p.rotationSnap=m_SnapRotation;p.scaleSnap=m_SnapScale;p.cameraSpeed=app.GetCameraMoveSpeed();p.cameraSensitivity=app.GetCameraSensitivity();std::string error;if(!SavePreferences("editor-preferences.json",p,&error))Logger::Get().Warn(error);
 }
 void EditorLayer::ConfigureDocking(){
@@ -40,8 +42,8 @@ void EditorLayer::ConfigureDocking(){
         ImGui::DockBuilderSplitNode(center,ImGuiDir_Left,.19f,&left,&center);
         ImGui::DockBuilderSplitNode(center,ImGuiDir_Right,.29f,&right,&center);
         ImGui::DockBuilderSplitNode(center,ImGuiDir_Down,.25f,&bottom,&center);
-        ImGui::DockBuilderSplitNode(right,ImGuiDir_Down,.50f,&settings,&right);
-        ImGui::DockBuilderDockWindow("Scene Hierarchy",left);ImGui::DockBuilderDockWindow("Inspector",right);ImGui::DockBuilderDockWindow("Scene Settings",settings);
+        ImGui::DockBuilderSplitNode(right,ImGuiDir_Down,.42f,&settings,&right);
+        ImGui::DockBuilderDockWindow("Scene Hierarchy",left);ImGui::DockBuilderDockWindow("Inspector",right);ImGui::DockBuilderDockWindow("Scene Settings",settings);ImGui::DockBuilderDockWindow("Editor Visuals",settings);
         ImGui::DockBuilderDockWindow("Viewport",center);ImGui::DockBuilderDockWindow("Asset Browser",bottom);ImGui::DockBuilderDockWindow("Console / Diagnostics",bottom);ImGui::DockBuilderDockWindow("Material Editor",bottom);ImGui::DockBuilderDockWindow("Statistics",bottom);ImGui::DockBuilderDockWindow("Physics Stress Test",bottom);
         ImGui::DockBuilderFinish(root);m_ResetLayout=false;
     }
@@ -79,6 +81,7 @@ void EditorLayer::DrawMainMenu(Application& app){
         if(ImGui::MenuItem("Delete","Delete",false,app.GetWorld().IsAlive(m_SelectedEntity)))DeleteEntity(app,m_SelectedEntity);ImGui::EndMenu();
     }
     if(ImGui::BeginMenu("View")){
+        ImGui::MenuItem("Editor Visuals",nullptr,&m_ShowVisualSettings);
         ImGui::MenuItem("Scene Hierarchy",nullptr,&m_ShowHierarchy);ImGui::MenuItem("Inspector",nullptr,&m_ShowInspector);ImGui::MenuItem("Viewport",nullptr,&m_ShowViewport);ImGui::MenuItem("Asset Browser",nullptr,&m_ShowAssetBrowser);ImGui::MenuItem("Material Editor",nullptr,&m_ShowMaterialEditor);ImGui::MenuItem("Scene Settings / Lighting",nullptr,&m_ShowSceneSettings);ImGui::MenuItem("Console / Diagnostics",nullptr,&m_ShowConsole);ImGui::MenuItem("Statistics",nullptr,&m_ShowStatistics);
         ImGui::Separator();if(ImGui::MenuItem("Reset Layout")){m_ResetLayout=true;m_ShowHierarchy=m_ShowInspector=m_ShowViewport=m_ShowAssetBrowser=m_ShowConsole=true;}
         if(ImGui::MenuItem("Navigation and snapping"))preferencesRequested=true;ImGui::MenuItem("ImGui Demo",nullptr,&m_ShowDemoWindow);ImGui::EndMenu();
@@ -92,6 +95,7 @@ void EditorLayer::DrawMainMenu(Application& app){
     if(ImGui::BeginMenu("Help")){ImGui::TextUnformatted("WhispEngine Editor 2.0");ImGui::TextUnformatted("RMB + WASD: camera, F: focus, W/E/R: gizmo");ImGui::TextUnformatted("Play clones scene data; Stop discards Runtime edits.");ImGui::TextUnformatted("Hierarchy is flat; parent transforms are not implemented.");ImGui::EndMenu();}
     if(preferencesRequested)ImGui::OpenPopup("EditorPreferences");
     if(ImGui::BeginPopup("EditorPreferences")){
+        ImGui::Checkbox("Enable Projectile Test Input (Play / R)",&m_ProjectileTestInput);
         float speed=app.GetCameraMoveSpeed(),sensitivity=app.GetCameraSensitivity();if(ImGui::DragFloat("Camera speed",&speed,.1f,.2f,25))app.SetCameraNavigation(speed,sensitivity);if(ImGui::DragFloat("Sensitivity",&sensitivity,.0001f,.0001f,.02f))app.SetCameraNavigation(speed,sensitivity);
         ImGui::DragFloat("Move snap",&m_SnapTranslation,.05f,.001f,1000);ImGui::DragFloat("Rotate snap (deg)",&m_SnapRotation,.5f,.1f,180);ImGui::DragFloat("Scale snap",&m_SnapScale,.01f,.001f,100);if(ImGui::Button("Save preferences"))PersistPreferences(app);ImGui::EndPopup();
     }

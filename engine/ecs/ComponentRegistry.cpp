@@ -135,7 +135,14 @@ ComponentRegistry Build(){
 }
 }
 ComponentRegistry& ComponentRegistry::Builtins(){static auto registry=Build();return registry;}
-void ComponentRegistry::Register(ComponentDescriptor d){if(d.key.empty()||!d.has||!d.add||!d.remove||!d.reset||!d.serialize||!d.deserialize)Fail("Incomplete component descriptor");if(!d.id||d.id!=ComponentId(d.key.c_str())||Find(d.id)||Find(d.key))Fail("Duplicate/invalid stable component ID: "+d.key);components.push_back(std::move(d));}
+void ComponentRegistry::Register(ComponentDescriptor d){if(d.key.empty()||!d.has||!d.add||!d.remove||!d.reset||!d.serialize||!d.deserialize)Fail("Incomplete component descriptor");if(!d.id||d.id!=ComponentId(d.key.c_str())||Find(d.id)||Find(d.key))Fail("Duplicate/invalid stable component ID: "+d.key);for(auto& p:d.properties){
+    p.internal=d.key=="SceneIdentity";
+    p.advanced=p.key=="shaderPath"||p.key=="texturePath"||p.key=="autoFitFromMesh"||p.key=="offset"||p.key=="attenuation"||p.key=="linearDampingMultiplier"||p.key=="angularDampingMultiplier"||p.key=="acceleration"||p.key=="torque"||p.key=="angularVelocity"||p.readOnly;
+    if(d.key=="Material"){
+        p.advanced=false;const auto& k=p.key;
+        p.section=k=="materialPath"||k=="override.shadingModel"?"Surface":k=="tint"||k=="texturePath"||k=="override.texturePath"?"Base Color":k=="override.metallic"||k=="override.roughness"||k=="override.metallicRoughnessTexturePath"?"Metallic / Roughness":k=="override.normalScale"||k=="override.normalTexturePath"?"Normal Map":k=="override.occlusionStrength"||k=="override.occlusionTexturePath"?"AO":k=="override.doubleSided"||k=="override.castShadows"||k=="override.receiveShadows"?"Rendering":"Advanced";
+    }
+}components.push_back(std::move(d));}
 const ComponentDescriptor* ComponentRegistry::Find(ComponentTypeId id)const{for(const auto& d:components)if(d.id==id)return &d;return nullptr;}
 const ComponentDescriptor* ComponentRegistry::Find(const std::string& key)const{for(const auto& d:components)if(d.key==key)return &d;return nullptr;}
 bool ComponentRegistry::Add(World& w,Entity e,ComponentTypeId id,std::string* error)const{return Checked([&]{w.AssertOwnerThread();auto* d=Find(id);if(!w.IsAlive(e)||!d||!d->addable||d->has(w,e))Fail("Invalid entity/component add");

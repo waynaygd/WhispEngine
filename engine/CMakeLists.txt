@@ -53,6 +53,8 @@ add_library(Engine
   editor/EditorInspector.cpp
   editor/EditorPreferences.cpp
   editor/EditorUi.cpp
+  editor/EditorVisualSettings.cpp
+  editor/AssetCatalog.cpp
   editor/EditorAssets.cpp
   editor/LightGizmos.cpp
   render/RenderFactory.cpp
@@ -94,6 +96,7 @@ if (WIN32 AND ENABLE_DX12)
   target_sources(Engine PRIVATE
     render/backends/dx12/Dx12RenderAdapter.cpp
     render/backends/dx12/Dx12Shadows.cpp
+    render/backends/dx12/Dx12EditorVisuals.cpp
     render/backends/dx12/Dx12Environment.cpp
     render/backends/dx12/Dx12SceneLights.cpp
   )

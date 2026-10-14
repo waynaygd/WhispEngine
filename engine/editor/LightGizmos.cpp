@@ -59,6 +59,7 @@ Occluder Bounds(ResourceHandle<MeshResource> mesh,const ecs::RenderPose& pose){
 }
 void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2& origin,const ImVec2& size)
 {
+    if(app.IsEditorPlayMode())return;
     if(!m_ShowLightGizmos||size.x<=1||size.y<=1)return;
     auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),size.x/size.y,app.GetCameraNearPlane(),app.GetCameraFarPlane());
     auto& world=app.GetWorld();std::vector<Occluder> occluders;
@@ -114,11 +115,11 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
 
 namespace editor {
 void EditorLayer::DrawViewportOverlays(Application& app,const ImVec2& origin,const ImVec2& size){
+    if(app.IsEditorPlayMode())return;
     if(size.x<=1||size.y<=1)return;const auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),size.x/size.y,app.GetCameraNearPlane(),app.GetCameraFarPlane());
     auto* draw=ImGui::GetWindowDrawList();draw->PushClipRect(origin,ImVec2(origin.x+size.x,origin.y+size.y),true);
     auto project=[&](V p)->std::optional<ImVec2>{auto v=ProjectGizmo(p,camera);if(!v)return {};return ImVec2(origin.x+(*v)[0]*size.x,origin.y+(*v)[1]*size.y);};
     auto line=[&](V a,V b,ImU32 color){auto q=ProjectEditorLine(a,b,camera);if(q)draw->AddLine(ImVec2(origin.x+(*q)[0]*size.x,origin.y+(*q)[1]*size.y),ImVec2(origin.x+(*q)[2]*size.x,origin.y+(*q)[3]*size.y),color);};
-    if(m_ShowGrid)for(int i=-20;i<=20;++i){line({float(i),0,-20},{float(i),0,20},i==0?IM_COL32(80,100,140,140):IM_COL32(100,110,120,65));line({-20,0,float(i)},{20,0,float(i)},i==0?IM_COL32(140,80,80,140):IM_COL32(100,110,120,65));}
     auto& world=app.GetWorld();auto* resources=app.GetResourceManager();
     if(resources&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&!ImGuizmo::IsOver()&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
         auto mouse=ImGui::GetMousePos();float x=((mouse.x-origin.x)/size.x*2-1)/camera.projection[0],y=(1-(mouse.y-origin.y)/size.y*2)/camera.projection[5];

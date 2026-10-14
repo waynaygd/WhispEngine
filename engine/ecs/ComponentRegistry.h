@@ -16,6 +16,8 @@ enum class AssetKind { None,Mesh,Texture,Material,Shader,Environment };
 using PropertyValue=std::variant<std::monostate,bool,int,float,std::string,Vec3,std::array<float,4>,std::vector<std::string>>;
 struct PropertyDescriptor {
     std::string key,label,tooltip;
+    std::string section;
+    bool advanced=false,internal=false;
     PropertyKind kind=PropertyKind::Number;
     AssetKind asset=AssetKind::None;
     float minimum=-1000000,maximum=1000000,speed=.05f;

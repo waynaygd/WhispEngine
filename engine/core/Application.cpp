@@ -608,7 +608,7 @@ void Application::ConfigureInputBindings()
     m_InputManager.BindAction("PauseToMenu", GLFW_KEY_ESCAPE);
     m_InputManager.BindAction("SpawnEntity", GLFW_KEY_SPACE);
     m_InputManager.BindAction("DestroyEntity", GLFW_KEY_BACKSPACE);
-    m_InputManager.BindAction("FireProjectile", GLFW_KEY_F);
+    m_InputManager.BindAction("FireProjectile", GLFW_KEY_R);
     m_InputManager.BindAction("ToggleDebugColliders", GLFW_KEY_F3);
 }
 
@@ -1055,6 +1055,7 @@ void Application::ToggleDebugColliders()
 
 bool Application::IsInputActionActive(const std::string& action) const
 {
+    if(action=="FireProjectile"&&(!IsSimulationRunning()||!m_EditorLayer.ProjectileTestEnabled()))return false;
     if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard)
         return false;
 
@@ -1070,7 +1071,7 @@ void Application::SetEditorPlayMode(bool enabled)
         const auto start=std::chrono::steady_clock::now();
         auto runtime=m_World.CloneData(&m_CloneMapping);
         m_EditDebugEntities=m_EcsDebugEntities;m_EditStressEntities=m_StressEntities;
-        m_EditLighting=m_LightingSettings;m_EditEnvironment=m_EnvironmentSettings;m_EditShadows=m_ShadowSettings;
+        m_EditLighting=m_LightingSettings;m_EditEnvironment=m_EnvironmentSettings;m_EditShadows=m_ShadowSettings;m_EditBackground=m_Background;
         auto map=[&](std::vector<ecs::Entity>& entities){std::erase_if(entities,[&](auto e){return !m_CloneMapping.contains(e);});for(auto& e:entities)e=m_CloneMapping.at(e);};
         map(m_EcsDebugEntities);map(m_StressEntities);
         m_EditorLayer.EnterRuntime(m_CloneMapping);m_RuntimeWorld=std::move(runtime);
@@ -1081,7 +1082,7 @@ void Application::SetEditorPlayMode(bool enabled)
         m_StateMachine.Clear(*this);
         m_Mutations.Clear();m_RenderInterpolation.Clear();m_EditorLayer.LeaveRuntime();m_RuntimeWorld.reset();m_CloneMapping.clear();
         m_EcsDebugEntities=std::move(m_EditDebugEntities);m_StressEntities=std::move(m_EditStressEntities);
-        m_LightingSettings=m_EditLighting;m_EnvironmentSettings=m_EditEnvironment;m_ShadowSettings=m_EditShadows;
+        m_LightingSettings=m_EditLighting;m_EnvironmentSettings=m_EditEnvironment;m_ShadowSettings=m_EditShadows;m_Background=m_EditBackground;
     }
     m_EditorPlayMode=enabled;m_EditorPaused=false;ResetPhysicsClock();m_ActiveCollisionPairs.clear();
     if(m_PhysicsSystem){m_PhysicsSystem->ResetState();m_PhysicsSystem->SetEnabled(enabled);}
@@ -1368,17 +1369,7 @@ int Application::Run()
             prevF7 = f7;
 
 
-            static bool prevF = false;
 
-            const bool f =
-                glfwGetKey(w, GLFW_KEY_F) == GLFW_PRESS;
-
-            if (f && !prevF)
-            {
-                SpawnPhysicsProjectile();
-            }
-
-            prevF = f;
         }
 
         bool anyAlive = false;
@@ -1519,6 +1510,10 @@ int Application::Run()
                 {
                     wc.renderer->BeginEditorUiFrame();
                     m_EditorLayer.Render(*this, wc.renderer.get(), dt);
+                    if(&wc==&m_Windows.front()){
+                        const bool capture=ImGui::GetIO().WantCaptureKeyboard||ImGui::GetIO().WantTextInput||m_EditorLayer.BlocksCamera();
+                        if(m_ProjectileInput.Update(m_InputManager.IsActionActive("FireProjectile"),m_EditorLayer.ProjectileTestEnabled(),IsEditorPlayMode(),IsEditorPaused(),m_EditorLayer.OwnsViewportKeyboard(),capture,m_Camera.controlsActive))SpawnPhysicsProjectile();
+                    }
                 }
 
                 // Diagnostics own the comparison switches after editor input as well.
@@ -1536,6 +1531,7 @@ int Application::Run()
                     if(m_ShadowBenchmark){m_LightingSettings.enabled=true;m_ShadowSettings.enabled=block%6>=2;m_ShadowSettings.pcf=block%6>=4;}
                 }
 
+                wc.renderer->SetEditorVisuals(m_EditorLayer.BuildVisualFrame(*this));
                 const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
                 const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();
                 const bool renderSceneToViewport =
@@ -1606,7 +1602,7 @@ int Application::Run()
         }
         if(m_RenderBenchmark && currentFrame>=(m_IblBenchmark?m_IblBenchmarkStart:100) && (!m_IblBenchmark||m_IblBenchmarkStart) && m_RenderSystem) {
             const auto ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-frameStart).count();
-            renderSamples.push_back({currentFrame,m_GpuInstancing,ms,m_RenderSystem->GetStatistics(),m_LightingSettings.enabled,m_ShadowSettings.enabled,m_ShadowSettings.pcf,m_ShadowSettings.resolution,m_LastGpuTimings,m_ShadingModelOverride,m_PbrTextureMask,unsigned(m_EnvironmentSettings.enabled?((m_EnvironmentSettings.diffuse?1:0)|(m_EnvironmentSettings.specular?2:0)):0),m_Windows.empty()?EnvironmentDiagnostics{}:m_Windows.front().renderer->GetEnvironmentDiagnostics(),GetLightDiagnostics(),m_EditorLayer.GetStatistics().uiMs,m_EditorLayer.GetStatistics().hierarchyMs,m_EditorLayer.GetStatistics().inspectorMs,unsigned(m_EditorLayer.GetViewportPixelWidth()),unsigned(m_EditorLayer.GetViewportPixelHeight())});
+            renderSamples.push_back({currentFrame,m_GpuInstancing,ms,m_RenderSystem->GetStatistics(),m_LightingSettings.enabled,m_ShadowSettings.enabled,m_ShadowSettings.pcf,m_ShadowSettings.resolution,m_LastGpuTimings,m_ShadingModelOverride,m_PbrTextureMask,unsigned(m_EnvironmentSettings.enabled?((m_EnvironmentSettings.diffuse?1:0)|(m_EnvironmentSettings.specular?2:0)):0),m_Windows.empty()?EnvironmentDiagnostics{}:m_Windows.front().renderer->GetEnvironmentDiagnostics(),GetLightDiagnostics(),m_EditorLayer.GetStatistics().uiMs,m_EditorLayer.GetStatistics().hierarchyMs,m_EditorLayer.GetStatistics().inspectorMs,unsigned(m_EditorLayer.GetViewportPixelWidth()),unsigned(m_EditorLayer.GetViewportPixelHeight()),m_Windows.empty()?EditorVisualDiagnostics{}:m_Windows.front().renderer->GetEditorVisualDiagnostics(),m_EditorLayer.GetStatistics().assetBrowserMs,m_ShadowSettings.filterTaps});
         }
         FrameMark;
     }
@@ -2012,12 +2008,12 @@ bool SceneKeyValid(const std::string& key){
 }
 }
 SceneSettings Application::GetSceneSettings()const{
-    SceneSettings s;s.lighting=m_LightingSettings;s.environment=m_EnvironmentSettings;s.shadows=m_ShadowSettings;
+    SceneSettings s;s.lighting=m_LightingSettings;s.environment=m_EnvironmentSettings;s.shadows=m_ShadowSettings;s.background=m_Background;
     s.primaryDirectional=SceneSerializer::PrimaryDirectionalId(const_cast<ecs::World&>(GetWorld()));return s;
 }
 bool Application::SetSceneSettings(const SceneSettings& s,std::string* error){
     try{(void)SceneSettingsToJson(s);const bool enabled=m_LightingSettings.enabled;const int debug=m_ShadowSettings.debugMode;
-        m_LightingSettings=s.lighting;m_LightingSettings.enabled=enabled;m_EnvironmentSettings=s.environment;m_ShadowSettings=s.shadows;m_ShadowSettings.debugMode=debug;return true;
+        m_LightingSettings=s.lighting;m_LightingSettings.enabled=enabled;m_EnvironmentSettings=s.environment;m_ShadowSettings=s.shadows;m_Background=s.background;m_ShadowSettings.debugMode=debug;return true;
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }
 bool Application::SaveSceneAs(const std::string& key,bool overwrite,std::string* error){

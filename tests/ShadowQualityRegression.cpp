@@ -77,9 +77,9 @@ int main(int argc,char** argv) {try {
         }
         Check(total>10000,"inclined plane control ROI missing");return affected;
     };
-    for(auto resolution:{512u,1024u,2048u,4096u})for(bool pcf:{false,true}) {
-        shadows.resolution=resolution;shadows.pcf=pcf;shadows.enabled=false;auto off=pair();shadows.enabled=true;auto on=pair();
-        const auto name=std::to_string(resolution)+(pcf?"-soft":"-hard");
+    for(auto resolution:{512u,1024u,2048u,4096u})for(int filter:{0,3,5}) {
+        shadows.resolution=resolution;shadows.pcf=filter!=0;shadows.filterTaps=filter==3?3:5;shadows.enabled=false;auto off=pair();shadows.enabled=true;auto on=pair();
+        const auto name=std::to_string(resolution)+(filter==0?"-hard":filter==3?"-soft3":"-soft");
         Save(output/(name+"-off.ppm"),off);Save(output/(name+".ppm"),on);
         int stripes=acne(off,on);std::cout<<name<<" plane affected pixels="<<stripes<<'\n';
         if(!baseline)Check(stripes<10,"inclined control plane has self-shadow stripes");

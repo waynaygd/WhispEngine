@@ -308,7 +308,7 @@ bool EditorLayer::IsPointInsideViewport(double x, double y) const
 void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
 {
     ZoneScopedN("EditorLayer");
-    m_Statistics.hierarchyMs=m_Statistics.inspectorMs=0;
+    m_Statistics.hierarchyMs=m_Statistics.inspectorMs=m_Statistics.assetBrowserMs=0;
     const auto uiStart=std::chrono::steady_clock::now();
     struct FinishUi {Statistics& stats;std::chrono::steady_clock::time_point start;~FinishUi(){stats.uiMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}} finish{m_Statistics,uiStart};
     RefreshAssetLists(dt);
@@ -325,6 +325,8 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     m_ViewportFocused=false;
     DrawMainMenu(app);DrawSceneDialogs(app);
     if(m_ShowSceneSettings)DrawSceneSettings(app,renderer,dt);
+    if(m_ShowVisualSettings)DrawEditorVisualSettings(app,renderer);
+    PrepareEditorSky(app,renderer);
     if(m_ShowConsole)DrawConsole(app,renderer);
     ImGui::SetNextWindowSize(ImVec2(340, 330), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Physics Stress Test")) {
@@ -391,6 +393,9 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
         m_ViewportPixelWidth = 0;
         m_ViewportPixelHeight = 0;
     }
+    // Re-evaluate after widgets: a popup/text field may have opened this frame.
+    m_ModalActive=ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel);
+    m_InputTextActive=ImGui::GetIO().WantTextInput||ImGui::IsAnyItemActive();
     HandleEditorShortcuts(app);
     if (m_ShowAssetBrowser)
         DrawAssetBrowser(app);
@@ -408,7 +413,7 @@ void EditorLayer::HandleEditorShortcuts(Application& app){
         if(ImGui::IsKeyPressed(ImGuiKey_S,false)){if(io.KeyShift){m_SceneDialogAction=3;m_SceneDialogRequested=true;}else{std::string error;if(!app.SaveCurrentScene(&error)){m_EditorError=error;Logger::Get().Error(error);}}}
         if(ImGui::IsKeyPressed(ImGuiKey_D,false))DuplicateEntity(app,m_SelectedEntity);
     }
-    if(!OwnsViewportKeyboard()||app.IsCameraControlActive())return;
+    if(!EditorHotkeysAllowed(app.IsEditorPlayMode(),OwnsViewportKeyboard(),io.WantCaptureKeyboard,app.IsCameraControlActive()))return;
     if(ImGui::IsKeyPressed(ImGuiKey_F,false))app.FocusEntity(m_SelectedEntity);
     if(ImGui::IsKeyPressed(ImGuiKey_W,false))m_GizmoOperation=0;
     if(ImGui::IsKeyPressed(ImGuiKey_E,false))m_GizmoOperation=1;
@@ -425,14 +430,12 @@ void EditorLayer::RefreshAssetLists(float dt)
     m_AssetRefreshTimer = 0.0f;
     m_AssetListsDirty = false;
 
-    const std::filesystem::path assetRoot = AssetPaths::ResolveAssetRoot();
-    const std::filesystem::path shaderRoot = AssetPaths::ResolveShaderRoot();
+    try{m_AssetCatalog.Refresh();m_MeshAssets.clear();m_TextureAssets.clear();m_MaterialAssets.clear();m_ShaderAssets.clear();m_EnvironmentAssets.clear();
+        for(const auto& row:m_AssetCatalog.Entries())switch(m_AssetCatalog.Types()[row.type].kind){
+            case ecs::AssetKind::Mesh:m_MeshAssets.push_back(row.key);break;case ecs::AssetKind::Texture:m_TextureAssets.push_back(row.key);break;case ecs::AssetKind::Material:m_MaterialAssets.push_back(row.key);break;case ecs::AssetKind::Shader:m_ShaderAssets.push_back(row.key);break;case ecs::AssetKind::Environment:m_EnvironmentAssets.push_back(row.key);break;default:break;
+        }
+    }catch(const std::exception& error){m_EditorError=error.what();}
 
-    m_MeshAssets = ScanAssetKeys(assetRoot, "models", { ".obj", ".fbx", ".gltf", ".glb" });
-    m_TextureAssets = ScanAssetKeys(assetRoot, "textures", { ".png", ".jpg", ".jpeg", ".bmp", ".tga", ".dds" });
-    m_MaterialAssets = ScanAssetKeys(assetRoot, "materials", { ".json", ".material" });
-    m_ShaderAssets = ScanAssetKeys(shaderRoot, "", { ".hlsl" });
-    m_EnvironmentAssets=ScanAssetKeys(assetRoot,"environments",{".hdr"});
 }
 
 void EditorLayer::DrawStatistics(Application& app, float dt)
@@ -489,7 +492,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
 {
     ImGui::SetNextWindowSize(ImVec2(760.0f, 520.0f), ImGuiCond_Appearing);
     ImGui::SetNextWindowSizeConstraints(ImVec2(420.0f, 280.0f), ImVec2(FLT_MAX, FLT_MAX));
-    ImGui::Begin("Viewport", &m_ShowViewport);
+    ImGui::Begin("Viewport", &m_ShowViewport,ImGuiWindowFlags_NoNavInputs);
 
     const bool playMode = app.IsEditorPlayMode();
     if (ImGui::Button(playMode ? "Stop" : "Play"))
@@ -507,6 +510,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     const ImVec2 framebufferScale = ImGui::GetIO().DisplayFramebufferScale;
     m_ViewportPixelWidth = std::max(1, static_cast<int>(std::lround(viewportSize.x * framebufferScale.x)));
     m_ViewportPixelHeight = std::max(1, static_cast<int>(std::lround(viewportSize.y * framebufferScale.y)));
+    if(m_DiagnosticWidth>1&&m_DiagnosticHeight>1){m_ViewportPixelWidth=m_DiagnosticWidth;m_ViewportPixelHeight=m_DiagnosticHeight;}
     m_ViewportMinX = contentMin.x;
     m_ViewportMinY = contentMin.y;
     m_ViewportMaxX = contentMax.x;
@@ -550,7 +554,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
 void EditorLayer::DrawMaterialEditor(Application& app)
 {
     ImGui::SetNextWindowSize(ImVec2(390,480),ImGuiCond_FirstUseEver);
-    ImGui::Begin("Material Editor",&m_ShowMaterialEditor);
+    if(!ImGui::Begin("Material Editor",&m_ShowMaterialEditor)){ImGui::End();return;}
     if(app.IsEditorPlayMode())ImGui::TextWrapped("Stop Play before modifying shared material assets.");
     ImGui::BeginDisabled(app.IsEditorPlayMode());
     auto* resources=app.GetResourceManager();auto& world=app.GetWorld();
@@ -574,7 +578,7 @@ void EditorLayer::DrawMaterialEditor(Application& app)
         if(m_MaterialDirty)m_MaterialError="Unsaved changes: Save or Revert before creating an asset.";
         else if(std::filesystem::exists(AssetPaths::ResolveAssetPath(m_NewMaterialKey)))m_MaterialError="Asset already exists; open it instead.";
         else {MaterialResource data;data.name=std::filesystem::path(m_NewMaterialKey).stem().string();data.placeholder=false;
-            if(MaterialLoader::Save(m_NewMaterialKey,data,&m_MaterialError)){open(AssetPaths::NormalizeAssetKey(m_NewMaterialKey));m_AssetListsDirty=true;}}
+            if(CreateMaterialAsset(app,m_NewMaterialKey,&m_MaterialError)){open(AssetPaths::NormalizeAssetKey(m_NewMaterialKey));m_AssetListsDirty=true;}}
     }
     ImGui::Separator();ImGui::Text("Asset: %s%s",m_EditingMaterial.c_str(),m_MaterialDirty?" *":"");
     auto resource=resources?resources->Get<MaterialResource>(m_EditingMaterial):nullptr;
@@ -582,10 +586,10 @@ void EditorLayer::DrawMaterialEditor(Application& app)
         auto data=resource->GetData();bool changed=false;
         changed|=ImGui::InputText("Name",&data.name);
         changed|=DrawResourceCombo("Shader",data.shaderPath,m_ShaderAssets,false);
-        changed|=DrawResourceCombo("Base texture (sRGB)",data.texturePath,m_TextureAssets,true);
-        changed|=DrawResourceCombo("Normal texture (linear)",data.normalTexturePath,m_TextureAssets,true);
-        changed|=DrawResourceCombo("MR texture (G rough / B metal)",data.metallicRoughnessTexturePath,m_TextureAssets,true);
-        changed|=DrawResourceCombo("AO texture (R)",data.occlusionTexturePath,m_TextureAssets,true);
+        changed|=DrawResourceCombo("Base texture (sRGB)",data.texturePath,m_TextureAssets,true);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,data.texturePath);
+        changed|=DrawResourceCombo("Normal texture (linear)",data.normalTexturePath,m_TextureAssets,true);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,data.normalTexturePath);
+        changed|=DrawResourceCombo("MR texture (G rough / B metal)",data.metallicRoughnessTexturePath,m_TextureAssets,true);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,data.metallicRoughnessTexturePath);
+        changed|=DrawResourceCombo("AO texture (R)",data.occlusionTexturePath,m_TextureAssets,true);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,data.occlusionTexturePath);
         changed|=ImGui::SliderFloat("Normal scale",&data.normalScale,0,4);
         changed|=ImGui::SliderFloat("AO strength",&data.occlusionStrength,0,1);
         const char* slotLabels[]={"Base UV set","Normal UV set","MR UV set","AO UV set"};
@@ -605,7 +609,7 @@ void EditorLayer::DrawMaterialEditor(Application& app)
         if(ImGui::Combo("Shading Model",&shading,shadingModels,2)){data.shadingModel=ShadingModel(shading);changed=true;}
         changed|=ImGui::SliderFloat("Metallic",&data.metallic,0,1);
         changed|=ImGui::SliderFloat("Roughness",&data.roughness,0,1);
-        if(data.shadingModel==ShadingModel::PBR)ImGui::TextWrapped("PBR stage 1 has no IBL: metals receive direct light only; ambient is a diffuse approximation.");
+        if(data.shadingModel==ShadingModel::PBR)ImGui::TextWrapped("PBR uses direct GGX and optional scene IBL. Map values use their existing color semantics.");
         ImGui::TextUnformatted("Base Color factor is linear. BRDF roughness minimum: 0.04.");
         int mode=int(data.surfaceMode);const char* modes[]={"Opaque","Masked (unsupported)","Transparent (unsupported)"};
         if(ImGui::Combo("Surface Mode",&mode,modes,3)){data.surfaceMode=MaterialSurfaceMode(mode);changed=true;}
@@ -643,7 +647,7 @@ void EditorLayer::DrawMaterialEditor(Application& app)
 
 void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const ImVec2& viewportSize)
 {
-    if (viewportSize.x <= 1.0f || viewportSize.y <= 1.0f)
+    if (app.IsEditorPlayMode() || viewportSize.x <= 1.0f || viewportSize.y <= 1.0f)
         return;
 
     auto& world = app.GetWorld();
@@ -712,13 +716,36 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
 
 namespace editor {
 void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,float dt){
-    const auto beforeSettings=app.GetSceneSettings();
+    if(m_FocusSceneSettings&&ImGui::GetFrameCount()>2){ImGui::SetNextWindowFocus();m_FocusSceneSettings=false;}
     ImGui::SetNextWindowSizeConstraints(ImVec2(270,180),ImVec2(FLT_MAX,FLT_MAX));
-    if(ImGui::Begin("Scene Settings",&m_ShowSceneSettings)) {
+    if(!ImGui::Begin("Scene Settings",&m_ShowSceneSettings)){ImGui::End();return;}
+    auto beforeSettings=app.GetSceneSettings();
+    {
         ImGui::PushItemWidth(std::max(90.f,ImGui::GetContentRegionAvail().x*.43f));
+        if(ImGui::CollapsingHeader("Scene Background",ImGuiTreeNodeFlags_DefaultOpen)){
+            auto settings=app.GetSceneSettings();auto& b=settings.background;bool changed=false;int mode=int(b.background);
+            if(ImGui::BeginTable("BackgroundProperties",2,ImGuiTableFlags_SizingStretchProp)){
+                ImGui::TableSetupColumn("Property",ImGuiTableColumnFlags_WidthFixed,90*ImGui::GetStyle().FontScaleDpi);ImGui::TableSetupColumn("Value",ImGuiTableColumnFlags_WidthStretch);
+                auto row=[&](const char* label,auto control){ImGui::TableNextRow();ImGui::TableSetColumnIndex(0);ImGui::AlignTextToFramePadding();ImGui::TextUnformatted(label);ImGui::TableSetColumnIndex(1);ImGui::SetNextItemWidth(-1);control();};
+                row("Mode",[&]{changed|=ImGui::Combo("##bgMode",&mode,"Solid\0Gradient\0HDR sky\0");});b.background=EditorBackground(mode);
+                row("Intensity",[&]{changed|=ImGui::SliderFloat("##skyIntensity",&b.skyIntensity,0,8);});
+                if(b.background==EditorBackground::Solid)row("Color",[&]{changed|=LinearColorEdit("##bgSolid",b.solid.data(),3,ImGuiColorEditFlags_NoInputs);});
+                else if(b.background==EditorBackground::Gradient){row("Top",[&]{changed|=LinearColorEdit("##bgTop",b.top.data(),3,ImGuiColorEditFlags_NoInputs);});row("Horizon",[&]{changed|=LinearColorEdit("##bgHorizon",b.horizon.data(),3,ImGuiColorEditFlags_NoInputs);});row("Ground",[&]{changed|=LinearColorEdit("##bgBottom",b.bottom.data(),3,ImGuiColorEditFlags_NoInputs);});row("Blend",[&]{changed|=ImGui::SliderFloat("##bgBlend",&b.gradientBlend,.1f,4);});}
+                else{row("Use IBL",[&]{changed|=ImGui::Checkbox("##bgUseIbl",&b.useIblEnvironment);if(ImGui::IsItemHovered())ImGui::SetTooltip("Share the IBL HDR asset and rotation. Visible sky intensity stays independent.");});ImGui::BeginDisabled(b.useIblEnvironment);row("HDR asset",[&]{
+                    const auto world=app.GetWorld().GetIdentity();if(!m_BackgroundAssetEditing||m_BackgroundDraftWorld!=world){m_BackgroundAssetDraft=b.cubemap;m_BackgroundDraftWorld=world;}
+                    bool edited=ImGui::InputText("##bgAsset",&m_BackgroundAssetDraft);m_BackgroundAssetEditing=ImGui::IsItemActive();edited|=AcceptAssetDrop(ecs::AssetKind::Environment,m_BackgroundAssetDraft);
+                    std::string error;const bool valid=ecs::ComponentRegistry::ValidateAssetKey(m_BackgroundAssetDraft,ecs::AssetKind::Environment,&error);
+                    if(edited&&valid){b.cubemap=m_BackgroundAssetDraft;changed=true;}if(ImGui::IsItemHovered())ImGui::SetTooltip("%s",m_BackgroundAssetDraft.c_str());if(!valid)ImGui::TextWrapped("%s",error.c_str());
+                });row("Rotation",[&]{changed|=ImGui::SliderFloat("##bgRotation",&b.skyRotation,-180,180,"%.1f deg");});ImGui::EndDisabled();}
+                ImGui::EndTable();
+            }
+            if(changed){std::string error;if(!app.SetSceneSettings(settings,&error))m_EditorError=error;}
+            ImGui::TextDisabled("Shared by Edit / Play");
+        }
         auto& lighting=app.GetLightingSettings();
         ImGui::Checkbox("Lighting enabled", &lighting.enabled);
         const auto sceneLights=app.GetLightDiagnostics();
+        if(ImGui::TreeNode("Render diagnostics")){
         ImGui::Text("Lights %u / enabled %u / frustum %u",sceneLights.total,sceneLights.enabled,sceneLights.influencing);
         ImGui::Text("D/P/S %u/%u/%u",sceneLights.directional,sceneLights.point,sceneLights.spot);
         bool tiled=app.GetLightRenderingMode()==LightRenderingMode::Tiled;
@@ -730,7 +757,8 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
         if(renderer){const auto t=renderer->GetGpuTimings();if(t.valid)ImGui::Text("Main GPU %.3f / frame GPU %.3f ms",t.mainMs,t.frameMs);}
         ImGui::Text("CPU frame %.3f ms / light upload %llu B",dt*1000.f,static_cast<unsigned long long>(sceneLights.uploadBytes));
         if(!sceneLights.error.empty())ImGui::TextWrapped("%s",sceneLights.error.c_str());
-        ImGui::SeparatorText("Legacy Directional (fallback)");
+        ImGui::TreePop();}
+        if(ImGui::TreeNode("Legacy Directional (fallback)")){
         if(sceneLights.primaryEcs)ImGui::TextWrapped("Scene primary %u:%u. Edit its Inspector/rotation.",sceneLights.primaryIndex,sceneLights.primaryGeneration);
         ImGui::BeginDisabled(sceneLights.primaryEcs);
         ImGui::Checkbox("Enabled", &lighting.directional.enabled);
@@ -738,6 +766,7 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
         LinearColorEdit("Color",lighting.directional.color.data(),3);
         ImGui::SliderFloat("Intensity",&lighting.directional.intensity,0.f,3.f);
         ImGui::EndDisabled();
+        ImGui::TreePop();}
         auto primary=SceneSerializer::PrimaryDirectionalId(app.GetWorld());
         if(ImGui::BeginCombo("Primary directional",primary.empty()?"Legacy fallback":primary.c_str())){
             for(auto e:app.GetWorld().Entities())if(auto* light=app.GetWorld().GetComponent<ecs::DirectionalLightComponent>(e)){
@@ -784,8 +813,10 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
         auto& shadows=app.GetShadowSettings();
         ImGui::Checkbox("Shadows enabled",&shadows.enabled);
         if(ImGui::Button("Shadow quality demo"))app.SetupShadowQualityDemoScene();
-        int filtering=shadows.pcf?1:0;
-        if(ImGui::Combo("Filtering",&filtering,"Hard (point)\0Soft (3 x 3)\0"))shadows.pcf=filtering==1;
+        int quality=int(GetShadowQuality(shadows));if(ImGui::Combo("Quality preset",&quality,"Low\0Medium\0High\0Ultra\0Custom\0"))ApplyShadowQuality(shadows,ShadowQuality(quality));
+        ImGui::Text("Depth map: %.1f MiB",ShadowMapBytes(shadows)/1048576.);
+        int filtering=shadows.pcf?(shadows.filterTaps==5?2:1):0;
+        if(ImGui::Combo("Filtering",&filtering,"Hard (point)\0Legacy PCF 3x3\0Smooth tent 5x5\0")){shadows.pcf=filtering!=0;shadows.filterTaps=filtering==2?5:3;}
         if(shadows.pcf)ImGui::SliderFloat("Radius (texels)",&shadows.filterRadius,0,2);
         ImGui::Checkbox("Fit near camera frustum",&shadows.cameraFitted);
         if(ImGui::Button("Restore shadow defaults"))shadows=ShadowSettings{};
@@ -834,7 +865,8 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
 
 
     const auto afterSettings=app.GetSceneSettings();
-    if(SceneSettingsToJson(beforeSettings)!=SceneSettingsToJson(afterSettings)&&!m_Transaction){EntitySnapshot before;before.world=app.GetWorld().GetIdentity();before.settings=beforeSettings;BeginTransaction("Scene settings",std::move(before));}
+    beforeSettings.lighting.enabled=afterSettings.lighting.enabled;beforeSettings.shadows.debugMode=afterSettings.shadows.debugMode;
+    if(beforeSettings!=afterSettings&&!m_Transaction){EntitySnapshot before;before.world=app.GetWorld().GetIdentity();before.settings=beforeSettings;BeginTransaction("Scene settings",std::move(before));}
     if(m_Transaction&&m_Transaction->before.settings&&!ImGui::IsAnyItemActive())FinishTransaction(app);
 
 }

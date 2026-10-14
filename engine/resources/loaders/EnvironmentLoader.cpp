@@ -218,6 +218,15 @@ EnvironmentResource Preprocess(EnvironmentResource e, unsigned size, unsigned ir
                        lut = data;
                    });
     e.brdfLut = lut;
+    unsigned skySize=64;while(skySize<512&&skySize*2<=e.width/4)skySize*=2;
+    if(skySize<=size)e.sky=e.environment;
+    else{
+        e.sky={skySize,1,{}};
+        for(unsigned face=0;face<6;++face){std::vector<float> pixels(std::size_t(skySize)*skySize*4);
+            for(unsigned y=0;y<skySize;++y)for(unsigned x=0;x<skySize;++x){auto v=SamplePanorama(e,CubeDirection(face,(2.*x+1)/skySize-1,(2.*y+1)/skySize-1));auto index=(std::size_t(y)*skySize+x)*4;for(int c=0;c<3;++c)pixels[index+c]=float(v[c]);pixels[index+3]=1;}
+            e.sky.subresources.push_back(std::move(pixels));
+        }
+    }
     e.placeholder = false;
     e.preprocessMs =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
