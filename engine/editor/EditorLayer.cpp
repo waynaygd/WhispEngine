@@ -428,6 +428,10 @@ void EditorLayer::HandleEditorShortcuts(Application& app){
         if(ImGui::IsKeyPressed(ImGuiKey_D,false))DuplicateEntity(app,m_SelectedEntity);
     }
     if(!EditorHotkeysAllowed(app.IsEditorPlayMode(),OwnsViewportKeyboard(),io.WantCaptureKeyboard,app.IsCameraControlActive()))return;
+    if(io.KeyAlt&&!io.KeyCtrl&&!io.KeyShift&&!m_InputTextActive&&!m_ToolActive&&!ImGuizmo::IsOver()&&!ImGuizmo::IsUsing()&&!ImGui::IsMouseDown(0)&&!ImGui::IsMouseDown(1)&&!ImGui::IsPopupOpen("",ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel)){
+        if(ImGui::IsKeyPressed(ImGuiKey_3,false))app.SetViewportUnlit(true);
+        if(ImGui::IsKeyPressed(ImGuiKey_4,false))app.SetViewportUnlit(false);
+    }
     if(!io.KeyCtrl&&!io.KeyAlt&&!m_InputTextActive&&ImGui::IsKeyPressed(ImGuiKey_G,false))m_GameView=!m_GameView;
     if(ImGui::IsKeyPressed(ImGuiKey_F,false))app.FocusEntity(m_SelectedEntity);
     if(ImGui::IsKeyPressed(ImGuiKey_W,false))m_GizmoOperation=0;
@@ -510,11 +514,21 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     ImGui::Begin("Viewport", &m_ShowViewport,ImGuiWindowFlags_NoNavInputs);
 
     const bool playMode = app.IsEditorPlayMode();
+    ImGui::BeginDisabled(playMode);if(ImGui::Button("Create"))ImGui::OpenPopup("CreateEntity");ImGui::EndDisabled();
+    if(playMode&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Stop Play before creating editor entities.");
+    if(ImGui::BeginPopup("CreateEntity")){if(ImGui::BeginMenu("3D Object")){for(const char* type:{"cube","sphere","cylinder","cone","plane"}){std::string label=type;label[0]=char(std::toupper(label[0]));if(ImGui::MenuItem(label.c_str()))CreatePrimitive(app,type);}ImGui::EndMenu();}if(ImGui::MenuItem("Empty Entity"))CreateEntity(app);if(ImGui::BeginMenu("Light")){if(ImGui::MenuItem("Directional"))CreateLight(app,LightType::Directional);if(ImGui::MenuItem("Point"))CreateLight(app,LightType::Point);if(ImGui::MenuItem("Spot"))CreateLight(app,LightType::Spot);ImGui::EndMenu();}ImGui::EndPopup();}
+    ImGui::SameLine();
     if (ImGui::Button(playMode ? "Stop" : "Play"))
         app.SetEditorPlayMode(!playMode);
     ImGui::SameLine();
     ImGui::TextUnformatted(playMode ? "Play" : "Edit");
-    if(!playMode){ImGui::SameLine();ImGui::Checkbox("Game View (G)",&m_GameView);}
+    ImGui::SameLine();ImGui::SetNextItemWidth(85*ImGui::GetStyle().FontScaleDpi);
+    int shading=app.IsViewportUnlit()?1:0;
+    if(ImGui::Combo("##ViewportShading",&shading,"Lit\0Unlit\0"))app.SetViewportUnlit(shading==1);
+    if(!playMode){
+        if(ImGui::GetWindowWidth()>520*ImGui::GetStyle().FontScaleDpi)ImGui::SameLine();
+        ImGui::Checkbox("Game View (G)",&m_GameView);
+    }
 
     ImGui::Separator();
 
@@ -773,15 +787,15 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
                 ImGui::EndTable();
             }
             if(b.background==EditorBackground::DayNight){changed|=LinearColorEdit("Zenith color",b.top.data(),3);changed|=LinearColorEdit("Horizon tint",b.horizon.data(),3);changed|=LinearColorEdit("Ground tint",b.bottom.data(),3);changed|=LinearColorEdit("Night color",b.nightColor.data(),3);changed|=PrecisionSliderFloat("Horizon glow",&b.horizonGlow,0,8);changed|=PrecisionSliderFloat("Sunset warmth",&b.sunsetWarmth,0,4);changed|=PrecisionSliderFloat("Night intensity",&b.nightIntensity,0,4);changed|=ImGui::Checkbox("Drive Light Properties",&b.driveLightProperties);if(b.driveLightProperties)changed|=PrecisionSliderFloat("Daylight intensity",&b.dayLightIntensity,0,8);ImGui::TextWrapped("Artist-friendly sky follows Primary Directional elevation/azimuth. No physical atmosphere or dynamic IBL convolution.");if(settings.environment.enabled)ImGui::TextWrapped("Warning: IBL uses a static HDRI and may not match time of day.");}
-            ImGui::Text("Sun Source: %s",b.background==EditorBackground::Cubemap?"HDRI radiance / optional procedural disc":"Primary Directional / procedural disc");
+            ImGui::Text("Sun Source: %s",b.background==EditorBackground::Cubemap?"HDRI radiance / optional sun glow":"Primary Directional / sun glow");
             auto primarySun=PrimarySun(app.GetWorld());if(primarySun.IsValid()){auto* tag=app.GetWorld().GetComponent<ecs::TagComponent>(primarySun);auto rays=ecs::LightDirection(ecs::RenderPose::From(*app.GetWorld().GetComponent<ecs::TransformComponent>(primarySun)));ImGui::TextWrapped("Primary Directional Light: %s",tag?tag->name.c_str():"Directional");ImGui::Text("Outgoing rays %.3f %.3f %.3f",rays.x,rays.y,rays.z);ImGui::Text("Sun elevation %.1f / azimuth %.1f deg",std::asin(std::clamp(-rays.y,-1.f,1.f))*57.2957795f,std::atan2(-rays.x,-rays.z)*57.2957795f);}else ImGui::TextWrapped("No enabled Primary Directional; Day/Night preview uses default midday.");
             if(previousHdr!=(b.useIblEnvironment?settings.environment.assetPath:b.cubemap)){b.sunMetadata=false;if(b.sunSync==SunSyncMode::SkyDrivesLight)b.sunSync=SunSyncMode::Independent;ImGui::TextWrapped("HDR selection changed: confirm explicit Sun Direction for this asset.");}
-            int sync=int(b.sunSync);changed|=ImGui::Combo("Sync Mode",&sync,"Independent\0Light Drives Sky (disc)\0Sky Drives Light (metadata)\0");b.sunSync=SunSyncMode(sync);
+            int sync=int(b.sunSync);changed|=ImGui::Combo("Sync Mode",&sync,"Independent\0Light Drives Sky (glow)\0Sky Drives Light (metadata)\0");b.sunSync=SunSyncMode(sync);
             changed|=ImGui::Checkbox("Use Explicit Sun Direction",&b.sunMetadata);
             if(b.sunMetadata)changed|=PrecisionDragFloat3("HDR Sun Direction (sky local)",b.sunDirection.data(),.01f,-1,1,"%.6g",ImGuiSliderFlags_NoRoundToFormat);
-            changed|=ImGui::Checkbox("Visible Sun Disc",&b.visibleSunDisc);
+            changed|=ImGui::Checkbox("Sun glow visible",&b.visibleSunDisc);
             if(b.background==EditorBackground::Cubemap){if(!b.sunMetadata)ImGui::TextWrapped("Warning: HDRI has no confirmed sun metadata. Set HDR Sun Direction explicitly; no brightest-pixel detection is performed.");ImGui::TextWrapped("HDRI may already contain a sun. Light Drives Sky moves only the procedural disc, not pixels inside the HDR map; enabling both can show two suns.");}
-            if(b.sunSync==SunSyncMode::LightDrivesSky||b.background==EditorBackground::DayNight){changed|=PrecisionDragFloat("Sun diameter (deg)",&b.sunRadius,.01f,.01f,10,"%.6g",ImGuiSliderFlags_NoRoundToFormat);changed|=PrecisionDragFloat("Visible sun intensity",&b.sunIntensity,.01f,0,32,"%.6g",ImGuiSliderFlags_NoRoundToFormat);changed|=PrecisionDragFloat("Glow radius (deg)",&b.sunGlowRadius,.1f,.01f,60);changed|=PrecisionSliderFloat("Glow intensity",&b.sunGlowIntensity,0,4);ImGui::TextWrapped("Disc follows primary light at any elevation. HDR rotation and precomputed IBL stay unchanged. Use an HDR without an existing sun to avoid two visible discs.");}
+            if(b.sunSync==SunSyncMode::LightDrivesSky||b.background==EditorBackground::DayNight){changed|=PrecisionDragFloat("Sun radiance",&b.sunIntensity,.01f,0,32,"%.6g",ImGuiSliderFlags_NoRoundToFormat);changed|=PrecisionDragFloat("Glow radius (deg)",&b.sunGlowRadius,.1f,.01f,60);changed|=PrecisionSliderFloat("Glow intensity",&b.sunGlowIntensity,0,4);ImGui::TextWrapped("Glow follows the primary light. Use an HDR without a baked sun to avoid duplicate suns. Legacy disc diameter remains readable in saved scenes.");}
             if(changed){BeginSceneTransaction(app,"Sky / Sun settings");std::string error;if(!app.SetSceneSettings(settings,&error))m_EditorError=error;else m_EditorError.clear();}
             if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());
             ImGui::TextDisabled("Shared by Edit / Play");

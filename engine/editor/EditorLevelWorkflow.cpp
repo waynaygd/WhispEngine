@@ -33,7 +33,7 @@ std::vector<ecs::Entity> EditorLayer::InstantiateImportedScene(Application& app,
   }
   FinishTransaction(app);EntitySnapshot before;before.world=app.GetWorld().GetIdentity();before.previousSelection=previous;
   for(const auto& item:items){auto e=app.CreateEmptyEntity(item.name);created.push_back(e);auto& world=app.GetWorld();*world.GetComponent<ecs::TransformComponent>(e)=item.transform;world.AddComponent<ecs::MeshRendererComponent>(e).meshPath=item.mesh;world.AddComponent<ecs::MaterialComponent>(e);EntitySnapshot dead;dead.entity=e;dead.world=e.world;before.related.push_back(dead);app.NotifyEditorMutation(e);}
-  m_SelectedEntity=created.back();CommitUndo(app,"Instantiate imported scene",std::move(before));
+  SelectEntityFromUser(app,created.back());CommitUndo(app,"Instantiate imported scene",std::move(before));
   if(auto* resources=app.GetResourceManager())for(const auto& mesh:checked)resources->LoadAsync<MeshResource>(mesh);
   m_EditorError.clear();return created;
  }catch(const std::exception& error){for(auto e:created)if(app.GetWorld().IsAlive(e))app.DestroySceneEntity(e);m_SelectedEntity=app.GetWorld().IsAlive(previous)?previous:ecs::Entity{};m_EditorError=error.what();return {};}

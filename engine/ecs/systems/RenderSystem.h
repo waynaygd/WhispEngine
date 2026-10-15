@@ -40,6 +40,8 @@ struct TransformComponent;
 class RenderSystem final : public ISystem
 {
 public:
+    void SetViewportUnlit(bool value){m_ViewportUnlit=value;}
+    bool IsViewportUnlit()const{return m_ViewportUnlit;}
     ~RenderSystem() override;
 
     const char* Name() const override { return "RenderSystem"; }
@@ -163,6 +165,7 @@ private:
     unsigned m_TextureMapMask=7;
     int m_ShadingModelOverride=-1;
     bool m_InstancingEnabled=true;
+    bool m_ViewportUnlit=false;
     const EnvironmentSettings* m_EnvironmentSettings=nullptr;
     std::string m_EnvironmentKey,m_RequestedEnvironment;
     ResourceHandle<EnvironmentResource> m_EnvironmentAsset;

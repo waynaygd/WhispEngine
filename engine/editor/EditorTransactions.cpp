@@ -83,18 +83,24 @@ void EditorLayer::Redo(Application& app){
     try{auto inverse=CaptureLike(app,record.snapshot);inverse.entity=RestoreSnapshot(app,record.snapshot,&inverse);m_Revision=record.after;m_UndoStack.push_back({record.label,std::move(inverse),record.before,record.after});}
     catch(const std::exception& e){m_EditorError=e.what();Logger::Get().Error(m_EditorError);m_RedoStack.push_back(std::move(record));}
 }
+void EditorLayer::SelectEntityFromUser(Application& app,ecs::Entity e){
+    SelectEntity(e);
+    if(!app.IsEditorPlayMode()&&app.GetWorld().IsAlive(e))m_GameView=false;
+}
 ecs::Entity EditorLayer::CreateEntity(Application& app,const std::string& name){
-    FinishTransaction(app);auto e=app.CreateEmptyEntity(name);m_SelectedEntity=e;EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Create entity",before);return e;
+    if(app.IsEditorPlayMode())return {};
+    FinishTransaction(app);auto e=app.CreateEmptyEntity(name);SelectEntityFromUser(app,e);EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Create entity",before);return e;
 }
 bool EditorLayer::DeleteEntity(Application& app,ecs::Entity e){
     FinishTransaction(app);if(!app.GetWorld().IsAlive(e))return false;auto before=CaptureSelectedEntity(app,e);app.DestroySceneEntity(e);CommitUndo(app,"Delete entity",std::move(before));return true;
 }
 ecs::Entity EditorLayer::DuplicateEntity(Application& app,ecs::Entity source){
+    if(app.IsEditorPlayMode())return {};
     FinishTransaction(app);if(!app.GetWorld().IsAlive(source))return {};auto values=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),source);
     auto e=app.CreateEmptyEntity();ecs::ComponentRegistry::Builtins().Restore(app.GetWorld(),e,values);
     if(auto* id=app.GetWorld().GetComponent<ecs::SceneIdentityComponent>(e))id->value=ecs::NewSceneIdentity();else app.GetWorld().AddComponent<ecs::SceneIdentityComponent>(e);
     if(auto* tag=app.GetWorld().GetComponent<ecs::TagComponent>(e))tag->name+=" Copy";
-    m_SelectedEntity=e;EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Duplicate entity",before);return e;
+    SelectEntityFromUser(app,e);EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Duplicate entity",before);return e;
 }
 bool EditorLayer::CopyEntity(Application& app,ecs::Entity source){
     if(app.IsEditorPlayMode()||!app.GetWorld().IsAlive(source))return false;
@@ -105,7 +111,7 @@ ecs::Entity EditorLayer::PasteEntity(Application& app){
     FinishTransaction(app);auto e=app.CreateEmptyEntity();
     try{ecs::ComponentRegistry::Builtins().Restore(app.GetWorld(),e,m_Clipboard);if(!app.GetWorld().HasComponent<ecs::SceneIdentityComponent>(e))app.GetWorld().AddComponent<ecs::SceneIdentityComponent>(e);app.GetWorld().GetComponent<ecs::SceneIdentityComponent>(e)->value=ecs::NewSceneIdentity();}
     catch(const std::exception& ex){app.DestroySceneEntity(e);m_EditorError=ex.what();return {};}
-    m_SelectedEntity=e;app.NotifyEditorMutation(e);EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Paste entity",before);return e;
+    SelectEntityFromUser(app,e);app.NotifyEditorMutation(e);EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Paste entity",before);return e;
 }
 ecs::Entity EditorLayer::BeginDuplicateDrag(Application& app){
     if(app.IsEditorPlayMode()||m_DuplicateDrag||!app.GetWorld().IsAlive(m_SelectedEntity))return {};
@@ -114,7 +120,7 @@ ecs::Entity EditorLayer::BeginDuplicateDrag(Application& app){
     auto e=app.CreateEmptyEntity();ecs::ComponentRegistry::Builtins().Restore(app.GetWorld(),e,values);
     if(!app.GetWorld().HasComponent<ecs::SceneIdentityComponent>(e))app.GetWorld().AddComponent<ecs::SceneIdentityComponent>(e);
     app.GetWorld().GetComponent<ecs::SceneIdentityComponent>(e)->value=ecs::NewSceneIdentity();
-    m_SelectedEntity=e;m_DuplicateDrag=true;EntitySnapshot before;before.entity=e;before.world=e.world;before.previousSelection=m_DragOriginal;BeginTransaction("Duplicate and move",before);return e;
+    SelectEntityFromUser(app,e);m_DuplicateDrag=true;EntitySnapshot before;before.entity=e;before.world=e.world;before.previousSelection=m_DragOriginal;BeginTransaction("Duplicate and move",before);return e;
 }
 ecs::Entity EditorLayer::CreatePrimitive(Application& app,const std::string& type){
     if(app.IsEditorPlayMode()||(type!="cube"&&type!="sphere"&&type!="cylinder"&&type!="cone"&&type!="plane"))return {};
@@ -124,7 +130,7 @@ ecs::Entity EditorLayer::CreateModelEntity(Application& app,const std::string& k
     if(app.IsEditorPlayMode()||key.empty()||!ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::Mesh,&m_EditorError))return {};
     FinishTransaction(app);auto e=app.CreateEmptyEntity(name);
     auto& mesh=app.GetWorld().AddComponent<ecs::MeshRendererComponent>(e);mesh.meshPath=key;
-    app.GetWorld().AddComponent<ecs::MaterialComponent>(e);m_SelectedEntity=e;
+    app.GetWorld().AddComponent<ecs::MaterialComponent>(e);SelectEntityFromUser(app,e);
     EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Create model",before);app.NotifyEditorMutation(e);return e;
 }
 

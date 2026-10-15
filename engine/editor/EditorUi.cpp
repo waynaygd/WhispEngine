@@ -151,15 +151,14 @@ void EditorLayer::DrawSceneHierarchy(Application& app){
     const auto start=std::chrono::steady_clock::now();ImGui::SetNextWindowSizeConstraints(ImVec2(180,150),ImVec2(FLT_MAX,FLT_MAX));
     if(!ImGui::Begin("Scene Hierarchy",&m_ShowHierarchy)){ImGui::End();return;}
     m_HierarchyFocused=ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-    auto& world=app.GetWorld();if(ImGui::Button("Create"))ImGui::OpenPopup("CreateEntity");
-    if(ImGui::BeginPopup("CreateEntity")){if(ImGui::BeginMenu("3D Object")){for(const char* type:{"cube","sphere","cylinder","cone","plane"}){std::string label=type;label[0]=char(std::toupper(label[0]));if(ImGui::MenuItem(label.c_str()))CreatePrimitive(app,type);}ImGui::EndMenu();}if(ImGui::MenuItem("Empty Entity"))CreateEntity(app);if(ImGui::BeginMenu("Light")){if(ImGui::MenuItem("Directional"))CreateLight(app,LightType::Directional);if(ImGui::MenuItem("Point"))CreateLight(app,LightType::Point);if(ImGui::MenuItem("Spot"))CreateLight(app,LightType::Spot);ImGui::EndMenu();}ImGui::EndPopup();}
+    auto& world=app.GetWorld();
     ImGui::InputTextWithHint("##filter","Search entities",&m_HierarchyFilter);
     auto entities=world.Entities();std::erase_if(entities,[&](auto e){auto* tag=world.GetComponent<ecs::TagComponent>(e);return !Matches(tag?tag->name:std::string(),m_HierarchyFilter);});
     if(!world.IsAlive(m_SelectedEntity)&&m_SelectedEntity.IsValid())m_SelectedEntity={};
     ImGuiListClipper clipper;clipper.Begin(int(entities.size()));while(clipper.Step())for(int row=clipper.DisplayStart;row<clipper.DisplayEnd;++row){
         const auto e=entities[row];const auto* tag=world.GetComponent<ecs::TagComponent>(e);ImGui::PushID(int(e.index));
         const std::string label=std::string(EntityKind(world,e))+" "+(tag&&!tag->name.empty()?tag->name:"Entity "+std::to_string(e.index));
-        if(ImGui::Selectable(label.c_str(),e==m_SelectedEntity)){FinishTransaction(app);m_PropertyDrafts.clear();m_SelectedEntity=e;}
+        if(ImGui::Selectable(label.c_str(),e==m_SelectedEntity)){FinishTransaction(app);SelectEntityFromUser(app,e);}
         if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0))app.FocusEntity(e);
         if(ImGui::BeginDragDropSource()){ImGui::SetDragDropPayload("WHISP_ENTITY",&e,sizeof(e));ImGui::TextUnformatted(label.c_str());ImGui::EndDragDropSource();}
         if(ImGui::BeginPopupContextItem("EntityActions")){

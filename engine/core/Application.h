@@ -53,6 +53,8 @@ public:
     const IWindow* GetWindow()const { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
     IRenderAdapter* GetRenderAdapter(){return m_Windows.empty()?nullptr:m_Windows.front().renderer.get();}
     editor::EditorLayer& GetEditorLayer(){return m_EditorLayer;}
+    void SetViewportUnlit(bool value){if(m_RenderSystem)m_RenderSystem->SetViewportUnlit(value);}
+    bool IsViewportUnlit()const{return m_RenderSystem&&m_RenderSystem->IsViewportUnlit();}
     ecs::World& GetWorld() { return m_RuntimeWorld?*m_RuntimeWorld:m_World; }
     ecs::World& GetEditorWorld(){return m_World;}
     scripting::LuaRuntime& GetLuaRuntime(){return m_LuaRuntime;}

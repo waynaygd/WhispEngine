@@ -108,6 +108,8 @@ public:
     bool ResetComponent(Application&,ecs::Entity,ecs::ComponentTypeId);
     bool AssignAsset(Application&,ecs::Entity,ecs::AssetKind,const std::string&);
     bool CreateMaterialAsset(Application&,const std::string&,std::string* error=nullptr);
+    std::string CreateLuaScriptAsset(Application&,const std::string& directory);
+    std::string CreatePrefabAsset(Application&,const std::string& directory);
     bool RenameMaterialAsset(Application&,const std::string&,const std::string&,bool confirmed,std::string* error=nullptr);
     bool DeleteMaterialAsset(Application&,const std::string&,bool confirmed,std::string* error=nullptr);
     bool SetProperty(Application&,ecs::Entity,ecs::ComponentTypeId,const std::string&,const ecs::PropertyValue&,bool transactional=true);
@@ -117,6 +119,7 @@ public:
     ecs::Entity CreateLight(Application&,LightType);
     void DeleteSelectedLight(Application&);
     void SelectEntity(ecs::Entity e){if(e!=m_SelectedEntity)m_PropertyDrafts.clear();m_SelectedEntity=e;}
+    void SelectEntityFromUser(Application& app,ecs::Entity e);
     ecs::Entity GetSelectedEntity()const{return m_SelectedEntity;}
     void RecordEdit(Application& app,const std::string& label){PushUndoBeforeChange(app,label);}
     void UndoEdit(Application& app){Undo(app);}

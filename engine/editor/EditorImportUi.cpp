@@ -30,8 +30,9 @@ void EditorLayer::DrawImportDialogs(Application& app){
  if(m_FolderPopup){ImGui::OpenPopup("New Folder");m_FolderPopup=false;}
  if(ImGui::BeginPopupModal("New Folder",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
   ImGui::Text("Parent: %s",m_FolderParent.empty()?"Project":m_FolderParent.c_str());ImGui::InputText("Folder name",&m_NewFolderName);
-  if(ImGui::Button("Create folder")){if(AssetImport::NewFolder(AssetImport::ProjectRoot(),m_FolderParent,m_NewFolderName,&m_EditorError)){m_AssetListsDirty=true;NavigateAssetFolder(m_FolderParent.empty()?m_NewFolderName:m_FolderParent+"/"+m_NewFolderName);ImGui::CloseCurrentPopup();}}
-  ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::EndPopup();
+  ImGui::BeginDisabled(app.IsEditorPlayMode());
+  if(ImGui::Button("Create folder")){if(AssetImport::NewFolder(AssetPaths::ResolveAssetRoot(),m_FolderParent,m_NewFolderName,&m_EditorError)){m_AssetListsDirty=true;NavigateAssetFolder(m_FolderParent.empty()?m_NewFolderName:m_FolderParent+"/"+m_NewFolderName);ImGui::CloseCurrentPopup();}}
+  ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::EndPopup();
  }
  if(m_ImportPopup){ImGui::OpenPopup("Import Asset");m_ImportPopup=false;}
  if(ImGui::BeginPopupModal("Import Asset",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){

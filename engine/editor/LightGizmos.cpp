@@ -13,7 +13,8 @@ namespace editor
 {
 ecs::Entity EditorLayer::CreateLight(Application& app,LightType type)
 {
-    auto e=app.CreateLightEntity(type);m_SelectedEntity=e;
+    if(app.IsEditorPlayMode())return {};
+    auto e=app.CreateLightEntity(type);SelectEntityFromUser(app,e);
     EntitySnapshot before;before.entity=e;before.alive=false;CommitUndo(app,"Create Light",before);return e;
 }
 void EditorLayer::DeleteSelectedLight(Application& app)
@@ -133,7 +134,7 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
         handle(pose.position,type==LightType::Point?cameraRight:d,p.range,0);
         if(type==LightType::Spot){for(int which=1;which<=2;++which){float a=(which==1?p.innerAngle:p.outerAngle)*.0174532925f;V tip=Add(pose.position,Scale(d,p.range*std::cos(a)));handle(tip,right,p.range*std::sin(a),which);}}
     });
-    if(hit.IsValid()&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&!ImGuizmo::IsOver()&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){FinishTransaction(app);m_PropertyDrafts.clear();m_SelectedEntity=hit;m_LightIconClicked=true;}
+    if(hit.IsValid()&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&!ImGuizmo::IsOver()&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){FinishTransaction(app);SelectEntityFromUser(app,hit);m_LightIconClicked=true;}
     draw->PopClipRect();
 }
 }
@@ -141,7 +142,7 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
 namespace editor {
 void EditorLayer::DrawViewportOverlays(Application& app,const ImVec2& origin,const ImVec2& size){
     if(m_LightPointerCaptured&&!ImGui::IsMouseDown(0)){FinishTransaction(app);m_LightPointerCaptured=false;}
-    if(app.IsEditorPlayMode()||m_GameView)return;
+    if(app.IsEditorPlayMode())return;
     if(size.x<=1||size.y<=1)return;const auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),size.x/size.y,app.GetCameraNearPlane(),app.GetCameraFarPlane());
     auto* draw=ImGui::GetWindowDrawList();draw->PushClipRect(origin,ImVec2(origin.x+size.x,origin.y+size.y),true);
     auto project=[&](V p)->std::optional<ImVec2>{auto v=ProjectGizmo(p,camera);if(!v)return {};return ImVec2(origin.x+(*v)[0]*size.x,origin.y+(*v)[1]*size.y);};
@@ -156,8 +157,9 @@ void EditorLayer::DrawViewportOverlays(Application& app,const ImVec2& origin,con
             auto bounds=Bounds(mesh,app.GetRenderInterpolation().Resolve(e,t));if(bounds.inverse==std::array<float,12>{})return;
             float distance=HitDistance(app.GetCameraPosition(),ray,bounds,nearest);if(distance<nearest){nearest=distance;hit=e;}
         });
-        FinishTransaction(app);m_PropertyDrafts.clear();m_SelectedEntity=hit;
+        FinishTransaction(app);SelectEntityFromUser(app,hit);
     }
+    if(m_GameView){draw->PopClipRect();return;}
     if(resources&&world.IsAlive(m_SelectedEntity))if(auto* m=world.GetComponent<ecs::MeshRendererComponent>(m_SelectedEntity))if(auto* t=world.GetComponent<ecs::TransformComponent>(m_SelectedEntity)){
         auto mesh=resources->Get<MeshResource>(m->meshPath);if(mesh&&mesh->IsLoaded()&&!mesh->GetData().meshData.vertices.empty()){
             auto pose=app.GetRenderInterpolation().Resolve(m_SelectedEntity,*t);auto bounds=Bounds(mesh,pose);std::array<float,16> model;ecs::BuildRenderModelMatrix(model.data(),pose);V corners[8];

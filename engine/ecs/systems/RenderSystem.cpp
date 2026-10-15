@@ -271,6 +271,7 @@ namespace ecs {
         BuildPerspectiveMatrix(lightCamera.projection.data(),m_CameraVerticalFovRadians,m_CameraAspectRatio,m_CameraNearPlane,m_CameraFarPlane);
         lightCamera.nearPlane=m_CameraNearPlane;lightCamera.farPlane=m_CameraFarPlane;
         auto lights=GatherSceneLights(world,m_LightingSettings?*m_LightingSettings:m_DefaultLighting,lightCamera,m_Interpolation);
+        if(m_ViewportUnlit)lights.lighting.enabled=false;
         if(m_Renderer){m_Renderer->SetCameraPosition({m_CameraPosition.x,m_CameraPosition.y,m_CameraPosition.z,0});
             m_Renderer->SetLighting(BuildLightingConstants(lights.lighting));
             m_Renderer->SetSceneLights(lights.lights,m_LightRenderingMode,lights.diagnostics);}
@@ -278,7 +279,8 @@ namespace ecs {
         if (m_Renderer == nullptr)
             return;
         if(m_EnvironmentSettings){
-            m_Renderer->SetEnvironmentSettings(*m_EnvironmentSettings);
+            auto environment=*m_EnvironmentSettings;if(m_ViewportUnlit)environment.diffuse=environment.specular=false;
+            m_Renderer->SetEnvironmentSettings(environment);
             if(m_ResourceManager&&m_EnvironmentSettings->enabled){
                 const auto& key=m_EnvironmentSettings->assetPath;
                 if(!m_EnvironmentAsset||m_RequestedEnvironment!=key){
@@ -410,7 +412,7 @@ namespace ecs {
                 ZoneScopedN("ShadowPass");
                 const auto start=std::chrono::steady_clock::now();
                 auto settings=SanitizeShadowSettings(m_ShadowSettings?*m_ShadowSettings:m_DefaultShadows);
-                settings.enabled=settings.enabled&&lights.primaryCastShadows;
+                settings.enabled=settings.enabled&&lights.primaryCastShadows&&!m_ViewportUnlit;
                 const auto light=BuildLightingConstants(lights.lighting);
                 auto frame=BuildCameraDirectionalShadowFrame(light,settings,
                     {m_CameraPosition.x,m_CameraPosition.y,m_CameraPosition.z},m_CameraYaw,m_CameraPitch,
@@ -611,7 +613,8 @@ namespace ecs {
         if (m_Renderer == nullptr)
             return;
         if(m_EnvironmentSettings){
-            m_Renderer->SetEnvironmentSettings(*m_EnvironmentSettings);
+            auto environment=*m_EnvironmentSettings;if(m_ViewportUnlit)environment.diffuse=environment.specular=false;
+            m_Renderer->SetEnvironmentSettings(environment);
             if(m_ResourceManager&&m_EnvironmentSettings->enabled){
                 const auto& key=m_EnvironmentSettings->assetPath;
                 if(!m_EnvironmentAsset||m_RequestedEnvironment!=key){
