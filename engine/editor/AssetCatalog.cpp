@@ -155,6 +155,8 @@ std::vector<std::string> AssetCatalog::Dependencies(const std::string& key){
                     if(ContainsReference(value,key))return true;
                     if(value.is_string()){
                         auto s=value.get<std::string>();s=s.substr(0,s.find('#'));std::replace(s.begin(),s.end(),'\\','/');
+                        if(ext==".gltf"&&key.starts_with("textures/")&&s.find('%')!=std::string::npos)
+                            throw std::runtime_error("Encoded glTF dependency needs package-level management: "+relative);
                         auto joined=(item.path().parent_path()/std::filesystem::u8path(s)).lexically_normal().lexically_relative(root);
                         return ContainsReference(AssetPaths::ToUtf8String(joined),key);
                     }
