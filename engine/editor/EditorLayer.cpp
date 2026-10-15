@@ -1,6 +1,7 @@
 #include "PrecisionInputs.h"
 #include <cstring>
 #include "TransformMath.h"
+#include "ScalePlaneGeometry.h"
 #include "SunSynchronization.h"
 #include "EditorWidgets.h"
 #include "EditorLayer.h"
@@ -20,6 +21,7 @@
 #include "../core/AssetPaths.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <ImGuizmo.h>
 #include <misc/cpp/imgui_stdlib.h>
 
@@ -733,11 +735,19 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
     ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
     ImGuizmo::SetRect(viewportMin.x, viewportMin.y, viewportSize.x, viewportSize.y);
 
-    if(!ImGuizmo::IsUsing()&&DrawScalePlanes(app,viewportMin,viewportSize))return;
+    ImGuizmo::SetGizmoSizeClipSpace(ScaleGizmoClipSize);
+    const bool planeOwnsPointer=!ImGuizmo::IsUsing()&&DrawScalePlanes(app,viewportMin,viewportSize,matrix);
     const ImGuizmo::MODE mode = m_GizmoMode == 0 ? ImGuizmo::LOCAL : ImGuizmo::WORLD;
     float snapValue=m_GizmoOperation==0?m_SnapTranslation:m_GizmoOperation==1?m_SnapRotation:m_SnapScale;float snap[3]={snapValue,snapValue,snapValue};
     float originalMatrix[16];std::copy(matrix,matrix+16,originalMatrix);
+    // Manipulate combines drawing and input. Its IsHoveringWindow gate must be
+    // false while a custom plane owns the pointer; moving MousePos alone is not
+    // enough (a nearly parallel ray can still select an axis). BeginFrame's
+    // NoInputs helper window is distinct from our viewport draw-list owner.
+    auto& context=*ImGui::GetCurrentContext();auto* hoveredWindow=context.HoveredWindow;
+    if(planeOwnsPointer)context.HoveredWindow=ImGui::FindWindowByName("gizmo");
     const bool manipulated=ImGuizmo::Manipulate(view, projection, ToGizmoOperation(m_GizmoOperation), mode, matrix,nullptr,(m_GizmoOperation==1?m_RotationSnapping:m_Snapping)?snap:nullptr);
+    context.HoveredWindow=hoveredWindow;
     bool matrixChanged=false;for(int i=0;i<16;++i)matrixChanged|=std::abs(matrix[i]-originalMatrix[i])>1e-6f;
     // ImGuizmo's previous delta may report "modified" on a later stationary drag.
     // Duplicate only when the target matrix actually changes (including snapped movement).

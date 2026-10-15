@@ -200,7 +200,7 @@ private:
     AssetNavigation m_AssetNavigation;
     std::string m_ImportTargetFolder,m_ImportPackageName;
 
-    bool DrawScalePlanes(Application&,const ImVec2&,const ImVec2&);
+    bool DrawScalePlanes(Application&,const ImVec2&,const ImVec2&,const float* model);
     int m_ScalePlane=0;
     ecs::TransformComponent m_ScaleOriginal;
     std::array<float,2> m_ScaleMouse{},m_ScaleDirection{};
