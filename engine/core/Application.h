@@ -175,8 +175,10 @@ private:
     ecs::Entity SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg);
     void UpdateEcs(float dt);
     void UpdateCameraController(float dt);
-    void UpdatePlayerController(float dt);
-    void UpdatePlayerMouseLook();
+    void UpdateGameplayInput();
+    bool GameplayInputAllowed() const;
+    bool CaptureGameplayCursor(bool);
+    scripting::GameplayServices GameplayCapabilities();
     void ReleasePlayerMouse();
     void UpdateRenderSystemCamera(IWindow* window);
     void UpdateRenderSystemCameraAspect(float aspectRatio);
@@ -226,6 +228,7 @@ private:
 
     ecs::World m_World; // Editor data and shared system/GPU-cache owner.
     std::unique_ptr<ecs::World> m_RuntimeWorld;
+    scripting::GameplayCamera m_GameplayCamera;
     scripting::LuaRuntime m_LuaRuntime;
     ecs::World::CloneMap m_CloneMapping;
     ecs::MutationQueue m_Mutations;
@@ -270,7 +273,6 @@ private:
     CameraControllerState m_Camera;
     ecs::Entity m_PlayerEntity{};
     bool m_PlayerMouseCaptured = false;
-    bool m_PlayerLeftWasDown = false;
     bool m_PlayerAltWasDown = false;
     bool m_DebugCollidersEnabled = false;
     bool m_PhysicsDebugPose = false;
@@ -285,6 +287,7 @@ private:
     bool m_EditorPlayMode = false;
     ecs::EventBus m_EventBus;
     InputManager m_InputManager;
+    InputManager::Bindings m_EditInputBindings;
     editor::EditorLayer m_EditorLayer;
     std::unordered_set<std::uint64_t> m_ActiveCollisionPairs;
 

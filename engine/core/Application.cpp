@@ -959,25 +959,6 @@ void Application::UpdateCameraController(float dt)
         Scale(Normalize(movement), speed * dt));
 }
 
-void Application::UpdatePlayerController(float)
-{
-    if(!m_RuntimeWorld||!m_RuntimeWorld->IsAlive(m_PlayerEntity))return;
-    auto* movement=m_RuntimeWorld->GetComponent<ecs::CharacterMovementComponent>(m_PlayerEntity);
-    if(!movement)return;
-    auto* primary=dynamic_cast<GlfwWindow*>(GetWindow());
-    auto* window=primary?primary->GetGlfwHandle():nullptr;
-    if(!window){ecs::SampleCharacterInput(*movement,{},false,false);return;}
-    const bool jumpDown=window&&glfwGetKey(window,GLFW_KEY_SPACE)==GLFW_PRESS;
-    const bool active=window&&m_PlayerMouseCaptured&&IsSimulationRunning();
-    const auto forward=BuildCameraForward(m_Camera.yaw,0);
-    const auto right=Normalize(Cross(ecs::Vec3{0,1,0},forward));
-    ecs::Vec3 direction{};
-    if(glfwGetKey(window,GLFW_KEY_W)==GLFW_PRESS)direction=Add(direction,forward);
-    if(glfwGetKey(window,GLFW_KEY_S)==GLFW_PRESS)direction=Add(direction,Scale(forward,-1));
-    if(glfwGetKey(window,GLFW_KEY_D)==GLFW_PRESS)direction=Add(direction,right);
-    if(glfwGetKey(window,GLFW_KEY_A)==GLFW_PRESS)direction=Add(direction,Scale(right,-1));
-    ecs::SampleCharacterInput(*movement,direction,jumpDown,active);
-}
 void Application::UpdateRenderSystemCamera(IWindow* window)
 {
     if (m_RenderSystem == nullptr || window == nullptr)
@@ -1088,6 +1069,7 @@ void Application::ToggleDebugColliders()
 
 bool Application::IsInputActionActive(const std::string& action) const
 {
+    if(IsEditorPlayMode()&&(action=="SpawnEntity"||action=="DestroyEntity"||action=="PauseToMenu"))return false;
     if(action=="FireProjectile"&&(!IsSimulationRunning()||!m_EditorLayer.ProjectileTestEnabled()))return false;
     if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard)
         return false;
@@ -1101,6 +1083,7 @@ void Application::SetEditorPlayMode(bool enabled)
     if(m_EditorPlayMode==enabled)return;
     if(enabled){
         m_EditorLayer.FinishTransaction(*this);
+        m_EditInputBindings=m_InputManager.CaptureBindings();
         m_SavedEditorCamera.position = m_Camera.position;
         m_SavedEditorCamera.yaw = m_Camera.yaw;
         m_SavedEditorCamera.pitch = m_Camera.pitch;
@@ -1120,14 +1103,15 @@ void Application::SetEditorPlayMode(bool enabled)
             m_Camera.position=ecs::PlayerEyePosition(t.position,player.eyeHeight);
             m_Camera.yaw=t.rotation.y;m_Camera.pitch=std::clamp(spawnPoint.rotation.x,-kMaxCameraPitch,kMaxCameraPitch);
         }
-        m_LuaRuntime.Start(*m_RuntimeWorld,[this](const std::string& action){return IsSimulationRunning()&&IsInputActionActive(action);});
+        m_GameplayCamera={};m_GameplayCamera.position=m_Camera.position;m_GameplayCamera.yaw=m_Camera.yaw;m_GameplayCamera.pitch=m_Camera.pitch;
+        m_LuaRuntime.Start(*m_RuntimeWorld,[this](const std::string& action){return GameplayInputAllowed()&&m_InputManager.FrameDown(action);},GameplayCapabilities());
         m_StateMachine.Clear(*this);RequestStateChange(std::make_unique<LoadingState>());m_StateMachine.ApplyPending(*this);
         m_LastCloneMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
     }else{
         ReleasePlayerMouse();
         if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
         m_StateMachine.Clear(*this);
-        m_LuaRuntime.Stop();m_Mutations.Clear();m_RenderInterpolation.Clear();m_EditorLayer.LeaveRuntime();m_RuntimeWorld.reset();m_CloneMapping.clear();
+        m_LuaRuntime.Stop();m_InputManager.RestoreBindings(std::move(m_EditInputBindings));m_Mutations.Clear();m_RenderInterpolation.Clear();m_EditorLayer.LeaveRuntime();m_RuntimeWorld.reset();m_CloneMapping.clear();
         m_Camera.position = m_SavedEditorCamera.position;
         m_Camera.yaw = m_SavedEditorCamera.yaw;
         m_Camera.pitch = m_SavedEditorCamera.pitch;
@@ -1139,7 +1123,7 @@ void Application::SetEditorPlayMode(bool enabled)
     Logger::Get().Info(enabled?"Editor: Play isolated Runtime World":"Editor: Stop discarded Runtime World");
 }
 void Application::SetEditorPaused(bool paused){
-    if(!m_EditorPlayMode||m_EditorPaused==paused)return;m_EditorPaused=paused;
+    if(!m_EditorPlayMode||m_EditorPaused==paused)return;m_EditorPaused=paused;if(paused)m_LuaRuntime.SuspendInput();
     m_FixedClock.Reset();m_ResetPhysicsDelta=true;
     if(m_PhysicsSystem)m_PhysicsSystem->SetEnabled(!paused);
 }
@@ -1286,7 +1270,7 @@ bool Application::Initialize()
         m_LuaRuntime.QueueCollision(e);
         m_ActiveCollisionPairs.insert(BuildCollisionPairKey(e.a.index, e.b.index));
 
-        if(m_RuntimeWorld)ecs::GroundCharacter(*m_RuntimeWorld,m_PlayerEntity,e);
+        if(m_RuntimeWorld){ecs::GroundCharacter(*m_RuntimeWorld,e.a,e);ecs::GroundCharacter(*m_RuntimeWorld,e.b,e);}
     });
     SetupEcsRuntimeDemo();
     if(!m_Config.ecsDemo.sceneFile.empty()){std::string error;if(!OpenScene(m_Config.ecsDemo.sceneFile,&error))Logger::Get().Error(error);}
@@ -1477,21 +1461,7 @@ int Application::Run()
         {
             ZoneScopedN("GameUpdate");
 
-            const bool hasPlayer =
-                m_EditorPlayMode &&
-                m_RuntimeWorld &&
-                m_RuntimeWorld->IsAlive(m_PlayerEntity);
-
-            if (hasPlayer)
-            {
-                UpdatePlayerMouseLook();
-            }
-            else
-            {
-                UpdateCameraController(dt);
-            }
-
-            UpdatePlayerController(dt);
+            if(m_EditorPlayMode)UpdateGameplayInput();else UpdateCameraController(dt);
             if(IsSimulationRunning())m_LuaRuntime.Update(dt);
 
             if (IsSimulationRunning() && m_UpdateMode == UpdateMode::Variable) {
@@ -1516,7 +1486,8 @@ int Application::Run()
                 }
                 if (IsSimulationRunning() && m_PhysicsSystem) {
                     m_RenderInterpolation.BeginTick(GetWorld());
-                    if(m_RuntimeWorld)ecs::ApplyCharacterMovement(*m_RuntimeWorld,m_PlayerEntity);
+                    m_LuaRuntime.FixedUpdate(float(FixedStepClock::TickSeconds));
+                    GetWorld().ForEach<ecs::CharacterMovementComponent>([&](ecs::Entity e,auto&){ecs::ApplyCharacterMovement(GetWorld(),e);});
                     m_World.UpdateFixedSystemsOn(GetWorld(),float(FixedStepClock::TickSeconds));
                     m_RenderInterpolation.EndTick(GetWorld());
                     m_PhysicsFrame.AddTick(m_PhysicsSystem->GetStatistics());
@@ -1535,12 +1506,14 @@ int Application::Run()
         ApplyStructuralCommands();
         UpdateEcs(dt);
         m_RenderInterpolation.SetFrame(GetWorld(),IsSimulationRunning(),m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
-        if(m_RuntimeWorld&&m_RuntimeWorld->IsAlive(m_PlayerEntity)){
-            auto* t=m_RuntimeWorld->GetComponent<ecs::TransformComponent>(m_PlayerEntity);
-            auto* p=m_RuntimeWorld->GetComponent<ecs::PlayerComponent>(m_PlayerEntity);
-            if(t&&p)m_Camera.position=ecs::PlayerEyePosition(m_RenderInterpolation.Resolve(m_PlayerEntity,*t).position,p->eyeHeight);
+        if(m_EditorPlayMode){
+            if(m_GameplayCamera.following){
+                auto* t=GetWorld().GetComponent<ecs::TransformComponent>(m_GameplayCamera.target);
+                if(t){auto p=m_RenderInterpolation.Resolve(m_GameplayCamera.target,*t).position;m_GameplayCamera.position=Add(p,m_GameplayCamera.offset);}
+                else m_GameplayCamera.following=false;
+            }
+            m_Camera.position=m_GameplayCamera.position;m_Camera.yaw=m_GameplayCamera.yaw;m_Camera.pitch=m_GameplayCamera.pitch;
         }
-
         static float fpsTimer = 0.0f;
         static int fpsFrames = 0;
 
@@ -1693,169 +1666,56 @@ int Application::Run()
 
 void Application::ReleasePlayerMouse()
 {
-    auto* primary = dynamic_cast<GlfwWindow*>(GetWindow());
-
-    if (primary)
-    {
-        GLFWwindow* window = primary->GetGlfwHandle();
-
-        if (window)
-        {
-            glfwSetInputMode(
-                window,
-                GLFW_CURSOR,
-                GLFW_CURSOR_NORMAL
-            );
-
-            if (glfwRawMouseMotionSupported())
-            {
-                glfwSetInputMode(
-                    window,
-                    GLFW_RAW_MOUSE_MOTION,
-                    GLFW_FALSE
-                );
-            }
-
-            m_PlayerLeftWasDown =
-                glfwGetMouseButton(
-                    window,
-                    GLFW_MOUSE_BUTTON_LEFT
-                ) == GLFW_PRESS;
-        }
+    if(auto* primary=dynamic_cast<GlfwWindow*>(GetWindow()))if(auto* window=primary->GetGlfwHandle()){
+        glfwSetInputMode(window,GLFW_CURSOR,GLFW_CURSOR_NORMAL);
+        if(glfwRawMouseMotionSupported())glfwSetInputMode(window,GLFW_RAW_MOUSE_MOTION,GLFW_FALSE);
     }
-
-    m_PlayerMouseCaptured = false;
+    m_PlayerMouseCaptured=false;m_InputManager.ResetMouseDelta();
 }
-
-void Application::UpdatePlayerMouseLook()
+bool Application::GameplayInputAllowed() const
 {
-    if (!m_RuntimeWorld ||
-        !m_RuntimeWorld->IsAlive(m_PlayerEntity))
-    {
-        ReleasePlayerMouse();
-        return;
-    }
-
-    auto* primary = dynamic_cast<GlfwWindow*>(GetWindow());
-    if (!primary)
-        return;
-
-    GLFWwindow* window = primary->GetGlfwHandle();
-    if (!window)
-        return;
-
-    const bool focused =
-        glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE;
-
-    const bool altDown =
-        glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS;
-
-    const bool altPressed =
-        altDown && !m_PlayerAltWasDown;
-
-    m_PlayerAltWasDown = altDown;
-
-    // Escape полностью останавливает игру
-    if (focused &&
-        glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS &&
-        !m_EditorLayer.BlocksCamera())
-    {
-        SetEditorPlayMode(false);
-        return;
-    }
-
-    // Left Alt освобождает игровой курсор
-    if (m_PlayerMouseCaptured && altPressed)
-    {
-        ReleasePlayerMouse();
-        return;
-    }
-
-    // Если мышь уже захвачена
-    if (m_PlayerMouseCaptured)
-    {
-        if (!focused || !IsSimulationRunning())
-        {
-            ReleasePlayerMouse();
-            return;
-        }
-
-        double mouseX = 0.0;
-        double mouseY = 0.0;
-
-        glfwGetCursorPos(window, &mouseX, &mouseY);
-
-        const float deltaX =
-            static_cast<float>(mouseX - m_Camera.lastMouseX);
-
-        const float deltaY =
-            static_cast<float>(mouseY - m_Camera.lastMouseY);
-
-        m_Camera.lastMouseX = mouseX;
-        m_Camera.lastMouseY = mouseY;
-
-        m_Camera.yaw +=
-            deltaX * m_Camera.mouseSensitivity;
-
-        m_Camera.pitch = std::clamp(
-            m_Camera.pitch -
-            deltaY * m_Camera.mouseSensitivity,
-            -kMaxCameraPitch,
-            kMaxCameraPitch
-        );
-
-        return;
-    }
-
-    // Ожидаем клик по игровому Viewport
-    const bool leftDown =
-        glfwGetMouseButton(
-            window,
-            GLFW_MOUSE_BUTTON_LEFT
-        ) == GLFW_PRESS;
-
-    const bool justClicked =
-        leftDown && !m_PlayerLeftWasDown;
-
-    m_PlayerLeftWasDown = leftDown;
-
-    if (!focused || !IsSimulationRunning())
-        return;
-
-    double mouseX = 0.0;
-    double mouseY = 0.0;
-
-    glfwGetCursorPos(window, &mouseX, &mouseY);
-
-    if (justClicked &&
-        m_EditorLayer.IsPointInsideViewport(mouseX, mouseY) &&
-        !m_EditorLayer.BlocksCamera())
-    {
-        glfwSetInputMode(
-            window,
-            GLFW_CURSOR,
-            GLFW_CURSOR_DISABLED
-        );
-
-        if (glfwRawMouseMotionSupported())
-        {
-            glfwSetInputMode(
-                window,
-                GLFW_RAW_MOUSE_MOTION,
-                GLFW_TRUE
-            );
-        }
-
-        glfwGetCursorPos(
-            window,
-            &m_Camera.lastMouseX,
-            &m_Camera.lastMouseY
-        );
-
-        m_PlayerMouseCaptured = true;
-    }
+    if(!IsSimulationRunning())return false;
+    auto* primary=dynamic_cast<GlfwWindow*>(const_cast<Application*>(this)->GetWindow());
+    auto* window=primary?primary->GetGlfwHandle():nullptr;
+    if(!window||!glfwGetWindowAttrib(window,GLFW_FOCUSED)||m_EditorLayer.BlocksCamera())return false;
+    if(ImGui::GetCurrentContext()&&(ImGui::GetIO().WantTextInput||ImGui::IsAnyItemActive()))return false;
+    double x=0,y=0;glfwGetCursorPos(window,&x,&y);
+    return m_PlayerMouseCaptured||m_EditorLayer.IsPointInsideViewport(x,y);
 }
-
+bool Application::CaptureGameplayCursor(bool capture)
+{
+    if(!capture){ReleasePlayerMouse();return true;}
+    if(!GameplayInputAllowed())return false;
+    auto* primary=dynamic_cast<GlfwWindow*>(GetWindow());auto* window=primary?primary->GetGlfwHandle():nullptr;
+    if(!window)return false;
+    if(!m_PlayerMouseCaptured){glfwSetInputMode(window,GLFW_CURSOR,GLFW_CURSOR_DISABLED);if(glfwRawMouseMotionSupported())glfwSetInputMode(window,GLFW_RAW_MOUSE_MOTION,GLFW_TRUE);m_PlayerMouseCaptured=true;m_InputManager.ResetMouseDelta();}
+    return true;
+}
+void Application::UpdateGameplayInput()
+{
+    m_InputManager.BeginFrame();
+    auto* primary=dynamic_cast<GlfwWindow*>(GetWindow());auto* window=primary?primary->GetGlfwHandle():nullptr;
+    if(!window)return;
+    const bool focused=glfwGetWindowAttrib(window,GLFW_FOCUSED)==GLFW_TRUE;
+    const bool text=ImGui::GetCurrentContext()&&(ImGui::GetIO().WantTextInput||ImGui::IsAnyItemActive());
+    const bool tab=glfwGetKey(window,GLFW_KEY_TAB)==GLFW_PRESS;
+    if(focused&&!text&&glfwGetKey(window,GLFW_KEY_ESCAPE)==GLFW_PRESS&&!m_EditorLayer.BlocksCamera()){SetEditorPlayMode(false);return;}
+    if(!focused||!IsSimulationRunning()||text||m_EditorLayer.BlocksCamera()||(tab&&!m_PlayerAltWasDown))ReleasePlayerMouse();
+    m_PlayerAltWasDown=tab;
+}
+scripting::GameplayServices Application::GameplayCapabilities()
+{
+    scripting::GameplayServices host;
+    host.inputAllowed=[this]{return GameplayInputAllowed();};
+    host.pressed=[this](const std::string& a){return GameplayInputAllowed()&&m_InputManager.FramePressed(a);};
+    host.released=[this](const std::string& a){return GameplayInputAllowed()&&m_InputManager.FrameReleased(a);};
+    host.mouseDelta=[this]{return GameplayInputAllowed()&&m_PlayerMouseCaptured?m_InputManager.MouseDelta():ecs::Vec3{};};
+    host.cursorCaptured=[this]{return m_PlayerMouseCaptured;};
+    host.captureCursor=[this](bool capture){return CaptureGameplayCursor(capture);};
+    host.bindAction=[this](const std::string& action,const std::string& key){return m_InputManager.BindNamedAction(action,key);};
+    host.actions=[this]{return m_InputManager.Actions();};
+    host.camera=&m_GameplayCamera;return host;
+}
 void Application::Shutdown()
 {
     SetEditorPlayMode(false);m_Mutations.Clear();

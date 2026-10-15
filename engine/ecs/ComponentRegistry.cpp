@@ -119,7 +119,9 @@ ComponentRegistry Build(){
     ComponentRegistry r;
     auto script=Descriptor<LuaScriptComponent>("LuaScript","Lua Script");
     Field<LuaScriptComponent>(script,"scriptPath","Script asset",&LuaScriptComponent::scriptPath,PropertyKind::Asset,0,0,AssetKind::LuaScript);
-    Field<LuaScriptComponent>(script,"enabled","Enabled",&LuaScriptComponent::enabled,PropertyKind::Boolean);Complete(script);
+    Field<LuaScriptComponent>(script,"enabled","Enabled",&LuaScriptComponent::enabled,PropertyKind::Boolean);
+    Field<LuaScriptComponent>(script,"inputEnabled","Allow gameplay input",&LuaScriptComponent::inputEnabled,PropertyKind::Boolean);
+    Field<LuaScriptComponent>(script,"cameraEnabled","Allow gameplay camera",&LuaScriptComponent::cameraEnabled,PropertyKind::Boolean);Complete(script);
     auto scriptSave=script.serialize;auto scriptLoad=script.deserialize;
     script.serialize=[scriptSave](const World& w,Entity e){auto j=scriptSave(w,e);j["properties"]=w.GetComponent<LuaScriptComponent>(e)->properties;return j;};
     script.deserialize=[scriptLoad](World& w,Entity e,const Json& j){
@@ -158,6 +160,7 @@ ComponentRegistry Build(){
         PropertyKind::Boolean
     );
 
+    Field<PlayerStartComponent>(playerStart,"controllerScript","Controller script",&PlayerStartComponent::controllerScript,PropertyKind::Asset,0,0,AssetKind::LuaScript);
     Complete(playerStart);
     r.Register(playerStart);
 

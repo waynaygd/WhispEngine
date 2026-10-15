@@ -5,6 +5,7 @@
 #include "../ecs/components/LuaScriptComponent.h"
 #include "../ecs/components/TagComponent.h"
 #include "../ecs/components/TransformComponent.h"
+#include "../ecs/PlayerSpawn.h"
 #include <sol/sol.hpp>
 #include <fstream>
 #include <map>
@@ -64,7 +65,7 @@ Json Schema(sol::table definition){
         if(!ValidValue(field,field["default"]))throw std::runtime_error("Invalid default: "+key);
         schema[key]=field;
     }
-    for(const char* callback:{"on_start","on_update","on_event","on_destroy"}){
+    for(const char* callback:{"on_start","on_update","on_fixed_update","on_event","on_stop","on_destroy"}){
         sol::object fn=definition[callback];if(fn.valid()&&fn!=sol::nil&&fn.get_type()!=sol::type::function)throw std::runtime_error(std::string(callback)+" must be a function");
     }
     return schema;
@@ -74,7 +75,7 @@ struct LuaRuntime::Impl {
     // State is declared first, so all Lua references die before the VM.
     sol::state lua;
     struct Program {std::string source;Json fields;std::uint64_t revision=0;};
-    struct Instance {std::string path;std::uint64_t revision;sol::environment env;sol::table definition,self;Json overrides;bool failed=false;};
+    struct Instance {std::string path;std::uint64_t revision;sol::environment env;sol::table definition,self;Json overrides;bool failed=false;ecs::Entity entity{};};
     std::map<std::string,Program> programs;
     std::map<std::string,std::string> errors;
     std::map<ecs::Entity,Instance,EntityLess> instances;
@@ -85,7 +86,12 @@ struct LuaRuntime::Impl {
     std::set<ecs::Entity,EntityLess> destroying;
     ecs::World* world=nullptr;
     std::function<bool(const std::string&)> input;
+    GameplayServices services;
+    ecs::Entity cameraOwner{},cursorOwner{};
+    bool fixedPhase=false;
     std::map<std::string,bool> held,pressed,released;
+    std::map<std::string,bool> fixedPressed,fixedReleased;
+    std::map<std::string,std::string> boundKeys;
     const std::thread::id owner=std::this_thread::get_id();
     bool stopping=false;
     Impl(){
@@ -128,7 +134,36 @@ struct LuaRuntime::Impl {
     }
     bool Alive(ecs::Entity e)const{return world&&world->IsAlive(e)&&!destroying.contains(e);}
     ecs::TransformComponent& Transform(ecs::Entity e){if(!Alive(e))throw std::runtime_error("Dead/stale/foreign entity");auto* t=world->GetComponent<ecs::TransformComponent>(e);if(!t)throw std::runtime_error("Entity has no Transform");return *t;}
-    void Bind(sol::environment& env){
+    bool InputAllowed(ecs::Entity owner)const{auto* c=Alive(owner)?world->GetComponent<ecs::LuaScriptComponent>(owner):nullptr;return !stopping&&c&&c->enabled&&c->inputEnabled&&(!services.inputAllowed||services.inputAllowed());}
+    bool MotionAllowed(ecs::Entity owner)const{auto* c=Alive(owner)?world->GetComponent<ecs::LuaScriptComponent>(owner):nullptr;return !stopping&&c&&c->enabled&&(!c->inputEnabled||!services.inputAllowed||services.inputAllowed());}
+    ecs::CharacterMovementComponent& Movement(ecs::Entity owner,ecs::Entity e){
+        if(!Alive(e))throw std::runtime_error("Character: dead/stale/foreign entity");
+        if(owner!=e)throw std::runtime_error("Character: a script controls only its own entity");
+        auto* m=world->GetComponent<ecs::CharacterMovementComponent>(e);
+        if(!m||!world->HasComponent<ecs::RigidbodyComponent>(e)||!world->HasComponent<ecs::ColliderComponent>(e)||!world->HasComponent<ecs::TransformComponent>(e))throw std::runtime_error("Character requires CharacterMovement, Rigidbody, Collider and Transform");return *m;
+    }
+    static void Vector(ecs::Vec3 v){if(!std::isfinite(v.x)||!std::isfinite(v.y)||!std::isfinite(v.z)||std::max({std::abs(v.x),std::abs(v.y),std::abs(v.z)})>1e6f)throw std::runtime_error("Expected finite bounded vector");}
+    static void Number(float n,float max){if(!std::isfinite(n)||n<0||n>max)throw std::runtime_error("Gameplay parameter outside valid range");}
+    void ClearControl(ecs::Entity e){
+        if(world&&world->IsAlive(e))if(auto* m=world->GetComponent<ecs::CharacterMovementComponent>(e)){m->desiredDirection={};m->jumpRequested=false;if(auto* b=world->GetComponent<ecs::RigidbodyComponent>(e)){b->velocity.x=0;b->velocity.z=0;}}
+        if(cameraOwner==e){if(services.camera)services.camera->following=false;cameraOwner={};}
+        if(cursorOwner==e){if(services.captureCursor)services.captureCursor(false);cursorOwner={};}
+    }
+    bool AcquireCamera(ecs::Entity e){
+        auto* c=Alive(e)?world->GetComponent<ecs::LuaScriptComponent>(e):nullptr;
+        if(stopping||!c||!c->enabled||!c->cameraEnabled||!services.camera)return false;
+        if(cameraOwner.IsValid()&&Alive(cameraOwner)&&cameraOwner!=e)return false;cameraOwner=e;return true;
+    }
+    GameplayCamera& Camera(ecs::Entity e){if(!AcquireCamera(e))throw std::runtime_error("Camera permission missing or camera owned by another script");return *services.camera;}
+    void BindAction(ecs::Entity owner,const std::string& action,const std::string& key){
+        auto* c=Alive(owner)?world->GetComponent<ecs::LuaScriptComponent>(owner):nullptr;
+        if(stopping||!c||!c->inputEnabled||!services.bindAction||!services.bindAction(action,key))throw std::runtime_error("Input.bind: permission missing, unknown key name or action budget exceeded");
+        if(!boundKeys.contains(action)||boundKeys[action]!=key){
+            boundKeys[action]=key;held.erase(action);pressed.erase(action);released.erase(action);fixedPressed.erase(action);fixedReleased.erase(action);
+        }
+        DiscoverInput(action);
+    }
+    void Bind(sol::environment& env,ecs::Entity owner){
         auto api=lua.create_table();
         api.set_function("is_alive",[this](ecs::Entity e){return Alive(e);});
         api.set_function("find_by_tag",[this](const std::string& tag){auto list=lua.create_table();int i=1;for(auto e:world->Entities())if(auto* t=world->GetComponent<ecs::TagComponent>(e);Alive(e)&&t&&t->name==tag)list[i++]=e;return list;});
@@ -142,26 +177,59 @@ struct LuaRuntime::Impl {
         env["World"]=api;
         auto log=lua.create_table();log.set_function("info",[](const std::string& s){Logger::Get().Info("Lua: "+s);});log.set_function("warning",[](const std::string& s){Logger::Get().Warn("Lua: "+s);});log.set_function("error",[](const std::string& s){Logger::Get().Error("Lua: "+s);});env["Log"]=log;
         auto controls=lua.create_table();
-        controls.set_function("is_action_held",[this](const std::string& s){DiscoverInput(s);return held[s];});
-        controls.set_function("is_action_pressed",[this](const std::string& s){DiscoverInput(s);return pressed[s];});
-        controls.set_function("is_action_released",[this](const std::string& s){DiscoverInput(s);return released[s];});env["Input"]=controls;
+        controls.set_function("is_down",[this,owner](const std::string& s){if(!InputAllowed(owner))return false;DiscoverInput(s);return held[s];});
+        controls.set_function("was_pressed",[this,owner](const std::string& s){if(!InputAllowed(owner))return false;DiscoverInput(s);return fixedPhase?fixedPressed[s]:pressed[s];});
+        controls.set_function("was_released",[this,owner](const std::string& s){if(!InputAllowed(owner))return false;DiscoverInput(s);return fixedPhase?fixedReleased[s]:released[s];});
+        controls["is_action_held"]=controls["is_down"];controls["is_action_pressed"]=controls["was_pressed"];controls["is_action_released"]=controls["was_released"];
+        controls.set_function("bind",[this,owner](const std::string& action,const std::string& key){BindAction(owner,action,key);});
+        controls.set_function("mouse_delta",[this,owner](){auto delta=InputAllowed(owner)&&services.mouseDelta?services.mouseDelta():ecs::Vec3{};return std::make_tuple(delta.x,delta.y);});
+        controls.set_function("cursor_captured",[this,owner](){return InputAllowed(owner)&&cursorOwner==owner&&services.cursorCaptured&&services.cursorCaptured();});
+        controls.set_function("capture_cursor",[this,owner](bool capture){if(!capture){if(cursorOwner==owner){if(services.captureCursor)services.captureCursor(false);cursorOwner={};}return true;}if(!InputAllowed(owner)||!services.captureCursor)return false;if(Alive(cursorOwner)&&cursorOwner!=owner&&services.cursorCaptured&&services.cursorCaptured())return false;bool ok=services.captureCursor(true);if(ok)cursorOwner=owner;return ok;});env["Input"]=controls;
+        auto character=lua.create_table();
+        character.set_function("move_world",[this,owner](ecs::Entity e,ecs::Vec3 direction){Vector(direction);auto& m=Movement(owner,e);if(!MotionAllowed(owner))return;m.desiredDirection={};float n=std::hypot(direction.x,direction.z);if(n>.0001f)m.desiredDirection={direction.x/std::max(1.f,n),0,direction.z/std::max(1.f,n)};});
+        character.set_function("move_local",[this,owner](ecs::Entity e,float x,float z){Vector({x,0,z});auto& m=Movement(owner,e);if(!MotionAllowed(owner))return;float yaw=Transform(e).rotation.y,n=std::max(1.f,std::hypot(x,z));m.desiredDirection={(std::cos(yaw)*x+std::sin(yaw)*z)/n,0,(-std::sin(yaw)*x+std::cos(yaw)*z)/n};});
+        character.set_function("jump",[this,owner](ecs::Entity e){auto& m=Movement(owner,e);if(MotionAllowed(owner))m.jumpRequested=true;});
+        character.set_function("stop",[this,owner](ecs::Entity e){auto& m=Movement(owner,e);m.desiredDirection={};m.jumpRequested=false;});
+        character.set_function("is_grounded",[this,owner](ecs::Entity e){return Movement(owner,e).grounded;});
+        character.set_function("get_move_speed",[this,owner](ecs::Entity e){return Movement(owner,e).moveSpeed;});
+        character.set_function("get_jump_speed",[this,owner](ecs::Entity e){return Movement(owner,e).jumpSpeed;});
+        character.set_function("set_move_speed",[this,owner](ecs::Entity e,float speed){Number(speed,30);Movement(owner,e).moveSpeed=speed;});
+        character.set_function("set_jump_speed",[this,owner](ecs::Entity e,float speed){Number(speed,20);Movement(owner,e).jumpSpeed=speed;});
+        character.set_function("velocity",[this,owner](ecs::Entity e){Movement(owner,e);auto v=world->GetComponent<ecs::RigidbodyComponent>(e)->velocity;return ecs::Vec3{v.x,0,v.z};});
+        character.set_function("eye_offset",[this,owner](ecs::Entity e){Movement(owner,e);auto* p=world->GetComponent<ecs::PlayerComponent>(e);auto* c=world->GetComponent<ecs::ColliderComponent>(e);return ecs::Vec3{0,(p?p->eyeHeight:c->halfExtents.y*2)-c->halfExtents.y+c->offset.y,0};});env["Character"]=character;
+        auto camera=lua.create_table();
+        camera.set_function("acquire",[this,owner](){return AcquireCamera(owner);});
+        camera.set_function("release",[this,owner](){if(cameraOwner==owner){if(services.camera)services.camera->following=false;cameraOwner={};}});
+        camera.set_function("angles",[this,owner](){auto& c=Camera(owner);return std::make_tuple(c.yaw,c.pitch);});
+        camera.set_function("set_angles",[this,owner](float yaw,float pitch){Vector({yaw,pitch,0});auto& c=Camera(owner);if(MotionAllowed(owner)){c.yaw=std::remainder(yaw,6.283185307f);c.pitch=std::clamp(pitch,-ecs::PlayerMaximumPitch,ecs::PlayerMaximumPitch);}});
+        camera.set_function("rotate",[this,owner](float yaw,float pitch){Vector({yaw,pitch,0});auto& c=Camera(owner);if(MotionAllowed(owner)){c.yaw=std::remainder(c.yaw+yaw,6.283185307f);c.pitch=std::clamp(c.pitch+pitch,-ecs::PlayerMaximumPitch,ecs::PlayerMaximumPitch);}});
+        camera.set_function("forward",[this,owner](){auto& c=Camera(owner);ecs::TransformComponent t;t.rotation={c.pitch,c.yaw,0};return ecs::PlayerLookDirection(t);});
+        camera.set_function("flat_forward",[this,owner](){auto& c=Camera(owner);return ecs::Vec3{std::sin(c.yaw),0,std::cos(c.yaw)};});
+        camera.set_function("right",[this,owner](){auto& c=Camera(owner);return ecs::Vec3{std::cos(c.yaw),0,-std::sin(c.yaw)};});
+        camera.set_function("position",[this,owner](){return Camera(owner).position;});
+        camera.set_function("set_position",[this,owner](ecs::Vec3 p){Vector(p);auto& c=Camera(owner);if(MotionAllowed(owner)){c.position=p;c.following=false;}});
+        camera.set_function("follow",[this,owner](ecs::Entity target,ecs::Vec3 offset){Transform(target);Vector(offset);auto& c=Camera(owner);c.target=target;c.offset=offset;c.following=true;});env["Camera"]=camera;
     }
     void DiscoverInput(const std::string& action){
-        if(action.size()>128||held.size()>128)throw std::runtime_error("Input action budget exceeded");
-        if(!held.contains(action)){bool now=input&&input(action);held[action]=now;pressed[action]=now;released[action]=false;}
+        if(action.empty()||action.size()>128||(held.size()>=128&&!held.contains(action)))throw std::runtime_error("Input action name/budget invalid");
+        if(!held.contains(action)){bool now=input&&input(action);held[action]=now;pressed[action]=services.pressed?services.pressed(action):now;released[action]=services.released&&services.released(action);fixedPressed[action]|=pressed[action];fixedReleased[action]|=released[action];}
     }
     template<class... Args>void Call(Instance& instance,const char* callback,Args&&... args){
-        if(instance.failed&&std::string_view(callback)!="on_destroy")return;
+        if(instance.failed&&std::string_view(callback)!="on_destroy"&&std::string_view(callback)!="on_stop")return;
         try{
         sol::object fn=instance.definition[callback];if(!fn.valid()||fn==sol::nil)return;
         if(fn.get_type()!=sol::type::function)throw std::runtime_error("Callback is no longer a function");
         ExecutionBudget budget(lua.lua_state());sol::protected_function function=fn;auto result=function(instance.self,std::forward<Args>(args)...);
         if(!result.valid()){sol::error error=result;instance.failed=true;Fail(instance.path,callback,error.what());}
         }catch(const std::exception& error){instance.failed=true;Fail(instance.path,callback,error.what());}
+        if(instance.failed)ClearControl(instance.entity);
     }
+    void Retire(ecs::Entity e,Instance& instance){Call(instance,"on_stop");Call(instance,"on_destroy");ClearControl(e);}
     void Sync(){
+        if(Alive(cameraOwner)){auto* c=world->GetComponent<ecs::LuaScriptComponent>(cameraOwner);if(!c||!c->enabled||!c->cameraEnabled)ClearControl(cameraOwner);}
+        if(Alive(cursorOwner)){auto* c=world->GetComponent<ecs::LuaScriptComponent>(cursorOwner);if(!c||!c->enabled||!c->inputEnabled)ClearControl(cursorOwner);}
         for(auto i=instances.begin();i!=instances.end();){auto* c=world->GetComponent<ecs::LuaScriptComponent>(i->first);
-            if(!Alive(i->first)||!c||!c->enabled||c->scriptPath!=i->second.path||c->properties!=i->second.overrides||programs.at(i->second.path).revision!=i->second.revision){Call(i->second,"on_destroy");i=instances.erase(i);}else ++i;
+            if(!Alive(i->first)||!c||!c->enabled||c->scriptPath!=i->second.path||c->properties!=i->second.overrides||programs.at(i->second.path).revision!=i->second.revision){Retire(i->first,i->second);i=instances.erase(i);}else ++i;
         }
         // Snapshot IDs: callbacks may spawn; new entities start on the following Update.
         for(auto e:world->Entities()){
@@ -171,10 +239,10 @@ struct LuaRuntime::Impl {
             const auto fingerprint=path+":"+std::to_string(programs.at(path).revision)+":"+overrides.dump();
             if(rejected.contains(e)&&rejected.at(e)==fingerprint)continue;
             try{
-                auto& program=programs.at(path);auto env=Environment();auto definition=Evaluate(program.source,path,env);Bind(env);
+                auto& program=programs.at(path);auto env=Environment();auto definition=Evaluate(program.source,path,env);Bind(env,e);
                 auto self=lua.create_table();self["entity"]=e;
                 for(auto it=program.fields.begin();it!=program.fields.end();++it){auto value=overrides.contains(it.key())?overrides.at(it.key()):it.value().at("default");if(!ValidValue(it.value(),value))throw std::runtime_error("Invalid override: "+it.key());self[it.key()]=ToLua(lua,value);}
-                auto [it,ok]=instances.emplace(e,Instance{path,program.revision,std::move(env),definition,self,overrides});Call(it->second,"on_start");
+                auto [it,ok]=instances.emplace(e,Instance{path,program.revision,std::move(env),definition,self,overrides,false,e});Call(it->second,"on_start");
                 rejected.erase(e);
             }catch(const std::exception& error){rejected[e]=fingerprint;Fail(path,"instance",error.what());}
         }
@@ -183,9 +251,17 @@ struct LuaRuntime::Impl {
 };
 LuaRuntime::LuaRuntime():impl(std::make_unique<Impl>()){}
 LuaRuntime::~LuaRuntime(){Stop();}
-void LuaRuntime::Start(ecs::World& world,std::function<bool(const std::string&)> input){Stop();impl->Check();world.AssertOwnerThread();impl->world=&world;impl->input=std::move(input);}
+void LuaRuntime::Start(ecs::World& world,std::function<bool(const std::string&)> input,GameplayServices services){Stop();impl->Check();world.AssertOwnerThread();impl->programs.clear();impl->errors.clear();impl->world=&world;impl->input=std::move(input);impl->services=std::move(services);}
 void LuaRuntime::Stop(){
-    impl->Check();impl->stopping=true;for(auto& [e,i]:impl->instances)impl->Call(i,"on_destroy");impl->instances.clear();impl->rejected.clear();impl->events.clear();impl->mutations.Clear();impl->destroying.clear();impl->world=nullptr;impl->input={};impl->held.clear();impl->pressed.clear();impl->released.clear();impl->stopping=false;lua_gc(impl->lua.lua_state(),LUA_GCCOLLECT,0);
+    impl->Check();impl->stopping=true;
+    for(auto& [e,i]:impl->instances)impl->Retire(e,i);
+    impl->instances.clear();impl->rejected.clear();impl->events.clear();
+    impl->mutations.Clear();impl->destroying.clear();impl->world=nullptr;
+    impl->input={};impl->services={};impl->cameraOwner={};impl->cursorOwner={};
+    impl->held.clear();impl->pressed.clear();impl->released.clear();
+    impl->fixedPressed.clear();impl->fixedReleased.clear();impl->boundKeys.clear();
+    impl->fixedPhase=false;impl->stopping=false;
+    lua_gc(impl->lua.lua_state(),LUA_GCCOLLECT,0);
 }
 void LuaRuntime::Update(float dt){
 #if defined(TRACY_ENABLE)
@@ -193,13 +269,33 @@ void LuaRuntime::Update(float dt){
 #endif
     impl->Check();if(!impl->world||!std::isfinite(dt)||dt<0)return;
     impl->world->AssertOwnerThread();if(impl->world->IsIterating())throw std::logic_error("Lua Update during ECS iteration");
-    for(auto& [action,previous]:impl->held){bool now=impl->input&&impl->input(action);impl->pressed[action]=now&&!previous;impl->released[action]=!now&&previous;previous=now;}
+    if(impl->services.actions)for(const auto& action:impl->services.actions())if(!action.empty()&&action.size()<=128&&(impl->held.size()<128||impl->held.contains(action)))impl->DiscoverInput(action);
+    for(auto& [action,previous]:impl->held){bool now=impl->input&&impl->input(action);impl->pressed[action]=impl->services.pressed?impl->services.pressed(action):now&&!previous;impl->released[action]=impl->services.released?impl->services.released(action):!now&&previous;impl->fixedPressed[action]|=impl->pressed[action];impl->fixedReleased[action]|=impl->released[action];previous=now;}
+    if(impl->services.inputAllowed&&!impl->services.inputAllowed()){impl->fixedPressed.clear();impl->fixedReleased.clear();}
     impl->Sync();auto events=std::move(impl->events);impl->events.clear();
+    for(auto& [e,i]:impl->instances)if(auto* m=impl->world->GetComponent<ecs::CharacterMovementComponent>(e)){m->desiredDirection={};if(!impl->MotionAllowed(e)||i.failed){m->jumpRequested=false;if(!impl->MotionAllowed(e)){impl->fixedPressed.clear();impl->fixedReleased.clear();}}}
     for(const auto& event:events)if(impl->Alive(event.target)){auto i=impl->instances.find(event.target);if(i!=impl->instances.end()){auto data=impl->lua.create_table();data["type"]=event.type;data["amount"]=event.amount;data["other"]=event.other;impl->Call(i->second,"on_event",data);}}
     for(auto& [e,i]:impl->instances)if(impl->Alive(e))impl->Call(i,"on_update",std::min(dt,.1f));
     // Destruction callback while components still exist; apply once, after all calls.
-    for(auto e:impl->destroying){auto i=impl->instances.find(e);if(i!=impl->instances.end()){impl->Call(i->second,"on_destroy");impl->instances.erase(i);}}
+    for(auto e:impl->destroying){auto i=impl->instances.find(e);if(i!=impl->instances.end()){impl->Retire(e,i->second);impl->instances.erase(i);}}
     impl->mutations.Apply(*impl->world);impl->destroying.clear();
+}
+void LuaRuntime::FixedUpdate(float dt){
+    impl->Check();if(!impl->world||!std::isfinite(dt)||dt<=0)return;
+    impl->world->AssertOwnerThread();if(impl->world->IsIterating())throw std::logic_error("Lua FixedUpdate during ECS iteration");
+    impl->Sync();impl->fixedPhase=true;
+    for(auto& [e,i]:impl->instances)if(impl->Alive(e)){
+        if(!impl->MotionAllowed(e))if(auto* m=impl->world->GetComponent<ecs::CharacterMovementComponent>(e)){m->desiredDirection={};m->jumpRequested=false;}
+        impl->Call(i,"on_fixed_update",dt);
+    }
+    impl->fixedPhase=false;impl->fixedPressed.clear();impl->fixedReleased.clear();
+    for(auto e:impl->destroying){auto i=impl->instances.find(e);if(i!=impl->instances.end()){impl->Retire(e,i->second);impl->instances.erase(i);}}
+    impl->mutations.Apply(*impl->world);impl->destroying.clear();
+}
+void LuaRuntime::SuspendInput(){
+    impl->Check();impl->held.clear();impl->pressed.clear();impl->released.clear();impl->fixedPressed.clear();impl->fixedReleased.clear();
+    if(impl->world)for(const auto& [e,i]:impl->instances)if(auto* m=impl->world->GetComponent<ecs::CharacterMovementComponent>(e)){m->desiredDirection={};m->jumpRequested=false;if(auto* b=impl->world->GetComponent<ecs::RigidbodyComponent>(e)){b->velocity.x=0;b->velocity.z=0;}}
+    if(impl->services.captureCursor)impl->services.captureCursor(false);impl->cursorOwner={};
 }
 void LuaRuntime::QueueCollision(const ecs::CollisionEvent& e){impl->Check();if(impl->world&&impl->events.size()<1022){impl->events.push_back({e.a,e.b,"collision"});impl->events.push_back({e.b,e.a,"collision"});}}
 bool LuaRuntime::ReloadScript(const std::string& path){return impl->Load(path);}

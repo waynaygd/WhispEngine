@@ -1,6 +1,7 @@
 #pragma once
 #include "../ecs/World.h"
 #include "../ecs/events/EventBus.h"
+#include "GameplayServices.h"
 #include <nlohmann/json.hpp>
 #include <functional>
 #include <memory>
@@ -14,9 +15,11 @@ public:
     ~LuaRuntime();
     LuaRuntime(const LuaRuntime&)=delete;
     LuaRuntime& operator=(const LuaRuntime&)=delete;
-    void Start(ecs::World&,std::function<bool(const std::string&)> input={});
+    void Start(ecs::World&,std::function<bool(const std::string&)> input={},GameplayServices services={});
     void Stop();
     void Update(float dt);
+    void FixedUpdate(float dt);
+    void SuspendInput();
     void QueueCollision(const ecs::CollisionEvent&);
     bool ReloadScript(const std::string&);
     nlohmann::json Fields(const std::string&);

@@ -16,7 +16,7 @@ namespace {
 int checks=0;
 void Check(bool condition,const char* message){if(!condition)throw std::runtime_error(message);++checks;}
 void Write(const std::string& key,const std::string& contents){auto path=scripting::SafeAsset(key,key.ends_with(".lua")?".lua":".prefab.json");std::filesystem::create_directories(path.parent_path());std::ofstream file(path,std::ios::binary);file<<contents;if(!file)throw std::runtime_error("Fixture write failed");}
-ecs::Entity Actor(ecs::World& world,const std::string& key){auto e=world.CreateEntity();world.AddComponent<ecs::TransformComponent>(e);world.AddComponent<ecs::LuaScriptComponent>(e).scriptPath=key;return e;}
+ecs::Entity Actor(ecs::World& world,const std::string& key){auto e=world.CreateEntity();world.AddComponent<ecs::TransformComponent>(e);auto& script=world.AddComponent<ecs::LuaScriptComponent>(e);script.scriptPath=key;script.inputEnabled=true;return e;}
 float X(ecs::World& w,ecs::Entity e){return w.GetComponent<ecs::TransformComponent>(e)->position.x;}
 const char* counter=R"(return {
  fields={ speed={type="number",default=1,min=0,max=10} },

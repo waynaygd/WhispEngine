@@ -7,6 +7,7 @@
 #include "components/RigidbodyComponent.h"
 #include "components/ColliderComponent.h"
 #include "components/TagComponent.h"
+#include "components/LuaScriptComponent.h"
 #include "events/EventBus.h"
 #include <cmath>
 #include <algorithm>
@@ -27,11 +28,11 @@ inline Vec3 PlayerBoxPoint(const TransformComponent& start,Vec3 local){
  return {center.x+c*local.x+s*local.z,center.y+local.y,center.z-s*local.x+c*local.z};
 }
 inline Entity SpawnPlayer(World& world,TransformComponent* spawnPoint=nullptr){
- Entity chosen;TransformComponent spawn;
+ Entity chosen;TransformComponent spawn;std::string controllerScript;
  // Collect handles before adding/removing entities.
  auto markers=world.Entities();
  for(auto e:markers){auto* s=world.GetComponent<PlayerStartComponent>(e);auto* t=world.GetComponent<TransformComponent>(e);
-  if(!chosen.IsValid()&&s&&s->enabled&&t){chosen=e;spawn=*t;}}
+  if(!chosen.IsValid()&&s&&s->enabled&&t){chosen=e;spawn=*t;controllerScript=s->controllerScript;}}
  Entity player;
  if(chosen.IsValid()){
   if(spawnPoint)*spawnPoint=spawn;
@@ -41,6 +42,7 @@ inline Entity SpawnPlayer(World& world,TransformComponent* spawnPoint=nullptr){
   auto& b=world.AddComponent<RigidbodyComponent>(player);b.mass=70;b.lockRotation=true;
   auto& c=world.AddComponent<ColliderComponent>(player);c.halfExtents=PlayerHalfExtents;c.autoFitFromMesh=false;c.restitution=0;c.friction=.8f;
   world.AddComponent<TagComponent>(player).name="Player";
+  if(!controllerScript.empty()){auto& script=world.AddComponent<LuaScriptComponent>(player);script.scriptPath=controllerScript;script.inputEnabled=true;script.cameraEnabled=true;}
  }
  // All runtime markers are editor-only, including disabled/legacy physical ones.
  for(auto e:markers)if(world.HasComponent<PlayerStartComponent>(e))world.DestroyEntity(e);

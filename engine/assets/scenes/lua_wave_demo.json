@@ -3,7 +3,7 @@
   "entities": [
     {"id":"lua-wave-controller", "components": {
       "Tag":{"name":"WaveController"}, "Transform":{},
-      "LuaScript":{"scriptPath":"scripts/wave_controller.lua","enabled":true,"properties":{}}
+      "LuaScript":{"scriptPath":"scripts/wave_controller.lua","enabled":true,"inputEnabled":true,"properties":{}}
     }},
     {"id":"lua-core", "components": {
       "Tag":{"name":"Core"},
