@@ -323,6 +323,17 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     if(m_LightPointerCaptured&&!ImGui::IsMouseDown(0)){FinishTransaction(app);m_LightPointerCaptured=false;}
     m_EscapeConsumed=false;
     if((ImGui::GetIO().AppFocusLost||ImGui::IsKeyPressed(ImGuiKey_Escape,false))&&m_Transaction){CancelTransaction(app);m_PropertyDrafts.clear();m_CancelGizmoUntilRelease=true;m_LightPointerCaptured=false;m_EscapeConsumed=true;}
+    // F11 changes only transient presentation. Keep the authored dock tree alive.
+    if(!ImGui::GetIO().WantTextInput&&!m_ModalActive&&!ImGui::GetIO().AppFocusLost&&ImGui::IsKeyPressed(ImGuiKey_F11,false)){
+        if(HasPendingTransaction())CancelTransaction(app);
+        m_LightPointerCaptured=m_PlaneScaleCaptured=m_ToolActive=false;m_CancelGizmoUntilRelease=true;
+        ImGuizmo::Enable(false);ImGuizmo::Enable(true);ImGui::ClearActiveID();
+        m_ViewportMaximized=!m_ViewportMaximized;m_FocusViewportWindow=true;
+    }
+    if(m_ViewportMaximized){
+        ImGui::DockSpace(ImHashStr("WhispEngine.Editor.Dockspace"),ImVec2(0,0),ImGuiDockNodeFlags_KeepAliveOnly);
+        DrawViewport(app,renderer);HandleEditorShortcuts(app);return;
+    }
     ConfigureDocking();DrawToolbar(app);
 
 
@@ -452,7 +463,7 @@ bool EditorLayer::BlocksGameplayInput()const{
     if(!g.ActiveId)return false;
     // Clicking an Image activates the window's background MoveId. It is the
     // viewport requesting gameplay focus, not an Inspector/text widget.
-    auto* viewport=ImGui::FindWindowByName("Viewport");
+    auto* viewport=ImGui::FindWindowByName(ViewportWindowName());
     return !viewport||g.ActiveIdWindow!=viewport||
         (g.ActiveId!=viewport->MoveId&&g.ActiveId!=viewport->GetID("ViewportCanvas"));
 }
@@ -473,11 +484,11 @@ void EditorLayer::HandleEditorShortcuts(Application& app){
         if(ImGui::IsKeyPressed(ImGuiKey_S,false)){if(io.KeyShift){m_SceneDialogAction=3;m_SceneDialogRequested=true;}else{std::string error;if(!app.SaveCurrentScene(&error)){m_EditorError=error;Logger::Get().Error(error);}}}
         if(ImGui::IsKeyPressed(ImGuiKey_D,false))DuplicateEntity(app,m_SelectedEntity);
     }
-    if(!EditorHotkeysAllowed(app.IsEditorPlayMode(),OwnsViewportKeyboard(),io.WantCaptureKeyboard,app.IsCameraControlActive()))return;
-    if(io.KeyAlt&&!io.KeyCtrl&&!io.KeyShift&&!m_InputTextActive&&!m_ToolActive&&!ImGuizmo::IsOver()&&!ImGuizmo::IsUsing()&&!ImGui::IsMouseDown(0)&&!ImGui::IsMouseDown(1)&&!ImGui::IsPopupOpen("",ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel)){
-        if(ImGui::IsKeyPressed(ImGuiKey_3,false))app.SetViewportUnlit(true);
-        if(ImGui::IsKeyPressed(ImGuiKey_4,false))app.SetViewportUnlit(false);
+    if(io.KeyAlt&&!io.KeyCtrl&&!io.KeyShift&&(m_ViewportFocused||app.IsViewportMouseCaptured())&&!BlocksGameplayInput()&&!ImGuizmo::IsUsing()&&!ImGui::IsMouseDown(0)&&!ImGui::IsMouseDown(1)){
+        if(ImGui::IsKeyPressed(ImGuiKey_3,false))app.SetViewportUnlit(false);
+        if(ImGui::IsKeyPressed(ImGuiKey_4,false))app.SetViewportUnlit(true);
     }
+    if(!EditorHotkeysAllowed(app.IsEditorPlayMode(),OwnsViewportKeyboard(),io.WantCaptureKeyboard,app.IsCameraControlActive()))return;
     if(!io.KeyCtrl&&!io.KeyAlt&&!m_InputTextActive&&ImGui::IsKeyPressed(ImGuiKey_G,false))m_GameView=!m_GameView;
     if(ImGui::IsKeyPressed(ImGuiKey_F,false))app.FocusEntity(m_SelectedEntity);
     if(ImGui::IsKeyPressed(ImGuiKey_W,false))m_GizmoOperation=0;
@@ -555,11 +566,19 @@ void EditorLayer::DrawStatistics(Application& app, float dt)
 
 void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
 {
-    ImGui::SetNextWindowSize(ImVec2(760.0f, 520.0f), ImGuiCond_Appearing);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(420.0f, 280.0f), ImVec2(FLT_MAX, FLT_MAX));
-    ImGui::Begin("Viewport", &m_ShowViewport,ImGuiWindowFlags_NoNavInputs);
+    const bool maximized=m_ViewportMaximized;
+    if(maximized){
+        auto* viewport=ImGui::GetMainViewport();ImGui::SetNextWindowPos(viewport->Pos);ImGui::SetNextWindowSize(viewport->Size);
+        ImGui::SetNextWindowViewport(viewport->ID);ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(0,0));ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize,0.f);
+    }else{
+        ImGui::SetNextWindowSize(ImVec2(760.0f, 520.0f), ImGuiCond_Appearing);
+        ImGui::SetNextWindowSizeConstraints(ImVec2(420.0f, 280.0f), ImVec2(FLT_MAX, FLT_MAX));
+    }
+    if(m_FocusViewportWindow){ImGui::SetNextWindowFocus();m_FocusViewportWindow=false;}
+    ImGui::Begin(ViewportWindowName(),maximized?nullptr:&m_ShowViewport,ImGuiWindowFlags_NoNavInputs|(maximized?(ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoBringToFrontOnFocus):0));
 
     const bool playMode = app.IsEditorPlayMode();
+    if(!maximized){
     ImGui::BeginDisabled(playMode);if(ImGui::Button("Create"))ImGui::OpenPopup("CreateEntity");ImGui::EndDisabled();
     if(playMode&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Stop Play before creating editor entities.");
     if(ImGui::BeginPopup("CreateEntity")){if(ImGui::BeginMenu("3D Object")){for(const char* type:{"cube","sphere","cylinder","cone","plane"}){std::string label=type;label[0]=char(std::toupper(label[0]));if(ImGui::MenuItem(label.c_str()))CreatePrimitive(app,type);}ImGui::EndMenu();}if(ImGui::MenuItem("Empty Entity"))CreateEntity(app);if(ImGui::BeginMenu("Player")){if(ImGui::MenuItem("Player Start"))CreatePlayerStart(app);ImGui::EndMenu();}if(ImGui::BeginMenu("Light")){if(ImGui::MenuItem("Directional"))CreateLight(app,LightType::Directional);if(ImGui::MenuItem("Point"))CreateLight(app,LightType::Point);if(ImGui::MenuItem("Spot"))CreateLight(app,LightType::Spot);ImGui::EndMenu();}ImGui::EndPopup();}
@@ -577,8 +596,9 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     }
 
     ImGui::Separator();
+    }
 
-    if(m_FixedDiagnosticLayout)ImGui::Dummy(ImVec2(1,ImGui::GetFrameHeightWithSpacing()*2-ImGui::GetStyle().ItemSpacing.y));
+    if(m_FixedDiagnosticLayout&&!maximized)ImGui::Dummy(ImVec2(1,ImGui::GetFrameHeightWithSpacing()*2-ImGui::GetStyle().ItemSpacing.y));
     const ImVec2 contentMin = ImGui::GetCursorScreenPos();
     const ImVec2 available = ImGui::GetContentRegionAvail();
     const ImVec2 viewportSize(std::max(available.x, 1.0f), std::max(available.y, 1.0f));
@@ -638,6 +658,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     DrawViewportOverlays(app,contentMin,viewportSize);
     m_ToolActive=ImGuizmo::IsUsing()||(m_Transaction&&!m_Transaction->before.settings);
     ImGui::End();
+    if(maximized)ImGui::PopStyleVar(2);
 }
 
 void EditorLayer::DrawMaterialEditor(Application& app)

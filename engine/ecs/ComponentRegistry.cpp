@@ -161,6 +161,12 @@ ComponentRegistry Build(){
     );
 
     Field<PlayerStartComponent>(playerStart,"controllerScript","Controller script",&PlayerStartComponent::controllerScript,PropertyKind::Asset,0,0,AssetKind::LuaScript);
+    Field<PlayerStartComponent>(playerStart,"characterHeight","Character Height",&PlayerStartComponent::characterHeight,PropertyKind::Number,.2f,10.f).set=[](World& w,Entity e,const PropertyValue& v){
+        auto& c=*w.GetComponent<PlayerStartComponent>(e);c.characterHeight=std::get<float>(v);c.eyeHeight=std::min(c.eyeHeight,c.characterHeight);
+    };
+    Field<PlayerStartComponent>(playerStart,"eyeHeight","Eye Height",&PlayerStartComponent::eyeHeight,PropertyKind::Number,0.f,10.f).set=[](World& w,Entity e,const PropertyValue& v){
+        auto& c=*w.GetComponent<PlayerStartComponent>(e);const auto height=std::get<float>(v);if(height>c.characterHeight)Fail("Eye Height must not exceed Character Height");c.eyeHeight=height;
+    };
     Complete(playerStart);
     r.Register(playerStart);
 
@@ -175,7 +181,7 @@ ComponentRegistry Build(){
         &PlayerComponent::eyeHeight,
         PropertyKind::Number,
         0.0f,
-        3.0f
+        10.0f
     );
 
     Complete(player);

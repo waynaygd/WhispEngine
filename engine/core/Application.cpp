@@ -1113,7 +1113,7 @@ void Application::SetEditorPlayMode(bool enabled)
         if(m_RuntimeWorld->IsAlive(m_PlayerEntity)){
             const auto& t=*m_RuntimeWorld->GetComponent<ecs::TransformComponent>(m_PlayerEntity);
             const auto& player=*m_RuntimeWorld->GetComponent<ecs::PlayerComponent>(m_PlayerEntity);
-            m_Camera.position=ecs::PlayerEyePosition(t.position,player.eyeHeight);
+            m_Camera.position=ecs::PlayerEyePosition(t.position,player.eyeHeight,m_RuntimeWorld->GetComponent<ecs::ColliderComponent>(m_PlayerEntity)->halfExtents.y);
             m_Camera.yaw=t.rotation.y;m_Camera.pitch=std::clamp(spawnPoint.rotation.x,-kMaxCameraPitch,kMaxCameraPitch);
         }
         m_GameplayCamera={};m_GameplayCamera.position=m_Camera.position;m_GameplayCamera.yaw=m_Camera.yaw;m_GameplayCamera.pitch=m_Camera.pitch;
@@ -1575,7 +1575,7 @@ int Application::Run()
                     auto* native=glfwWindow->GetGlfwHandle();glfwGetCursorPos(native,&mouseX,&mouseY);
                     for(int b=0;b<=GLFW_MOUSE_BUTTON_LAST;++b)mouseButtonsDown|=glfwGetMouseButton(native,b)==GLFW_PRESS;
                 }
-                auto cameraMouseFrame=m_EditorLayer.RouteCameraMouse(m_Camera.controlsActive,mouseButtonsDown,ImVec2(float(mouseX),float(mouseY)));
+                auto cameraMouseFrame=m_EditorLayer.RouteCameraMouse(IsViewportMouseCaptured(),mouseButtonsDown,ImVec2(float(mouseX),float(mouseY)));
                 if (wc.editorUiAvailable)
                 {
                     wc.renderer->BeginEditorUiFrame();

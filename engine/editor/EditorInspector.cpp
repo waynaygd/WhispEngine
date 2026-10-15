@@ -146,7 +146,7 @@ void EditorLayer::DrawInspector(Application& app){
             ImGui::TextDisabled("Rz*Ry*Rx; Local: R*Q, World: Q*R. Euler gimbal lock remains.");
         }
         if(d.key=="PlayerStart"){
-            auto half=ecs::PlayerHalfExtents;
+            auto half=ecs::PlayerBodyHalfExtents(*world.GetComponent<ecs::PlayerStartComponent>(e));
             ImGui::TextWrapped("Position marks the feet. Player size: %.2f x %.2f x %.2f. Scale is ignored. Y rotation sets facing; X sets camera pitch. The body stays upright.",half.x*2,half.y*2,half.z*2);
         }
         if(d.key=="PointLight"||d.key=="SpotLight")ImGui::TextWrapped("Point/Spot shadows are a reserved flag. Range is in world units; Transform scale is ignored.");

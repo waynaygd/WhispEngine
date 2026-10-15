@@ -12,6 +12,7 @@
 #include <set>
 #include <iostream>
 #include <imgui_internal.h>
+#include <ImGuizmo.h>
 #if defined(ENABLE_DX12)
 #include "platform/GlfwWindow.h"
 #include "render/backends/dx12/Dx12RenderAdapter.h"
@@ -124,6 +125,37 @@ static void NativeEditorMouseInput(){
  button(1,false);SetActiveWindow(hwnd);SetFocus(hwnd);frame();
  Check(!(ImGui::GetIO().ConfigFlags&ImGuiConfigFlags_NoMouse),"focus recovery restores ImGui mouse configuration");
 }
+static void NativeViewportDisplay(){
+ Application app;Check(app.Initialize(),"display initialization");SyntheticEditorInput input;
+ auto* window=dynamic_cast<GlfwWindow*>(app.GetWindow())->GetGlfwHandle();int originalWidth,originalHeight;glfwGetWindowSize(window,&originalWidth,&originalHeight);glfwHideWindow(window);
+ SyntheticEditorInput::Queue([](ImGuiIO& io){io.AddFocusEvent(true);});
+ app.NewScene();auto& ui=app.GetEditorLayer();auto cube=ui.CreatePrimitive(app,"cube");app.GetWorld().GetComponent<TransformComponent>(cube)->position={0,0,4};app.SetEditorCameraPose({0,0,-6},0,0);ui.SetGameView(false);
+ auto frame=[&](unsigned n=3){app.SetFrameLimit(n);Check(app.Run()==0,"display frames");};frame(20);
+ ImGui::FocusWindow(ImGui::FindWindowByName("Viewport"));frame();
+ auto press=[&](ImGuiKey key){SyntheticEditorInput::Key(key,true);frame();SyntheticEditorInput::Key(key,false);frame();};
+ auto shade=[&](ImGuiKey key){SyntheticEditorInput::Key(ImGuiMod_Alt,true);frame();press(key);SyntheticEditorInput::Key(ImGuiMod_Alt,false);frame();};
+ auto* normal=ImGui::FindWindowByName("Viewport");const auto dock=normal->DockId;const auto pos=normal->Pos,size=normal->Size;
+ app.SetViewportUnlit(true);shade(ImGuiKey_3);Check(!app.IsViewportUnlit(),"Edit Alt+3 Lit");shade(ImGuiKey_4);Check(app.IsViewportUnlit(),"Edit Alt+4 Unlit");
+ press(ImGuiKey_F11);Check(ui.IsViewportMaximized(),"F11 maximizes in Edit");
+ auto checkBounds=[&]{auto b=ui.GetViewportBounds();auto* main=ImGui::GetMainViewport();Near(b[0],main->Pos.x,1,"maximized left bound");Near(b[1],main->Pos.y,1,"maximized top bound");Near(b[2],main->Pos.x+main->Size.x,1,"maximized right bound");Near(b[3],main->Pos.y+main->Size.y,1,"maximized bottom bound");Check(ui.GetViewportPixelWidth()==int(std::lround(main->Size.x*ImGui::GetIO().DisplayFramebufferScale.x))&&ui.GetViewportPixelHeight()==int(std::lround(main->Size.y*ImGui::GetIO().DisplayFramebufferScale.y)),"fullscreen target and aspect match window");};checkBounds();
+ Check(!ImGui::FindWindowByName("Inspector")->Active&&!ImGui::FindWindowByName("Main Toolbar")->Active,"fullscreen hides panels without changing preferences");
+ Check(dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter())->ReadBackViewportPixels().size()==std::size_t(ui.GetViewportPixelWidth())*ui.GetViewportPixelHeight()*4,"fullscreen GPU target matches bounds");
+ ui.ClearSelection();frame();auto full=ui.GetViewportBounds();const float cx=(full[0]+full[2])*.5f,cy=(full[1]+full[3])*.5f;
+ SyntheticEditorInput::Position(cx,cy);frame();SyntheticEditorInput::Button(0,true);frame(1);SyntheticEditorInput::Button(0,false);frame();Check(ui.GetSelectedEntity()==cube,"fullscreen mouse picking selects Entity");
+ bool gizmo=false;for(float dx:{15.f,20.f,25.f,30.f,35.f,45.f}){SyntheticEditorInput::Position(cx+dx,cy);frame(1);if(ImGuizmo::IsOver(ImGuizmo::TRANSLATE_X)){gizmo=true;break;}}Check(gizmo,"fullscreen transform gizmo uses current viewport bounds");
+ ui.RecordEdit(app,"F11 transaction fixture");app.GetWorld().GetComponent<TransformComponent>(cube)->position.x=1;
+ press(ImGuiKey_F11);Check(!ui.IsViewportMaximized()&&!ui.HasPendingTransaction()&&app.GetWorld().GetComponent<TransformComponent>(cube)->position.x==0,"F11 cancels pending transform edit safely");press(ImGuiKey_F11);Check(ui.IsViewportMaximized(),"fullscreen reentry after cancelled edit");
+ std::size_t iniBytes=0;std::string ini=ImGui::SaveIniSettingsToMemory(&iniBytes);Check(ini.find("[Window][Viewport##Maximized]")==std::string::npos,"fullscreen window does not persist layout");
+ glfwSetWindowSize(window,980,660);frame(5);checkBounds();press(ImGuiKey_F11);Check(!ui.IsViewportMaximized()&&normal->DockId==dock,"F11 restores previous dock assignment");
+ // Restore the original outer size before comparing authored panel sizes.
+ glfwSetWindowSize(window,originalWidth,originalHeight);frame(5);Check(ImGui::FindWindowByName("Inspector")->Active,"Inspector restored after fullscreen");Near(normal->Pos.x,pos.x,1,"normal viewport X restored");Near(normal->Pos.y,pos.y,1,"normal viewport Y restored");Near(normal->Size.x,size.x,1,"normal viewport width restored");Near(normal->Size.y,size.y,1,"normal viewport height restored");
+ app.SetEditorPlayMode(true);frame();ImGui::FocusWindow(normal);frame();shade(ImGuiKey_3);Check(!app.IsViewportUnlit(),"Play Alt+3 Lit");shade(ImGuiKey_4);Check(app.IsViewportUnlit(),"Play Alt+4 Unlit");
+ press(ImGuiKey_F11);Check(ui.IsViewportMaximized(),"Play F11 works without PlayerStart");app.SetEditorPaused(true);press(ImGuiKey_F11);Check(!ui.IsViewportMaximized(),"Pause F11 returns layout");press(ImGuiKey_F11);
+ app.SetEditorPlayMode(false);frame();Check(ui.IsViewportMaximized(),"Stop retains fullscreen presentation");
+ app.SetViewportUnlit(false);SyntheticEditorInput::Key(ImGuiMod_Alt,true);frame(1);ImGui::GetCurrentContext()->WantTextInputNextFrame=1;SyntheticEditorInput::Key(ImGuiKey_4,true);frame(1);Check(!app.IsViewportUnlit(),"text editing blocks display hotkeys");SyntheticEditorInput::Key(ImGuiKey_4,false);SyntheticEditorInput::Key(ImGuiMod_Alt,false);frame();
+ ImGui::GetCurrentContext()->WantTextInputNextFrame=1;SyntheticEditorInput::Key(ImGuiKey_F11,true);frame(1);Check(ui.IsViewportMaximized(),"text editing blocks F11");SyntheticEditorInput::Key(ImGuiKey_F11,false);frame();press(ImGuiKey_F11);Check(!ui.IsViewportMaximized(),"final normal layout restored");
+ Check(dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter())->GetValidationErrorCount()==0,"display DX12 validation clean");
+}
 static void NativePlayerInput(){
  Application app;Check(app.Initialize(),"input native initialization");SyntheticEditorInput input;
  auto* window=dynamic_cast<GlfwWindow*>(app.GetWindow())->GetGlfwHandle();auto hwnd=glfwGetWin32Window(window);
@@ -132,7 +164,7 @@ static void NativePlayerInput(){
  app.NewScene();auto& ui=app.GetEditorLayer();ui.SetFixedDiagnosticLayout(true);
  auto frame=[&](unsigned n=4){app.SetFrameLimit(n);Check(app.Run()==0,"input native frames");};
  frame();auto bounds=ui.GetViewportBounds();float x=(bounds[0]+bounds[2])*.5f,y=(bounds[1]+bounds[3])*.5f;
- auto point=[&]{glfwSetCursorPos(window,x,y);SyntheticEditorInput::Position(x,y);ImGui::FocusWindow(ImGui::FindWindowByName("Viewport"));};
+ auto point=[&]{auto b=ui.GetViewportBounds();x=(b[0]+b[2])*.5f;y=(b[1]+b[3])*.5f;glfwSetCursorPos(window,x,y);SyntheticEditorInput::Position(x,y);ImGui::FocusWindow(ImGui::FindWindowByName(ui.IsViewportMaximized()?"Viewport##Maximized":"Viewport"));};
  auto key=[&](int k,bool down){SendMessageW(hwnd,down?WM_KEYDOWN:WM_KEYUP,k,(LPARAM(MapVirtualKeyW(k,MAPVK_VK_TO_VSC))<<16)|(down?0:LPARAM(0xc0000000)));};
  auto mouse=[&](bool down){SendMessageW(hwnd,down?WM_LBUTTONDOWN:WM_LBUTTONUP,down?MK_LBUTTON:0,MAKELPARAM(int(x),int(y)));SyntheticEditorInput::Button(0,down);};
  point();frame();auto editorPose=app.GetCameraPosition();auto editorYaw=app.GetCameraYaw();
@@ -146,7 +178,8 @@ static void NativePlayerInput(){
  Check(!app.IsCameraControlActive()&&glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_NORMAL,"Stop releases free-fly even while RMB held");frame();Near(app.GetCameraPosition().z,editorPose.z,0,"held RMB cannot move restored Stop pose");
  key('W',false);SendMessageW(hwnd,WM_RBUTTONUP,0,MAKELPARAM(int(x),int(y)));SyntheticEditorInput::Button(1,false);frame();
  auto start=ui.CreatePlayerStart(app);app.GetWorld().GetComponent<TransformComponent>(start)->position={0,2,0};
- app.SetEditorPlayMode(true);frame();Entity player;for(auto e:app.GetWorld().Entities())if(app.GetWorld().HasComponent<PlayerComponent>(e))player=e;
+ app.GetWorld().GetComponent<PlayerStartComponent>(start)->characterHeight=2;app.GetWorld().GetComponent<PlayerStartComponent>(start)->eyeHeight=1.8f;
+ app.SetEditorPlayMode(true);Near(app.GetCameraPosition().y,3.8f,.0001f,"initial camera uses configured body and eye height");frame();Entity player;for(auto e:app.GetWorld().Entities())if(app.GetWorld().HasComponent<PlayerComponent>(e))player=e;
  auto* script=app.GetWorld().GetComponent<LuaScriptComponent>(player);Check(script&&script->inputEnabled&&script->cameraEnabled,"spawn assigns Lua permissions");
  Check(script->scriptPath=="scripts/FirstPersonController.lua"&&app.GetLuaRuntime().Error(script->scriptPath).empty()&&app.GetLuaRuntime().InstanceCount()==1&&app.GetLuaRuntime().HasCameraOwner(),"active asset loads, starts and acquires camera");
  point();frame();mouse(true);auto* viewport=ImGui::FindWindowByName("Viewport");ImGui::SetActiveID(viewport->MoveId,viewport);
@@ -158,20 +191,30 @@ static void NativePlayerInput(){
  auto* movement=app.GetWorld().GetComponent<CharacterMovementComponent>(player);auto* body=app.GetWorld().GetComponent<RigidbodyComponent>(player);
  Check(std::hypot(movement->desiredDirection.x,movement->desiredDirection.z)>.9f&&std::hypot(body->velocity.x,body->velocity.z)>3.9f,"GLFW input reaches Lua then fixed CharacterMovement");
  Check(!app.IsCameraControlActive(),"Lua camera excludes editor free-fly");
+ auto interpolated=app.GetRenderInterpolation().Resolve(player,*app.GetWorld().GetComponent<TransformComponent>(player));Near(app.GetCameraPosition().y-interpolated.position.y,.8f,.0001f,"Lua eye_offset follows configured height through interpolation");
+ SyntheticEditorInput::Position(inspector->WorkRect.Min.x+10,inspector->WorkRect.Min.y+25);mouse(true);SendMessageW(hwnd,WM_RBUTTONDOWN,MK_RBUTTON,0);SyntheticEditorInput::Button(1,true);frame();
+ Check(glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_DISABLED&&ImGui::GetCurrentContext()->HoveredWindow==nullptr&&!ImGui::IsAnyItemActive()&&!ImGui::GetIO().MouseDown[0]&&!ImGui::GetIO().MouseDown[1],"Play capture filters virtual hover and both buttons from UI");mouse(false);SendMessageW(hwnd,WM_RBUTTONUP,0,0);SyntheticEditorInput::Button(1,false);frame();
+ auto displayKey=[&](ImGuiKey key){SyntheticEditorInput::Key(key,true);frame();SyntheticEditorInput::Key(key,false);frame();};
+ displayKey(ImGuiKey_F11);Check(ui.IsViewportMaximized()&&glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_DISABLED,"F11 retains captured Lua cursor");
+ SyntheticEditorInput::Key(ImGuiMod_Alt,true);frame();displayKey(ImGuiKey_4);Check(app.IsViewportUnlit(),"captured fullscreen Play Alt+4 Unlit");displayKey(ImGuiKey_3);Check(!app.IsViewportUnlit(),"captured fullscreen Play Alt+3 Lit");SyntheticEditorInput::Key(ImGuiMod_Alt,false);frame();
  auto yaw=app.GetCameraYaw();double mx,my;glfwGetCursorPos(window,&mx,&my);glfwSetCursorPos(window,bounds[2]+200,my-8);frame();
  Check(app.GetCameraYaw()>yaw+.01f,"disabled-cursor relative mouse reaches Lua camera");
  key('W',false);key(VK_TAB,true);frame();Check(glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_NORMAL,"Tab releases gameplay cursor");key(VK_TAB,false);frame();
  point();frame();mouse(true);frame();mouse(false);frame();Check(glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_DISABLED,"second viewport click recaptures");
+ displayKey(ImGuiKey_F11);Check(!ui.IsViewportMaximized()&&glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_DISABLED,"F11 restores layout without releasing Lua capture");
+ auto sink=CreateWindowExW(WS_EX_TOOLWINDOW,L"STATIC",L"QoL test focus",WS_POPUP,0,0,1,1,hwnd,nullptr,GetModuleHandleW(nullptr),nullptr);Check(sink!=nullptr,"owned focus sink");
+ ShowWindow(sink,SW_SHOWNOACTIVATE);SetActiveWindow(sink);SetFocus(sink);Check(!glfwGetWindowAttrib(window,GLFW_FOCUSED),"native test window loses focus");frame(1);Check(glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_NORMAL,"Play focus loss releases cursor");DestroyWindow(sink);SetActiveWindow(hwnd);SetFocus(hwnd);point();frame();mouse(true);frame();mouse(false);frame();Check(glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_DISABLED,"Play recapture after focus recovery");
  ImGui::GetIO().WantTextInput=true;frame(1);Check(glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_NORMAL,"text editing releases gameplay capture");ImGui::GetIO().WantTextInput=false;
  script->scriptPath="scripts/KeyboardTurnController.lua";point();frame();yaw=app.GetCameraYaw();key('E',true);key('W',true);frame(20);
  Check(app.GetCameraYaw()>yaw&&std::hypot(movement->desiredDirection.x,movement->desiredDirection.z)>.9f&&glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_NORMAL,"keyboard alternative moves and turns without capture");key('E',false);key('W',false);
  yaw=app.GetCameraYaw();key('Q',true);frame(20);Check(app.GetCameraYaw()<yaw,"keyboard alternative turns with Q");key('Q',false);
  app.GetWorld().RemoveComponent<LuaScriptComponent>(player);key('W',true);frame(20);Near(std::hypot(body->velocity.x,body->velocity.z),0,.001f,"no controller means no automatic player WASD");key('W',false);
- key(VK_ESCAPE,true);frame();Check(!app.IsEditorPlayMode(),"Escape stops Play");key(VK_ESCAPE,false);
+ auto& restarted=app.GetWorld().AddComponent<LuaScriptComponent>(player);restarted.scriptPath="scripts/FirstPersonController.lua";restarted.inputEnabled=restarted.cameraEnabled=true;frame();displayKey(ImGuiKey_F11);point();frame();mouse(true);frame();mouse(false);frame();Check(ui.IsViewportMaximized()&&glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_DISABLED,"fullscreen FPS recaptured before Stop");
+ key(VK_ESCAPE,true);frame();Check(!app.IsEditorPlayMode()&&ui.IsViewportMaximized()&&glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_NORMAL&&app.GetLuaRuntime().InstanceCount()==0,"Escape stops fullscreen FPS and releases input");key(VK_ESCAPE,false);
 }
 #endif
 int main(int argc,char** argv){ScopedEditorPreferenceRestore preferences;try{Assets assets;
 #if defined(ENABLE_DX12)
- if(argc>1&&std::string(argv[1])=="--dx12"){Native(assets);NativeEditorMouseInput();NativePlayerInput();}else
+ if(argc>1&&std::string(argv[1])=="--dx12"){Native(assets);NativeEditorMouseInput();NativeViewportDisplay();NativePlayerInput();}else
 #endif
  {InputFrames();CameraMouseRouting();Fps();FixedEdgesAndErrors(assets);}std::cout<<"Lua gameplay controller: "<<checks<<" checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

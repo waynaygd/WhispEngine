@@ -45,6 +45,7 @@ public:
         CameraMouseFrame& operator=(const CameraMouseFrame&)=delete;
     };
     CameraMouseFrame RouteCameraMouse(bool captured,bool buttonsDown,const ImVec2& pointer);
+    bool IsViewportMaximized()const{return m_ViewportMaximized;}
     struct Statistics {double uiMs=0,hierarchyMs=0,inspectorMs=0,assetBrowserMs=0,lightGizmoMs=0;};
     const Statistics& GetStatistics()const{return m_Statistics;}
     EditorVisualSettings& GetVisualSettings(){return m_VisualSettings;}
@@ -243,6 +244,8 @@ private:
     bool m_ShowSceneSettings=true,m_ShowConsole=true,m_ShowGrid=true,m_Snapping=false;
     bool m_ResetLayout=true,m_FixedDiagnosticLayout=false,m_ViewportFocused=false,m_ToolActive=false,m_InputTextActive=false,m_ModalActive=false;
     bool m_CameraMouseDrain=false,m_CameraMouseWasSuppressed=false;
+    bool m_ViewportMaximized=false,m_FocusViewportWindow=false;
+    const char* ViewportWindowName()const{return m_ViewportMaximized?"Viewport##Maximized":"Viewport";}
     float m_SnapTranslation=1,m_SnapRotation=15,m_SnapScale=.1f;
     Statistics m_Statistics;
     AssetCatalog m_AssetCatalog;

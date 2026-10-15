@@ -16,33 +16,37 @@ namespace ecs {
 // of marker scale. The FPS body stays upright; pitch belongs to the camera.
 inline constexpr Vec3 PlayerHalfExtents{.3f,.85f,.3f};
 inline constexpr float PlayerMaximumPitch=1.55334306f;
+inline float PlayerHeight(const PlayerStartComponent& start){return std::clamp(std::isfinite(start.characterHeight)?start.characterHeight:1.7f,.2f,10.f);}
+inline float PlayerEyeHeight(const PlayerStartComponent& start){return std::clamp(std::isfinite(start.eyeHeight)?start.eyeHeight:1.7f,0.f,PlayerHeight(start));}
+inline Vec3 PlayerBodyHalfExtents(const PlayerStartComponent& start){return {PlayerHalfExtents.x,PlayerHeight(start)*.5f,PlayerHalfExtents.z};}
 inline Vec3 PlayerLookDirection(const TransformComponent& start){
  const float pitch=std::clamp(start.rotation.x,-PlayerMaximumPitch,PlayerMaximumPitch);
  return {std::sin(start.rotation.y)*std::cos(pitch),std::sin(pitch),std::cos(start.rotation.y)*std::cos(pitch)};
 }
-inline Vec3 PlayerBodyCenter(Vec3 feet){feet.y+=PlayerHalfExtents.y;return feet;}
-inline Vec3 PlayerEyePosition(Vec3 center,float eyeHeight){center.y+=eyeHeight-PlayerHalfExtents.y;return center;}
-inline Vec3 PlayerBoxPoint(const TransformComponent& start,Vec3 local){
+inline Vec3 PlayerBodyCenter(Vec3 feet,float halfHeight=PlayerHalfExtents.y){feet.y+=halfHeight;return feet;}
+inline Vec3 PlayerEyePosition(Vec3 center,float eyeHeight,float halfHeight=PlayerHalfExtents.y){center.y+=eyeHeight-halfHeight;return center;}
+inline Vec3 PlayerBoxPoint(const TransformComponent& start,Vec3 local,float halfHeight=PlayerHalfExtents.y){
  const float c=std::cos(start.rotation.y),s=std::sin(start.rotation.y);
- auto center=PlayerBodyCenter(start.position);
+ auto center=PlayerBodyCenter(start.position,halfHeight);
  return {center.x+c*local.x+s*local.z,center.y+local.y,center.z-s*local.x+c*local.z};
 }
 inline Entity SpawnPlayer(World& world,TransformComponent* spawnPoint=nullptr){
- Entity chosen;TransformComponent spawn;std::string controllerScript;
+ Entity chosen;TransformComponent spawn;PlayerStartComponent settings;
  // Collect handles before adding/removing entities.
  auto markers=world.Entities();
  for(auto e:markers){auto* s=world.GetComponent<PlayerStartComponent>(e);auto* t=world.GetComponent<TransformComponent>(e);
-  if(!chosen.IsValid()&&s&&s->enabled&&t){chosen=e;spawn=*t;controllerScript=s->controllerScript;}}
+  if(!chosen.IsValid()&&s&&s->enabled&&t){chosen=e;spawn=*t;settings=*s;}}
  Entity player;
  if(chosen.IsValid()){
   if(spawnPoint)*spawnPoint=spawn;
   player=world.CreateEntity();auto& t=world.AddComponent<TransformComponent>(player);
-  t.position=PlayerBodyCenter(spawn.position);t.rotation={0,spawn.rotation.y,0};
-  world.AddComponent<PlayerComponent>(player);world.AddComponent<CharacterMovementComponent>(player);
+  const auto half=PlayerBodyHalfExtents(settings);
+  t.position=PlayerBodyCenter(spawn.position,half.y);t.rotation={0,spawn.rotation.y,0};
+  world.AddComponent<PlayerComponent>(player).eyeHeight=PlayerEyeHeight(settings);world.AddComponent<CharacterMovementComponent>(player);
   auto& b=world.AddComponent<RigidbodyComponent>(player);b.mass=70;b.lockRotation=true;
-  auto& c=world.AddComponent<ColliderComponent>(player);c.halfExtents=PlayerHalfExtents;c.autoFitFromMesh=false;c.restitution=0;c.friction=.8f;
+  auto& c=world.AddComponent<ColliderComponent>(player);c.halfExtents=half;c.autoFitFromMesh=false;c.restitution=0;c.friction=.8f;
   world.AddComponent<TagComponent>(player).name="Player";
-  if(!controllerScript.empty()){auto& script=world.AddComponent<LuaScriptComponent>(player);script.scriptPath=controllerScript;script.inputEnabled=true;script.cameraEnabled=true;}
+  if(!settings.controllerScript.empty()){auto& script=world.AddComponent<LuaScriptComponent>(player);script.scriptPath=settings.controllerScript;script.inputEnabled=true;script.cameraEnabled=true;}
  }
  // All runtime markers are editor-only, including disabled/legacy physical ones.
  for(auto e:markers)if(world.HasComponent<PlayerStartComponent>(e))world.DestroyEntity(e);

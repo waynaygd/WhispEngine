@@ -109,8 +109,8 @@ static void Gpu(){
         Check(!ui.IsGameView()&&ui.GetSelectedEntity()==pickedCube,"successful mesh picking exits Game View and retains entity");
         ui.SetGameView(true);SyntheticEditorInput::Position(bounds[2]-10,bounds[1]+10);app.Run();SyntheticEditorInput::Button(0,true);app.Run();SyntheticEditorInput::Button(0,false);app.Run();Check(ui.IsGameView(),"empty viewport click preserves Game View");ui.SetGameView(false);
         auto chord=[&](ImGuiKey key){SyntheticEditorInput::Key(ImGuiMod_Alt,true);app.Run();SyntheticEditorInput::Key(key,true);app.Run();SyntheticEditorInput::Key(key,false);SyntheticEditorInput::Key(ImGuiMod_Alt,false);app.Run();};
-        chord(ImGuiKey_3);Check(app.IsViewportUnlit(),"Alt+3 reaches transient Unlit through viewport routing");chord(ImGuiKey_4);Check(!app.IsViewportUnlit(),"Alt+4 restores Lit through viewport routing");
-        ImGui::SetWindowFocus("Inspector");app.Run();chord(ImGuiKey_3);Check(!app.IsViewportUnlit(),"Inspector focus blocks shading shortcut");
+        chord(ImGuiKey_4);Check(app.IsViewportUnlit(),"Alt+4 reaches transient Unlit through viewport routing");chord(ImGuiKey_3);Check(!app.IsViewportUnlit(),"Alt+3 restores Lit through viewport routing");
+        ImGui::SetWindowFocus("Inspector");app.Run();chord(ImGuiKey_4);Check(!app.IsViewportUnlit(),"Inspector focus blocks shading shortcut");
         auto* assets=ImGui::FindWindowByName("Asset Browser");Check(assets,"Asset Browser exists");
         ImGui::SetWindowDock(assets,0,ImGuiCond_Always);ImGui::SetWindowPos(assets,ImVec2(20,260),ImGuiCond_Always);ImGui::SetWindowSize(assets,ImVec2(650,360),ImGuiCond_Always);
         ImGui::SetWindowFocus("Asset Browser");ui.NavigateAssetFolder("scripts");app.Run();app.Run();

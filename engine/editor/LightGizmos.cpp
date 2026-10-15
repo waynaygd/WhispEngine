@@ -150,7 +150,8 @@ void EditorLayer::DrawPlayerStartGizmos(Application& app,const ImVec2& origin,co
     ecs::Entity hit;float nearest=INFINITY;const auto mouse=ImGui::GetMousePos();
     app.GetWorld().ForEach<ecs::PlayerStartComponent,ecs::TransformComponent>([&](ecs::Entity e,auto& start,auto& t){
         const bool selected=e==m_SelectedEntity;const ImU32 color=start.enabled?IM_COL32(80,235,255,255):IM_COL32(155,160,165,255);
-        const auto center=ecs::PlayerBodyCenter(t.position),eye=ecs::PlayerEyePosition(center,ecs::PlayerComponent{}.eyeHeight);
+        const auto half=ecs::PlayerBodyHalfExtents(start);
+        const auto center=ecs::PlayerBodyCenter(t.position,half.y),eye=ecs::PlayerEyePosition(center,ecs::PlayerEyeHeight(start),half.y);
         V forward=ecs::PlayerLookDirection(t);
         V tip=Add(eye,Scale(forward,1.1f));line(eye,tip,color);
         V right{std::cos(t.rotation.y),0,-std::sin(t.rotation.y)};
@@ -166,8 +167,8 @@ void EditorLayer::DrawPlayerStartGizmos(Application& app,const ImVec2& origin,co
             if(mouse.x>=p->x-12&&mouse.x<=p->x+12&&mouse.y>=p->y-32&&mouse.y<=p->y+5&&(*depth)[2]<nearest){hit=e;nearest=(*depth)[2];}
         }
         if(!selected)return;
-        std::array<V,8> corners;auto h=ecs::PlayerHalfExtents;
-        for(int i=0;i<8;++i)corners[i]=ecs::PlayerBoxPoint(t,{i&1?h.x:-h.x,i&2?h.y:-h.y,i&4?h.z:-h.z});
+        std::array<V,8> corners;auto h=half;
+        for(int i=0;i<8;++i)corners[i]=ecs::PlayerBoxPoint(t,{i&1?h.x:-h.x,i&2?h.y:-h.y,i&4?h.z:-h.z},h.y);
         for(int i=0;i<8;++i)for(int bit:{1,2,4})if(!(i&bit))line(corners[i],corners[i|bit],color);
         line(Add(t.position,V{-.2f,0,0}),Add(t.position,V{.2f,0,0}),color);line(Add(t.position,V{0,0,-.2f}),Add(t.position,V{0,0,.2f}),color);
         if(auto eyes=project(eye)){draw->AddCircleFilled(*eyes,5,IM_COL32(10,15,20,240));draw->AddCircleFilled(*eyes,3,IM_COL32(255,220,90,255));draw->AddText(ImVec2(eyes->x+7,eyes->y),IM_COL32(255,220,90,255),"Eyes");}

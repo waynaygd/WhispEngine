@@ -14,6 +14,10 @@ Reload Script action; a rejected reload keeps the previous valid program.
 2. Use **Create → Player → Player Start**. Its Position denotes the feet.
 3. In Player Start, choose **Controller script**. The default is
    `scripts/FirstPersonController.lua`. Empty means no script/controller.
+   **Character Height** is the full physical box height (default 1.70, range
+   0.20–10.00). **Eye Height** is measured from the feet (default 1.70), between
+   zero and Character Height. Reducing the body height clamps the eyes; Undo
+   restores both values. Body width remains 0.60. Transform scale is ignored.
 4. Play. The runtime player receives the selected asset in a normal
    LuaScriptComponent, with input and camera permissions enabled. The marker is
    removed only from the runtime copy.
@@ -178,9 +182,22 @@ free-fly input. Without a lease (including a scene without PlayerStart), the
 Viewport keeps its ordinary RMB free-fly camera while Lua and physics run.
 Viewport background focus does not block gameplay input; active Inspector or
 toolbar widgets, text editing and popups still do.
+Editor free-fly and Lua cursor capture share the same scoped mouse-event guard.
+Virtual cursor positions and mouse buttons do not reach editor widgets while
+captured. On release, the remaining held gesture is drained before UI resumes;
+GLFW input polling and Lua mouse deltas remain available to the controller.
 Stop always releases the native cursor and restores the saved editor free-fly
 camera. The host capability boundary can later provide raycasts/interactions
 without introducing a parallel Lua runtime. No Interact system is added here.
+
+F11 toggles a maximized, borderless Viewport within the existing application
+window, in Edit, Play or Pause. It keeps the normal dock layout and panel
+preferences intact and is not persisted. F11 cancels a pending edit/gizmo
+transaction safely. Stop may leave the Viewport maximized; F11 restores it.
+Alt+3 selects **Lit**, Alt+4 selects **Unlit**, including Play, captured mouse
+and maximized Viewport. These shortcuts use the existing shading state and
+require Viewport focus or cursor ownership. Text fields and popups block them.
+F11 is also blocked while typing or a popup is open.
 
 ## Validation and limitations
 
