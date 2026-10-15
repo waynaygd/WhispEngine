@@ -7,8 +7,10 @@
 #include "components/RigidbodyComponent.h"
 #include "components/SceneIdentityComponent.h"
 #include "components/TagComponent.h"
+#include "components/PlayerStartComponent.h"
 #include "components/TransformComponent.h"
 #include "components/VelocityComponent.h"
+#include "components/PlayerComponent.h"
 #include "components/LuaScriptComponent.h"
 #include "../resources/MaterialSerialization.h"
 #include "../scene/LightSerialization.h"
@@ -142,7 +144,50 @@ ComponentRegistry Build(){
     auto collider=Descriptor<ColliderComponent>("Collider","Collider");Field<ColliderComponent>(collider,"type","Shape",&ColliderComponent::type,PropertyKind::Integer,0,1).choices={"Box","Sphere"};Field<ColliderComponent>(collider,"halfExtents","Half extents",&ColliderComponent::halfExtents,PropertyKind::Vector,0,1e6f);Field<ColliderComponent>(collider,"offset","Offset",&ColliderComponent::offset,PropertyKind::Vector);Field<ColliderComponent>(collider,"restitution","Restitution",&ColliderComponent::restitution,PropertyKind::Number,-1,1);Field<ColliderComponent>(collider,"friction","Friction",&ColliderComponent::friction,PropertyKind::Number,-1,100);Field<ColliderComponent>(collider,"autoFitFromMesh","Fit from mesh",&ColliderComponent::autoFitFromMesh,PropertyKind::Boolean);Complete(collider);r.Register(collider);
     auto velocity=Descriptor<VelocityComponent>("Velocity","Velocity");Field<VelocityComponent>(velocity,"linear","Linear",&VelocityComponent::linear,PropertyKind::Vector);Field<VelocityComponent>(velocity,"angular","Angular",&VelocityComponent::angular,PropertyKind::Vector);Complete(velocity);r.Register(velocity);
     auto bounds=Descriptor<BoundsBounceComponent>("BoundsBounce","Bounds bounce");Field<BoundsBounceComponent>(bounds,"minX","Min X",&BoundsBounceComponent::minX,PropertyKind::Number);Field<BoundsBounceComponent>(bounds,"maxX","Max X",&BoundsBounceComponent::maxX,PropertyKind::Number);Field<BoundsBounceComponent>(bounds,"minY","Min Y",&BoundsBounceComponent::minY,PropertyKind::Number);Field<BoundsBounceComponent>(bounds,"maxY","Max Y",&BoundsBounceComponent::maxY,PropertyKind::Number);Complete(bounds);r.Register(bounds);
-    r.Register(Light<DirectionalLightComponent>("DirectionalLight","Directional light"));r.Register(Light<PointLightComponent>("PointLight","Point light"));r.Register(Light<SpotLightComponent>("SpotLight","Spot light"));return r;
+    r.Register(Light<DirectionalLightComponent>("DirectionalLight","Directional light"));r.Register(Light<PointLightComponent>("PointLight","Point light"));r.Register(Light<SpotLightComponent>("SpotLight","Spot light"));
+    auto playerStart = Descriptor<PlayerStartComponent>(
+        "PlayerStart", "Player Start"
+    );
+
+    Field<PlayerStartComponent>(
+        playerStart,
+        "enabled",
+        "Enabled",
+        &PlayerStartComponent::enabled,
+        PropertyKind::Boolean
+    );
+
+    Complete(playerStart);
+    r.Register(playerStart);
+
+    auto player = Descriptor<PlayerComponent>(
+        "Player", "Player"
+    );
+
+    Field<PlayerComponent>(
+        player,
+        "moveSpeed",
+        "Move Speed",
+        &PlayerComponent::moveSpeed,
+        PropertyKind::Number,
+        0.1f,
+        30.0f
+    );
+
+    Field<PlayerComponent>(
+        player,
+        "eyeHeight",
+        "Eye Height",
+        &PlayerComponent::eyeHeight,
+        PropertyKind::Number,
+        0.0f,
+        3.0f
+    );
+
+    Complete(player);
+    r.Register(player);
+
+    return r;
 }
 }
 ComponentRegistry& ComponentRegistry::Builtins(){static auto registry=Build();return registry;}
@@ -178,3 +223,4 @@ bool ComponentRegistry::ValidateAssetKey(const std::string& key,AssetKind kind,s
     bool valid=kind==AssetKind::None||(kind==AssetKind::LuaScript&&ext==".lua")||(kind==AssetKind::Prefab&&key.ends_with(".prefab.json"))||(kind==AssetKind::Mesh&&(ext==".obj"||ext==".gltf"||ext==".glb"||ext==".fbx"))||(kind==AssetKind::Texture&&(ext==".png"||ext==".dds"||ext==".jpg"||ext==".jpeg"||ext==".bmp"||ext==".tga"))||(kind==AssetKind::Material&&(ext==".json"||ext==".material"))||(kind==AssetKind::Shader&&ext==".hlsl")||(kind==AssetKind::Environment&&ext==".hdr")||key.starts_with("defaults/");if(!valid)Fail("Resource type does not match property");
 },error);}
 }
+

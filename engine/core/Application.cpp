@@ -15,8 +15,11 @@
 #include "../ecs/components/TagComponent.h"
 #include "../ecs/components/TransformComponent.h"
 #include "../ecs/components/VelocityComponent.h"
+#include "../ecs/components/PlayerStartComponent.h"
+#include "../ecs/components/PlayerComponent.h"
 #include "../ecs/systems/BoundsBounceSystem.h"
 #include "../ecs/systems/PhysicsSystem.h"
+
 #include "../ecs/PhysicsStressScene.h"
 #include "PhysicsDiagnosticSample.h"
 #include "RenderDiagnosticSample.h"
@@ -911,6 +914,13 @@ void Application::UpdateCameraController(float dt)
         -kMaxCameraPitch,
         kMaxCameraPitch);
 
+    if (m_EditorPlayMode &&
+        m_RuntimeWorld &&
+        m_RuntimeWorld->IsAlive(m_PlayerEntity))
+    {
+        return;
+    }
+
     const ecs::Vec3 worldUp{ 0.0f, 1.0f, 0.0f };
     const ecs::Vec3 forward = BuildCameraForward(m_Camera.yaw, m_Camera.pitch);
     const ecs::Vec3 right = Normalize(Cross(worldUp, forward));
@@ -945,6 +955,78 @@ void Application::UpdateCameraController(float dt)
     m_Camera.position = Add(
         m_Camera.position,
         Scale(Normalize(movement), speed * dt));
+}
+
+void Application::UpdatePlayerController(float dt)
+{
+    if (!m_RuntimeWorld ||
+        !m_RuntimeWorld->IsAlive(m_PlayerEntity))
+        return;
+
+    auto* transform =
+        m_RuntimeWorld->GetComponent<ecs::TransformComponent>(
+            m_PlayerEntity
+        );
+
+    auto* player =
+        m_RuntimeWorld->GetComponent<ecs::PlayerComponent>(
+            m_PlayerEntity
+        );
+
+    if (!transform || !player)
+        return;
+
+    // Движение только во время активной игры
+    if (IsSimulationRunning() &&
+        m_EditorLayer.OwnsViewportKeyboard())
+    {
+        auto* primary =
+            dynamic_cast<GlfwWindow*>(GetWindow());
+
+        GLFWwindow* window =
+            primary ? primary->GetGlfwHandle() : nullptr;
+
+        if (window &&
+            glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE)
+        {
+            // Направление камеры без вертикального наклона
+            ecs::Vec3 forward =
+                BuildCameraForward(m_Camera.yaw, 0.0f);
+
+            ecs::Vec3 worldUp{ 0.0f, 1.0f, 0.0f };
+
+            ecs::Vec3 right =
+                Normalize(Cross(worldUp, forward));
+
+            ecs::Vec3 movement{};
+
+            if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+                movement = Add(movement, forward);
+
+            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+                movement = Add(movement, Scale(forward, -1.0f));
+
+            if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+                movement = Add(movement, right);
+
+            if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+                movement = Add(movement, Scale(right, -1.0f));
+
+            if (Length(movement) > 0.0001f)
+            {
+                movement = Normalize(movement);
+
+                transform->position = Add(
+                    transform->position,
+                    Scale(movement, player->moveSpeed * dt)
+                );
+            }
+        }
+    }
+
+    // Камера следует за ECS-сущностью
+    m_Camera.position = transform->position;
+    m_Camera.position.y += player->eyeHeight;
 }
 
 void Application::UpdateRenderSystemCamera(IWindow* window)
@@ -1070,13 +1152,74 @@ void Application::SetEditorPlayMode(bool enabled)
     if(m_EditorPlayMode==enabled)return;
     if(enabled){
         m_EditorLayer.FinishTransaction(*this);
+        m_SavedEditorCamera.position = m_Camera.position;
+        m_SavedEditorCamera.yaw = m_Camera.yaw;
+        m_SavedEditorCamera.pitch = m_Camera.pitch;
         const auto start=std::chrono::steady_clock::now();
         auto runtime=m_World.CloneData(&m_CloneMapping);
         m_EditDebugEntities=m_EcsDebugEntities;m_EditStressEntities=m_StressEntities;
         m_EditLighting=m_LightingSettings;m_EditEnvironment=m_EnvironmentSettings;m_EditShadows=m_ShadowSettings;m_EditBackground=m_Background;m_EditAntiAliasing=m_AntiAliasing;
         auto map=[&](std::vector<ecs::Entity>& entities){std::erase_if(entities,[&](auto e){return !m_CloneMapping.contains(e);});for(auto& e:entities)e=m_CloneMapping.at(e);};
         map(m_EcsDebugEntities);map(m_StressEntities);
-        m_EditorLayer.EnterRuntime(m_CloneMapping);m_RuntimeWorld=std::move(runtime);
+        m_EditorLayer.EnterRuntime(m_CloneMapping);
+        m_RuntimeWorld=std::move(runtime);
+        // Ищем PlayerStart и создаём игрока
+        for (ecs::Entity entity : m_RuntimeWorld->Entities())
+        {
+            // Получаем PlayerStartComponent
+            auto* start =
+                m_RuntimeWorld->GetComponent<ecs::PlayerStartComponent>(entity);
+
+            // Получаем TransformComponent
+            auto* transform =
+                m_RuntimeWorld->GetComponent<ecs::TransformComponent>(entity);
+
+            // Пропускаем объекты без активного PlayerStart
+            if (!start || !start->enabled || !transform)
+                continue;
+
+            // Запоминаем точку появления до создания игрока
+            const ecs::Vec3 spawnPosition = transform->position;
+            const ecs::Vec3 spawnRotation = transform->rotation;
+
+            // Создаём сущность игрока
+            m_PlayerEntity = m_RuntimeWorld->CreateEntity();
+
+            // Добавляем Transform
+            auto& playerTransform =
+                m_RuntimeWorld->AddComponent<ecs::TransformComponent>(
+                    m_PlayerEntity
+                );
+
+            playerTransform.position = spawnPosition;
+            playerTransform.rotation = spawnRotation;
+
+            // Добавляем PlayerComponent
+            auto& player =
+                m_RuntimeWorld->AddComponent<ecs::PlayerComponent>(
+                    m_PlayerEntity
+                );
+
+            // Добавляем имя игрока
+            auto& tag =
+                m_RuntimeWorld->AddComponent<ecs::TagComponent>(
+                    m_PlayerEntity
+                );
+
+            tag.name = "Player";
+
+            // Устанавливаем игровую камеру
+            m_Camera.position = playerTransform.position;
+            m_Camera.position.y += player.eyeHeight;
+
+            m_Camera.yaw = playerTransform.rotation.y;
+            m_Camera.pitch = playerTransform.rotation.x;
+
+            Logger::Get().Info("Player: spawned");
+
+            // Создаём только одного игрока
+            break;
+        }
         m_LuaRuntime.Start(*m_RuntimeWorld,[this](const std::string& action){return IsSimulationRunning()&&IsInputActionActive(action);});
         m_StateMachine.Clear(*this);RequestStateChange(std::make_unique<LoadingState>());m_StateMachine.ApplyPending(*this);
         m_LastCloneMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
@@ -1084,6 +1227,9 @@ void Application::SetEditorPlayMode(bool enabled)
         if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
         m_StateMachine.Clear(*this);
         m_LuaRuntime.Stop();m_Mutations.Clear();m_RenderInterpolation.Clear();m_EditorLayer.LeaveRuntime();m_RuntimeWorld.reset();m_CloneMapping.clear();
+        m_Camera.position = m_SavedEditorCamera.position;
+        m_Camera.yaw = m_SavedEditorCamera.yaw;
+        m_Camera.pitch = m_SavedEditorCamera.pitch;
         m_EcsDebugEntities=std::move(m_EditDebugEntities);m_StressEntities=std::move(m_EditStressEntities);
         m_LightingSettings=m_EditLighting;m_EnvironmentSettings=m_EditEnvironment;m_ShadowSettings=m_EditShadows;m_Background=m_EditBackground;m_AntiAliasing=m_EditAntiAliasing;
     }
@@ -1429,6 +1575,7 @@ int Application::Run()
             ZoneScopedN("GameUpdate");
 
             UpdateCameraController(dt);
+            UpdatePlayerController(dt);
             if(IsSimulationRunning())m_LuaRuntime.Update(dt);
 
             if (IsSimulationRunning() && m_UpdateMode == UpdateMode::Variable) {

@@ -175,6 +175,7 @@ private:
     ecs::Entity SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg);
     void UpdateEcs(float dt);
     void UpdateCameraController(float dt);
+    void UpdatePlayerController(float dt);
     void UpdateRenderSystemCamera(IWindow* window);
     void UpdateRenderSystemCameraAspect(float aspectRatio);
     void SetupRenderStressScene();
@@ -254,7 +255,18 @@ private:
     double m_FixedSimulationSeconds = 0;
     bool m_ResetPhysicsDelta = true;
     StateMachine m_StateMachine;
+
+    struct CameraPose
+    {
+        ecs::Vec3 position{};
+        float yaw = 0.0f;
+        float pitch = 0.0f;
+    };
+
+    CameraPose m_SavedEditorCamera{};
+
     CameraControllerState m_Camera;
+    ecs::Entity m_PlayerEntity{};
     bool m_DebugCollidersEnabled = false;
     bool m_PhysicsDebugPose = false;
     bool m_GpuInstancing = true;
