@@ -1,6 +1,8 @@
 #include "PrecisionInputs.h"
 #include "SunSynchronization.h"
 #include "EditorLayer.h"
+#include "ScriptEditor.h"
+#include "../core/AssetPaths.h"
 #include "EditorWidgets.h"
 #include "../core/Application.h"
 #include "../ecs/components/LuaScriptComponent.h"
@@ -100,6 +102,13 @@ void EditorLayer::DrawInspector(Application& app){
             }
             auto& runtime=app.GetLuaRuntime();
             if(ImGui::Button("Reload Script"))runtime.ReloadScript(script->scriptPath);
+            ImGui::SameLine();ImGui::BeginDisabled(script->scriptPath.empty());
+            if(ImGui::Button("Open Script"))OpenLuaScriptInVisualStudio(script->scriptPath,&m_EditorError);
+            ImGui::EndDisabled();
+            if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)){
+                try{const auto path=AssetPaths::ToUtf8String(ResolveEditableLuaScript(script->scriptPath));ImGui::SetTooltip("Open in Visual Studio 2022:\n%s",path.c_str());}
+                catch(const std::exception& failure){ImGui::SetTooltip("%s",script->scriptPath.empty()?"Assign a Lua script first":failure.what());}
+            }
             auto schema=runtime.Fields(script->scriptPath);
             auto error=runtime.Error(script->scriptPath);
             if(error.empty())ImGui::TextDisabled("Loaded: %zu fields",schema.size());else ImGui::TextWrapped("%s",error.c_str());

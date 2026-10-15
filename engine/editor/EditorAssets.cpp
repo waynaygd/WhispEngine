@@ -1,4 +1,5 @@
 #include "EditorLayer.h"
+#include "ScriptEditor.h"
 #include "EditorWidgets.h"
 #include "PrecisionInputs.h"
 #include "AssetImport.h"
@@ -132,10 +133,12 @@ void EditorLayer::DrawAssetBrowser(Application& app){
         while(clipper.Step())for(int rowIndex=clipper.DisplayStart;rowIndex<clipper.DisplayEnd;++rowIndex){ImGui::TableNextRow();for(int col=0;col<columns;++col){auto index=rowIndex*columns+col;if(index>=int(rows.size()))break;ImGui::TableSetColumnIndex(col);const auto& entry=*rows[index];const auto& type=types[entry.type];const auto& key=entry.key;auto name=AssetPaths::ToUtf8String(std::filesystem::u8path(key).filename());ImGui::PushID(key.c_str());
             const char* state=AssetLoadState(resources,type.kind,key);std::string label=m_AssetGrid?type.icon+"\n"+name+"\n"+state:type.icon+" "+name+"  |  "+type.name+"  |  "+state;
             if(ImGui::Selectable(label.c_str(),m_SelectedAsset==key,ImGuiSelectableFlags_None,ImVec2(0,m_AssetGrid?84.f*ImGui::GetStyle().FontScaleDpi:0))){m_SelectedAsset=key;m_SelectedAssetKind=type.name;}
-            if(ImGui::IsItemHovered())ImGui::SetTooltip("%s\n%s / %s\nDouble-click material: open editor. Drag: assign compatible slot.",key.c_str(),type.name.c_str(),state);
+            if(ImGui::IsItemHovered())ImGui::SetTooltip("%s\n%s / %s\n%s",key.c_str(),type.name.c_str(),state,type.kind==ecs::AssetKind::LuaScript?"Double-click: open in Visual Studio 2022. Drag: assign script.":"Double-click material: open editor. Drag: assign compatible slot.");
             if((type.kind!=ecs::AssetKind::None||type.name=="Imported Scene")&&ImGui::BeginDragDropSource()){AssetPayload payload{};payload.kind=type.kind;std::memcpy(payload.key,key.data(),std::min(key.size(),sizeof(payload.key)-1));ImGui::SetDragDropPayload("WHISP_ASSET",&payload,sizeof(payload));ImGui::Text("%s %s",type.icon.c_str(),name.c_str());ImGui::EndDragDropSource();}
             if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::Material)openMaterial(key);
+            if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::LuaScript)OpenLuaScriptInVisualStudio(key,&m_EditorError);
             if(ImGui::BeginPopupContextItem("AssetActions")){
+                if(type.kind==ecs::AssetKind::LuaScript&&ImGui::MenuItem("Open in Visual Studio"))OpenLuaScriptInVisualStudio(key,&m_EditorError);
                 if(type.kind==ecs::AssetKind::Prefab&&ImGui::MenuItem("Instantiate Prefab")){
                     try{FinishTransaction(app);auto e=scripting::SpawnPrefab(app.GetWorld(),key,{});EntitySnapshot before;before.entity=e;before.world=e.world;m_SelectedEntity=e;app.NotifyEditorMutation(e);CommitUndo(app,"Instantiate Prefab",before);}catch(const std::exception& error){m_EditorError=error.what();}
                 }

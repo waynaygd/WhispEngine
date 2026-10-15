@@ -152,6 +152,18 @@ Schema не регистрируется как новый ComponentDescriptor.
 В Inspector есть picker Lua assets, текстовое поле и drag/drop `WHISP_ASSET`,
 Enabled, Reload, статус и диагностика. Asset fields поддерживают текст и drop;
 prefab kind определяется по default с `.prefab.json`.
+Рядом с Reload находится `Open Script`: он открывает активный `.lua` в Visual
+Studio 2022, а полный canonical path показывает в tooltip. В Asset Browser то же
+действие доступно двойным кликом по Lua или через `Open in Visual Studio`.
+Общий модуль — `editor/ScriptEditor.cpp`: resolver использует тот же `SafeAsset`,
+что Reload; поиск IDE — vswhere (17.x/Core Editor), затем проверенный devenv из PATH.
+Открытие через Windows `ShellExecuteExW` и
+[`devenv /Edit`](https://learn.microsoft.com/en-us/visualstudio/ide/reference/edit-devenv-exe?view=visualstudio)
+переиспользует IDE и не вызывает Reload или C++ build. Если активен staged root,
+редактируется именно staged-файл; копирования в source root при открытии нет.
+После сохранения файла нажать Reload самостоятельно. Пустой scriptPath отключает
+кнопку; отсутствующий файл/IDE или ошибка запуска показываются через Editor error
+и существующий Logger. Другой редактор автоматически не выбирается.
 Asset Browser индексирует `.lua` и полный суффикс `.prefab.json` раздельно.
 Доступны Create Lua Script, Create Prefab (из выбранной Entity) и контекстное
 Instantiate Prefab. Создание prefab исключает SceneIdentity; instantiate

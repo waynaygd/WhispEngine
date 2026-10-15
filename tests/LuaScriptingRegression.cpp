@@ -3,6 +3,7 @@
 #include "core/AssetPaths.h"
 #include "core/Application.h"
 #include "core/Logger.h"
+#include "editor/ScriptEditor.h"
 #include "ecs/components/LuaScriptComponent.h"
 #include "ecs/components/SceneIdentityComponent.h"
 #include "ecs/components/TransformComponent.h"
@@ -32,6 +33,10 @@ int main(){
         auto scratch=original/"out"/("lua-regression-"+ecs::NewSceneIdentity());std::filesystem::create_directories(scratch/"assets");
         for(const char* folder:{"scripts","prefabs","scenes"})std::filesystem::copy(assets/folder,scratch/"assets"/folder,std::filesystem::copy_options::recursive);
         std::filesystem::current_path(scratch);
+        Check(editor::ResolveEditableLuaScript("scripts/wave_controller.lua")==std::filesystem::weakly_canonical(scratch/"assets/scripts/wave_controller.lua"),"Open Script resolves active staged copy, not source fallback");
+        for(const char* key:{"","../outside.lua","C:/outside.lua","scripts/missing.lua","scripts/wrong.txt"}){
+            bool rejected=false;try{(void)editor::ResolveEditableLuaScript(key);}catch(const std::exception&){rejected=true;}Check(rejected,"Open Script rejects unsafe, empty or missing asset");
+        }
         Write("scripts/counter.lua",counter);
         ecs::World world;auto a=Actor(world,"scripts/counter.lua");auto b=Actor(world,"scripts/counter.lua");world.GetComponent<ecs::LuaScriptComponent>(b)->properties["speed"]=2;
         scripting::LuaRuntime lua;Check(lua.ReloadScript("scripts/counter.lua"),"load counter");lua.Start(world);lua.Update(.02f);

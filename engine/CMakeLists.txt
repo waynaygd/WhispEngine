@@ -59,6 +59,7 @@ add_library(Engine
   editor/AssetCatalog.cpp
   editor/EditorAssetPreview.cpp
   editor/EditorAssets.cpp
+  editor/ScriptEditor.cpp
   editor/GltfSceneImport.cpp
   editor/EditorLevelWorkflow.cpp
   editor/EditorScalePlanes.cpp
@@ -123,5 +124,6 @@ if (ENABLE_VULKAN)
 endif()
 
 if(WIN32)
+  target_link_libraries(Engine PRIVATE shell32 version)
   target_link_libraries(Engine PRIVATE comdlg32)
 endif()
