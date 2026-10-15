@@ -94,7 +94,7 @@ bool MaterialLoader::Save(const std::string& key,const MaterialResource& m,std::
     try {
         const auto safe=SafeKey(key,false);if(safe.empty())throw std::runtime_error("empty output key");
         if(std::filesystem::path(safe).extension()!=".json")throw std::runtime_error("material asset output must have a .json extension");
-        const auto path=AssetPaths::ResolveAssetOutputPath(safe);
+        const auto path=AssetPaths::ResolveAssetOutputPath(std::filesystem::u8path(safe));
         if(path.empty())throw std::runtime_error("invalid asset output root");
         const auto j=Serialize(m);const auto validated=Parse(safe,j);
         if(!validated.success)throw std::runtime_error(validated.errorMessage);

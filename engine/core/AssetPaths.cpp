@@ -80,7 +80,8 @@ std::string NormalizeRelativeKey(const fs::path& path)
     if (normalized.is_absolute())
         return {};
 
-    const std::string key = normalized.generic_string();
+    const auto utf8 = normalized.generic_u8string();
+    const std::string key(utf8.begin(),utf8.end());
     if (key.empty() || key == "..")
         return {};
 
@@ -202,7 +203,7 @@ std::filesystem::path ResolveAssetOutputPath(const std::filesystem::path& relati
     if (assetRoot.empty())
         return {};
 
-    return (assetRoot / std::filesystem::path(key)).lexically_normal();
+    return (assetRoot / std::filesystem::u8path(key)).lexically_normal();
 }
 
 std::filesystem::path ResolveShaderPath(const std::filesystem::path& relativePath)
@@ -215,7 +216,7 @@ std::filesystem::path ResolveShaderPath(const std::filesystem::path& relativePat
     if (shaderRoot.empty())
         return {};
 
-    return NormalizeIfExists(shaderRoot / std::filesystem::path(key));
+    return NormalizeIfExists(shaderRoot / std::filesystem::u8path(key));
 }
 
 std::string ToUtf8String(const std::filesystem::path& path)

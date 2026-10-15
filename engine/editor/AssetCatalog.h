@@ -15,7 +15,7 @@ struct AssetEntry {std::string key;std::size_t type=0;};
 class AssetCatalog {
     std::vector<AssetType> types;
     std::vector<AssetEntry> entries;
-    std::set<std::string> folders,created;
+    std::set<std::string> folders,created,hiddenFallbacks;
     std::uint64_t revision=0;
 public:
     static std::string DirectoryKey(const std::filesystem::path& p){auto text=p.generic_u8string();return {text.begin(),text.end()};}
@@ -32,5 +32,13 @@ public:
     bool DeleteMaterial(const std::string& key,std::string* error=nullptr);
     static bool ContainsReference(const nlohmann::json&,const std::string&);
     static std::filesystem::path SafeMaterialPath(const std::string&);
+    // File operations affect this active-root path only. Referenced assets are
+    // deliberately blocked; there is no blind rewriting of project documents.
+    static std::filesystem::path EditablePath(const std::string&);
+    static std::string RenameDestination(const std::string& key,const std::string& name);
+    static std::string FileSuffix(const std::string& key);
+    static std::vector<std::string> Dependencies(const std::string& key);
+    bool RenameAssetFile(const std::string& from,const std::string& to,std::string* error=nullptr);
+    bool DeleteAssetFile(const std::string& key,std::string* error=nullptr);
 };
 }

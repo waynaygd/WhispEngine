@@ -416,6 +416,9 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
 
 void EditorLayer::HandleEditorShortcuts(Application& app){
     const auto& io=ImGui::GetIO();if(io.WantTextInput||m_ModalActive||m_EscapeConsumed)return;
+    // Asset file shortcuts are handled by the browser after its widgets. Never
+    // let a Delete intended for that window reach the entity command path.
+    if(AssetBrowserOwnsKeyboard()&&(ImGui::IsKeyPressed(ImGuiKey_Delete,false)||ImGui::IsKeyPressed(ImGuiKey_F2,false)))return;
     if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)&&!app.IsEditorPlayMode()){
         if(HasPendingTransaction()){CancelTransaction(app);m_LightPointerCaptured=false;m_CancelGizmoUntilRelease=true;}else if((m_ViewportFocused||m_HierarchyFocused)&&!m_InputTextActive&&!app.IsCameraControlActive())ClearSelection();return;
     }
@@ -605,7 +608,7 @@ void EditorLayer::DrawMaterialEditor(Application& app)
     const auto open=[&](const std::string& key) {
         if(m_MaterialDirty&&key!=m_EditingMaterial){m_MaterialError="Unsaved changes: Save or Revert before opening another asset.";return;}
         m_EditingMaterial=key;m_MaterialError.clear();
-        if(resources&&!key.empty()) {resources->Load<MaterialResource>(key);resources->WatchForHotReload<MaterialResource>(key);}
+        if(resources&&!key.empty()) {resources->Load<MaterialResource>(std::filesystem::u8path(key));resources->WatchForHotReload<MaterialResource>(std::filesystem::u8path(key));}
     };
     if(m_SelectedAssetKind=="Material"&&ImGui::Button("Open selected asset"))open(m_SelectedAsset);
     if(component&&!component->materialPath.empty()) {ImGui::SameLine();if(ImGui::Button("Open entity material"))open(component->materialPath);}
@@ -624,7 +627,7 @@ void EditorLayer::DrawMaterialEditor(Application& app)
             if(CreateMaterialAsset(app,m_NewMaterialKey,&m_MaterialError)){open(AssetPaths::NormalizeAssetKey(m_NewMaterialKey));m_AssetListsDirty=true;}}
     }
     ImGui::Separator();ImGui::Text("Asset: %s%s",m_EditingMaterial.c_str(),m_MaterialDirty?" *":"");
-    auto resource=resources?resources->Get<MaterialResource>(m_EditingMaterial):nullptr;
+    auto resource=resources?resources->Get<MaterialResource>(std::filesystem::u8path(m_EditingMaterial)):nullptr;
     if(resource&&resource->IsLoaded()) {
         auto data=resource->GetData();bool changed=false;
         changed|=ImGui::InputText("Name",&data.name);
@@ -666,12 +669,12 @@ void EditorLayer::DrawMaterialEditor(Application& app)
             resources->SetMaterialDirty(m_EditingMaterial,true);
         }
         if(ImGui::Button("Save")) {
-            if(MaterialLoader::Save(m_EditingMaterial,resource->GetData(),&m_MaterialError)){m_MaterialDirty=false;resources->SetMaterialDirty(m_EditingMaterial,false);resources->Reload<MaterialResource>(m_EditingMaterial);}
+            if(MaterialLoader::Save(m_EditingMaterial,resource->GetData(),&m_MaterialError)){m_MaterialDirty=false;resources->SetMaterialDirty(m_EditingMaterial,false);resources->Reload<MaterialResource>(std::filesystem::u8path(m_EditingMaterial));}
         }
         ImGui::SameLine();if(ImGui::Button("Revert"))ImGui::OpenPopup("Discard unsaved material edits?");
         if(ImGui::BeginPopupModal("Discard unsaved material edits?",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
             ImGui::TextUnformatted("Revert this shared asset to its saved file?");
-            if(ImGui::Button("Revert to file")) {resources->SetMaterialDirty(m_EditingMaterial,false);auto reloaded=resources->Reload<MaterialResource>(m_EditingMaterial);
+            if(ImGui::Button("Revert to file")) {resources->SetMaterialDirty(m_EditingMaterial,false);auto reloaded=resources->Reload<MaterialResource>(std::filesystem::u8path(m_EditingMaterial));
                 if(reloaded&&reloaded->IsLoaded()){m_MaterialDirty=false;m_MaterialError.clear();}else {m_MaterialError=reloaded?reloaded->GetErrorMessage():"Reload failed";resources->SetMaterialDirty(m_EditingMaterial,m_MaterialDirty);}
                 ImGui::CloseCurrentPopup();}
             ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();ImGui::EndPopup();

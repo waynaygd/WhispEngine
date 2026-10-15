@@ -112,6 +112,11 @@ public:
     std::string CreatePrefabAsset(Application&,const std::string& directory);
     bool RenameMaterialAsset(Application&,const std::string&,const std::string&,bool confirmed,std::string* error=nullptr);
     bool DeleteMaterialAsset(Application&,const std::string&,bool confirmed,std::string* error=nullptr);
+    bool RenameAssetFile(Application&,const std::string&,const std::string& name,bool confirmed,std::string* error=nullptr);
+    bool DeleteAssetFile(Application&,const std::string&,bool confirmed,std::string* error=nullptr);
+    std::vector<std::string> AssetFileBlockers(Application&,const std::string&)const;
+    const std::string& SelectedAsset()const{return m_SelectedAsset;}
+    void SelectAsset(const std::string& key,const std::string& kind){m_SelectedAsset=key;m_SelectedAssetKind=kind;}
     bool SetProperty(Application&,ecs::Entity,ecs::ComponentTypeId,const std::string&,const ecs::PropertyValue&,bool transactional=true);
     void BeginSceneTransaction(Application&,const std::string& label="Scene settings");
     std::size_t UndoCount()const{return m_UndoStack.size();}
@@ -181,6 +186,9 @@ private:
     std::string m_AssetPreviewKey,m_AssetMetadataKey,m_AssetMetadata;
     std::uint64_t m_AssetPreviewVersion=0,m_AssetMetadataVersion=0;
     void DrawAssetBrowser(Application& app);
+    bool AssetBrowserOwnsKeyboard()const;
+    void BeginAssetFileAction(Application&,int,const std::string&);
+    void InvalidateAssetFileUi(Application&,const std::string&,const std::string& replacement);
     void DrawImportDialogs(Application& app);
     void DrawMaterialEditor(Application& app);
     void DrawLightGizmos(Application&,IRenderAdapter*,const ImVec2&,const ImVec2&);
@@ -226,6 +234,11 @@ private:
     bool m_AssetGrid=false,m_AssetActionRequested=false;
     int m_AssetAction=0,m_ModelImportMode=0;
     std::string m_AssetActionSource,m_AssetActionKey="materials/new.material.json";
+    bool m_AssetActionFocus=false;
+    std::filesystem::path m_AssetActionPath;
+    std::filesystem::file_time_type m_AssetActionTime{};
+    std::uintmax_t m_AssetActionSize=0;
+    std::vector<std::string> m_AssetActionBlockers;
     std::string m_AssetDirectory;
     bool AssetReferenced(Application&,const std::string&)const;
     std::string m_HierarchyFilter,m_AssetFilter,m_ConsoleFilter,m_RenameBuffer,m_SceneDialogKey="scenes/new_scene.json",m_UnsavedSaveKey="scenes/untitled.json";

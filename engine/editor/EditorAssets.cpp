@@ -11,6 +11,7 @@
 #include <fstream>
 #include "../resources/ResourceManager.h"
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <misc/cpp/imgui_stdlib.h>
 #include <set>
 #include <cstring>
@@ -20,7 +21,7 @@ namespace editor {
 bool EditorLayer::OpenMaterial(Application& app,const std::string& key){
     m_ShowMaterialEditor=m_FocusMaterial=true;
     if(m_MaterialDirty&&key!=m_EditingMaterial){m_MaterialError="Save or Revert the current material before switching assets";return false;}
-    m_EditingMaterial=key;m_SelectedAsset=key;m_SelectedAssetKind="Material";if(auto* r=app.GetResourceManager())r->LoadAsync<MaterialResource>(key);return true;
+    m_EditingMaterial=key;m_SelectedAsset=key;m_SelectedAssetKind="Material";if(auto* r=app.GetResourceManager())r->LoadAsync<MaterialResource>(std::filesystem::u8path(key));return true;
 }
 bool EditorLayer::AssignAsset(Application& app,ecs::Entity e,ecs::AssetKind kind,const std::string& key){
     if(!ecs::ComponentRegistry::ValidateAssetKey(key,kind,&m_EditorError))return false;
@@ -47,15 +48,77 @@ bool EditorLayer::CreateMaterialAsset(Application& app,const std::string& key,st
 }
 bool EditorLayer::RenameMaterialAsset(Application& app,const std::string& from,const std::string& to,bool confirmed,std::string* error){
     if(!confirmed||app.IsEditorPlayMode()||m_MaterialDirty||AssetReferenced(app,from)){if(error)*error="Confirm action in Edit mode; asset must have no scene/history references or unsaved edits";return false;}
-    const bool ok=m_AssetCatalog.RenameMaterial(from,to,error);if(ok)m_AssetListsDirty=true;return ok;
+    const bool ok=m_AssetCatalog.RenameMaterial(from,to,error);if(ok)InvalidateAssetFileUi(app,from,to);return ok;
 }
 bool EditorLayer::DeleteMaterialAsset(Application& app,const std::string& key,bool confirmed,std::string* error){
     if(!confirmed||app.IsEditorPlayMode()||m_MaterialDirty||AssetReferenced(app,key)){if(error)*error="Confirm action in Edit mode; asset must have no scene/history references or unsaved edits";return false;}
-    const bool ok=m_AssetCatalog.DeleteMaterial(key,error);if(ok)m_AssetListsDirty=true;return ok;
+    const bool ok=m_AssetCatalog.DeleteMaterial(key,error);if(ok)InvalidateAssetFileUi(app,key,{});return ok;
+}
+bool EditorLayer::AssetBrowserOwnsKeyboard()const{
+    if(!ImGui::GetCurrentContext())return false;
+    for(auto* window=GImGui->NavWindow;window;window=window->ParentWindow)
+        if(std::strcmp(window->Name,"Asset Browser")==0)return true;
+    return false;
+}
+std::vector<std::string> EditorLayer::AssetFileBlockers(Application& app,const std::string& key)const{
+    std::vector<std::string> reasons;
+    if(app.IsEditorPlayMode())reasons.push_back("Stop Play before modifying asset files");
+    if(m_MaterialDirty)reasons.push_back("Save or Revert unsaved material edits first");
+    try{(void)AssetCatalog::EditablePath(key);}catch(const std::exception& e){reasons.push_back(e.what());return reasons;}
+    try{
+        if(AssetReferenced(app,key)){
+            reasons.push_back("Current scene, Scene Settings or Undo/Redo history references this asset");
+            auto& world=app.GetEditorWorld();
+            for(auto e:world.Entities()){
+                auto components=ecs::ComponentRegistry::Builtins().Capture(world,e);
+                for(const auto& [component,value]:components.items())if(AssetCatalog::ContainsReference(value,key)){
+                    auto* tag=world.GetComponent<ecs::TagComponent>(e);
+                    reasons.push_back("Entity "+(tag?tag->name:std::to_string(e.index))+" / "+component);
+                }
+            }
+        }
+    }catch(const std::exception& e){reasons.push_back("Scene reference audit incomplete: "+std::string(e.what()));}
+    if(AssetCatalog::ContainsReference(m_VisualSettings.cubemap,key))reasons.push_back("Editor background preferences reference this environment");
+    try{auto disk=AssetCatalog::Dependencies(key);reasons.insert(reasons.end(),disk.begin(),disk.end());}catch(const std::exception& e){reasons.push_back("Dependency audit incomplete: "+std::string(e.what()));}return reasons;
+}
+void EditorLayer::InvalidateAssetFileUi(Application& app,const std::string& old,const std::string& replacement){
+    ReleaseAssetPreview(app.GetRenderAdapter());m_AssetMetadataKey.clear();m_AssetMetadata.clear();m_AssetMetadataVersion=0;
+    if(auto* resources=app.GetResourceManager()){
+        const auto path=std::filesystem::u8path(old);
+        resources->Unload<MaterialResource>(path);resources->Unload<TextureResource>(path);resources->Unload<EnvironmentResource>(path);
+    }
+    const bool editing=m_EditingMaterial==old;if(editing){m_EditingMaterial.clear();m_MaterialError.clear();}
+    m_SelectedAsset=replacement;if(replacement.empty())m_SelectedAssetKind.clear();
+    else {NavigateAssetFolder(AssetPaths::ToUtf8String(std::filesystem::u8path(replacement).parent_path()));m_AssetFilter.clear();m_AssetKindFilter=0;}
+    if(editing&&!replacement.empty())OpenMaterial(app,replacement);
+    m_AssetListsDirty=true;
+}
+bool EditorLayer::RenameAssetFile(Application& app,const std::string& key,const std::string& name,bool confirmed,std::string* error){
+    try{
+        if(!confirmed)throw std::runtime_error("Confirm Rename first");
+        const auto reasons=AssetFileBlockers(app,key);if(!reasons.empty()){std::string message="Rename blocked:";for(auto& s:reasons)message+="\n- "+s;throw std::runtime_error(message);}
+        auto to=AssetCatalog::RenameDestination(key,name);std::string message;
+        if(!m_AssetCatalog.RenameAssetFile(key,to,&message))throw std::runtime_error(message);
+        InvalidateAssetFileUi(app,key,to);if(error)error->clear();return true;
+    }catch(const std::exception& e){if(error)*error=e.what();return false;}
+}
+bool EditorLayer::DeleteAssetFile(Application& app,const std::string& key,bool confirmed,std::string* error){
+    try{
+        if(!confirmed)throw std::runtime_error("Confirm Delete first");
+        const auto reasons=AssetFileBlockers(app,key);if(!reasons.empty()){std::string message="Delete blocked:";for(auto& s:reasons)message+="\n- "+s;throw std::runtime_error(message);}
+        std::string message;if(!m_AssetCatalog.DeleteAssetFile(key,&message))throw std::runtime_error(message);
+        InvalidateAssetFileUi(app,key,{});if(error)error->clear();return true;
+    }catch(const std::exception& e){if(error)*error=e.what();return false;}
+}
+void EditorLayer::BeginAssetFileAction(Application& app,int action,const std::string& key){
+    m_AssetAction=action;m_AssetActionSource=key;m_AssetActionRequested=true;m_AssetActionFocus=true;m_EditorError.clear();
+    auto filename=AssetPaths::ToUtf8String(std::filesystem::u8path(key).filename());m_AssetActionKey=filename.substr(0,filename.size()-AssetCatalog::FileSuffix(key).size());
+    m_AssetActionBlockers=AssetFileBlockers(app,key);m_AssetActionPath.clear();
+    try{m_AssetActionPath=AssetImport::SafeTarget(AssetPaths::ResolveAssetRoot(),key);const auto checked=AssetCatalog::EditablePath(key);m_AssetActionTime=std::filesystem::last_write_time(checked);m_AssetActionSize=std::filesystem::file_size(checked);}catch(const std::exception& e){m_EditorError=e.what();}
 }
 namespace {
 template<class T>const char* LoadState(ResourceManager* resources,const std::string& key){
-    auto asset=resources?resources->Get<T>(key):nullptr;if(!asset)return "Not requested";if(asset->IsLoading())return "Loading";if(asset->IsFailed())return "Failed";return "Ready";
+    auto asset=resources?resources->Get<T>(std::filesystem::u8path(key)):nullptr;if(!asset)return "Not requested";if(asset->IsLoading())return "Loading";if(asset->IsFailed())return "Failed";return "Ready";
 }
 const char* AssetLoadState(ResourceManager* resources,ecs::AssetKind kind,const std::string& key){
     switch(kind){case ecs::AssetKind::Mesh:return LoadState<MeshResource>(resources,key);case ecs::AssetKind::Texture:return LoadState<TextureResource>(resources,key);case ecs::AssetKind::Material:return LoadState<MaterialResource>(resources,key);case ecs::AssetKind::Shader:return LoadState<ShaderResource>(resources,key);case ecs::AssetKind::Environment:return LoadState<EnvironmentResource>(resources,key);default:return "Indexed";}
@@ -177,9 +240,15 @@ void EditorLayer::DrawAssetBrowser(Application& app){
                 if(type.kind==ecs::AssetKind::Mesh&&ImGui::MenuItem("Create model entity"))CreateModelEntity(app,key,name);
                 if(type.kind==ecs::AssetKind::Material&&ImGui::MenuItem("Open Material Editor"))openMaterial(key);
                 if(type.kind!=ecs::AssetKind::None&&ImGui::MenuItem("Assign to selection"))AssignAsset(app,m_SelectedEntity,type.kind,key);
-                ImGui::BeginDisabled(app.IsEditorPlayMode()||m_MaterialDirty||!m_AssetCatalog.CreatedHere(key));
-                if(ImGui::MenuItem("Rename..."))action(2,key);if(ImGui::MenuItem("Delete..."))action(3,key);ImGui::EndDisabled();
-                ImGui::TextDisabled("Rename/delete: session-created, unreferenced materials only.");ImGui::EndPopup();
+                std::string blocked;
+                if(app.IsEditorPlayMode())blocked="Stop Play before modifying asset files";
+                else if(m_MaterialDirty)blocked="Save or Revert material edits first";
+                else try{(void)AssetCatalog::EditablePath(key);}catch(const std::exception& e){blocked=e.what();}
+                if(ImGui::MenuItem("Rename...","F2",false,blocked.empty())){SelectAsset(key,type.name);BeginAssetFileAction(app,2,key);}
+                if(!blocked.empty()&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("%s",blocked.c_str());
+                if(ImGui::MenuItem("Delete...","Delete",false,blocked.empty())){SelectAsset(key,type.name);BeginAssetFileAction(app,3,key);}
+                if(!blocked.empty()&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("%s",blocked.c_str());
+                ImGui::EndPopup();
             }ImGui::PopID();
         }}ImGui::EndTable();
     }
@@ -191,30 +260,70 @@ void EditorLayer::DrawAssetBrowser(Application& app){
     if(m_SelectedAssetKind=="Material"&&!m_SelectedAsset.empty()&&ImGui::Button("Open selected material"))openMaterial(m_SelectedAsset);
     if(resources&&!m_SelectedAsset.empty()){
         if(ImGui::Button("Load preview metadata")){
-            if(m_SelectedAssetKind=="Material")resources->LoadAsync<MaterialResource>(m_SelectedAsset);else if(m_SelectedAssetKind=="Mesh")resources->LoadAsync<MeshResource>(m_SelectedAsset);else if(m_SelectedAssetKind=="Texture")resources->LoadAsync<TextureResource>(m_SelectedAsset);else if(m_SelectedAssetKind=="Environment")resources->LoadAsync<EnvironmentResource>(m_SelectedAsset);
+            if(m_SelectedAssetKind=="Material")resources->LoadAsync<MaterialResource>(std::filesystem::u8path(m_SelectedAsset));else if(m_SelectedAssetKind=="Mesh")resources->LoadAsync<MeshResource>(std::filesystem::u8path(m_SelectedAsset));else if(m_SelectedAssetKind=="Texture")resources->LoadAsync<TextureResource>(std::filesystem::u8path(m_SelectedAsset));else if(m_SelectedAssetKind=="Environment")resources->LoadAsync<EnvironmentResource>(std::filesystem::u8path(m_SelectedAsset));
         }
-        if(m_SelectedAssetKind=="Material"){auto r=resources->Get<MaterialResource>(m_SelectedAsset);if(r&&r->IsLoaded()){const auto& d=r->GetData();ImGui::Text("%s / Metallic %.2f / Roughness %.2f",d.shadingModel==ShadingModel::PBR?"PBR":"Lambert",d.metallic,d.roughness);}}
-        if(m_SelectedAssetKind=="Mesh"){auto r=resources->Get<MeshResource>(m_SelectedAsset);if(r&&r->IsLoaded()){const auto& d=r->GetData().meshData;ImGui::Text("%zu vertices / %zu indices / %zu material ranges",d.vertices.size(),d.indices.size(),d.submeshes.size());}}
-        if(m_SelectedAssetKind=="Texture"){auto r=resources->Get<TextureResource>(m_SelectedAsset);if(r&&r->IsLoaded()){const auto& d=r->GetData().textureData;ImGui::Text("%d x %d / RGBA / %.2f MiB decoded",d.width,d.height,d.pixels.size()/1048576.);}}
-        if(m_SelectedAssetKind=="Environment"){auto r=resources->Get<EnvironmentResource>(m_SelectedAsset);if(r&&r->IsLoaded()){const auto& d=r->GetData();ImGui::Text("HDR %u x %u / sky %u / IBL %u",d.width,d.height,d.sky.resolution,d.environment.resolution);}}
+        if(m_SelectedAssetKind=="Material"){auto r=resources->Get<MaterialResource>(std::filesystem::u8path(m_SelectedAsset));if(r&&r->IsLoaded()){const auto& d=r->GetData();ImGui::Text("%s / Metallic %.2f / Roughness %.2f",d.shadingModel==ShadingModel::PBR?"PBR":"Lambert",d.metallic,d.roughness);}}
+        if(m_SelectedAssetKind=="Mesh"){auto r=resources->Get<MeshResource>(std::filesystem::u8path(m_SelectedAsset));if(r&&r->IsLoaded()){const auto& d=r->GetData().meshData;ImGui::Text("%zu vertices / %zu indices / %zu material ranges",d.vertices.size(),d.indices.size(),d.submeshes.size());}}
+        if(m_SelectedAssetKind=="Texture"){auto r=resources->Get<TextureResource>(std::filesystem::u8path(m_SelectedAsset));if(r&&r->IsLoaded()){const auto& d=r->GetData().textureData;ImGui::Text("%d x %d / RGBA / %.2f MiB decoded",d.width,d.height,d.pixels.size()/1048576.);}}
+        if(m_SelectedAssetKind=="Environment"){auto r=resources->Get<EnvironmentResource>(std::filesystem::u8path(m_SelectedAsset));if(r&&r->IsLoaded()){const auto& d=r->GetData();ImGui::Text("HDR %u x %u / sky %u / IBL %u",d.width,d.height,d.sky.resolution,d.environment.resolution);}}
     }
     DrawAssetPreview(app);
     ImGui::TextDisabled("Type previews; content is indexed on Refresh, never every frame.");
     if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::EndChild();
-    if(m_AssetActionRequested){ImGui::OpenPopup("Material Asset Action");m_AssetActionRequested=false;}
+    const auto& io=ImGui::GetIO();
+    if(AssetBrowserOwnsKeyboard()&&!app.IsEditorPlayMode()&&!m_SelectedAsset.empty()&&!io.WantTextInput&&!ImGui::IsAnyItemActive()&&!ImGui::IsDragDropActive()&&!io.KeyCtrl&&!io.KeyAlt&&!io.KeyShift&&!ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel)){
+        if(ImGui::IsKeyPressed(ImGuiKey_F2,false))BeginAssetFileAction(app,2,m_SelectedAsset);
+        else if(ImGui::IsKeyPressed(ImGuiKey_Delete,false))BeginAssetFileAction(app,3,m_SelectedAsset);
+    }
+    if(m_AssetActionRequested){ImGui::OpenPopup(m_AssetAction==1?"Material Asset Action":m_AssetAction==2?"Rename Asset":"Delete Asset?");m_AssetActionRequested=false;}
     if(ImGui::BeginPopupModal("Material Asset Action",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
-        ImGui::TextUnformatted(m_AssetAction==1?"Create a PBR material (schema v4)":m_AssetAction==2?"Rename session-created material":"Delete session-created material permanently");
-        if(m_AssetAction!=3)ImGui::InputText("Asset key / directory",&m_AssetActionKey);else ImGui::TextWrapped("%s",m_AssetActionSource.c_str());
-        ImGui::TextWrapped("References in scene, Undo/Redo and saved project JSON block rename/delete. Reassign and save them first. Asset file operations are outside scene Undo.");
+        ImGui::TextUnformatted("Create a PBR material (schema v4)");
+        ImGui::InputText("Asset key / directory",&m_AssetActionKey);
         ImGui::BeginDisabled(app.IsEditorPlayMode()||m_MaterialDirty);
-        if(ImGui::Button(m_AssetAction==1?"Create":m_AssetAction==2?"Confirm Rename":"Confirm Delete")){
-            bool ok=false;
-            if(m_AssetAction!=1&&AssetReferenced(app,m_AssetActionSource))m_EditorError="Asset is referenced by this scene or its Undo/Redo history";
-            else if(m_AssetAction==1)ok=CreateMaterialAsset(app,m_AssetActionKey,&m_EditorError);
-            else if(m_AssetAction==2)ok=RenameMaterialAsset(app,m_AssetActionSource,m_AssetActionKey,true,&m_EditorError);
-            else ok=DeleteMaterialAsset(app,m_AssetActionSource,true,&m_EditorError);
-            if(ok){if(resources&&m_AssetAction!=1)resources->Unload<MaterialResource>(m_AssetActionSource);if(m_AssetAction!=3)openMaterial(m_AssetActionKey);else{m_SelectedAsset.clear();if(m_EditingMaterial==m_AssetActionSource)m_EditingMaterial.clear();}m_AssetListsDirty=true;ImGui::CloseCurrentPopup();}
+        if(ImGui::Button("Create")){
+            if(CreateMaterialAsset(app,m_AssetActionKey,&m_EditorError)){openMaterial(m_AssetActionKey);m_AssetListsDirty=true;ImGui::CloseCurrentPopup();}
         }ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::EndPopup();
+    }
+    const char* fileDialog=m_AssetAction==2?"Rename Asset":"Delete Asset?";
+    if(ImGui::BeginPopupModal(fileDialog,nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
+        const bool rename=m_AssetAction==2;
+        const auto filename=AssetPaths::ToUtf8String(std::filesystem::u8path(m_AssetActionSource).filename());
+        if(!rename)ImGui::TextWrapped("Are you sure you want to delete \"%s\"?",filename.c_str());
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX()+520*ImGui::GetStyle().FontScaleDpi);
+        ImGui::TextWrapped("File: %s",AssetPaths::ToUtf8String(m_AssetActionPath).c_str());
+        if(std::filesystem::weakly_canonical(AssetPaths::ResolveAssetRoot())!=std::filesystem::weakly_canonical(AssetImport::ProjectRoot()))
+            ImGui::TextWrapped("Active staged copy only. The next build may restore the original from source assets. Source files are not changed.");
+        ImGui::TextWrapped("Referenced assets are blocked. File changes are outside scene Undo.");
+        if(!m_AssetActionBlockers.empty()){
+            ImGui::BeginChild("Dependencies",ImVec2(520*ImGui::GetStyle().FontScaleDpi,120*ImGui::GetStyle().FontScaleDpi),ImGuiChildFlags_Borders);
+            for(const auto& reason:m_AssetActionBlockers)ImGui::TextWrapped("Blocked: %s",reason.c_str());
+            ImGui::EndChild();
+        }
+        bool enter=false;
+        if(rename){
+            if(m_AssetActionFocus)ImGui::SetKeyboardFocusHere();
+            ImGui::SetNextItemWidth(300*ImGui::GetStyle().FontScaleDpi);
+            enter=ImGui::InputText("Name",&m_AssetActionKey,ImGuiInputTextFlags_AutoSelectAll|ImGuiInputTextFlags_EnterReturnsTrue);
+            ImGui::SameLine();ImGui::TextUnformatted(AssetCatalog::FileSuffix(m_AssetActionSource).c_str());
+        }
+        m_AssetActionFocus=false;
+        ImGui::BeginDisabled(app.IsEditorPlayMode()||!m_AssetActionBlockers.empty());
+        const bool clicked=ImGui::Button(rename?"Rename":"Delete");
+        if((clicked||enter)&&!app.IsEditorPlayMode()&&m_AssetActionBlockers.empty()){
+            bool ok=false;
+            try{
+                const auto path=AssetCatalog::EditablePath(m_AssetActionSource);
+                if(path!=m_AssetActionPath||std::filesystem::last_write_time(path)!=m_AssetActionTime||std::filesystem::file_size(path)!=m_AssetActionSize)
+                    throw std::runtime_error("File changed since this dialog opened. Cancel and review it again.");
+                ok=rename?RenameAssetFile(app,m_AssetActionSource,m_AssetActionKey,true,&m_EditorError):DeleteAssetFile(app,m_AssetActionSource,true,&m_EditorError);
+            }catch(const std::exception& e){m_EditorError=e.what();}
+            if(ok)ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndDisabled();ImGui::SameLine();
+        if(ImGui::Button("Cancel")||ImGui::IsKeyPressed(ImGuiKey_Escape,false))ImGui::CloseCurrentPopup();
+        if(!rename)ImGui::SetItemDefaultFocus();
+        if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());
+        ImGui::PopTextWrapPos();ImGui::EndPopup();
     }
     DrawImportDialogs(app);
     ImGui::End();
