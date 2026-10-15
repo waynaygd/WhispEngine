@@ -860,7 +860,7 @@ void Application::UpdateCameraController(float dt)
         ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse;
     const bool mouseOverViewport = m_EditorLayer.IsPointInsideViewport(cursorX, cursorY);
     const auto inputOwner=m_EditorLayer.InputOwnership(glfwGetMouseButton(window,GLFW_MOUSE_BUTTON_RIGHT)==GLFW_PRESS,glfwGetMouseButton(window,GLFW_MOUSE_BUTTON_LEFT)==GLFW_PRESS,m_Camera.controlsActive,IsEditorPlayMode());
-    const bool editorBlocksMouseLook = (!m_Camera.controlsActive&&inputOwner!=editor::InputOwner::Camera) || m_EditorLayer.BlocksCamera() || glfwGetMouseButton(window,GLFW_MOUSE_BUTTON_LEFT)==GLFW_PRESS ||
+    const bool editorBlocksMouseLook = (!m_Camera.controlsActive&&inputOwner!=editor::InputOwner::Camera) || m_EditorLayer.BlocksCamera() || (!m_Camera.controlsActive&&glfwGetMouseButton(window,GLFW_MOUSE_BUTTON_LEFT)==GLFW_PRESS) ||
         (!m_Camera.controlsActive&&(!mouseOverViewport||!m_EditorLayer.IsViewportHovered())) ||
         (editorWantsMouse&&!mouseOverViewport&&!m_Camera.controlsActive);
     const bool rightMouseDown =
@@ -1568,6 +1568,14 @@ int Application::Run()
                 if (!wc.window || wc.window->ShouldClose()) continue;
 
                 wc.renderer->BeginFrame();
+                // Route mouse ownership before the GLFW/ImGui NewFrame pair.
+                // Keep the guard through ImGui::Render/EndFrame as well.
+                bool mouseButtonsDown=false;double mouseX=0,mouseY=0;
+                if(auto* glfwWindow=dynamic_cast<GlfwWindow*>(wc.window.get())){
+                    auto* native=glfwWindow->GetGlfwHandle();glfwGetCursorPos(native,&mouseX,&mouseY);
+                    for(int b=0;b<=GLFW_MOUSE_BUTTON_LAST;++b)mouseButtonsDown|=glfwGetMouseButton(native,b)==GLFW_PRESS;
+                }
+                auto cameraMouseFrame=m_EditorLayer.RouteCameraMouse(m_Camera.controlsActive,mouseButtonsDown,ImVec2(float(mouseX),float(mouseY)));
                 if (wc.editorUiAvailable)
                 {
                     wc.renderer->BeginEditorUiFrame();

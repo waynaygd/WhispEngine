@@ -28,12 +28,23 @@
 class Application;
 class IRenderAdapter;
 struct ImVec2;
+struct ImGuiContext;
 
 namespace editor
 {
 class EditorLayer
 {
 public:
+    class CameraMouseFrame {
+        ImGuiContext* context=nullptr;
+        bool restoreMouse=false;
+    public:
+        explicit CameraMouseFrame(bool suppress);
+        ~CameraMouseFrame();
+        CameraMouseFrame(const CameraMouseFrame&)=delete;
+        CameraMouseFrame& operator=(const CameraMouseFrame&)=delete;
+    };
+    CameraMouseFrame RouteCameraMouse(bool captured,bool buttonsDown,const ImVec2& pointer);
     struct Statistics {double uiMs=0,hierarchyMs=0,inspectorMs=0,assetBrowserMs=0,lightGizmoMs=0;};
     const Statistics& GetStatistics()const{return m_Statistics;}
     EditorVisualSettings& GetVisualSettings(){return m_VisualSettings;}
@@ -231,6 +242,7 @@ private:
     bool m_ShowDemoWindow = false;
     bool m_ShowSceneSettings=true,m_ShowConsole=true,m_ShowGrid=true,m_Snapping=false;
     bool m_ResetLayout=true,m_FixedDiagnosticLayout=false,m_ViewportFocused=false,m_ToolActive=false,m_InputTextActive=false,m_ModalActive=false;
+    bool m_CameraMouseDrain=false,m_CameraMouseWasSuppressed=false;
     float m_SnapTranslation=1,m_SnapRotation=15,m_SnapScale=.1f;
     Statistics m_Statistics;
     AssetCatalog m_AssetCatalog;

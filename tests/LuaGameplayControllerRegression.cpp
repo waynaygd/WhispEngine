@@ -39,6 +39,20 @@ static void InputFrames(){
  Host h;Check(h.input.BindNamedAction("Jump","Space")&&h.input.BindNamedAction("Click","MouseLeft"),"named keys and buttons");Check(!h.input.BindNamedAction("Bad","unknown")&&!h.input.BindNamedAction("","W"),"invalid actions rejected");
  h.Sample();h.keys.insert(GLFW_KEY_SPACE);h.buttons.insert(GLFW_MOUSE_BUTTON_LEFT);h.mx=7;h.my=-3;h.Sample();Check(h.input.FrameDown("Jump")&&h.input.FramePressed("Jump")&&h.input.FramePressed("Click"),"frame down/press snapshots");Near(h.input.MouseDelta().x,7,0,"relative mouse X");h.Sample();Check(!h.input.FramePressed("Jump"),"no repeated physical edge");h.keys.clear();h.Sample();Check(h.input.FrameReleased("Jump"),"release snapshot");h.input.ResetMouseDelta();h.mx=1000;h.Sample();Near(h.input.MouseDelta().x,0,0,"capture transition suppresses cursor warp");
 }
+static void CameraMouseRouting(){
+ auto* context=ImGui::CreateContext();
+ {
+  editor::EditorLayer ui;auto& io=ImGui::GetIO();const auto flags=io.ConfigFlags;
+  io.AddMousePosEvent(10,20);io.AddMouseButtonEvent(0,true);io.AddMouseWheelEvent(0,1);io.AddKeyEvent(ImGuiKey_W,true);
+  {auto frame=ui.RouteCameraMouse(true,true,ImVec2(30,40));Check((io.ConfigFlags&ImGuiConfigFlags_NoMouse)&&!io.MouseDown[0],"camera frame suppresses UI mouse");Check(context->InputEventsQueue.Size==1&&context->InputEventsQueue[0].Type==ImGuiInputEventType_Key,"camera filters only mouse events, preserves keyboard");}
+  Check(io.ConfigFlags==flags,"camera scope restores original ImGui flags");
+  {auto frame=ui.RouteCameraMouse(false,true,ImVec2(30,40));Check(io.ConfigFlags&ImGuiConfigFlags_NoMouse,"secondary held button remains owned after camera release");}
+  {auto frame=ui.RouteCameraMouse(false,false,ImVec2(30,40));Check(io.ConfigFlags&ImGuiConfigFlags_NoMouse,"release frame is drained");}
+  {auto frame=ui.RouteCameraMouse(false,false,ImVec2(123,456));Check(!(io.ConfigFlags&ImGuiConfigFlags_NoMouse),"new gestures return to UI");auto& event=context->InputEventsQueue.back();Check(event.Type==ImGuiInputEventType_MousePos&&event.MousePos.PosX==123&&event.MousePos.PosY==456,"UI resumes at restored native pointer without virtual warp");}
+  io.ConfigFlags|=ImGuiConfigFlags_NoMouse;{auto frame=ui.RouteCameraMouse(true,true,ImVec2());}Check(io.ConfigFlags&ImGuiConfigFlags_NoMouse,"preexisting mouse configuration preserved");
+ }
+ ImGui::DestroyContext(context);
+}
 static void Fps(){
  World w;Host host;scripting::LuaRuntime lua;EventBus events;PhysicsSystem physics(&events,9.81f,.985f,3,.05f,.85f,12);
  auto floor=w.CreateEntity();w.AddComponent<TransformComponent>(floor).position={0,-.025f,0};w.AddComponent<ColliderComponent>(floor).halfExtents={64,.025f,64};w.AddComponent<RigidbodyComponent>(floor).isStatic=true;
@@ -81,11 +95,35 @@ static void Native(Assets& assets){
  Application app;Check(app.Initialize(),"native initialization");glfwHideWindow(dynamic_cast<GlfwWindow*>(app.GetWindow())->GetGlfwHandle());SyntheticEditorInput input;app.NewScene();auto& ui=app.GetEditorLayer();ui.SetFixedDiagnosticLayout(true);auto start=ui.CreatePlayerStart(app);app.GetWorld().GetComponent<TransformComponent>(start)->position={0,2,5};app.GetWorld().GetComponent<PlayerStartComponent>(start)->controllerScript=path;
  auto floor=ui.CreatePrimitive(app,"plane");app.GetWorld().GetComponent<TransformComponent>(floor)->scale={64,1,64};auto& c=app.GetWorld().AddComponent<ColliderComponent>(floor);c.halfExtents={32,.025f,32};c.autoFitFromMesh=false;app.GetWorld().AddComponent<RigidbodyComponent>(floor).isStatic=true;
  auto before=SceneSerializer::CaptureWorld(app.GetWorld(),app.GetSceneSettings());app.SetEditorPlayMode(true);Entity player;for(auto e:app.GetWorld().Entities())if(app.GetWorld().HasComponent<PlayerComponent>(e))player=e;Check(app.GetWorld().IsAlive(player),"native spawn with selected script");app.GetWorld().GetComponent<LuaScriptComponent>(player)->inputEnabled=false;
- app.SetFrameLimit(240);Check(app.Run()==0,"native Lua controller scene");auto* t=app.GetWorld().GetComponent<TransformComponent>(player);Check(t->position.x>1&&std::abs(t->position.y-.875f)<.004f,"real Lua command/physics landing");auto pose=app.GetRenderInterpolation().Resolve(player,*t);Near(app.GetCameraPosition().x,pose.position.x,1e-5f,"camera follows interpolated character");
+ app.SetFrameLimit(480);Check(app.Run()==0,"native Lua controller scene");auto* t=app.GetWorld().GetComponent<TransformComponent>(player);Check(t->position.x>1&&std::abs(t->position.y-.875f)<.004f,"real Lua command/physics landing");auto pose=app.GetRenderInterpolation().Resolve(player,*t);Near(app.GetCameraPosition().x,pose.position.x,1e-5f,"camera follows interpolated character");
  app.SetEditorPaused(true);auto paused=t->position;app.SetFrameLimit(5);app.Run();Near(t->position.x,paused.x,0,"Pause stops physics");app.SetEditorPlayMode(false);Check(SceneSerializer::CaptureWorld(app.GetWorld(),app.GetSceneSettings())==before&&app.GetLuaRuntime().InstanceCount()==0,"Stop preserves editor and destroys Lua runtime instances");Check(dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter())->GetValidationErrorCount()==0,"DX12 validation zero");
 }
 // Messages target this test's own HWND, exercising GLFW polling and Application's
 // frame order rather than replacing Lua's host with a fake input service.
+static void NativeEditorMouseInput(){
+ Application app;Check(app.Initialize(),"editor mouse initialization");SyntheticEditorInput input;
+ auto* window=dynamic_cast<GlfwWindow*>(app.GetWindow())->GetGlfwHandle();auto hwnd=glfwGetWin32Window(window);
+ glfwShowWindow(window);glfwFocusWindow(window);SetActiveWindow(hwnd);SetFocus(hwnd);glfwPollEvents();
+ app.NewScene();auto& ui=app.GetEditorLayer();ui.SetFixedDiagnosticLayout(true);
+ auto frame=[&](unsigned n=4){app.SetFrameLimit(n);Check(app.Run()==0,"editor mouse frames");};
+ frame();auto bounds=ui.GetViewportBounds();const float x=(bounds[0]+bounds[2])*.5f,y=(bounds[1]+bounds[3])*.5f;
+ auto button=[&](int b,bool down){SendMessageW(hwnd,b==1?(down?WM_RBUTTONDOWN:WM_RBUTTONUP):(down?WM_LBUTTONDOWN:WM_LBUTTONUP),down?(b==1?MK_RBUTTON:MK_LBUTTON):0,MAKELPARAM(int(x),int(y)));SyntheticEditorInput::Button(b,down);};
+ auto point=[&]{SetForegroundWindow(hwnd);SetActiveWindow(hwnd);SetFocus(hwnd);glfwSetCursorPos(window,x,y);SyntheticEditorInput::Position(x,y);ImGui::FocusWindow(ImGui::FindWindowByName("Viewport"));};
+ button(0,false);button(1,false);point();frame();point();button(1,true);frame(1);
+ Check(app.IsCameraControlActive(),"Edit RMB captures free-fly");
+ auto* inspector=ImGui::FindWindowByName("Inspector");Check(inspector!=nullptr,"editor mouse Inspector exists");
+ SyntheticEditorInput::Position(inspector->WorkRect.Min.x+20,inspector->WorkRect.Min.y+30);frame();
+ Check(ImGui::GetCurrentContext()->HoveredWindow==nullptr&&ImGui::GetCurrentContext()->HoveredId==0,"captured virtual cursor cannot hover other UI windows");
+ button(0,true);frame();Check(app.IsCameraControlActive()&&!ImGui::IsAnyItemActive()&&!ImGui::GetIO().MouseDown[0],"secondary click stays camera owned and cannot activate UI");
+ button(1,false);frame();Check(!app.IsCameraControlActive()&&glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_NORMAL,"RMB release ends camera capture");
+ Check(!ImGui::IsAnyItemActive()&&!ImGui::GetIO().MouseDown[0],"held secondary button cannot click through after release");
+ button(0,false);frame();point();frame();Check(ui.IsViewportHovered(),"normal UI hover returns after all buttons released");
+ Check(!(ImGui::GetIO().ConfigFlags&ImGuiConfigFlags_NoMouse),"capture does not leave global ImGui mouse disabled");
+ button(1,true);frame();Check(app.IsCameraControlActive(),"RMB can capture again");
+ SetActiveWindow(nullptr);SetFocus(nullptr);frame(1);Check(!app.IsCameraControlActive()&&glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_NORMAL,"focus loss safely releases editor capture");
+ button(1,false);SetActiveWindow(hwnd);SetFocus(hwnd);frame();
+ Check(!(ImGui::GetIO().ConfigFlags&ImGuiConfigFlags_NoMouse),"focus recovery restores ImGui mouse configuration");
+}
 static void NativePlayerInput(){
  Application app;Check(app.Initialize(),"input native initialization");SyntheticEditorInput input;
  auto* window=dynamic_cast<GlfwWindow*>(app.GetWindow())->GetGlfwHandle();auto hwnd=glfwGetWin32Window(window);
@@ -134,6 +172,6 @@ static void NativePlayerInput(){
 #endif
 int main(int argc,char** argv){ScopedEditorPreferenceRestore preferences;try{Assets assets;
 #if defined(ENABLE_DX12)
- if(argc>1&&std::string(argv[1])=="--dx12"){Native(assets);NativePlayerInput();}else
+ if(argc>1&&std::string(argv[1])=="--dx12"){Native(assets);NativeEditorMouseInput();NativePlayerInput();}else
 #endif
- {InputFrames();Fps();FixedEdgesAndErrors(assets);}std::cout<<"Lua gameplay controller: "<<checks<<" checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+ {InputFrames();CameraMouseRouting();Fps();FixedEdgesAndErrors(assets);}std::cout<<"Lua gameplay controller: "<<checks<<" checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

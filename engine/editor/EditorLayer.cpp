@@ -416,6 +416,34 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
         ImGui::ShowDemoWindow(&m_ShowDemoWindow);
 }
 
+EditorLayer::CameraMouseFrame::CameraMouseFrame(bool suppress){
+    if(!suppress||!ImGui::GetCurrentContext())return;
+    context=ImGui::GetCurrentContext();auto& io=ImGui::GetIO();
+    restoreMouse=(io.ConfigFlags&ImGuiConfigFlags_NoMouse)==0;
+    // GLFW cursor-disabled coordinates are virtual camera deltas, not UI input.
+    // Remove queued mouse events before NewFrame, preserving keyboard/focus events.
+    for(int i=context->InputEventsQueue.Size-1;i>=0;--i){
+        auto type=context->InputEventsQueue[i].Type;
+        if(type>=ImGuiInputEventType_MousePos&&type<=ImGuiInputEventType_MouseViewport)context->InputEventsQueue.erase(context->InputEventsQueue.Data+i);
+    }
+    io.ClearInputMouse();
+    if(context->ActiveIdSource==ImGuiInputSource_Mouse)ImGui::ClearActiveID();
+    context->MovingWindow=nullptr;
+    // Scoped to this camera-owned frame; suppress backend fallback hover too.
+    io.ConfigFlags|=ImGuiConfigFlags_NoMouse;
+}
+EditorLayer::CameraMouseFrame::~CameraMouseFrame(){
+    if(restoreMouse&&context==ImGui::GetCurrentContext())ImGui::GetIO().ConfigFlags&=~ImGuiConfigFlags_NoMouse;
+}
+EditorLayer::CameraMouseFrame EditorLayer::RouteCameraMouse(bool captured,bool buttonsDown,const ImVec2& pointer){
+    const bool suppress=captured||m_CameraMouseDrain;
+    // Swallow the release frame and any secondary button held across release.
+    m_CameraMouseDrain=captured||(m_CameraMouseDrain&&buttonsDown);
+    if(!suppress&&m_CameraMouseWasSuppressed&&ImGui::GetCurrentContext())ImGui::GetIO().AddMousePosEvent(pointer.x,pointer.y);
+    m_CameraMouseWasSuppressed=suppress;
+    return CameraMouseFrame(suppress);
+}
+
 bool EditorLayer::BlocksGameplayInput()const{
     if(m_ToolActive||m_ModalActive)return true;
     if(!ImGui::GetCurrentContext())return false;
