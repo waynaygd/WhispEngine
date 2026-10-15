@@ -139,8 +139,8 @@ std::string EditorLayer::CreatePrefabAsset(Application& app,const std::string& d
         try{
             if(app.IsEditorPlayMode())throw std::runtime_error("Stop Play before creating assets");
             if(directory!="prefabs"&&!directory.starts_with("prefabs/"))throw std::runtime_error("Choose prefabs or a subfolder");
-            if(!app.GetWorld().IsAlive(m_SelectedEntity))throw std::runtime_error("Select an entity first");
-            auto components=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),m_SelectedEntity);components.erase("SceneIdentity");
+            if(!app.GetWorld().IsAlive(m_Selection.active))throw std::runtime_error("Select an entity first");
+            auto components=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),m_Selection.active);components.erase("SceneIdentity");
             std::string key=directory+"/entity_"+ecs::NewSceneIdentity()+".prefab.json";
             if(!SceneSerializer::WriteAtomic(scripting::SafeAsset(key,".prefab.json"),{{"version",1},{"components",components}},&m_EditorError,false))throw std::runtime_error(m_EditorError);
             m_SelectedAsset=key;m_SelectedAssetKind="Prefab";m_AssetListsDirty=true;NavigateAssetFolder(directory);m_EditorError.clear();return key;
@@ -165,7 +165,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
                 return clicked;
             };
             if(item("Lua Script","scripts"))CreateLuaScriptAsset(app,directory);
-            if(item("Prefab","prefabs",app.GetWorld().IsAlive(m_SelectedEntity)))CreatePrefabAsset(app,directory);
+            if(item("Prefab","prefabs",app.GetWorld().IsAlive(m_Selection.active)))CreatePrefabAsset(app,directory);
             if(item("Material","materials"))action(1,directory+"/new.material.json");
             ImGui::EndMenu();
         }
@@ -239,7 +239,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
                 if(type.name=="Imported Scene"&&ImGui::MenuItem("Instantiate imported scene"))InstantiateImportedScene(app,key);
                 if(type.kind==ecs::AssetKind::Mesh&&ImGui::MenuItem("Create model entity"))CreateModelEntity(app,key,name);
                 if(type.kind==ecs::AssetKind::Material&&ImGui::MenuItem("Open Material Editor"))openMaterial(key);
-                if(type.kind!=ecs::AssetKind::None&&ImGui::MenuItem("Assign to selection"))AssignAsset(app,m_SelectedEntity,type.kind,key);
+                if(type.kind!=ecs::AssetKind::None&&ImGui::MenuItem("Assign to Active Entity"))AssignAsset(app,m_Selection.active,type.kind,key);
                 std::string blocked;
                 if(app.IsEditorPlayMode())blocked="Stop Play before modifying asset files";
                 else if(m_MaterialDirty)blocked="Save or Revert material edits first";
@@ -254,7 +254,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
     }
     if(ImGui::BeginPopupContextWindow("ContentCreate",ImGuiPopupFlags_MouseButtonRight|ImGuiPopupFlags_NoOpenOverItems)){creationMenu(m_AssetDirectory);ImGui::EndPopup();}
     ImGui::Separator();ImGui::TextWrapped("Selected: %s",m_SelectedAsset.empty()?"None":m_SelectedAsset.c_str());
-    if(!m_SelectedAsset.empty())for(auto& type:types)if(type.name==m_SelectedAssetKind){ImGui::Text("%s %s / %s",type.icon.c_str(),type.name.c_str(),AssetLoadState(resources,type.kind,m_SelectedAsset));if(type.kind!=ecs::AssetKind::None&&ImGui::Button("Assign selected to entity"))AssignAsset(app,m_SelectedEntity,type.kind,m_SelectedAsset);}
+    if(!m_SelectedAsset.empty())for(auto& type:types)if(type.name==m_SelectedAssetKind){ImGui::Text("%s %s / %s",type.icon.c_str(),type.name.c_str(),AssetLoadState(resources,type.kind,m_SelectedAsset));if(type.kind!=ecs::AssetKind::None&&ImGui::Button("Assign selected to entity"))AssignAsset(app,m_Selection.active,type.kind,m_SelectedAsset);}
     if(m_SelectedAssetKind=="Mesh"&&!m_SelectedAsset.empty()&&!app.IsEditorPlayMode()&&ImGui::Button("Create Model Entity")){CreateModelEntity(app,m_SelectedAsset,AssetPaths::ToUtf8String(std::filesystem::u8path(m_SelectedAsset).stem()));}
     if(m_SelectedAssetKind=="Imported Scene"&&!m_SelectedAsset.empty()&&!app.IsEditorPlayMode()&&ImGui::Button("Instantiate imported scene"))InstantiateImportedScene(app,m_SelectedAsset);
     if(m_SelectedAssetKind=="Material"&&!m_SelectedAsset.empty()&&ImGui::Button("Open selected material"))openMaterial(m_SelectedAsset);

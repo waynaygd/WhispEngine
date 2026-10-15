@@ -6,11 +6,11 @@
 #include <imgui_internal.h>
 namespace editor {
 bool EditorLayer::DrawScalePlanes(Application& app,const ImVec2& origin,const ImVec2& size,const float* model){
- auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(m_SelectedEntity);if(!t||m_GizmoOperation!=2)return false;
+ auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(m_Selection.active);if(!t||m_GizmoOperation!=2)return false;
  if(m_PlaneScaleCaptured){
   if(!ImGui::IsMouseDown(0)){FinishTransaction(app);m_PlaneScaleCaptured=false;}
   else {auto mouse=ImGui::GetMousePos();float amount=((mouse.x-m_ScaleMouse[0])*m_ScaleDirection[0]+(mouse.y-m_ScaleMouse[1])*m_ScaleDirection[1])/(100*ImGui::GetStyle().FontScaleDpi);
-   t->scale=ScalePlane(m_ScaleOriginal.scale,m_ScalePlane,std::max(.001f,1+amount),m_Snapping?m_SnapScale:0);app.NotifyEditorMutation(m_SelectedEntity);}
+   t->scale=ScalePlane(m_ScaleOriginal.scale,m_ScalePlane,std::max(.001f,1+amount),m_Snapping?m_SnapScale:0);app.NotifyEditorMutation(m_Selection.active);}
  }
  const auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),size.x/size.y,app.GetCameraNearPlane(),app.GetCameraFarPlane());
  auto geometry=BuildScalePlaneGeometry(model,camera,origin,size,ImGui::GetStyle().FontScaleDpi);

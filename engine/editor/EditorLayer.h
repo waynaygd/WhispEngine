@@ -6,6 +6,8 @@
 #include "../render/RenderResourceHandles.h"
 #include "EditorPreferences.h"
 #include "InputRouting.h"
+#include "SelectionSet.h"
+#include "GroupTransform.h"
 #include "AssetCatalog.h"
 #include "AssetNavigation.h"
 #include "TransformPrecision.h"
@@ -85,7 +87,7 @@ public:
     void SetLightGizmosVisible(bool v){m_ShowLightGizmos=v;}
     void EnterRuntime(const ecs::World::CloneMap&);
     void LeaveRuntime();
-    void ResetHistory(){m_UndoStack.clear();m_RedoStack.clear();m_SelectedEntity={};m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
+    void ResetHistory(){m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
     void FinishTransaction(Application&);
     void CancelTransaction(Application&);
     bool HasPendingTransaction()const{return m_Transaction.has_value();}
@@ -101,7 +103,17 @@ public:
     ecs::Entity BeginDuplicateDrag(Application&);
     ecs::Entity CreatePrimitive(Application&,const std::string& type);
     ecs::Entity CreateModelEntity(Application&,const std::string& key,const std::string& name="Model");
-    void ClearSelection(){m_SelectedEntity={};m_PropertyDrafts.clear();}
+    void ClearSelection(){m_Selection.Clear();m_PropertyDrafts.clear();}
+    const std::vector<ecs::Entity>& GetSelectedEntities()const{return m_Selection.items;}
+    bool IsSelected(ecs::Entity e)const{return m_Selection.Contains(e);}
+    void PruneSelection(Application&);
+    void SelectViewportEntity(Application&,ecs::Entity,bool ctrl,bool shift);
+    void SelectHierarchyEntity(Application&,ecs::Entity,bool ctrl,bool shift,const std::vector<ecs::Entity>& order);
+    void SelectAllEntities(Application&,const std::vector<ecs::Entity>& order);
+    bool DeleteSelection(Application&);
+    bool BeginGroupTransform(Application&,bool local);
+    bool UpdateGroupTransform(Application&,const ImportMatrix&);
+    void EndGroupTransform(Application&,bool cancel=false);
     enum class OpenDecision {Cancel,Discard,Save};
     void ReleaseAssetPreview(IRenderAdapter*);
     bool RequestRecentScene(Application&,const std::string&);
@@ -137,9 +149,9 @@ public:
     const std::string& GetError()const{return m_EditorError;}
     ecs::Entity CreateLight(Application&,LightType);
     void DeleteSelectedLight(Application&);
-    void SelectEntity(ecs::Entity e){if(e!=m_SelectedEntity)m_PropertyDrafts.clear();m_SelectedEntity=e;}
+    void SelectEntity(ecs::Entity e){if(e!=m_Selection.active||m_Selection.items.size()>1)m_PropertyDrafts.clear();m_Selection.Replace(e);}
     void SelectEntityFromUser(Application& app,ecs::Entity e);
-    ecs::Entity GetSelectedEntity()const{return m_SelectedEntity;}
+    ecs::Entity GetSelectedEntity()const{return m_Selection.active;}
     void RecordEdit(Application& app,const std::string& label){PushUndoBeforeChange(app,label);}
     void UndoEdit(Application& app){Undo(app);}
     void RedoEdit(Application& app){Redo(app);}
@@ -160,10 +172,22 @@ private:
         nlohmann::json components=nlohmann::json::object();
         std::optional<SceneSettings> settings;
         std::vector<EntitySnapshot> related;
+        std::optional<SelectionSet> selection;
     };
     struct UndoRecord {std::string label;EntitySnapshot snapshot;std::uint64_t before=0,after=0;};
     struct PendingTransaction {std::string label;EntitySnapshot before;};
     std::optional<PendingTransaction> m_Transaction;
+    struct GroupSession {
+        EntitySnapshot before;
+        ecs::TransformComponent pivot;
+        ImportMatrix current;
+        std::vector<ecs::Entity> entities;
+        std::vector<ecs::TransformComponent> originals;
+    };
+    std::optional<GroupSession> m_GroupTransform;
+    EntitySnapshot CaptureSelection(Application&)const;
+    void DrawGroupGizmo(Application&,const float* view,const float* projection);
+    std::vector<ecs::Entity> m_HierarchyVisible;
     std::uint64_t m_Revision=0,m_SavedRevision=0,m_NextRevision=0;
     bool m_ExternalDirty=false;
     EntitySnapshot CaptureLike(Application&,const EntitySnapshot&)const;
@@ -219,7 +243,7 @@ private:
     std::array<float,2> m_ScaleMouse{},m_ScaleDirection{};
     void DrawGizmo(Application& app, const ImVec2& viewportMin, const ImVec2& viewportSize);
     EntitySnapshot CaptureSelectedEntity(Application& app,ecs::Entity entity={}) const;
-    ecs::Entity RestoreSnapshot(Application& app, const EntitySnapshot& snapshot,EntitySnapshot* inverse=nullptr);
+    ecs::Entity RestoreSnapshot(Application& app, const EntitySnapshot& snapshot,EntitySnapshot* inverse=nullptr,ecs::World::CloneMap* remapped=nullptr);
 
     void PushUndoBeforeChange(Application& app, const std::string& label);
     void Undo(Application& app);
@@ -227,7 +251,7 @@ private:
     bool CanUndo() const { return !m_UndoStack.empty(); }
     bool CanRedo() const { return !m_RedoStack.empty(); }
 
-    ecs::Entity m_SelectedEntity{};
+    SelectionSet m_Selection;
     int m_GizmoOperation = 0;
     int m_GizmoMode = 0;
     bool m_GameView=false,m_ProjectAssets=true,m_PlaneScaleCaptured=false;
@@ -285,7 +309,7 @@ private:
     std::vector<std::string> m_ShaderAssets;
     std::string m_SelectedAsset;
     std::string m_SelectedAssetKind;
-    struct HistoryContext {ecs::Entity selected;std::vector<UndoRecord> undo,redo;std::uint64_t revision,saved,next;bool external;};
+    struct HistoryContext {SelectionSet selection;std::vector<UndoRecord> undo,redo;std::uint64_t revision,saved,next;bool external;};
     std::optional<HistoryContext> m_EditHistory;
     std::vector<UndoRecord> m_UndoStack;
     std::vector<UndoRecord> m_RedoStack;

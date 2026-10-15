@@ -1133,6 +1133,7 @@ void Application::SetEditorPlayMode(bool enabled)
     }
     m_EditorPlayMode=enabled;m_EditorPaused=false;ResetPhysicsClock();m_ActiveCollisionPairs.clear();
     if(m_PhysicsSystem){m_PhysicsSystem->ResetState();m_PhysicsSystem->SetEnabled(enabled);}
+    m_EditorLayer.PruneSelection(*this);
     Logger::Get().Info(enabled?"Editor: Play isolated Runtime World":"Editor: Stop discarded Runtime World");
 }
 void Application::SetEditorPaused(bool paused){

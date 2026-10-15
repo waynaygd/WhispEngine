@@ -318,7 +318,8 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     const auto uiStart=std::chrono::steady_clock::now();
     struct FinishUi {Statistics& stats;std::chrono::steady_clock::time_point start;~FinishUi(){stats.uiMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}} finish{m_Statistics,uiStart};
     RefreshAssetLists(dt);
-    if(m_Transaction&&!m_Transaction->before.settings&&m_Transaction->before.entity!=m_SelectedEntity)FinishTransaction(app);
+    PruneSelection(app);
+    if(m_Transaction&&!m_Transaction->before.settings&&m_Transaction->before.entity.IsValid()&&m_Transaction->before.entity!=m_Selection.active)FinishTransaction(app);
     m_InputTextActive=ImGui::GetIO().WantTextInput;m_ModalActive=ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel);
     if(m_LightPointerCaptured&&!ImGui::IsMouseDown(0)){FinishTransaction(app);m_LightPointerCaptured=false;}
     m_EscapeConsumed=false;
@@ -331,6 +332,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
         m_ViewportMaximized=!m_ViewportMaximized;m_FocusViewportWindow=true;
     }
     if(m_ViewportMaximized){
+        m_HierarchyFocused=false;
         ImGui::DockSpace(ImHashStr("WhispEngine.Editor.Dockspace"),ImVec2(0,0),ImGuiDockNodeFlags_KeepAliveOnly);
         DrawViewport(app,renderer);HandleEditorShortcuts(app);return;
     }
@@ -477,12 +479,12 @@ void EditorLayer::HandleEditorShortcuts(Application& app){
         if(HasPendingTransaction()){CancelTransaction(app);m_LightPointerCaptured=false;m_CancelGizmoUntilRelease=true;}else if((m_ViewportFocused||m_HierarchyFocused)&&!m_InputTextActive&&!app.IsCameraControlActive())ClearSelection();return;
     }
     const bool entityKeys=!app.IsEditorPlayMode()&&(m_ViewportFocused||m_HierarchyFocused)&&!m_InputTextActive&&!m_ToolActive&&!app.IsCameraControlActive();
-    if(entityKeys){if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_C,false))CopyEntity(app,m_SelectedEntity);if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_V,false))PasteEntity(app);if(ImGui::IsKeyPressed(ImGuiKey_Delete,false))DeleteEntity(app,m_SelectedEntity);}
+    if(entityKeys){if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_C,false))CopyEntity(app,m_Selection.active);if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_V,false))PasteEntity(app);if(ImGui::IsKeyPressed(ImGuiKey_Delete,false))DeleteSelection(app);if(m_HierarchyFocused&&io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_A,false))SelectAllEntities(app,m_HierarchyVisible);}
     if(io.KeyCtrl){
         if(ImGui::IsKeyPressed(ImGuiKey_Z,false))Undo(app);
         if(ImGui::IsKeyPressed(ImGuiKey_Y,false))Redo(app);
         if(ImGui::IsKeyPressed(ImGuiKey_S,false)){if(io.KeyShift){m_SceneDialogAction=3;m_SceneDialogRequested=true;}else{std::string error;if(!app.SaveCurrentScene(&error)){m_EditorError=error;Logger::Get().Error(error);}}}
-        if(ImGui::IsKeyPressed(ImGuiKey_D,false))DuplicateEntity(app,m_SelectedEntity);
+        if(ImGui::IsKeyPressed(ImGuiKey_D,false))DuplicateEntity(app,m_Selection.active);
     }
     if(io.KeyAlt&&!io.KeyCtrl&&!io.KeyShift&&(m_ViewportFocused||app.IsViewportMouseCaptured())&&!BlocksGameplayInput()&&!ImGuizmo::IsUsing()&&!ImGui::IsMouseDown(0)&&!ImGui::IsMouseDown(1)){
         if(ImGui::IsKeyPressed(ImGuiKey_3,false))app.SetViewportUnlit(false);
@@ -490,7 +492,7 @@ void EditorLayer::HandleEditorShortcuts(Application& app){
     }
     if(!EditorHotkeysAllowed(app.IsEditorPlayMode(),OwnsViewportKeyboard(),io.WantCaptureKeyboard,app.IsCameraControlActive()))return;
     if(!io.KeyCtrl&&!io.KeyAlt&&!m_InputTextActive&&ImGui::IsKeyPressed(ImGuiKey_G,false))m_GameView=!m_GameView;
-    if(ImGui::IsKeyPressed(ImGuiKey_F,false))app.FocusEntity(m_SelectedEntity);
+    if(ImGui::IsKeyPressed(ImGuiKey_F,false))app.FocusEntity(m_Selection.active);
     if(ImGui::IsKeyPressed(ImGuiKey_W,false))m_GizmoOperation=0;
     if(ImGui::IsKeyPressed(ImGuiKey_E,false))m_GizmoOperation=1;
     if(ImGui::IsKeyPressed(ImGuiKey_R,false))m_GizmoOperation=2;
@@ -669,7 +671,7 @@ void EditorLayer::DrawMaterialEditor(Application& app)
     if(app.IsEditorPlayMode())ImGui::TextWrapped("Stop Play before modifying shared material assets.");
     ImGui::BeginDisabled(app.IsEditorPlayMode());
     auto* resources=app.GetResourceManager();auto& world=app.GetWorld();
-    auto* component=world.GetComponent<ecs::MaterialComponent>(m_SelectedEntity);
+    auto* component=world.GetComponent<ecs::MaterialComponent>(m_Selection.active);
     const auto open=[&](const std::string& key) {
         if(m_MaterialDirty&&key!=m_EditingMaterial){m_MaterialError="Unsaved changes: Save or Revert before opening another asset.";return;}
         m_EditingMaterial=key;m_MaterialError.clear();
@@ -758,6 +760,9 @@ void EditorLayer::DrawMaterialEditor(Application& app)
 
 void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const ImVec2& viewportSize)
 {
+    // Ctrl/Shift clicks belong to selection, even when an object lies under a
+    // shared handle. Snap remains controlled by the existing toolbar settings.
+    if((ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&ImGui::IsMouseClicked(0)&&!ImGuizmo::IsUsing())return;
     if(m_ModalActive){if(m_GizmoUndoCaptured)CancelTransaction(app);m_GizmoUndoCaptured=false;m_CancelGizmoUntilRelease=true;ImGuizmo::Enable(false);return;}
     if((app.IsCameraControlActive()||ImGui::IsMouseDown(1))&&!ImGuizmo::IsUsing())return;
     if (app.IsEditorPlayMode() || m_GameView || viewportSize.x <= 1.0f || viewportSize.y <= 1.0f)
@@ -765,10 +770,10 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
 
     if(m_CancelGizmoUntilRelease){ImGuizmo::Enable(false);if(ImGui::IsMouseDown(0))return;m_CancelGizmoUntilRelease=false;}ImGuizmo::Enable(true);
     auto& world = app.GetWorld();
-    if (!m_SelectedEntity.IsValid() || !world.IsAlive(m_SelectedEntity))
+    if (!m_Selection.active.IsValid() || !world.IsAlive(m_Selection.active))
         return;
 
-    auto* transform = world.GetComponent<ecs::TransformComponent>(m_SelectedEntity);
+    auto* transform = world.GetComponent<ecs::TransformComponent>(m_Selection.active);
     if (transform == nullptr)
         return;
 
@@ -798,6 +803,7 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
     ImGuizmo::SetRect(viewportMin.x, viewportMin.y, viewportSize.x, viewportSize.y);
 
     ImGuizmo::SetGizmoSizeClipSpace(ScaleGizmoClipSize);
+    if(m_Selection.items.size()>1){DrawGroupGizmo(app,view,projection);return;}
     const bool planeOwnsPointer=!ImGuizmo::IsUsing()&&DrawScalePlanes(app,viewportMin,viewportSize,matrix);
     const ImGuizmo::MODE mode = m_GizmoMode == 0 ? ImGuizmo::LOCAL : ImGuizmo::WORLD;
     float snapValue=m_GizmoOperation==0?m_SnapTranslation:m_GizmoOperation==1?m_SnapRotation:m_SnapScale;float snap[3]={snapValue,snapValue,snapValue};
@@ -824,7 +830,7 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
         }
 
         ImportMatrix result;std::copy(matrix,matrix+16,result.begin());
-        if(auto decomposed=DecomposeTransform(result,transform->scale)){*transform=*decomposed;app.NotifyEditorMutation(m_SelectedEntity);}else m_EditorError="Transform requires shear/singular scale; use Local scale handles";
+        if(auto decomposed=DecomposeTransform(result,transform->scale)){*transform=*decomposed;app.NotifyEditorMutation(m_Selection.active);}else m_EditorError="Transform requires shear/singular scale; use Local scale handles";
     }
     else if (!ImGuizmo::IsUsing())
     {
