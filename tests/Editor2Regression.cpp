@@ -32,7 +32,8 @@ static void Extension(){
 }
 static void Cpu(){
     Extension();
-    const auto& registry=ecs::ComponentRegistry::Builtins();Check(registry.Components().size()==12,"builtin component coverage");
+    const auto& registry=ecs::ComponentRegistry::Builtins();Check(registry.Components().size()==13,"builtin component coverage including LuaScript");
+    const auto* script=registry.Find("LuaScript");Check(script&&script->id==ecs::ComponentId("LuaScript")&&script->properties.size()==2,"LuaScript stable descriptor and static fields");
     ecs::World a,b;auto e=a.CreateEntity(),other=b.CreateEntity();Check(e.index==other.index&&e.generation==other.generation&&e!=other,"World identity in Entity equality");Check(!a.IsAlive(other)&&!b.IsAlive(e),"foreign handles cannot alias");
     std::string error;Check(registry.Add(a,e,ecs::ComponentId("Transform"),&error),"registry add");Check(!registry.Add(a,other,ecs::ComponentId("Transform"),&error),"registry foreign add");
     ecs::PropertyValue property;Check(!registry.Get(a,other,ecs::ComponentId("Transform"),"position",property,&error),"foreign property read");Check(registry.Get(a,e,ecs::ComponentId("Transform"),"position",property,&error),"safe property read");

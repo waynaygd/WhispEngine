@@ -25,6 +25,8 @@ target_include_directories(ImGuizmo PUBLIC
 target_link_libraries(ImGuizmo PUBLIC DearImGui)
 
 add_library(Engine
+  scripting/LuaRuntime.cpp
+  scripting/Prefab.cpp
   core/Application.cpp
   core/AssetDependencyValidation.cpp
   core/AssetPaths.cpp
@@ -75,7 +77,7 @@ target_sources(Engine PRIVATE
 )
 
 target_include_directories(Engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(Engine PUBLIC glfw WhispEngineJson)
+target_link_libraries(Engine PUBLIC glfw WhispEngineJson PRIVATE WhispLua sol2::sol2)
 target_link_libraries(
     Engine
     PRIVATE

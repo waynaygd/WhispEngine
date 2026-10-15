@@ -22,6 +22,8 @@ void CheckReferences(const std::string& key){
 }
 }
 AssetCatalog::AssetCatalog(){
+    Register({"Lua Script","[Lua]","scripts",ecs::AssetKind::LuaScript,{".lua"}});
+    Register({"Prefab","[PF]","prefabs",ecs::AssetKind::Prefab,{".json"}});
     Register({"Mesh","[M]","models",ecs::AssetKind::Mesh,{".obj",".fbx",".gltf",".glb"}});
     Register({"Texture","[T]","",ecs::AssetKind::Texture,{".png",".jpg",".jpeg",".bmp",".tga",".dds"}});
     Register({"Material","[Mat]","materials",ecs::AssetKind::Material,{".json",".material"}});
@@ -43,6 +45,7 @@ void AssetCatalog::Refresh(){
             try{(void)AssetImport::SafeTarget(root,AssetPaths::ToUtf8String(item.path().lexically_relative(root)));}catch(...){if(item.is_directory())walk.disable_recursion_pending();continue;}
             if(item.is_directory()&&!std::filesystem::is_symlink(item.symlink_status()))dirs.insert(DirectoryKey(item.path().lexically_relative(root)));
             if(!item.is_regular_file()||std::filesystem::is_symlink(item.symlink_status()))continue;
+            if(type.kind==ecs::AssetKind::Prefab&&!item.path().filename().string().ends_with(".prefab.json"))continue;
             auto ext=item.path().extension().string();std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});
             if(std::find(type.extensions.begin(),type.extensions.end(),ext)==type.extensions.end())continue;
             auto key=AssetPaths::ToUtf8String(item.path().lexically_relative(root));std::replace(key.begin(),key.end(),'\\','/');ready.push_back({key,i});

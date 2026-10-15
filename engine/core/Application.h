@@ -22,6 +22,7 @@
 #include "../ecs/events/EventBus.h"
 #include "../platform/InputManager.h"
 #include "../editor/EditorLayer.h"
+#include "../scripting/LuaRuntime.h"
 
 class IWindow;
 class IRenderAdapter;
@@ -54,6 +55,7 @@ public:
     editor::EditorLayer& GetEditorLayer(){return m_EditorLayer;}
     ecs::World& GetWorld() { return m_RuntimeWorld?*m_RuntimeWorld:m_World; }
     ecs::World& GetEditorWorld(){return m_World;}
+    scripting::LuaRuntime& GetLuaRuntime(){return m_LuaRuntime;}
     ecs::MutationQueue& GetMutationQueue(){return m_Mutations;}
     void ApplyStructuralCommands(){if(m_Mutations.Apply(GetWorld())&&m_PhysicsSystem)m_PhysicsSystem->ResetState();}
     const ecs::World& GetWorld() const { return m_RuntimeWorld?*m_RuntimeWorld:m_World; }
@@ -219,6 +221,7 @@ private:
 
     ecs::World m_World; // Editor data and shared system/GPU-cache owner.
     std::unique_ptr<ecs::World> m_RuntimeWorld;
+    scripting::LuaRuntime m_LuaRuntime;
     ecs::World::CloneMap m_CloneMapping;
     ecs::MutationQueue m_Mutations;
     std::vector<ecs::Entity> m_EditDebugEntities,m_EditStressEntities;

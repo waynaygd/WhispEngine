@@ -3,6 +3,7 @@
 #include "EditorLayer.h"
 #include "EditorWidgets.h"
 #include "../core/Application.h"
+#include "../ecs/components/LuaScriptComponent.h"
 #include "../resources/ResourceManager.h"
 #include <imgui.h>
 #include <chrono>
@@ -90,6 +91,41 @@ void EditorLayer::DrawInspector(Application& app){
                 if(ImGui::TreeNodeEx(section,primary?ImGuiTreeNodeFlags_DefaultOpen:0)){drawSection(section,false);ImGui::TreePop();}
             }
         }else{drawSection("",false);bool hasAdvanced=std::any_of(d.properties.begin(),d.properties.end(),[](const auto& p){return p.advanced&&!p.internal;});if(hasAdvanced&&ImGui::TreeNode("Advanced")){drawSection("",true);ImGui::TreePop();}}
+        if(d.key=="LuaScript"){
+            auto* script=world.GetComponent<ecs::LuaScriptComponent>(e);
+            if(ImGui::BeginCombo("Choose Script",script->scriptPath.c_str())){
+                for(const auto& asset:m_AssetCatalog.Entries())if(m_AssetCatalog.Types()[asset.type].kind==ecs::AssetKind::LuaScript)
+                    if(ImGui::Selectable(asset.key.c_str(),script->scriptPath==asset.key))SetProperty(app,e,d.id,"scriptPath",asset.key);
+                ImGui::EndCombo();
+            }
+            auto& runtime=app.GetLuaRuntime();
+            if(ImGui::Button("Reload Script"))runtime.ReloadScript(script->scriptPath);
+            auto schema=runtime.Fields(script->scriptPath);
+            auto error=runtime.Error(script->scriptPath);
+            if(error.empty())ImGui::TextDisabled("Loaded: %zu fields",schema.size());else ImGui::TextWrapped("%s",error.c_str());
+            for(auto field=schema.begin();field!=schema.end();++field){
+                ImGui::PushID(field.key().c_str());
+                try{
+                    const auto& metadata=field.value();const auto type=metadata.at("type").get<std::string>();
+                    auto value=script->properties.contains(field.key())?script->properties.at(field.key()):metadata.at("default");
+                    ecs::PropertyDescriptor p;p.key=field.key();p.label=metadata.value("label",field.key());p.minimum=metadata.value("min",-1e6f);p.maximum=metadata.value("max",1e6f);
+                    ecs::PropertyValue v;
+                    if(type=="bool"){p.kind=ecs::PropertyKind::Boolean;v=value.get<bool>();}
+                    else if(type=="integer"){p.kind=ecs::PropertyKind::Integer;v=value.get<int>();}
+                    else if(type=="number"){p.kind=ecs::PropertyKind::Number;v=value.get<float>();}
+                    else if(type=="vec3"){p.kind=ecs::PropertyKind::Vector;v=ecs::Vec3{value.at(0).get<float>(),value.at(1).get<float>(),value.at(2).get<float>()};}
+                    else {p.kind=type=="asset"?ecs::PropertyKind::Asset:ecs::PropertyKind::String;v=value.get<std::string>();if(type=="asset")p.asset=metadata.at("default").get<std::string>().ends_with(".prefab.json")?ecs::AssetKind::Prefab:ecs::AssetKind::None;}
+                    ImGui::TextUnformatted(p.label.c_str());bool changed=Drawer(p,v);
+                    if(changed){
+                        PushUndoBeforeChange(app,"Edit Lua / "+p.label);
+                        if(type=="bool")value=std::get<bool>(v);else if(type=="integer")value=std::get<int>(v);else if(type=="number")value=std::get<float>(v);else if(type=="vec3"){auto x=std::get<ecs::Vec3>(v);value=nlohmann::json::array({x.x,x.y,x.z});}else value=std::get<std::string>(v);
+                        script->properties[field.key()]=value;app.NotifyEditorMutation(e);
+                    }
+                    if(ImGui::IsItemDeactivatedAfterEdit()||(changed&&!ImGui::IsAnyItemActive()))FinishTransaction(app);
+                }catch(const std::exception&){ImGui::TextWrapped("Override incompatible with schema: %s",field.key().c_str());if(ImGui::SmallButton("Use default")){PushUndoBeforeChange(app,"Reset Lua field");script->properties.erase(field.key());app.NotifyEditorMutation(e);FinishTransaction(app);}}
+                ImGui::PopID();
+            }
+        }
         if(d.key=="Transform"){
             ImGui::Checkbox("Rotation Snap",&m_RotationSnapping);ImGui::SameLine();
             if(ImGui::BeginCombo("Step",std::to_string(m_SnapRotation).c_str())){for(float step:{15.f,30.f,45.f,90.f})if(ImGui::Selectable((std::to_string(int(step))+" deg").c_str(),m_SnapRotation==step))m_SnapRotation=step;ImGui::EndCombo();}

@@ -1,0 +1,209 @@
+#include "LuaRuntime.h"
+#include "Prefab.h"
+#include "../core/Logger.h"
+#include "../ecs/MutationQueue.h"
+#include "../ecs/components/LuaScriptComponent.h"
+#include "../ecs/components/TagComponent.h"
+#include "../ecs/components/TransformComponent.h"
+#include <sol/sol.hpp>
+#include <fstream>
+#include <map>
+#include <set>
+#include <cmath>
+#include <thread>
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#endif
+namespace scripting {
+namespace {
+using Json=nlohmann::json;
+struct EntityLess {bool operator()(ecs::Entity a,ecs::Entity b)const{return std::tie(a.world,a.index,a.generation)<std::tie(b.world,b.index,b.generation);}};
+void Budget(lua_State* state,lua_Debug*){luaL_error(state,"Lua instruction budget exceeded");}
+struct ExecutionBudget {
+    lua_State* state;
+    explicit ExecutionBudget(lua_State* s):state(s){lua_sethook(s,Budget,LUA_MASKCOUNT,200000);}
+    ~ExecutionBudget(){lua_sethook(state,nullptr,0,0);}
+};
+sol::object ToLua(sol::state& lua,const Json& value){
+    if(value.is_boolean())return sol::make_object(lua,value.get<bool>());
+    if(value.is_number_integer())return sol::make_object(lua,value.get<lua_Integer>());
+    if(value.is_number())return sol::make_object(lua,value.get<double>());
+    if(value.is_string())return sol::make_object(lua,value.get<std::string>());
+    if(value.is_array()&&value.size()==3)return sol::make_object(lua,ecs::Vec3{value[0].get<float>(),value[1].get<float>(),value[2].get<float>()});
+    throw std::runtime_error("Unsupported Lua field value");
+}
+bool ValidValue(const Json& field,const Json& value){
+    const auto type=field.at("type").get<std::string>();
+    if(type=="bool")return value.is_boolean();
+    if(type=="string"||type=="asset")return value.is_string()&&value.get_ref<const std::string&>().size()<=1024;
+    auto number=[&](const Json& v){return v.is_number()&&std::isfinite(v.get<double>())&&v.get<double>()>=field.value("min",-1e6)&&v.get<double>()<=field.value("max",1e6);};
+    if(type=="integer")return value.is_number_integer()&&number(value);
+    if(type=="number")return number(value);
+    if(type=="vec3")return value.is_array()&&value.size()==3&&number(value[0])&&number(value[1])&&number(value[2]);
+    return false;
+}
+Json Schema(sol::table definition){
+    Json schema=Json::object();sol::object fields=definition["fields"];
+    if(!fields.valid()||fields==sol::nil)fields=sol::make_object(definition.lua_state(),sol::table::create(definition.lua_state()));
+    if(fields.get_type()!=sol::type::table)throw std::runtime_error("fields must be a table");
+    for(auto item:fields.as<sol::table>()){
+        if(item.first.get_type()!=sol::type::string||item.second.get_type()!=sol::type::table)throw std::runtime_error("fields must map names to schemas");
+        auto key=item.first.as<std::string>();auto f=item.second.as<sol::table>();
+        if(key.empty()||key=="entity"||key.size()>128||schema.size()>=128)throw std::runtime_error("Invalid/oversized field schema");
+        sol::object typeObject=f["type"];if(typeObject.get_type()!=sol::type::string)throw std::runtime_error("Field type must be a string: "+key);
+        Json field={{"type",typeObject.as<std::string>()},{"label",key}};
+        sol::object label=f["label"];if(label.valid()&&label!=sol::nil){if(label.get_type()!=sol::type::string)throw std::runtime_error("Field label must be a string");field["label"]=label.as<std::string>();}
+        for(const char* bound:{"min","max"}){sol::object b=f[bound];if(b.valid()&&b!=sol::nil){if(b.get_type()!=sol::type::number)throw std::runtime_error("Field bounds must be numeric");auto value=b.as<double>();if(!std::isfinite(value))throw std::runtime_error("Nonfinite field bound");field[bound]=value;}}
+        sol::object d=f["default"];const auto type=field["type"].get<std::string>();
+        if(type=="bool"){if(d.get_type()!=sol::type::boolean)throw std::runtime_error("Boolean default required");field["default"]=d.as<bool>();}
+        else if(type=="integer") {if(!d.is<lua_Integer>())throw std::runtime_error("Integer default required");field["default"]=d.as<lua_Integer>();}
+        else if(type=="number"){if(d.get_type()!=sol::type::number)throw std::runtime_error("Numeric default required");field["default"]=d.as<double>();}
+        else if(type=="string"||type=="asset"){if(d.get_type()!=sol::type::string)throw std::runtime_error("String default required");field["default"]=d.as<std::string>();}
+        else if(type=="vec3"){if(d.get_type()!=sol::type::table)throw std::runtime_error("Vec3 default must be a table");auto v=d.as<sol::table>();auto values=Json::array();for(int index=1;index<=3;++index){sol::object x=v[index];if(x.get_type()!=sol::type::number)throw std::runtime_error("Vec3 default must contain three numbers");values.push_back(x.as<double>());}field["default"]=values;}
+        else throw std::runtime_error("Unknown field type: "+type);
+        if(!ValidValue(field,field["default"]))throw std::runtime_error("Invalid default: "+key);
+        schema[key]=field;
+    }
+    for(const char* callback:{"on_start","on_update","on_event","on_destroy"}){
+        sol::object fn=definition[callback];if(fn.valid()&&fn!=sol::nil&&fn.get_type()!=sol::type::function)throw std::runtime_error(std::string(callback)+" must be a function");
+    }
+    return schema;
+}
+}
+struct LuaRuntime::Impl {
+    // State is declared first, so all Lua references die before the VM.
+    sol::state lua;
+    struct Program {std::string source;Json fields;std::uint64_t revision=0;};
+    struct Instance {std::string path;std::uint64_t revision;sol::environment env;sol::table definition,self;Json overrides;bool failed=false;};
+    std::map<std::string,Program> programs;
+    std::map<std::string,std::string> errors;
+    std::map<ecs::Entity,Instance,EntityLess> instances;
+    std::map<ecs::Entity,std::string,EntityLess> rejected;
+    struct Event {ecs::Entity target,other;std::string type;float amount=0;};
+    std::vector<Event> events;
+    ecs::MutationQueue mutations;
+    std::set<ecs::Entity,EntityLess> destroying;
+    ecs::World* world=nullptr;
+    std::function<bool(const std::string&)> input;
+    std::map<std::string,bool> held,pressed,released;
+    const std::thread::id owner=std::this_thread::get_id();
+    bool stopping=false;
+    Impl(){
+        lua.open_libraries(sol::lib::base,sol::lib::math,sol::lib::string,sol::lib::table,sol::lib::utf8);
+        lua.new_usertype<ecs::Entity>("Entity",sol::no_constructor);
+        lua.new_usertype<ecs::Vec3>("Vec3",sol::constructors<ecs::Vec3(),ecs::Vec3(float,float,float)>(),"x",&ecs::Vec3::x,"y",&ecs::Vec3::y,"z",&ecs::Vec3::z);
+    }
+    void Check()const{if(owner!=std::this_thread::get_id())throw std::logic_error("Lua VM belongs to its owner thread");}
+    void Fail(const std::string& path,const std::string& callback,const std::string& message){errors[path]=callback+": "+message;Logger::Get().Error("Lua ["+path+"] "+errors[path]);}
+    sol::environment Environment(){
+        sol::environment env(lua,sol::create);
+        // Explicit allowlist: no package/io/os/debug/load/dofile/rawset/metatables/pcall.
+        for(const char* key:{"assert","error","ipairs","pairs","next","select","tonumber","tostring","type"})env[key]=lua[key];
+        sol::table vector=lua.create_table();vector["new"]=lua["Vec3"]["new"];env["Vec3"]=vector;
+        for(const char* key:{"math","string","table","utf8"}){
+            sol::table copy=lua.create_table();sol::table original=lua[key];for(auto item:original)copy[item.first]=item.second;env[key]=copy;
+        }
+        return env;
+    }
+    sol::table Evaluate(const std::string& source,const std::string& path,sol::environment& env){
+        ExecutionBudget budget(lua.lua_state());
+        auto loaded=lua.load(source,"@"+path,sol::load_mode::text);
+        if(!loaded.valid()){sol::error error=loaded;throw std::runtime_error(error.what());}
+        sol::protected_function fn=loaded;sol::set_environment(env,fn);auto result=fn();
+        if(!result.valid()){sol::error error=result;throw std::runtime_error(error.what());}
+        sol::object value=result;if(value.get_type()!=sol::type::table)throw std::runtime_error("Script must return a behaviour table");return value.as<sol::table>();
+    }
+    bool Load(const std::string& path){
+        Check();try{
+            auto file=SafeAsset(path,".lua");if(std::filesystem::file_size(file)>256*1024)throw std::runtime_error("Script exceeds 256 KiB");
+            std::ifstream stream(file,std::ios::binary);if(!stream)throw std::runtime_error("Cannot read script");
+            std::string source((std::istreambuf_iterator<char>(stream)),{});
+            // Validate in a disposable VM: even math.randomseed/upvalues must not
+            // perturb a running program when a candidate is rejected.
+            Impl validation;
+            auto env=validation.Environment();auto definition=validation.Evaluate(source,path,env);auto fields=Schema(definition);
+            auto revision=programs.contains(path)?programs.at(path).revision+1:1;
+            programs[path]={std::move(source),std::move(fields),revision};errors.erase(path);return true;
+        }catch(const std::exception& e){Fail(path,"load",e.what());return false;}
+    }
+    bool Alive(ecs::Entity e)const{return world&&world->IsAlive(e)&&!destroying.contains(e);}
+    ecs::TransformComponent& Transform(ecs::Entity e){if(!Alive(e))throw std::runtime_error("Dead/stale/foreign entity");auto* t=world->GetComponent<ecs::TransformComponent>(e);if(!t)throw std::runtime_error("Entity has no Transform");return *t;}
+    void Bind(sol::environment& env){
+        auto api=lua.create_table();
+        api.set_function("is_alive",[this](ecs::Entity e){return Alive(e);});
+        api.set_function("find_by_tag",[this](const std::string& tag){auto list=lua.create_table();int i=1;for(auto e:world->Entities())if(auto* t=world->GetComponent<ecs::TagComponent>(e);Alive(e)&&t&&t->name==tag)list[i++]=e;return list;});
+        api.set_function("get_position",[this](ecs::Entity e){return Transform(e).position;});
+        api.set_function("get_rotation",[this](ecs::Entity e){return Transform(e).rotation;});
+        api.set_function("get_scale",[this](ecs::Entity e){return Transform(e).scale;});
+        api.set_function("set_position",[this](ecs::Entity e,ecs::Vec3 p){if(!std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.z))throw std::runtime_error("Nonfinite position");Transform(e).position=p;});
+        api.set_function("spawn_prefab",[this](const std::string& key,ecs::Vec3 p){if(stopping)throw std::runtime_error("Spawn during Stop");if(world->GetAliveCount()>10000)throw std::runtime_error("Lua entity budget exceeded");return SpawnPrefab(*world,key,p);});
+        api.set_function("destroy",[this](ecs::Entity e){if(Alive(e)){destroying.insert(e);mutations.Destroy(e);}});
+        api.set_function("send_event",[this](ecs::Entity e,const std::string& type,float amount){if(Alive(e)&&events.size()<1024&&type.size()<128&&std::isfinite(amount))events.push_back({e,{},type,amount});});
+        env["World"]=api;
+        auto log=lua.create_table();log.set_function("info",[](const std::string& s){Logger::Get().Info("Lua: "+s);});log.set_function("warning",[](const std::string& s){Logger::Get().Warn("Lua: "+s);});log.set_function("error",[](const std::string& s){Logger::Get().Error("Lua: "+s);});env["Log"]=log;
+        auto controls=lua.create_table();
+        controls.set_function("is_action_held",[this](const std::string& s){DiscoverInput(s);return held[s];});
+        controls.set_function("is_action_pressed",[this](const std::string& s){DiscoverInput(s);return pressed[s];});
+        controls.set_function("is_action_released",[this](const std::string& s){DiscoverInput(s);return released[s];});env["Input"]=controls;
+    }
+    void DiscoverInput(const std::string& action){
+        if(action.size()>128||held.size()>128)throw std::runtime_error("Input action budget exceeded");
+        if(!held.contains(action)){bool now=input&&input(action);held[action]=now;pressed[action]=now;released[action]=false;}
+    }
+    template<class... Args>void Call(Instance& instance,const char* callback,Args&&... args){
+        if(instance.failed&&std::string_view(callback)!="on_destroy")return;
+        try{
+        sol::object fn=instance.definition[callback];if(!fn.valid()||fn==sol::nil)return;
+        if(fn.get_type()!=sol::type::function)throw std::runtime_error("Callback is no longer a function");
+        ExecutionBudget budget(lua.lua_state());sol::protected_function function=fn;auto result=function(instance.self,std::forward<Args>(args)...);
+        if(!result.valid()){sol::error error=result;instance.failed=true;Fail(instance.path,callback,error.what());}
+        }catch(const std::exception& error){instance.failed=true;Fail(instance.path,callback,error.what());}
+    }
+    void Sync(){
+        for(auto i=instances.begin();i!=instances.end();){auto* c=world->GetComponent<ecs::LuaScriptComponent>(i->first);
+            if(!Alive(i->first)||!c||!c->enabled||c->scriptPath!=i->second.path||c->properties!=i->second.overrides||programs.at(i->second.path).revision!=i->second.revision){Call(i->second,"on_destroy");i=instances.erase(i);}else ++i;
+        }
+        // Snapshot IDs: callbacks may spawn; new entities start on the following Update.
+        for(auto e:world->Entities()){
+            auto* c=world->GetComponent<ecs::LuaScriptComponent>(e);if(!Alive(e)||!c||!c->enabled||c->scriptPath.empty()||instances.contains(e))continue;
+            const auto path=c->scriptPath;const auto overrides=c->properties;
+            if(!programs.contains(path)&&(!errors.contains(path)?!Load(path):true))continue;
+            const auto fingerprint=path+":"+std::to_string(programs.at(path).revision)+":"+overrides.dump();
+            if(rejected.contains(e)&&rejected.at(e)==fingerprint)continue;
+            try{
+                auto& program=programs.at(path);auto env=Environment();auto definition=Evaluate(program.source,path,env);Bind(env);
+                auto self=lua.create_table();self["entity"]=e;
+                for(auto it=program.fields.begin();it!=program.fields.end();++it){auto value=overrides.contains(it.key())?overrides.at(it.key()):it.value().at("default");if(!ValidValue(it.value(),value))throw std::runtime_error("Invalid override: "+it.key());self[it.key()]=ToLua(lua,value);}
+                auto [it,ok]=instances.emplace(e,Instance{path,program.revision,std::move(env),definition,self,overrides});Call(it->second,"on_start");
+                rejected.erase(e);
+            }catch(const std::exception& error){rejected[e]=fingerprint;Fail(path,"instance",error.what());}
+        }
+        std::erase_if(rejected,[this](const auto& pair){return !world->IsAlive(pair.first);});
+    }
+};
+LuaRuntime::LuaRuntime():impl(std::make_unique<Impl>()){}
+LuaRuntime::~LuaRuntime(){Stop();}
+void LuaRuntime::Start(ecs::World& world,std::function<bool(const std::string&)> input){Stop();impl->Check();world.AssertOwnerThread();impl->world=&world;impl->input=std::move(input);}
+void LuaRuntime::Stop(){
+    impl->Check();impl->stopping=true;for(auto& [e,i]:impl->instances)impl->Call(i,"on_destroy");impl->instances.clear();impl->rejected.clear();impl->events.clear();impl->mutations.Clear();impl->destroying.clear();impl->world=nullptr;impl->input={};impl->held.clear();impl->pressed.clear();impl->released.clear();impl->stopping=false;lua_gc(impl->lua.lua_state(),LUA_GCCOLLECT,0);
+}
+void LuaRuntime::Update(float dt){
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("LuaGameplayUpdate");
+#endif
+    impl->Check();if(!impl->world||!std::isfinite(dt)||dt<0)return;
+    impl->world->AssertOwnerThread();if(impl->world->IsIterating())throw std::logic_error("Lua Update during ECS iteration");
+    for(auto& [action,previous]:impl->held){bool now=impl->input&&impl->input(action);impl->pressed[action]=now&&!previous;impl->released[action]=!now&&previous;previous=now;}
+    impl->Sync();auto events=std::move(impl->events);impl->events.clear();
+    for(const auto& event:events)if(impl->Alive(event.target)){auto i=impl->instances.find(event.target);if(i!=impl->instances.end()){auto data=impl->lua.create_table();data["type"]=event.type;data["amount"]=event.amount;data["other"]=event.other;impl->Call(i->second,"on_event",data);}}
+    for(auto& [e,i]:impl->instances)if(impl->Alive(e))impl->Call(i,"on_update",std::min(dt,.1f));
+    // Destruction callback while components still exist; apply once, after all calls.
+    for(auto e:impl->destroying){auto i=impl->instances.find(e);if(i!=impl->instances.end()){impl->Call(i->second,"on_destroy");impl->instances.erase(i);}}
+    impl->mutations.Apply(*impl->world);impl->destroying.clear();
+}
+void LuaRuntime::QueueCollision(const ecs::CollisionEvent& e){impl->Check();if(impl->world&&impl->events.size()<1022){impl->events.push_back({e.a,e.b,"collision"});impl->events.push_back({e.b,e.a,"collision"});}}
+bool LuaRuntime::ReloadScript(const std::string& path){return impl->Load(path);}
+nlohmann::json LuaRuntime::Fields(const std::string& path){impl->Check();if(!impl->programs.contains(path)&&!impl->errors.contains(path))impl->Load(path);auto i=impl->programs.find(path);return i==impl->programs.end()?Json::object():i->second.fields;}
+std::string LuaRuntime::Error(const std::string& path)const{impl->Check();auto i=impl->errors.find(path);return i==impl->errors.end()?std::string():i->second;}
+std::size_t LuaRuntime::InstanceCount()const{return impl->instances.size();}
+}

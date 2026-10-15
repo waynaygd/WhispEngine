@@ -610,6 +610,7 @@ void Application::ConfigureInputBindings()
     m_InputManager.BindAction("SpawnEntity", GLFW_KEY_SPACE);
     m_InputManager.BindAction("DestroyEntity", GLFW_KEY_BACKSPACE);
     m_InputManager.BindAction("FireProjectile", GLFW_KEY_R);
+    m_InputManager.BindAction("LuaAttack", GLFW_KEY_F);
     m_InputManager.BindAction("ToggleDebugColliders", GLFW_KEY_F3);
 }
 
@@ -1076,12 +1077,13 @@ void Application::SetEditorPlayMode(bool enabled)
         auto map=[&](std::vector<ecs::Entity>& entities){std::erase_if(entities,[&](auto e){return !m_CloneMapping.contains(e);});for(auto& e:entities)e=m_CloneMapping.at(e);};
         map(m_EcsDebugEntities);map(m_StressEntities);
         m_EditorLayer.EnterRuntime(m_CloneMapping);m_RuntimeWorld=std::move(runtime);
+        m_LuaRuntime.Start(*m_RuntimeWorld,[this](const std::string& action){return IsSimulationRunning()&&IsInputActionActive(action);});
         m_StateMachine.Clear(*this);RequestStateChange(std::make_unique<LoadingState>());m_StateMachine.ApplyPending(*this);
         m_LastCloneMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
     }else{
         if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
         m_StateMachine.Clear(*this);
-        m_Mutations.Clear();m_RenderInterpolation.Clear();m_EditorLayer.LeaveRuntime();m_RuntimeWorld.reset();m_CloneMapping.clear();
+        m_LuaRuntime.Stop();m_Mutations.Clear();m_RenderInterpolation.Clear();m_EditorLayer.LeaveRuntime();m_RuntimeWorld.reset();m_CloneMapping.clear();
         m_EcsDebugEntities=std::move(m_EditDebugEntities);m_StressEntities=std::move(m_EditStressEntities);
         m_LightingSettings=m_EditLighting;m_EnvironmentSettings=m_EditEnvironment;m_ShadowSettings=m_EditShadows;m_Background=m_EditBackground;m_AntiAliasing=m_EditAntiAliasing;
     }
@@ -1234,6 +1236,7 @@ bool Application::Initialize()
     m_Windows.push_back(std::move(ctx));
     ConfigureInputBindings();
     m_EventBus.SubscribeCollision([this](const ecs::CollisionEvent& e){
+        m_LuaRuntime.QueueCollision(e);
         m_ActiveCollisionPairs.insert(BuildCollisionPairKey(e.a.index, e.b.index));
     });
     SetupEcsRuntimeDemo();
@@ -1426,6 +1429,7 @@ int Application::Run()
             ZoneScopedN("GameUpdate");
 
             UpdateCameraController(dt);
+            if(IsSimulationRunning())m_LuaRuntime.Update(dt);
 
             if (IsSimulationRunning() && m_UpdateMode == UpdateMode::Variable) {
                 m_StateMachine.Update(*this, dt);

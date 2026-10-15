@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(WhispEngine LANGUAGES CXX)
+project(WhispEngine LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,6 +9,7 @@ option(ENABLE_VULKAN "Enable Vulkan backend" ON)
 option(ENABLE_TRACY "Enable Tracy profiler" ON)
 
 include(FetchContent)
+include(cmake/Lua.cmake)
 
 FetchContent_Declare(
   glfw
@@ -138,6 +139,20 @@ if (WHISP_BUILD_PHYSICS_TESTS)
 endif()
 
 add_executable(WhispEngine WhispEngine.cpp)
+add_custom_target(LuaGameplayAssets ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/engine/assets/scripts ${CMAKE_BINARY_DIR}/assets/scripts
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/engine/assets/prefabs ${CMAKE_BINARY_DIR}/assets/prefabs
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets/scenes
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/lua_wave_demo.json ${CMAKE_BINARY_DIR}/assets/scenes/lua_wave_demo.json)
+add_dependencies(WhispEngine LuaGameplayAssets)
+option(WHISP_BUILD_LUA_TESTS "Build embedded Lua gameplay regressions" ON)
+if(WHISP_BUILD_LUA_TESTS)
+  enable_testing()
+  add_executable(LuaScriptingRegression tests/LuaScriptingRegression.cpp)
+  target_link_libraries(LuaScriptingRegression PRIVATE Engine)
+  add_test(NAME LuaScriptingRegression COMMAND LuaScriptingRegression)
+  set_tests_properties(LuaScriptingRegression PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 90)
+endif()
 target_link_libraries(WhispEngine PRIVATE Engine)
 
 if (ENABLE_TRACY)

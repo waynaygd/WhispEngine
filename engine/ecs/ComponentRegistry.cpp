@@ -9,6 +9,7 @@
 #include "components/TagComponent.h"
 #include "components/TransformComponent.h"
 #include "components/VelocityComponent.h"
+#include "components/LuaScriptComponent.h"
 #include "../resources/MaterialSerialization.h"
 #include "../scene/LightSerialization.h"
 #include <cmath>
@@ -113,6 +114,16 @@ template<class C>ComponentDescriptor Light(const char* key,const char* label){
 }
 ComponentRegistry Build(){
     ComponentRegistry r;
+    auto script=Descriptor<LuaScriptComponent>("LuaScript","Lua Script");
+    Field<LuaScriptComponent>(script,"scriptPath","Script asset",&LuaScriptComponent::scriptPath,PropertyKind::Asset,0,0,AssetKind::LuaScript);
+    Field<LuaScriptComponent>(script,"enabled","Enabled",&LuaScriptComponent::enabled,PropertyKind::Boolean);Complete(script);
+    auto scriptSave=script.serialize;auto scriptLoad=script.deserialize;
+    script.serialize=[scriptSave](const World& w,Entity e){auto j=scriptSave(w,e);j["properties"]=w.GetComponent<LuaScriptComponent>(e)->properties;return j;};
+    script.deserialize=[scriptLoad](World& w,Entity e,const Json& j){
+        auto values=j.value("properties",Json::object());if(!values.is_object()||values.size()>128)Fail("Lua properties must be a bounded object");
+        for(auto i=values.begin();i!=values.end();++i){const auto& v=i.value();if(i.key().size()>128||!(v.is_boolean()||v.is_number()||v.is_string()||(v.is_array()&&v.size()==3)))Fail("Invalid Lua property: "+i.key());if(v.is_string()&&v.get_ref<const std::string&>().size()>1024)Fail("Lua string too long");if(v.is_array())for(const auto& x:v)if(!x.is_number()||!std::isfinite(x.get<double>()))Fail("Invalid Lua vector");if(v.is_number()&&!std::isfinite(v.get<double>()))Fail("Nonfinite Lua property");}
+        scriptLoad(w,e,j);w.GetComponent<LuaScriptComponent>(e)->properties=std::move(values);
+    };r.Register(script);
     auto tag=Descriptor<TagComponent>("Tag","Name");Field<TagComponent>(tag,"name","Name",&TagComponent::name,PropertyKind::String);Complete(tag);r.Register(tag);
     auto identity=Descriptor<SceneIdentityComponent>("SceneIdentity","Scene identity");identity.addable=identity.removable=false;Field<SceneIdentityComponent>(identity,"value","Persistent ID",&SceneIdentityComponent::value,PropertyKind::String).readOnly=true;Complete(identity);r.Register(identity);
     auto t=Descriptor<TransformComponent>("Transform","Transform");Field<TransformComponent>(t,"position","Position",&TransformComponent::position,PropertyKind::Vector);Field<TransformComponent>(t,"rotation","Rotation (rad)",&TransformComponent::rotation,PropertyKind::Vector);Field<TransformComponent>(t,"scale","Scale",&TransformComponent::scale,PropertyKind::Vector);Complete(t);r.Register(t);
@@ -164,6 +175,6 @@ void ComponentRegistry::Restore(World& w,Entity e,const nlohmann::json& j)const{
 bool ComponentRegistry::ValidateAssetKey(const std::string& key,AssetKind kind,std::string* error){return Checked([&]{if(key.empty())return;
     const auto path=std::filesystem::u8path(key);if(key.size()>1024||path.is_absolute()||path.has_root_name()||key.find(':')!=std::string::npos||key.find('\\')!=std::string::npos)Fail("Use a portable relative resource key");for(auto& part:path)if(part=="..")Fail("Resource key cannot escape project root");
     std::string ext=path.extension().string();std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});
-    bool valid=kind==AssetKind::None||(kind==AssetKind::Mesh&&(ext==".obj"||ext==".gltf"||ext==".glb"||ext==".fbx"))||(kind==AssetKind::Texture&&(ext==".png"||ext==".dds"||ext==".jpg"||ext==".jpeg"||ext==".bmp"||ext==".tga"))||(kind==AssetKind::Material&&(ext==".json"||ext==".material"))||(kind==AssetKind::Shader&&ext==".hlsl")||(kind==AssetKind::Environment&&ext==".hdr")||key.starts_with("defaults/");if(!valid)Fail("Resource type does not match property");
+    bool valid=kind==AssetKind::None||(kind==AssetKind::LuaScript&&ext==".lua")||(kind==AssetKind::Prefab&&key.ends_with(".prefab.json"))||(kind==AssetKind::Mesh&&(ext==".obj"||ext==".gltf"||ext==".glb"||ext==".fbx"))||(kind==AssetKind::Texture&&(ext==".png"||ext==".dds"||ext==".jpg"||ext==".jpeg"||ext==".bmp"||ext==".tga"))||(kind==AssetKind::Material&&(ext==".json"||ext==".material"))||(kind==AssetKind::Shader&&ext==".hlsl")||(kind==AssetKind::Environment&&ext==".hdr")||key.starts_with("defaults/");if(!valid)Fail("Resource type does not match property");
 },error);}
 }

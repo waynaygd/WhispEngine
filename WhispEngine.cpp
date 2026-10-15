@@ -1,5 +1,6 @@
 ﻿#include "core/Application.h"
 #include "editor/SunSynchronization.h"
+#include "core/Logger.h"
 #include <cstring>
 #include <cstdlib>
 #include <algorithm>
@@ -15,6 +16,12 @@ int main(int argc, char** argv)
     for(int i=1;i<argc;++i){if(std::strcmp(argv[i],"--light-overlap")==0)overlap=true;if(std::strcmp(argv[i],"--light-objects")==0&&i+1<argc)lightObjects=std::atoi(argv[++i]);}
     // Optional repeatable visual smoke/benchmark run. Normal startup is unchanged.
     for (int i = 1; i < argc; ++i) {
+        if(std::strcmp(argv[i],"--lua-demo")==0){
+            std::string error;if(!app.OpenScene("scenes/lua_wave_demo.json",&error)){Logger::Get().Error(error);app.Shutdown();return 1;}
+            app.SetEditorCameraPose({0,10,-14},0,-.55f);
+            auto entities=app.GetWorld().Entities();if(!entities.empty())app.GetEditorLayer().SelectEntity(entities.front());
+        }
+        else
         if(std::strcmp(argv[i],"--editor-benchmark")==0&&i+1<argc)app.SetRenderBenchmarkOutput(argv[++i]);
         else if(std::strcmp(argv[i],"--primitive-demo")==0){
             app.NewScene();auto& editor=app.GetEditorLayer();auto sun=editor.CreateLight(app,LightType::Directional);app.GetWorld().GetComponent<ecs::DirectionalLightComponent>(sun)->primary=true;app.GetWorld().GetComponent<ecs::TransformComponent>(sun)->rotation={.35f,3.14159265f,0};

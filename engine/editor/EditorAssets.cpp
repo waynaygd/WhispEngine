@@ -4,6 +4,10 @@
 #include "AssetImport.h"
 #include "../core/Application.h"
 #include "../core/AssetPaths.h"
+#include "../ecs/components/LuaScriptComponent.h"
+#include "../ecs/components/SceneIdentityComponent.h"
+#include "../scripting/Prefab.h"
+#include <fstream>
 #include "../resources/ResourceManager.h"
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
@@ -25,6 +29,7 @@ bool EditorLayer::AssignAsset(Application& app,ecs::Entity e,ecs::AssetKind kind
     if(kind==ecs::AssetKind::Mesh){if(!w.HasComponent<ecs::MeshRendererComponent>(e)&&!r.Add(w,e,ecs::ComponentId("MeshRenderer"),&m_EditorError))return false;w.GetComponent<ecs::MeshRendererComponent>(e)->meshPath=key;}
     else if(kind==ecs::AssetKind::Material){if(!w.HasComponent<ecs::MaterialComponent>(e))w.AddComponent<ecs::MaterialComponent>(e);auto& m=*w.GetComponent<ecs::MaterialComponent>(e);m.materialPath=key;m.shaderPath.clear();m.texturePath.clear();m.overrides={};m.slotMaterials.clear();if(auto* mesh=w.GetComponent<ecs::MeshRendererComponent>(e)){mesh->shaderPath.clear();mesh->texturePath.clear();}}
     else if(kind==ecs::AssetKind::Texture||kind==ecs::AssetKind::Shader){if(!w.HasComponent<ecs::MaterialComponent>(e))w.AddComponent<ecs::MaterialComponent>(e);auto& m=*w.GetComponent<ecs::MaterialComponent>(e);(kind==ecs::AssetKind::Texture?m.texturePath:m.shaderPath)=key;}
+    else if(kind==ecs::AssetKind::LuaScript){if(!w.HasComponent<ecs::LuaScriptComponent>(e))w.AddComponent<ecs::LuaScriptComponent>(e);w.GetComponent<ecs::LuaScriptComponent>(e)->scriptPath=key;}
     else return false;app.NotifyEditorMutation(e);CommitUndo(app,"Assign asset",std::move(before));return true;
 }
 
@@ -60,6 +65,25 @@ void EditorLayer::DrawAssetBrowser(Application& app){
     struct Timing {double& ms;std::chrono::steady_clock::time_point start;~Timing(){ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}} timing{m_Statistics.assetBrowserMs,start};
     ImGui::SetNextWindowSizeConstraints(ImVec2(280,180),ImVec2(FLT_MAX,FLT_MAX));if(!ImGui::Begin("Asset Browser",&m_ShowAssetBrowser)){ImGui::End();return;}
     const auto& types=m_AssetCatalog.Types();auto* resources=app.GetResourceManager();
+    ImGui::BeginDisabled(app.IsEditorPlayMode());
+    if(ImGui::Button("Create Lua Script")){
+        try{
+            std::string key="scripts/new_behaviour.lua";unsigned n=1;
+            while(std::filesystem::exists(scripting::SafeAsset(key,".lua")))key="scripts/new_behaviour_"+std::to_string(n++)+".lua";
+            auto path=scripting::SafeAsset(key,".lua");std::filesystem::create_directories(path.parent_path());
+            std::ofstream file(path);file<<"return {\n  fields = { speed = {type=\"number\", default=1, min=0, max=20} },\n  on_start = function(self) end,\n  on_update = function(self, dt) end,\n  on_event = function(self, event) end,\n  on_destroy = function(self) end\n}\n";file.close();if(!file)throw std::runtime_error("Script write failed");m_SelectedAsset=key;m_SelectedAssetKind="Lua Script";m_AssetListsDirty=true;
+        }catch(const std::exception& error){m_EditorError=error.what();}
+    }
+    ImGui::SameLine();if(ImGui::Button("Create Prefab")){
+        try{
+            if(!app.GetWorld().IsAlive(m_SelectedEntity))throw std::runtime_error("Select an entity first");
+            auto components=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),m_SelectedEntity);components.erase("SceneIdentity");
+            std::string key="prefabs/entity_"+ecs::NewSceneIdentity()+".prefab.json";
+            if(!SceneSerializer::WriteAtomic(scripting::SafeAsset(key,".prefab.json"),{{"version",1},{"components",components}},&m_EditorError,false))throw std::runtime_error(m_EditorError);
+            m_SelectedAsset=key;m_SelectedAssetKind="Prefab";m_AssetListsDirty=true;
+        }catch(const std::exception& error){m_EditorError=error.what();}
+    }
+    ImGui::EndDisabled();
     auto openMaterial=[&](const std::string& key){OpenMaterial(app,key);};
     auto action=[&](int kind,const std::string& key){m_AssetAction=kind;m_AssetActionSource=key;m_AssetActionKey=key;m_AssetActionRequested=true;m_EditorError.clear();};
     ImGui::BeginDisabled(app.IsEditorPlayMode());if(ImGui::Button("Create Material")){std::string directory=m_AssetDirectory.starts_with("materials")?m_AssetDirectory:"materials";action(1,directory+"/new.material.json");}ImGui::EndDisabled();
@@ -112,6 +136,9 @@ void EditorLayer::DrawAssetBrowser(Application& app){
             if((type.kind!=ecs::AssetKind::None||type.name=="Imported Scene")&&ImGui::BeginDragDropSource()){AssetPayload payload{};payload.kind=type.kind;std::memcpy(payload.key,key.data(),std::min(key.size(),sizeof(payload.key)-1));ImGui::SetDragDropPayload("WHISP_ASSET",&payload,sizeof(payload));ImGui::Text("%s %s",type.icon.c_str(),name.c_str());ImGui::EndDragDropSource();}
             if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::Material)openMaterial(key);
             if(ImGui::BeginPopupContextItem("AssetActions")){
+                if(type.kind==ecs::AssetKind::Prefab&&ImGui::MenuItem("Instantiate Prefab")){
+                    try{FinishTransaction(app);auto e=scripting::SpawnPrefab(app.GetWorld(),key,{});EntitySnapshot before;before.entity=e;before.world=e.world;m_SelectedEntity=e;app.NotifyEditorMutation(e);CommitUndo(app,"Instantiate Prefab",before);}catch(const std::exception& error){m_EditorError=error.what();}
+                }
                 if(type.name=="Imported Scene"&&ImGui::MenuItem("Instantiate imported scene"))InstantiateImportedScene(app,key);
                 if(type.kind==ecs::AssetKind::Mesh&&ImGui::MenuItem("Create model entity"))CreateModelEntity(app,key,name);
                 if(type.kind==ecs::AssetKind::Material&&ImGui::MenuItem("Open Material Editor"))openMaterial(key);
