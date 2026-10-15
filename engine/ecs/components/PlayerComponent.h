@@ -4,7 +4,7 @@ namespace ecs {
 
     struct PlayerComponent
     {
-        float moveSpeed = 4.0f;
+        // Measured from the feet, not from the Rigidbody center.
         float eyeHeight = 1.7f;
     };
 

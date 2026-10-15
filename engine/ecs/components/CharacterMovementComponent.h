@@ -1,4 +1,5 @@
 #pragma once
+#include "../MathTypes.h"
 
 namespace ecs {
 
@@ -11,6 +12,8 @@ namespace ecs {
         // Состояние во время игры
         bool grounded = false;
         bool jumpWasDown = false;
+        Vec3 desiredDirection{};
+        bool jumpRequested = false;
     };
 
 }

@@ -3,6 +3,7 @@
 #include "LightGizmoMath.h"
 #include "../core/Application.h"
 #include "../ecs/LightGather.h"
+#include "../ecs/PlayerSpawn.h"
 #include "../render/ColorPipeline.h"
 #include "../resources/ResourceManager.h"
 #include <imgui.h>
@@ -140,6 +141,42 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
 }
 
 namespace editor {
+void EditorLayer::DrawPlayerStartGizmos(Application& app,const ImVec2& origin,const ImVec2& size){
+    if(app.IsEditorPlayMode()||m_GameView||size.x<=1||size.y<=1)return;
+    const auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),size.x/size.y,app.GetCameraNearPlane(),app.GetCameraFarPlane());
+    auto* draw=ImGui::GetWindowDrawList();draw->PushClipRect(origin,ImVec2(origin.x+size.x,origin.y+size.y),true);
+    auto project=[&](V p)->std::optional<ImVec2>{auto q=ProjectGizmo(p,camera);if(!q)return {};return ImVec2(origin.x+(*q)[0]*size.x,origin.y+(*q)[1]*size.y);};
+    auto line=[&](V a,V b,ImU32 color){auto q=ProjectEditorLine(a,b,camera);if(!q)return;ImVec2 x(origin.x+(*q)[0]*size.x,origin.y+(*q)[1]*size.y),y(origin.x+(*q)[2]*size.x,origin.y+(*q)[3]*size.y);draw->AddLine(x,y,IM_COL32(10,15,20,230),4);draw->AddLine(x,y,color,2);};
+    ecs::Entity hit;float nearest=INFINITY;const auto mouse=ImGui::GetMousePos();
+    app.GetWorld().ForEach<ecs::PlayerStartComponent,ecs::TransformComponent>([&](ecs::Entity e,auto& start,auto& t){
+        const bool selected=e==m_SelectedEntity;const ImU32 color=start.enabled?IM_COL32(80,235,255,255):IM_COL32(155,160,165,255);
+        const auto center=ecs::PlayerBodyCenter(t.position),eye=ecs::PlayerEyePosition(center,ecs::PlayerComponent{}.eyeHeight);
+        V forward=ecs::PlayerLookDirection(t);
+        V tip=Add(eye,Scale(forward,1.1f));line(eye,tip,color);
+        V right{std::cos(t.rotation.y),0,-std::sin(t.rotation.y)};
+        line(tip,Add(Sub(tip,Scale(forward,.2f)),Scale(right,.12f)),color);line(tip,Sub(Sub(tip,Scale(forward,.2f)),Scale(right,.12f)),color);
+        auto p=project(t.position);
+        if(p){
+            // Constant screen-size person silhouette with a contrasting outline.
+            draw->AddCircleFilled(ImVec2(p->x,p->y-24),6,IM_COL32(10,15,20,240));draw->AddCircleFilled(ImVec2(p->x,p->y-24),4,color);
+            auto stroke=[&](ImVec2 a,ImVec2 b){draw->AddLine(a,b,IM_COL32(10,15,20,240),6);draw->AddLine(a,b,color,3);};
+            stroke(ImVec2(p->x,p->y-18),ImVec2(p->x,p->y-9));stroke(ImVec2(p->x-8,p->y-15),ImVec2(p->x+8,p->y-15));stroke(ImVec2(p->x,p->y-9),ImVec2(p->x-6,p->y));stroke(ImVec2(p->x,p->y-9),ImVec2(p->x+6,p->y));
+            if(selected)draw->AddText(ImVec2(p->x+12,p->y-28),color,"PlayerStart (feet)");
+            auto depth=ProjectGizmo(t.position,camera);
+            if(mouse.x>=p->x-12&&mouse.x<=p->x+12&&mouse.y>=p->y-32&&mouse.y<=p->y+5&&(*depth)[2]<nearest){hit=e;nearest=(*depth)[2];}
+        }
+        if(!selected)return;
+        std::array<V,8> corners;auto h=ecs::PlayerHalfExtents;
+        for(int i=0;i<8;++i)corners[i]=ecs::PlayerBoxPoint(t,{i&1?h.x:-h.x,i&2?h.y:-h.y,i&4?h.z:-h.z});
+        for(int i=0;i<8;++i)for(int bit:{1,2,4})if(!(i&bit))line(corners[i],corners[i|bit],color);
+        line(Add(t.position,V{-.2f,0,0}),Add(t.position,V{.2f,0,0}),color);line(Add(t.position,V{0,0,-.2f}),Add(t.position,V{0,0,.2f}),color);
+        if(auto eyes=project(eye)){draw->AddCircleFilled(*eyes,5,IM_COL32(10,15,20,240));draw->AddCircleFilled(*eyes,3,IM_COL32(255,220,90,255));draw->AddText(ImVec2(eyes->x+7,eyes->y),IM_COL32(255,220,90,255),"Eyes");}
+    });
+    if(hit.IsValid()&&!m_LightIconClicked&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&!m_LightPointerCaptured&&ImGui::IsMouseClicked(0)&&!ImGuizmo::IsOver()&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
+        FinishTransaction(app);SelectEntityFromUser(app,hit);m_LightIconClicked=true;
+    }
+    draw->PopClipRect();
+}
 void EditorLayer::DrawViewportOverlays(Application& app,const ImVec2& origin,const ImVec2& size){
     if(m_LightPointerCaptured&&!ImGui::IsMouseDown(0)){FinishTransaction(app);m_LightPointerCaptured=false;}
     if(app.IsEditorPlayMode())return;

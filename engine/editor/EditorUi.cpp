@@ -4,6 +4,7 @@
 #include "../core/Application.h"
 #include "../core/AssetPaths.h"
 #include "../resources/ResourceManager.h"
+#include "../ecs/components/PlayerStartComponent.h"
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <ImGuizmo.h>
@@ -17,6 +18,7 @@ bool Matches(const std::string& text,const std::string& filter){
     return std::search(text.begin(),text.end(),filter.begin(),filter.end(),[](unsigned char a,unsigned char b){return std::tolower(a)==std::tolower(b);})!=text.end();
 }
 const char* EntityKind(const ecs::World& w,ecs::Entity e){
+    if(w.HasComponent<ecs::PlayerStartComponent>(e))return "[PlayerStart]";
     if(w.HasComponent<ecs::DirectionalLightComponent>(e))return "[D]";if(w.HasComponent<ecs::PointLightComponent>(e))return "[P]";if(w.HasComponent<ecs::SpotLightComponent>(e))return "[S]";if(w.HasComponent<ecs::MeshRendererComponent>(e))return "[Mesh]";return "[Entity]";
 }
 }

@@ -16,6 +16,7 @@
 #include "../ecs/components/TransformComponent.h"
 #include "../ecs/components/VelocityComponent.h"
 #include "../ecs/components/PlayerStartComponent.h"
+#include "../ecs/PlayerSpawn.h"
 #include "../ecs/components/PlayerComponent.h"
 #include "../ecs/components/CharacterMovementComponent.h"
 #include "../ecs/systems/BoundsBounceSystem.h"
@@ -215,7 +216,7 @@ static ecs::Vec3 BuildCameraForward(float yaw, float pitch)
     });
 }
 
-constexpr float kMaxCameraPitch = 1.55334306f;
+constexpr float kMaxCameraPitch = ecs::PlayerMaximumPitch;
 constexpr float kFallbackAspectRatio = 16.0f / 9.0f;
 
 void Application::RunResourceBootstrapCheck()
@@ -958,153 +959,25 @@ void Application::UpdateCameraController(float dt)
         Scale(Normalize(movement), speed * dt));
 }
 
-void Application::UpdatePlayerController(float dt)
+void Application::UpdatePlayerController(float)
 {
-    if (!m_RuntimeWorld ||
-        !m_RuntimeWorld->IsAlive(m_PlayerEntity))
-        return;
-
-    auto* transform =
-        m_RuntimeWorld->GetComponent<ecs::TransformComponent>(
-            m_PlayerEntity
-        );
-
-    auto* player =
-        m_RuntimeWorld->GetComponent<ecs::PlayerComponent>(
-            m_PlayerEntity
-        );
-
-    if (!transform || !player)
-        return;
-
-    auto* characterMovement =
-        m_RuntimeWorld->GetComponent<
-        ecs::CharacterMovementComponent
-        >(m_PlayerEntity);
-
-    if (!characterMovement)
-        return;
-
-    // Движение только во время активной игры
-    if (IsSimulationRunning() && m_PlayerMouseCaptured)
-    {
-        auto* primary =
-            dynamic_cast<GlfwWindow*>(GetWindow());
-
-        GLFWwindow* window =
-            primary ? primary->GetGlfwHandle() : nullptr;
-
-        if (window &&
-            glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE)
-        {
-            // Направление камеры без вертикального наклона
-            ecs::Vec3 forward =
-                BuildCameraForward(m_Camera.yaw, 0.0f);
-
-            ecs::Vec3 worldUp{ 0.0f, 1.0f, 0.0f };
-
-            ecs::Vec3 right =
-                Normalize(Cross(worldUp, forward));
-
-            ecs::Vec3 movement{};
-
-            if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-                movement = Add(movement, forward);
-
-            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-                movement = Add(movement, Scale(forward, -1.0f));
-
-            if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-                movement = Add(movement, right);
-
-            if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-                movement = Add(movement, Scale(right, -1.0f));
-
-            // Получаем физическое тело игрока
-            auto* body =
-                m_RuntimeWorld->GetComponent<ecs::RigidbodyComponent>(
-                    m_PlayerEntity
-                );
-
-            if (body)
-            {
-                // Нормализуем направление, чтобы по диагонали
-                // игрок не двигался быстрее
-                if (Length(movement) > 0.0001f)
-                {
-                    movement = Normalize(movement);
-                }
-
-                // Устанавливаем горизонтальную скорость
-                body->velocity.x = movement.x * characterMovement->moveSpeed;
-                body->velocity.z = movement.z * characterMovement->moveSpeed;
-
-                // Пробуждаем физическое тело
-                if (Length(movement) > 0.0001f)
-                {
-                    body->sleeping = false;
-                    body->sleepTimer = 0.0f;
-                }
-            }
-        }
-    }
-
-    if (!m_PlayerMouseCaptured)
-    {
-        auto* body =
-            m_RuntimeWorld->GetComponent<ecs::RigidbodyComponent>(
-                m_PlayerEntity
-            );
-
-        if (body)
-        {
-            body->velocity.x = 0.0f;
-            body->velocity.z = 0.0f;
-        }
-    }
-
-    auto* primary =
-        dynamic_cast<GlfwWindow*>(GetWindow());
-
-    GLFWwindow* window =
-        primary ? primary->GetGlfwHandle() : nullptr;
-
-    const bool jumpDown =
-        window &&
-        glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
-
-    const bool jumpPressed =
-        jumpDown && !characterMovement->jumpWasDown;
-
-    characterMovement->jumpWasDown = jumpDown;
-
-    if (jumpPressed &&
-        m_PlayerMouseCaptured &&
-        IsSimulationRunning() &&
-        characterMovement->grounded)
-    {
-        auto* body =
-            m_RuntimeWorld->GetComponent<
-            ecs::RigidbodyComponent
-            >(m_PlayerEntity);
-
-        if (body)
-        {
-            body->velocity.y =
-                characterMovement->jumpSpeed;
-
-            body->sleeping = false;
-            body->sleepTimer = 0.0f;
-
-            characterMovement->grounded = false;
-        }
-    }
-
-    // Камера следует за ECS-сущностью
-    m_Camera.position = transform->position;
-    m_Camera.position.y += player->eyeHeight;
+    if(!m_RuntimeWorld||!m_RuntimeWorld->IsAlive(m_PlayerEntity))return;
+    auto* movement=m_RuntimeWorld->GetComponent<ecs::CharacterMovementComponent>(m_PlayerEntity);
+    if(!movement)return;
+    auto* primary=dynamic_cast<GlfwWindow*>(GetWindow());
+    auto* window=primary?primary->GetGlfwHandle():nullptr;
+    if(!window){ecs::SampleCharacterInput(*movement,{},false,false);return;}
+    const bool jumpDown=window&&glfwGetKey(window,GLFW_KEY_SPACE)==GLFW_PRESS;
+    const bool active=window&&m_PlayerMouseCaptured&&IsSimulationRunning();
+    const auto forward=BuildCameraForward(m_Camera.yaw,0);
+    const auto right=Normalize(Cross(ecs::Vec3{0,1,0},forward));
+    ecs::Vec3 direction{};
+    if(glfwGetKey(window,GLFW_KEY_W)==GLFW_PRESS)direction=Add(direction,forward);
+    if(glfwGetKey(window,GLFW_KEY_S)==GLFW_PRESS)direction=Add(direction,Scale(forward,-1));
+    if(glfwGetKey(window,GLFW_KEY_D)==GLFW_PRESS)direction=Add(direction,right);
+    if(glfwGetKey(window,GLFW_KEY_A)==GLFW_PRESS)direction=Add(direction,Scale(right,-1));
+    ecs::SampleCharacterInput(*movement,direction,jumpDown,active);
 }
-
 void Application::UpdateRenderSystemCamera(IWindow* window)
 {
     if (m_RenderSystem == nullptr || window == nullptr)
@@ -1239,95 +1112,13 @@ void Application::SetEditorPlayMode(bool enabled)
         map(m_EcsDebugEntities);map(m_StressEntities);
         m_EditorLayer.EnterRuntime(m_CloneMapping);
         m_RuntimeWorld=std::move(runtime);
-        // Ищем PlayerStart и создаём игрока
-        for (ecs::Entity entity : m_RuntimeWorld->Entities())
-        {
-            // Получаем PlayerStartComponent
-            auto* start =
-                m_RuntimeWorld->GetComponent<ecs::PlayerStartComponent>(entity);
-
-            // Получаем TransformComponent
-            auto* transform =
-                m_RuntimeWorld->GetComponent<ecs::TransformComponent>(entity);
-
-            // Пропускаем объекты без активного PlayerStart
-            if (!start || !start->enabled || !transform)
-                continue;
-
-            // Запоминаем точку появления до создания игрока
-            const ecs::Vec3 spawnPosition = transform->position;
-            const ecs::Vec3 spawnRotation = transform->rotation;
-
-            // Создаём сущность игрока
-            m_PlayerEntity = m_RuntimeWorld->CreateEntity();
-
-            // Добавляем Transform
-            auto& playerTransform =
-                m_RuntimeWorld->AddComponent<ecs::TransformComponent>(
-                    m_PlayerEntity
-                );
-
-            playerTransform.position = spawnPosition;
-            playerTransform.rotation = spawnRotation;
-
-            // Добавляем PlayerComponent
-            auto& player =
-                m_RuntimeWorld->AddComponent<ecs::PlayerComponent>(
-                    m_PlayerEntity
-                );
-
-            m_RuntimeWorld
-                ->AddComponent<ecs::CharacterMovementComponent>(
-                    m_PlayerEntity
-                );
-
-            // Физическое тело
-            auto& body =
-                m_RuntimeWorld->AddComponent<ecs::RigidbodyComponent>(
-                    m_PlayerEntity
-                );
-
-            body.mass = 70.0f;
-            body.useGravity = true;
-            body.simulatePhysics = true;
-            body.isStatic = false;
-
-            // Форма столкновения
-            auto& collider =
-                m_RuntimeWorld->AddComponent<ecs::ColliderComponent>(
-                    m_PlayerEntity
-                );
-
-            collider.type = ecs::ColliderType::Box;
-            collider.halfExtents = { 0.3f, 0.85f, 0.3f };
-            collider.autoFitFromMesh = false;
-            collider.restitution = 0.0f;
-            collider.friction = 0.8f;
-
-            // Добавляем имя игрока
-            auto& tag =
-                m_RuntimeWorld->AddComponent<ecs::TagComponent>(
-                    m_PlayerEntity
-                );
-
-            tag.name = "Player";
-
-            // Устанавливаем игровую камеру
-            m_Camera.position = playerTransform.position;
-            m_Camera.position.y += player.eyeHeight;
-
-            m_Camera.yaw = playerTransform.rotation.y;
-            m_Camera.pitch = playerTransform.rotation.x;
-
-            // Удаляем только игровую копию точки появления
-            m_RuntimeWorld->DestroyEntity(entity);
-
-            Logger::Get().Info(
-                "Player spawned; runtime PlayerStart removed"
-            );
-
-            // Создаём только одного игрока
-            break;
+        ecs::TransformComponent spawnPoint;
+        m_PlayerEntity=ecs::SpawnPlayer(*m_RuntimeWorld,&spawnPoint);
+        if(m_RuntimeWorld->IsAlive(m_PlayerEntity)){
+            const auto& t=*m_RuntimeWorld->GetComponent<ecs::TransformComponent>(m_PlayerEntity);
+            const auto& player=*m_RuntimeWorld->GetComponent<ecs::PlayerComponent>(m_PlayerEntity);
+            m_Camera.position=ecs::PlayerEyePosition(t.position,player.eyeHeight);
+            m_Camera.yaw=t.rotation.y;m_Camera.pitch=std::clamp(spawnPoint.rotation.x,-kMaxCameraPitch,kMaxCameraPitch);
         }
         m_LuaRuntime.Start(*m_RuntimeWorld,[this](const std::string& action){return IsSimulationRunning()&&IsInputActionActive(action);});
         m_StateMachine.Clear(*this);RequestStateChange(std::make_unique<LoadingState>());m_StateMachine.ApplyPending(*this);
@@ -1495,34 +1286,7 @@ bool Application::Initialize()
         m_LuaRuntime.QueueCollision(e);
         m_ActiveCollisionPairs.insert(BuildCollisionPairKey(e.a.index, e.b.index));
 
-        if (!m_RuntimeWorld ||
-            !m_RuntimeWorld->IsAlive(m_PlayerEntity))
-            return;
-
-        auto* movement =
-            m_RuntimeWorld->GetComponent<
-            ecs::CharacterMovementComponent
-            >(m_PlayerEntity);
-
-        auto* body =
-            m_RuntimeWorld->GetComponent<
-            ecs::RigidbodyComponent
-            >(m_PlayerEntity);
-
-        if (!movement || !body)
-            return;
-
-        // Нормаль должна указывать вверх относительно игрока
-        const bool groundContact =
-            (e.a == m_PlayerEntity && e.normal.y > 0.5f) ||
-            (e.b == m_PlayerEntity && e.normal.y < -0.5f);
-
-        // Не считаем игрока стоящим на земле,
-        // когда он уже движется вверх после прыжка
-        if (groundContact && body->velocity.y <= 0.15f)
-        {
-            movement->grounded = true;
-        }
+        if(m_RuntimeWorld)ecs::GroundCharacter(*m_RuntimeWorld,m_PlayerEntity,e);
     });
     SetupEcsRuntimeDemo();
     if(!m_Config.ecsDemo.sceneFile.empty()){std::string error;if(!OpenScene(m_Config.ecsDemo.sceneFile,&error))Logger::Get().Error(error);}
@@ -1752,17 +1516,7 @@ int Application::Run()
                 }
                 if (IsSimulationRunning() && m_PhysicsSystem) {
                     m_RenderInterpolation.BeginTick(GetWorld());
-                    if (m_RuntimeWorld &&
-                        m_RuntimeWorld->IsAlive(m_PlayerEntity))
-                    {
-                        auto* movement =
-                            m_RuntimeWorld->GetComponent<
-                            ecs::CharacterMovementComponent
-                            >(m_PlayerEntity);
-
-                        if (movement)
-                            movement->grounded = false;
-                    }
+                    if(m_RuntimeWorld)ecs::ApplyCharacterMovement(*m_RuntimeWorld,m_PlayerEntity);
                     m_World.UpdateFixedSystemsOn(GetWorld(),float(FixedStepClock::TickSeconds));
                     m_RenderInterpolation.EndTick(GetWorld());
                     m_PhysicsFrame.AddTick(m_PhysicsSystem->GetStatistics());
@@ -1780,6 +1534,12 @@ int Application::Run()
         }
         ApplyStructuralCommands();
         UpdateEcs(dt);
+        m_RenderInterpolation.SetFrame(GetWorld(),IsSimulationRunning(),m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
+        if(m_RuntimeWorld&&m_RuntimeWorld->IsAlive(m_PlayerEntity)){
+            auto* t=m_RuntimeWorld->GetComponent<ecs::TransformComponent>(m_PlayerEntity);
+            auto* p=m_RuntimeWorld->GetComponent<ecs::PlayerComponent>(m_PlayerEntity);
+            if(t&&p)m_Camera.position=ecs::PlayerEyePosition(m_RenderInterpolation.Resolve(m_PlayerEntity,*t).position,p->eyeHeight);
+        }
 
         static float fpsTimer = 0.0f;
         static int fpsFrames = 0;

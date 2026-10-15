@@ -3,6 +3,7 @@
 #include "../components/ColliderComponent.h"
 #include "../components/RigidbodyComponent.h"
 #include "../components/TransformComponent.h"
+#include "../components/PlayerStartComponent.h"
 #include <algorithm>
 #include <cmath>
 #include <chrono>
@@ -138,7 +139,7 @@ static Vec3 InverseInertiaLocal(
     const ecs::RigidbodyComponent& rb,
     const ecs::ColliderComponent& collider)
 {
-    if (rb.isStatic || rb.mass <= 0.0001f)
+    if (rb.isStatic || rb.lockRotation || rb.mass <= 0.0001f)
         return Vec3{};
 
     if (collider.type == ecs::ColliderType::Sphere)
@@ -678,10 +679,11 @@ void PhysicsSystem::Update(World& world, float dt)
     world.ForEach<ColliderComponent, TransformComponent, RigidbodyComponent>(
         [&](Entity e, ColliderComponent& c, TransformComponent& t, RigidbodyComponent& rb)
         {
-            if (rb.simulatePhysics || rb.isStatic) bodies.push_back({e, &t, &c, &rb});
+            if (!world.HasComponent<PlayerStartComponent>(e) && (rb.simulatePhysics || rb.isStatic)) bodies.push_back({e, &t, &c, &rb});
         });
     std::sort(bodies.begin(), bodies.end(), [](const BodyRef& a, const BodyRef& b) { return a.entity.index < b.entity.index; });
     for (auto& b : bodies) {
+        if(b.rigidbody->lockRotation)b.rigidbody->angularVelocity={};
         b.axes = BuildBoxAxes(b.transform->rotation);
         b.inverseInertia = InverseInertiaLocal(*b.rigidbody, *b.collider);
     }

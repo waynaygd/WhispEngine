@@ -6,6 +6,7 @@
 #include "EditorWidgets.h"
 #include "../core/Application.h"
 #include "../ecs/components/LuaScriptComponent.h"
+#include "../ecs/PlayerSpawn.h"
 #include "../resources/ResourceManager.h"
 #include <imgui.h>
 #include <chrono>
@@ -143,6 +144,10 @@ void EditorLayer::DrawInspector(Application& app){
             ImGui::BeginDisabled(app.IsEditorPlayMode()||app.GetSceneBackground().sunSync==SunSyncMode::SkyDrivesLight&&PrimarySun(world)==e);
             if(ImGui::Button("-90 deg"))RotateSelectedQuarter(app,m_RotateAxis,-1,m_GizmoMode==1);ImGui::SameLine();if(ImGui::Button("+90 deg"))RotateSelectedQuarter(app,m_RotateAxis,1,m_GizmoMode==1);ImGui::EndDisabled();
             ImGui::TextDisabled("Rz*Ry*Rx; Local: R*Q, World: Q*R. Euler gimbal lock remains.");
+        }
+        if(d.key=="PlayerStart"){
+            auto half=ecs::PlayerHalfExtents;
+            ImGui::TextWrapped("Position marks the feet. Player size: %.2f x %.2f x %.2f. Scale is ignored. Y rotation sets facing; X sets camera pitch. The body stays upright.",half.x*2,half.y*2,half.z*2);
         }
         if(d.key=="PointLight"||d.key=="SpotLight")ImGui::TextWrapped("Point/Spot shadows are a reserved flag. Range is in world units; Transform scale is ignored.");
         if(d.key=="DirectionalLight"||d.key=="SpotLight")ImGui::TextWrapped("Outgoing rays follow Transform local +Z; Inspector rotation is in degrees (stored radians).");

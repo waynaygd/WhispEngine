@@ -80,6 +80,7 @@ public:
     void MarkSaved(){m_SavedRevision=m_Revision;m_ExternalDirty=false;}
     void MarkDirty(){m_ExternalDirty=true;}
     ecs::Entity CreateEntity(Application&,const std::string& name="Entity");
+    ecs::Entity CreatePlayerStart(Application&);
     bool DeleteEntity(Application&,ecs::Entity);
     ecs::Entity DuplicateEntity(Application&,ecs::Entity);
     bool CopyEntity(Application&,ecs::Entity);
@@ -192,6 +193,7 @@ private:
     void DrawImportDialogs(Application& app);
     void DrawMaterialEditor(Application& app);
     void DrawLightGizmos(Application&,IRenderAdapter*,const ImVec2&,const ImVec2&);
+    void DrawPlayerStartGizmos(Application&,const ImVec2&,const ImVec2&);
     bool m_ShowLightGizmos=true,m_LightXray=false;
     int m_LightXrayMode=1,m_TransformPrecision=1,m_RotateAxis=1;
     bool m_RotationSnapping=false,m_ShowPhysicsStress=false;
