@@ -1216,7 +1216,11 @@ void PhysicsSystem::Update(World& world, float dt)
         m_ContactCache = std::move(nextCache);
         // Defer callbacks until all substeps finish: listeners can mutate World.
         if (m_EventBus) for (const auto& m : contacts)
-            events.push_back({bodies[m.a].entity,bodies[m.b].entity});
+            events.push_back({
+    bodies[m.a].entity,
+    bodies[m.b].entity,
+    m.normal
+                });
     }
     if (m_EventBus) for (const auto& event : events)
         if (world.IsAlive(event.a) && world.IsAlive(event.b)) m_EventBus->PublishCollision(event);

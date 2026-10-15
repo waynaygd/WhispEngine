@@ -176,6 +176,8 @@ private:
     void UpdateEcs(float dt);
     void UpdateCameraController(float dt);
     void UpdatePlayerController(float dt);
+    void UpdatePlayerMouseLook();
+    void ReleasePlayerMouse();
     void UpdateRenderSystemCamera(IWindow* window);
     void UpdateRenderSystemCameraAspect(float aspectRatio);
     void SetupRenderStressScene();
@@ -267,6 +269,9 @@ private:
 
     CameraControllerState m_Camera;
     ecs::Entity m_PlayerEntity{};
+    bool m_PlayerMouseCaptured = false;
+    bool m_PlayerLeftWasDown = false;
+    bool m_PlayerAltWasDown = false;
     bool m_DebugCollidersEnabled = false;
     bool m_PhysicsDebugPose = false;
     bool m_GpuInstancing = true;

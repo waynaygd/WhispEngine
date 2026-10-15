@@ -7,6 +7,7 @@
 #include "components/RigidbodyComponent.h"
 #include "components/SceneIdentityComponent.h"
 #include "components/TagComponent.h"
+#include "components/CharacterMovementComponent.h"
 #include "components/PlayerStartComponent.h"
 #include "components/TransformComponent.h"
 #include "components/VelocityComponent.h"
@@ -186,6 +187,35 @@ ComponentRegistry Build(){
 
     Complete(player);
     r.Register(player);
+
+    auto movement =
+        Descriptor<CharacterMovementComponent>(
+            "CharacterMovement",
+            "Character Movement"
+        );
+
+    Field<CharacterMovementComponent>(
+        movement,
+        "moveSpeed",
+        "Move Speed",
+        &CharacterMovementComponent::moveSpeed,
+        PropertyKind::Number,
+        0.0f,
+        30.0f
+    );
+
+    Field<CharacterMovementComponent>(
+        movement,
+        "jumpSpeed",
+        "Jump Speed",
+        &CharacterMovementComponent::jumpSpeed,
+        PropertyKind::Number,
+        0.0f,
+        20.0f
+    );
+
+    Complete(movement);
+    r.Register(movement);
 
     return r;
 }

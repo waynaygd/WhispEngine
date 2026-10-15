@@ -17,6 +17,7 @@
 #include "../ecs/components/VelocityComponent.h"
 #include "../ecs/components/PlayerStartComponent.h"
 #include "../ecs/components/PlayerComponent.h"
+#include "../ecs/components/CharacterMovementComponent.h"
 #include "../ecs/systems/BoundsBounceSystem.h"
 #include "../ecs/systems/PhysicsSystem.h"
 
@@ -976,9 +977,16 @@ void Application::UpdatePlayerController(float dt)
     if (!transform || !player)
         return;
 
+    auto* characterMovement =
+        m_RuntimeWorld->GetComponent<
+        ecs::CharacterMovementComponent
+        >(m_PlayerEntity);
+
+    if (!characterMovement)
+        return;
+
     // Движение только во время активной игры
-    if (IsSimulationRunning() &&
-        m_EditorLayer.OwnsViewportKeyboard())
+    if (IsSimulationRunning() && m_PlayerMouseCaptured)
     {
         auto* primary =
             dynamic_cast<GlfwWindow*>(GetWindow());
@@ -1012,15 +1020,83 @@ void Application::UpdatePlayerController(float dt)
             if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
                 movement = Add(movement, Scale(right, -1.0f));
 
-            if (Length(movement) > 0.0001f)
-            {
-                movement = Normalize(movement);
-
-                transform->position = Add(
-                    transform->position,
-                    Scale(movement, player->moveSpeed * dt)
+            // Получаем физическое тело игрока
+            auto* body =
+                m_RuntimeWorld->GetComponent<ecs::RigidbodyComponent>(
+                    m_PlayerEntity
                 );
+
+            if (body)
+            {
+                // Нормализуем направление, чтобы по диагонали
+                // игрок не двигался быстрее
+                if (Length(movement) > 0.0001f)
+                {
+                    movement = Normalize(movement);
+                }
+
+                // Устанавливаем горизонтальную скорость
+                body->velocity.x = movement.x * characterMovement->moveSpeed;
+                body->velocity.z = movement.z * characterMovement->moveSpeed;
+
+                // Пробуждаем физическое тело
+                if (Length(movement) > 0.0001f)
+                {
+                    body->sleeping = false;
+                    body->sleepTimer = 0.0f;
+                }
             }
+        }
+    }
+
+    if (!m_PlayerMouseCaptured)
+    {
+        auto* body =
+            m_RuntimeWorld->GetComponent<ecs::RigidbodyComponent>(
+                m_PlayerEntity
+            );
+
+        if (body)
+        {
+            body->velocity.x = 0.0f;
+            body->velocity.z = 0.0f;
+        }
+    }
+
+    auto* primary =
+        dynamic_cast<GlfwWindow*>(GetWindow());
+
+    GLFWwindow* window =
+        primary ? primary->GetGlfwHandle() : nullptr;
+
+    const bool jumpDown =
+        window &&
+        glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
+
+    const bool jumpPressed =
+        jumpDown && !characterMovement->jumpWasDown;
+
+    characterMovement->jumpWasDown = jumpDown;
+
+    if (jumpPressed &&
+        m_PlayerMouseCaptured &&
+        IsSimulationRunning() &&
+        characterMovement->grounded)
+    {
+        auto* body =
+            m_RuntimeWorld->GetComponent<
+            ecs::RigidbodyComponent
+            >(m_PlayerEntity);
+
+        if (body)
+        {
+            body->velocity.y =
+                characterMovement->jumpSpeed;
+
+            body->sleeping = false;
+            body->sleepTimer = 0.0f;
+
+            characterMovement->grounded = false;
         }
     }
 
@@ -1200,6 +1276,34 @@ void Application::SetEditorPlayMode(bool enabled)
                     m_PlayerEntity
                 );
 
+            m_RuntimeWorld
+                ->AddComponent<ecs::CharacterMovementComponent>(
+                    m_PlayerEntity
+                );
+
+            // Физическое тело
+            auto& body =
+                m_RuntimeWorld->AddComponent<ecs::RigidbodyComponent>(
+                    m_PlayerEntity
+                );
+
+            body.mass = 70.0f;
+            body.useGravity = true;
+            body.simulatePhysics = true;
+            body.isStatic = false;
+
+            // Форма столкновения
+            auto& collider =
+                m_RuntimeWorld->AddComponent<ecs::ColliderComponent>(
+                    m_PlayerEntity
+                );
+
+            collider.type = ecs::ColliderType::Box;
+            collider.halfExtents = { 0.3f, 0.85f, 0.3f };
+            collider.autoFitFromMesh = false;
+            collider.restitution = 0.0f;
+            collider.friction = 0.8f;
+
             // Добавляем имя игрока
             auto& tag =
                 m_RuntimeWorld->AddComponent<ecs::TagComponent>(
@@ -1215,7 +1319,12 @@ void Application::SetEditorPlayMode(bool enabled)
             m_Camera.yaw = playerTransform.rotation.y;
             m_Camera.pitch = playerTransform.rotation.x;
 
-            Logger::Get().Info("Player: spawned");
+            // Удаляем только игровую копию точки появления
+            m_RuntimeWorld->DestroyEntity(entity);
+
+            Logger::Get().Info(
+                "Player spawned; runtime PlayerStart removed"
+            );
 
             // Создаём только одного игрока
             break;
@@ -1224,6 +1333,7 @@ void Application::SetEditorPlayMode(bool enabled)
         m_StateMachine.Clear(*this);RequestStateChange(std::make_unique<LoadingState>());m_StateMachine.ApplyPending(*this);
         m_LastCloneMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
     }else{
+        ReleasePlayerMouse();
         if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
         m_StateMachine.Clear(*this);
         m_LuaRuntime.Stop();m_Mutations.Clear();m_RenderInterpolation.Clear();m_EditorLayer.LeaveRuntime();m_RuntimeWorld.reset();m_CloneMapping.clear();
@@ -1384,6 +1494,35 @@ bool Application::Initialize()
     m_EventBus.SubscribeCollision([this](const ecs::CollisionEvent& e){
         m_LuaRuntime.QueueCollision(e);
         m_ActiveCollisionPairs.insert(BuildCollisionPairKey(e.a.index, e.b.index));
+
+        if (!m_RuntimeWorld ||
+            !m_RuntimeWorld->IsAlive(m_PlayerEntity))
+            return;
+
+        auto* movement =
+            m_RuntimeWorld->GetComponent<
+            ecs::CharacterMovementComponent
+            >(m_PlayerEntity);
+
+        auto* body =
+            m_RuntimeWorld->GetComponent<
+            ecs::RigidbodyComponent
+            >(m_PlayerEntity);
+
+        if (!movement || !body)
+            return;
+
+        // Нормаль должна указывать вверх относительно игрока
+        const bool groundContact =
+            (e.a == m_PlayerEntity && e.normal.y > 0.5f) ||
+            (e.b == m_PlayerEntity && e.normal.y < -0.5f);
+
+        // Не считаем игрока стоящим на земле,
+        // когда он уже движется вверх после прыжка
+        if (groundContact && body->velocity.y <= 0.15f)
+        {
+            movement->grounded = true;
+        }
     });
     SetupEcsRuntimeDemo();
     if(!m_Config.ecsDemo.sceneFile.empty()){std::string error;if(!OpenScene(m_Config.ecsDemo.sceneFile,&error))Logger::Get().Error(error);}
@@ -1574,7 +1713,20 @@ int Application::Run()
         {
             ZoneScopedN("GameUpdate");
 
-            UpdateCameraController(dt);
+            const bool hasPlayer =
+                m_EditorPlayMode &&
+                m_RuntimeWorld &&
+                m_RuntimeWorld->IsAlive(m_PlayerEntity);
+
+            if (hasPlayer)
+            {
+                UpdatePlayerMouseLook();
+            }
+            else
+            {
+                UpdateCameraController(dt);
+            }
+
             UpdatePlayerController(dt);
             if(IsSimulationRunning())m_LuaRuntime.Update(dt);
 
@@ -1600,6 +1752,17 @@ int Application::Run()
                 }
                 if (IsSimulationRunning() && m_PhysicsSystem) {
                     m_RenderInterpolation.BeginTick(GetWorld());
+                    if (m_RuntimeWorld &&
+                        m_RuntimeWorld->IsAlive(m_PlayerEntity))
+                    {
+                        auto* movement =
+                            m_RuntimeWorld->GetComponent<
+                            ecs::CharacterMovementComponent
+                            >(m_PlayerEntity);
+
+                        if (movement)
+                            movement->grounded = false;
+                    }
                     m_World.UpdateFixedSystemsOn(GetWorld(),float(FixedStepClock::TickSeconds));
                     m_RenderInterpolation.EndTick(GetWorld());
                     m_PhysicsFrame.AddTick(m_PhysicsSystem->GetStatistics());
@@ -1766,6 +1929,171 @@ int Application::Run()
     }
     if(m_RenderBenchmark && !SaveRenderDiagnostics(m_RenderDiagnosticOutput,renderSamples))return 4;
     return 0;
+}
+
+void Application::ReleasePlayerMouse()
+{
+    auto* primary = dynamic_cast<GlfwWindow*>(GetWindow());
+
+    if (primary)
+    {
+        GLFWwindow* window = primary->GetGlfwHandle();
+
+        if (window)
+        {
+            glfwSetInputMode(
+                window,
+                GLFW_CURSOR,
+                GLFW_CURSOR_NORMAL
+            );
+
+            if (glfwRawMouseMotionSupported())
+            {
+                glfwSetInputMode(
+                    window,
+                    GLFW_RAW_MOUSE_MOTION,
+                    GLFW_FALSE
+                );
+            }
+
+            m_PlayerLeftWasDown =
+                glfwGetMouseButton(
+                    window,
+                    GLFW_MOUSE_BUTTON_LEFT
+                ) == GLFW_PRESS;
+        }
+    }
+
+    m_PlayerMouseCaptured = false;
+}
+
+void Application::UpdatePlayerMouseLook()
+{
+    if (!m_RuntimeWorld ||
+        !m_RuntimeWorld->IsAlive(m_PlayerEntity))
+    {
+        ReleasePlayerMouse();
+        return;
+    }
+
+    auto* primary = dynamic_cast<GlfwWindow*>(GetWindow());
+    if (!primary)
+        return;
+
+    GLFWwindow* window = primary->GetGlfwHandle();
+    if (!window)
+        return;
+
+    const bool focused =
+        glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE;
+
+    const bool altDown =
+        glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS;
+
+    const bool altPressed =
+        altDown && !m_PlayerAltWasDown;
+
+    m_PlayerAltWasDown = altDown;
+
+    // Escape полностью останавливает игру
+    if (focused &&
+        glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS &&
+        !m_EditorLayer.BlocksCamera())
+    {
+        SetEditorPlayMode(false);
+        return;
+    }
+
+    // Left Alt освобождает игровой курсор
+    if (m_PlayerMouseCaptured && altPressed)
+    {
+        ReleasePlayerMouse();
+        return;
+    }
+
+    // Если мышь уже захвачена
+    if (m_PlayerMouseCaptured)
+    {
+        if (!focused || !IsSimulationRunning())
+        {
+            ReleasePlayerMouse();
+            return;
+        }
+
+        double mouseX = 0.0;
+        double mouseY = 0.0;
+
+        glfwGetCursorPos(window, &mouseX, &mouseY);
+
+        const float deltaX =
+            static_cast<float>(mouseX - m_Camera.lastMouseX);
+
+        const float deltaY =
+            static_cast<float>(mouseY - m_Camera.lastMouseY);
+
+        m_Camera.lastMouseX = mouseX;
+        m_Camera.lastMouseY = mouseY;
+
+        m_Camera.yaw +=
+            deltaX * m_Camera.mouseSensitivity;
+
+        m_Camera.pitch = std::clamp(
+            m_Camera.pitch -
+            deltaY * m_Camera.mouseSensitivity,
+            -kMaxCameraPitch,
+            kMaxCameraPitch
+        );
+
+        return;
+    }
+
+    // Ожидаем клик по игровому Viewport
+    const bool leftDown =
+        glfwGetMouseButton(
+            window,
+            GLFW_MOUSE_BUTTON_LEFT
+        ) == GLFW_PRESS;
+
+    const bool justClicked =
+        leftDown && !m_PlayerLeftWasDown;
+
+    m_PlayerLeftWasDown = leftDown;
+
+    if (!focused || !IsSimulationRunning())
+        return;
+
+    double mouseX = 0.0;
+    double mouseY = 0.0;
+
+    glfwGetCursorPos(window, &mouseX, &mouseY);
+
+    if (justClicked &&
+        m_EditorLayer.IsPointInsideViewport(mouseX, mouseY) &&
+        !m_EditorLayer.BlocksCamera())
+    {
+        glfwSetInputMode(
+            window,
+            GLFW_CURSOR,
+            GLFW_CURSOR_DISABLED
+        );
+
+        if (glfwRawMouseMotionSupported())
+        {
+            glfwSetInputMode(
+                window,
+                GLFW_RAW_MOUSE_MOTION,
+                GLFW_TRUE
+            );
+        }
+
+        glfwGetCursorPos(
+            window,
+            &m_Camera.lastMouseX,
+            &m_Camera.lastMouseY
+        );
+
+        m_PlayerMouseCaptured = true;
+    }
 }
 
 void Application::Shutdown()
