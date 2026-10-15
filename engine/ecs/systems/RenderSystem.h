@@ -166,6 +166,7 @@ private:
     int m_ShadingModelOverride=-1;
     bool m_InstancingEnabled=true;
     bool m_ViewportUnlit=false;
+    std::string m_FogWarning;
     const EnvironmentSettings* m_EnvironmentSettings=nullptr;
     std::string m_EnvironmentKey,m_RequestedEnvironment;
     ResourceHandle<EnvironmentResource> m_EnvironmentAsset;

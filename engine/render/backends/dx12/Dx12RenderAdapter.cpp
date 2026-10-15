@@ -1211,7 +1211,7 @@ bool Dx12RenderAdapter::EnsureViewportResources(UINT width, UINT height)
     depthDesc.Height = height;
     depthDesc.DepthOrArraySize = 1;
     depthDesc.MipLevels = 1;
-    depthDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    depthDesc.Format = DXGI_FORMAT_R32_TYPELESS;
     depthDesc.SampleDesc.Count = 1;
     depthDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     depthDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
@@ -1420,7 +1420,7 @@ bool Dx12RenderAdapter::CreateDepthResources()
     depthDesc.Height = m_Height;
     depthDesc.DepthOrArraySize = 1;
     depthDesc.MipLevels = 1;
-    depthDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    depthDesc.Format = DXGI_FORMAT_R32_TYPELESS;
     depthDesc.SampleDesc.Count = 1;
     depthDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     depthDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
@@ -1699,6 +1699,7 @@ void Dx12RenderAdapter::BeginFrame()
     m_SubmissionStatistics={}; m_InstancePageIndex=0;
     m_MaterialBindingTrace.clear();m_MaterialTables.clear();m_MaterialTableCount=0;m_EnvironmentTable={};m_LastMaterialTable={};m_FrameConstantsDirty=true;
     for(auto& page:m_InstancePages[m_FrameIndex])page.used=0;
+    CollectFogTiming(m_FrameIndex);m_FogPassCursor=0;
     m_FrameConstantPageIndex=0;m_FrameConstantAddress=0;
     for(auto& page:m_FrameConstantPages[m_FrameIndex])page.used=0;
 
@@ -2005,7 +2006,7 @@ void Dx12RenderAdapter::Shutdown()
 
     m_FrameRecording=false;
     ReleaseSceneLights();
-    ReleaseEditorVisuals();ReleaseEnvironment();m_CachedBrdfGpu.Reset();ReleaseHdrTargets();m_OutputPso.Reset();m_OutputRoot.Reset();
+    ReleaseFog();ReleaseEditorVisuals();ReleaseEnvironment();m_CachedBrdfGpu.Reset();ReleaseHdrTargets();m_OutputPso.Reset();m_OutputRoot.Reset();
     ReleaseShadowResources();m_ShadowVs.Reset();m_ShadowInstanceVs.Reset();m_ShadowPso.Reset();m_ShadowInstancePso.Reset();m_ShadowDoublePso.Reset();m_ShadowDoubleInstancePso.Reset();m_ShadowMirrorPso.Reset();m_ShadowMirrorInstancePso.Reset();m_ShadowRoot.Reset();
     m_TimeHeap.Reset();for(auto& resource:m_TimeReadback)resource.Reset();m_TimeFrequency=0;
     std::fill(std::begin(m_TimePending),std::end(m_TimePending),0);

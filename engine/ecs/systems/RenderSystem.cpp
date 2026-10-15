@@ -1,3 +1,4 @@
+#include "../FogGather.h"
 #include "RenderSystem.h"
 #include "../LightGather.h"
 
@@ -272,6 +273,14 @@ namespace ecs {
         lightCamera.nearPlane=m_CameraNearPlane;lightCamera.farPlane=m_CameraFarPlane;
         auto lights=GatherSceneLights(world,m_LightingSettings?*m_LightingSettings:m_DefaultLighting,lightCamera,m_Interpolation);
         if(m_ViewportUnlit)lights.lighting.enabled=false;
+        if(m_Renderer){
+            auto fog=GatherFog(world,lightCamera);std::string warning;
+            if(fog.activeCount>1)warning="Multiple enabled global Fog components: lowest Entity index wins";
+            if(fog.invalidCount)warning="Invalid Fog component ignored at render boundary";
+            if(fog.active&&!m_Renderer->GetFogDiagnostics().supported)warning="Fog is not supported by this render backend";
+            if(warning!=m_FogWarning){m_FogWarning=warning;if(!warning.empty())Logger::Get().Warn(warning);}
+            m_Renderer->SetFog(fog);
+        }
         if(m_Renderer){m_Renderer->SetCameraPosition({m_CameraPosition.x,m_CameraPosition.y,m_CameraPosition.z,0});
             m_Renderer->SetLighting(BuildLightingConstants(lights.lighting));
             m_Renderer->SetSceneLights(lights.lights,m_LightRenderingMode,lights.diagnostics);}
@@ -907,7 +916,7 @@ namespace ecs {
         const std::uint64_t currentVersion =
             resource->GetVersion();
 
-        // Пока запрос ждал в очереди, CPU resource мог обновиться.
+        // пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ, CPU resource пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ.
         if (currentVersion != requestedVersion)
         {
             QueueGpuFinalization(

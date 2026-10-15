@@ -9,6 +9,7 @@
 #include "components/TagComponent.h"
 #include "components/CharacterMovementComponent.h"
 #include "components/PlayerStartComponent.h"
+#include "components/FogComponent.h"
 #include "components/TransformComponent.h"
 #include "components/VelocityComponent.h"
 #include "components/PlayerComponent.h"
@@ -148,6 +149,26 @@ ComponentRegistry Build(){
     auto velocity=Descriptor<VelocityComponent>("Velocity","Velocity");Field<VelocityComponent>(velocity,"linear","Linear",&VelocityComponent::linear,PropertyKind::Vector);Field<VelocityComponent>(velocity,"angular","Angular",&VelocityComponent::angular,PropertyKind::Vector);Complete(velocity);r.Register(velocity);
     auto bounds=Descriptor<BoundsBounceComponent>("BoundsBounce","Bounds bounce");Field<BoundsBounceComponent>(bounds,"minX","Min X",&BoundsBounceComponent::minX,PropertyKind::Number);Field<BoundsBounceComponent>(bounds,"maxX","Max X",&BoundsBounceComponent::maxX,PropertyKind::Number);Field<BoundsBounceComponent>(bounds,"minY","Min Y",&BoundsBounceComponent::minY,PropertyKind::Number);Field<BoundsBounceComponent>(bounds,"maxY","Max Y",&BoundsBounceComponent::maxY,PropertyKind::Number);Complete(bounds);r.Register(bounds);
     r.Register(Light<DirectionalLightComponent>("DirectionalLight","Directional light"));r.Register(Light<PointLightComponent>("PointLight","Point light"));r.Register(Light<SpotLightComponent>("SpotLight","Spot light"));
+    auto fog=Descriptor<FogComponent>("Fog","Fog");
+    Field<FogComponent>(fog,"enabled","Enabled",&FogComponent::enabled,PropertyKind::Boolean);
+    Field<FogComponent>(fog,"mode","Mode",&FogComponent::mode,PropertyKind::Integer,0,2).choices={"Distance","Height","Volumetric"};
+    Field<FogComponent>(fog,"color","Fog Color",&FogComponent::color,PropertyKind::Color,0,1).colorComponents=3;
+    Field<FogComponent>(fog,"density","Intensity",&FogComponent::density,PropertyKind::Number,0,1).tooltip="Distance blend intensity; Height/Volumetric density multiplier";
+    Field<FogComponent>(fog,"startDistance","Start Distance",&FogComponent::startDistance,PropertyKind::Number,0,10000).section="Distance";
+    Field<FogComponent>(fog,"endDistance","End Distance",&FogComponent::endDistance,PropertyKind::Number,.001f,10000).section="Distance";
+    Field<FogComponent>(fog,"baseHeight","Base Height",&FogComponent::baseHeight,PropertyKind::Number,-10000,10000).section="Medium";
+    Field<FogComponent>(fog,"heightDensity","Height Density",&FogComponent::heightDensity,PropertyKind::Number,0,10).section="Height";
+    Field<FogComponent>(fog,"heightFalloff","Height Falloff",&FogComponent::heightFalloff,PropertyKind::Number,0,10).section="Medium";
+    Field<FogComponent>(fog,"scatteringColor","Scattering Color",&FogComponent::scatteringColor,PropertyKind::Color,0,1).section="Volumetric";fog.properties.back().colorComponents=3;
+    Field<FogComponent>(fog,"extinction","Extinction",&FogComponent::extinction,PropertyKind::Number,0,10).section="Volumetric";
+    Field<FogComponent>(fog,"anisotropy","Anisotropy",&FogComponent::anisotropy,PropertyKind::Number,-.95f,.95f).section="Volumetric";
+    Field<FogComponent>(fog,"maxDistance","Max Distance / Sky",&FogComponent::maxDistance,PropertyKind::Number,.01f,10000);
+    Field<FogComponent>(fog,"quality","Quality",&FogComponent::quality,PropertyKind::Integer,0,2).choices={"Low (16 steps)","Medium (32 steps)","High (64 steps)"};fog.properties.back().section="Volumetric";
+    Field<FogComponent>(fog,"sceneLighting","Scene Lighting",&FogComponent::sceneLighting,PropertyKind::Boolean).section="Volumetric";
+    Complete(fog);auto loadFog=fog.deserialize;
+    fog.deserialize=[loadFog](World& w,Entity e,const Json& j){loadFog(w,e,j);if(!ValidFog(*w.GetComponent<FogComponent>(e)))Fail("Fog: invalid parameters (End Distance must exceed Start Distance)");};
+    for(auto& property:fog.properties){auto set=property.set;property.set=[set](World& w,Entity e,const PropertyValue& v){auto& c=*w.GetComponent<FogComponent>(e);auto before=c;set(w,e,v);if(!ValidFog(c)){c=before;Fail("Fog: End Distance must exceed Start Distance; all parameters must be finite and within range");}};}
+    r.Register(fog);
     auto playerStart = Descriptor<PlayerStartComponent>(
         "PlayerStart", "Player Start"
     );

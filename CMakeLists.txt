@@ -86,6 +86,19 @@ if (WHISP_BUILD_PHYSICS_TESTS)
     target_link_libraries(CharacterMovementRegression PRIVATE Tracy::TracyClient)
   endif()
   add_test(NAME CharacterMovementRegression COMMAND CharacterMovementRegression)
+  add_executable(FogRegression tests/FogRegression.cpp)
+  target_link_libraries(FogRegression PRIVATE Engine DearImGui ImGuizmo)
+  if(TARGET Tracy::TracyClient)
+    target_link_libraries(FogRegression PRIVATE Tracy::TracyClient)
+  endif()
+  add_test(NAME FogRegression COMMAND FogRegression)
+  set_tests_properties(FogRegression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" RUN_SERIAL TRUE)
+  if(ENABLE_DX12)
+    target_compile_definitions(FogRegression PRIVATE ENABLE_DX12=1)
+    add_dependencies(FogRegression MaterialShaderSources IblFixtures EditorPrimitiveFixtures)
+    add_test(NAME FogDx12Regression COMMAND FogRegression --dx12)
+    set_tests_properties(FogDx12Regression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" RUN_SERIAL TRUE ENVIRONMENT "WHISP_DX12_DEBUG=1")
+  endif()
   add_executable(MultiSelectionRegression tests/MultiSelectionRegression.cpp)
   target_link_libraries(MultiSelectionRegression PRIVATE Engine DearImGui ImGuizmo)
   if(TARGET Tracy::TracyClient)
@@ -264,6 +277,7 @@ add_custom_command(TARGET WhispEngine POST_BUILD
 # Source assets are also needed by backend-independent recorder regressions.
 # Keep incremental HLSL edits synchronized without requiring an executable relink.
 add_custom_target(MaterialShaderSources ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/shaders/dx12/fog.hlsl ${CMAKE_BINARY_DIR}/shaders/dx12/fog.hlsl
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/shaders/dx12
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/shaders/dx12/editor_visuals.hlsl ${CMAKE_BINARY_DIR}/shaders/dx12/editor_visuals.hlsl
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/shaders/dx12
@@ -280,7 +294,11 @@ add_custom_target(MaterialShaderSources ALL
     ${CMAKE_SOURCE_DIR}/engine/shaders/dx12/light_cull.hlsl
     ${CMAKE_BINARY_DIR}/shaders/dx12/light_cull.hlsl
   VERBATIM)
-add_dependencies(WhispEngine MaterialShaderSources)
+add_custom_target(FogAssets ALL
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets/scenes
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/fog_diagnostic.json ${CMAKE_BINARY_DIR}/assets/scenes/fog_diagnostic.json
+)
+add_dependencies(WhispEngine MaterialShaderSources FogAssets)
 if(TARGET GpuInstancingRegression)
   add_dependencies(GpuInstancingRegression MaterialShaderSources)
   add_dependencies(LightingRegression MaterialShaderSources)

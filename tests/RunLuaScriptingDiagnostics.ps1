@@ -1,6 +1,7 @@
 param(
     [string]$BuildDirectory='out/build/x64-release',
     [string]$CTest='ctest',
+    [string]$TestRegex='',
     [switch]$UseCurrentLayout
 )
 $ErrorActionPreference='Stop'
@@ -21,7 +22,9 @@ try{
     if(-not $UseCurrentLayout){
         foreach($name in $saved.Keys){Copy-Item -LiteralPath (Join-Path $fixture $name) -Destination (Join-Path $build $name)}
     }
-    & $CTest --test-dir $build --output-on-failure --timeout 180
+    $testArguments=@('--test-dir',$build,'--output-on-failure','--timeout','180')
+    if($TestRegex){$testArguments+=@('-R',$TestRegex)}
+    & $CTest @testArguments
     $testExit=$LASTEXITCODE
 }finally{
     foreach($name in $saved.Keys){

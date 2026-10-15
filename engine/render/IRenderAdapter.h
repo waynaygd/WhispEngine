@@ -9,6 +9,7 @@
 #include "AntiAliasing.h"
 #include "EditorVisuals.h"
 #include "SceneLights.h"
+#include "Fog.h"
 struct EnvironmentResource;
 #include <span>
 
@@ -120,6 +121,8 @@ public:
     virtual void SetSceneLights(std::span<const GpuSceneLight>,LightRenderingMode,const SceneLightDiagnostics& = {}) {}
     virtual SceneLightDiagnostics GetSceneLightDiagnostics() const {return {};}
 
+    virtual void SetFog(const FogFrame&) {}
+    virtual FogDiagnostics GetFogDiagnostics()const{return {};}
     virtual void SetAntiAliasing(AntiAliasingMode) {}
     virtual AntiAliasingDiagnostics GetAntiAliasingDiagnostics()const{return {};}
     virtual void SetEnvironmentSettings(const EnvironmentSettings&) {}

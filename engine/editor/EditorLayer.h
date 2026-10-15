@@ -96,6 +96,7 @@ public:
     void MarkDirty(){m_ExternalDirty=true;}
     ecs::Entity CreateEntity(Application&,const std::string& name="Entity");
     ecs::Entity CreatePlayerStart(Application&);
+    ecs::Entity CreateFog(Application&);
     bool DeleteEntity(Application&,ecs::Entity);
     ecs::Entity DuplicateEntity(Application&,ecs::Entity);
     bool CopyEntity(Application&,ecs::Entity);

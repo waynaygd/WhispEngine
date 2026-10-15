@@ -7,6 +7,7 @@
 #include "../ecs/components/SceneIdentityComponent.h"
 #include "../scene/SceneSerializer.h"
 #include "../ecs/components/PlayerStartComponent.h"
+#include "../ecs/components/FogComponent.h"
 namespace editor {
 namespace {
 bool Same(const nlohmann::json& a,const nlohmann::json& b){return a==b;}
@@ -107,6 +108,11 @@ ecs::Entity EditorLayer::CreatePlayerStart(Application& app){
     auto e=app.CreateEmptyEntity("PlayerStart");app.GetWorld().AddComponent<ecs::PlayerStartComponent>(e);
     SelectEntityFromUser(app,e);EntitySnapshot before;before.entity=e;before.world=e.world;before.previousSelection=previous;
     CommitUndo(app,"Create Player Start",before);return e;
+}
+ecs::Entity EditorLayer::CreateFog(Application& app){
+    if(app.IsEditorPlayMode())return {};FinishTransaction(app);auto previous=m_Selection.active;
+    auto e=app.CreateEmptyEntity("Fog");app.GetWorld().AddComponent<ecs::FogComponent>(e);SelectEntityFromUser(app,e);
+    EntitySnapshot before;before.entity=e;before.world=e.world;before.previousSelection=previous;CommitUndo(app,"Create Fog",before);return e;
 }
 bool EditorLayer::DeleteEntity(Application& app,ecs::Entity e){
     FinishTransaction(app);if(!app.GetWorld().IsAlive(e))return false;auto before=CaptureSelectedEntity(app,e);app.DestroySceneEntity(e);CommitUndo(app,"Delete entity",std::move(before));return true;

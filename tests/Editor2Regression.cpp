@@ -32,8 +32,8 @@ static void Extension(){
 }
 static void Cpu(){
     Extension();
-    const auto& registry=ecs::ComponentRegistry::Builtins();Check(registry.Components().size()==16,"builtin component coverage including LuaScript and player components");
-    for(const char* key:{"PlayerStart","Player","CharacterMovement"}){const auto* component=registry.Find(key);Check(component&&component->id==ecs::ComponentId(key),"player component stable descriptor");}
+    const auto& registry=ecs::ComponentRegistry::Builtins();Check(registry.Components().size()==17,"builtin component coverage including Fog, LuaScript and player components");
+    for(const char* key:{"Fog","PlayerStart","Player","CharacterMovement"}){const auto* component=registry.Find(key);Check(component&&component->id==ecs::ComponentId(key),"player component stable descriptor");}
     const auto* script=registry.Find("LuaScript");Check(script&&script->id==ecs::ComponentId("LuaScript")&&script->properties.size()==4,"LuaScript stable descriptor, asset/enabled and explicit input/camera permissions");
     ecs::World a,b;auto e=a.CreateEntity(),other=b.CreateEntity();Check(e.index==other.index&&e.generation==other.generation&&e!=other,"World identity in Entity equality");Check(!a.IsAlive(other)&&!b.IsAlive(e),"foreign handles cannot alias");
     std::string error;Check(registry.Add(a,e,ecs::ComponentId("Transform"),&error),"registry add");Check(!registry.Add(a,other,ecs::ComponentId("Transform"),&error),"registry foreign add");

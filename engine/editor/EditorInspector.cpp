@@ -1,3 +1,5 @@
+#include "../ecs/FogGather.h"
+#include "../render/IRenderAdapter.h"
 #include "PrecisionInputs.h"
 #include "SunSynchronization.h"
 #include "EditorLayer.h"
@@ -94,6 +96,15 @@ void EditorLayer::DrawInspector(Application& app){
                 bool primary=std::string(section)=="Surface"||std::string(section)=="Base Color"||std::string(section)=="Metallic / Roughness";
                 if(ImGui::TreeNodeEx(section,primary?ImGuiTreeNodeFlags_DefaultOpen:0)){drawSection(section,false);ImGui::TreePop();}
             }
+        }else if(d.key=="Fog"){
+            drawSection("",false);auto mode=world.GetComponent<ecs::FogComponent>(e)->mode;
+            if(mode!=FogMode::Distance){ImGui::SeparatorText("Height profile (world space)");drawSection("Medium",false);}
+            ImGui::SeparatorText(mode==FogMode::Distance?"Distance":mode==FogMode::Height?"Height":"Volumetric");
+            drawSection(mode==FogMode::Distance?"Distance":mode==FogMode::Height?"Height":"Volumetric",false);
+            const auto fog=ecs::GatherFog(world);if(fog.activeCount>1)ImGui::TextWrapped("Conflict: %u enabled Fog components. Lowest Entity index wins.",fog.activeCount);
+            if(fog.invalidCount)ImGui::TextWrapped("Invalid Fog components ignored: %u",fog.invalidCount);
+            ImGui::TextWrapped("Global environment; Transform is ignored. Colors are linear. Height density is constant below Base Height and decreases above it.");
+            if(auto* renderer=app.GetRenderAdapter()){auto stats=renderer->GetFogDiagnostics();if(!stats.error.empty())ImGui::TextWrapped("%s",stats.error.c_str());ImGui::Text("Fog: %u steps, CPU %.3f / GPU %.3f ms, %.2f MiB",stats.samples,stats.cpuMs,stats.gpuMs,double(stats.gpuBytes)/(1024*1024));}
         }else{drawSection("",false);bool hasAdvanced=std::any_of(d.properties.begin(),d.properties.end(),[](const auto& p){return p.advanced&&!p.internal;});if(hasAdvanced&&ImGui::TreeNode("Advanced")){drawSection("",true);ImGui::TreePop();}}
         if(d.key=="LuaScript"){
             auto* script=world.GetComponent<ecs::LuaScriptComponent>(e);

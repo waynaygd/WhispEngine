@@ -5,6 +5,7 @@
 #include "../core/AssetPaths.h"
 #include "../resources/ResourceManager.h"
 #include "../ecs/components/PlayerStartComponent.h"
+#include "../ecs/components/FogComponent.h"
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <ImGuizmo.h>
@@ -19,7 +20,7 @@ bool Matches(const std::string& text,const std::string& filter){
 }
 const char* EntityKind(const ecs::World& w,ecs::Entity e){
     if(w.HasComponent<ecs::PlayerStartComponent>(e))return "[PlayerStart]";
-    if(w.HasComponent<ecs::DirectionalLightComponent>(e))return "[D]";if(w.HasComponent<ecs::PointLightComponent>(e))return "[P]";if(w.HasComponent<ecs::SpotLightComponent>(e))return "[S]";if(w.HasComponent<ecs::MeshRendererComponent>(e))return "[Mesh]";return "[Entity]";
+    if(w.HasComponent<ecs::DirectionalLightComponent>(e))return "[D]";if(w.HasComponent<ecs::PointLightComponent>(e))return "[P]";if(w.HasComponent<ecs::SpotLightComponent>(e))return "[S]";if(w.HasComponent<ecs::FogComponent>(e))return "[Fog]";if(w.HasComponent<ecs::MeshRendererComponent>(e))return "[Mesh]";return "[Entity]";
 }
 }
 void EditorLayer::InitializePreferences(Application& app){
@@ -96,6 +97,7 @@ void EditorLayer::DrawMainMenu(Application& app){
         ImGui::Separator();if(ImGui::MenuItem("Reset Layout")){m_ResetLayout=true;m_ShowHierarchy=m_ShowInspector=m_ShowViewport=m_ShowAssetBrowser=m_ShowConsole=true;}
         if(ImGui::MenuItem("Navigation and snapping"))preferencesRequested=true;ImGui::MenuItem("ImGui Demo",nullptr,&m_ShowDemoWindow);ImGui::EndMenu();
     }
+    if(ImGui::BeginMenu("Create")){if(ImGui::BeginMenu("Environment")){if(ImGui::MenuItem("Fog"))CreateFog(app);ImGui::EndMenu();}ImGui::EndMenu();}
     if(ImGui::BeginMenu("Scene")){
         if(ImGui::MenuItem("Create Entity"))CreateEntity(app);
         if(ImGui::BeginMenu("Create Light")){if(ImGui::MenuItem("Directional"))CreateLight(app,LightType::Directional);if(ImGui::MenuItem("Point"))CreateLight(app,LightType::Point);if(ImGui::MenuItem("Spot"))CreateLight(app,LightType::Spot);ImGui::EndMenu();}
