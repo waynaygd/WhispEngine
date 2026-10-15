@@ -416,6 +416,19 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
         ImGui::ShowDemoWindow(&m_ShowDemoWindow);
 }
 
+bool EditorLayer::BlocksGameplayInput()const{
+    if(m_ToolActive||m_ModalActive)return true;
+    if(!ImGui::GetCurrentContext())return false;
+    if(ImGui::GetIO().WantTextInput||ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel))return true;
+    const auto& g=*ImGui::GetCurrentContext();
+    if(!g.ActiveId)return false;
+    // Clicking an Image activates the window's background MoveId. It is the
+    // viewport requesting gameplay focus, not an Inspector/text widget.
+    auto* viewport=ImGui::FindWindowByName("Viewport");
+    return !viewport||g.ActiveIdWindow!=viewport||
+        (g.ActiveId!=viewport->MoveId&&g.ActiveId!=viewport->GetID("ViewportCanvas"));
+}
+
 void EditorLayer::HandleEditorShortcuts(Application& app){
     const auto& io=ImGui::GetIO();if(io.WantTextInput||m_ModalActive||m_EscapeConsumed)return;
     // Asset file shortcuts are handled by the browser after its widgets. Never

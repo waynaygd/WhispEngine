@@ -302,4 +302,9 @@ bool LuaRuntime::ReloadScript(const std::string& path){return impl->Load(path);}
 nlohmann::json LuaRuntime::Fields(const std::string& path){impl->Check();if(!impl->programs.contains(path)&&!impl->errors.contains(path))impl->Load(path);auto i=impl->programs.find(path);return i==impl->programs.end()?Json::object():i->second.fields;}
 std::string LuaRuntime::Error(const std::string& path)const{impl->Check();auto i=impl->errors.find(path);return i==impl->errors.end()?std::string():i->second;}
 std::size_t LuaRuntime::InstanceCount()const{return impl->instances.size();}
+bool LuaRuntime::HasCameraOwner()const{
+    impl->Check();
+    auto* script=impl->Alive(impl->cameraOwner)?impl->world->GetComponent<ecs::LuaScriptComponent>(impl->cameraOwner):nullptr;
+    return script&&script->enabled&&script->cameraEnabled;
+}
 }

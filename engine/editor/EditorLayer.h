@@ -68,6 +68,7 @@ public:
     void SetFixedDiagnosticLayout(bool fixed){m_FixedDiagnosticLayout=fixed;if(fixed){m_ShowStatistics=m_ShowMaterialEditor=true;}}
     InputOwner InputOwnership(bool right,bool left,bool camera,bool play)const{return RouteInput({m_ViewportFocused,m_ViewportHovered,m_InputTextActive,m_ModalActive,m_ToolActive&&!m_LightPointerCaptured,m_LightPointerCaptured||m_LightHandleHovered,camera,right,left,play});}
     bool BlocksCamera()const{return m_ToolActive||m_InputTextActive||m_ModalActive;}
+    bool BlocksGameplayInput()const;
     bool OwnsViewportKeyboard()const{return m_ViewportFocused&&!BlocksCamera();}
     void SetLightGizmosVisible(bool v){m_ShowLightGizmos=v;}
     void EnterRuntime(const ecs::World::CloneMap&);

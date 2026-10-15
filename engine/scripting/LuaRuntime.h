@@ -25,5 +25,6 @@ public:
     nlohmann::json Fields(const std::string&);
     std::string Error(const std::string&)const;
     std::size_t InstanceCount()const;
+    bool HasCameraOwner()const;
 };
 }

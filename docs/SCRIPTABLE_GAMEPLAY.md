@@ -173,6 +173,11 @@ end
 
 Only one script can hold the camera/cursor lease; failure or destruction frees
 it. Scripts should retry acquire if another controller previously held it.
+In Play, a live Lua camera lease owns the rendered camera and excludes editor
+free-fly input. Without a lease (including a scene without PlayerStart), the
+Viewport keeps its ordinary RMB free-fly camera while Lua and physics run.
+Viewport background focus does not block gameplay input; active Inspector or
+toolbar widgets, text editing and popups still do.
 Stop always releases the native cursor and restores the saved editor free-fly
 camera. The host capability boundary can later provide raycasts/interactions
 without introducing a parallel Lua runtime. No Interact system is added here.
@@ -184,6 +189,11 @@ PhysicsSystem: FPS/alternative control, frame/fixed edges, zero/multiple ticks,
 diagonal speed, held jump, script removal/disable/errors, input gating,
 permissions, entity lifetime and camera lease release. A DX12 integration test
 runs Lua movement, landing, interpolated following, Pause and isolated Stop.
+It also sends Win32 messages to its own focused test window to exercise actual
+GLFW polling through Application, Lua and fixed physics: viewport capture,
+disabled-cursor mouse delta, Tab/recapture, keyboard-only control, free-fly in
+Play without PlayerStart, and camera restoration on Stop. This native input
+test requires a Windows desktop where the test window can receive focus.
 
 Manual desktop tests are still needed for physical mouse capture/raw input,
 WASD/Space/Tab/Escape, text-field editing and native focus transitions on the

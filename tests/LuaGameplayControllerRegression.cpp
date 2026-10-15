@@ -11,10 +11,13 @@
 #include <fstream>
 #include <set>
 #include <iostream>
+#include <imgui_internal.h>
 #if defined(ENABLE_DX12)
 #include "platform/GlfwWindow.h"
 #include "render/backends/dx12/Dx12RenderAdapter.h"
 #include <GLFW/glfw3.h>
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
 #endif
 using namespace ecs;
 static int checks=0;
@@ -81,9 +84,56 @@ static void Native(Assets& assets){
  app.SetFrameLimit(240);Check(app.Run()==0,"native Lua controller scene");auto* t=app.GetWorld().GetComponent<TransformComponent>(player);Check(t->position.x>1&&std::abs(t->position.y-.875f)<.004f,"real Lua command/physics landing");auto pose=app.GetRenderInterpolation().Resolve(player,*t);Near(app.GetCameraPosition().x,pose.position.x,1e-5f,"camera follows interpolated character");
  app.SetEditorPaused(true);auto paused=t->position;app.SetFrameLimit(5);app.Run();Near(t->position.x,paused.x,0,"Pause stops physics");app.SetEditorPlayMode(false);Check(SceneSerializer::CaptureWorld(app.GetWorld(),app.GetSceneSettings())==before&&app.GetLuaRuntime().InstanceCount()==0,"Stop preserves editor and destroys Lua runtime instances");Check(dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter())->GetValidationErrorCount()==0,"DX12 validation zero");
 }
+// Messages target this test's own HWND, exercising GLFW polling and Application's
+// frame order rather than replacing Lua's host with a fake input service.
+static void NativePlayerInput(){
+ Application app;Check(app.Initialize(),"input native initialization");SyntheticEditorInput input;
+ auto* window=dynamic_cast<GlfwWindow*>(app.GetWindow())->GetGlfwHandle();auto hwnd=glfwGetWin32Window(window);
+ glfwShowWindow(window);glfwFocusWindow(window);SetActiveWindow(hwnd);SetFocus(hwnd);glfwPollEvents();
+ Check(glfwGetWindowAttrib(window,GLFW_FOCUSED)==GLFW_TRUE,"test window focused");
+ app.NewScene();auto& ui=app.GetEditorLayer();ui.SetFixedDiagnosticLayout(true);
+ auto frame=[&](unsigned n=4){app.SetFrameLimit(n);Check(app.Run()==0,"input native frames");};
+ frame();auto bounds=ui.GetViewportBounds();float x=(bounds[0]+bounds[2])*.5f,y=(bounds[1]+bounds[3])*.5f;
+ auto point=[&]{glfwSetCursorPos(window,x,y);SyntheticEditorInput::Position(x,y);ImGui::FocusWindow(ImGui::FindWindowByName("Viewport"));};
+ auto key=[&](int k,bool down){SendMessageW(hwnd,down?WM_KEYDOWN:WM_KEYUP,k,(LPARAM(MapVirtualKeyW(k,MAPVK_VK_TO_VSC))<<16)|(down?0:LPARAM(0xc0000000)));};
+ auto mouse=[&](bool down){SendMessageW(hwnd,down?WM_LBUTTONDOWN:WM_LBUTTONUP,down?MK_LBUTTON:0,MAKELPARAM(int(x),int(y)));SyntheticEditorInput::Button(0,down);};
+ point();frame();auto editorPose=app.GetCameraPosition();auto editorYaw=app.GetCameraYaw();
+ app.SetEditorPlayMode(true);frame();Check(!app.GetLuaRuntime().HasCameraOwner(),"no PlayerStart means no camera lease");
+ SendMessageW(hwnd,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(int(x),int(y)));SyntheticEditorInput::Button(1,true);key('W',true);frame(20);
+ Check(app.IsCameraControlActive(),"Play without player retains RMB free-fly");
+ auto moved=app.GetCameraPosition();Check(std::abs(moved.x-editorPose.x)+std::abs(moved.y-editorPose.y)+std::abs(moved.z-editorPose.z)>.01f,"Play free-fly movement survives camera synchronization");
+ double fx,fy;glfwGetCursorPos(window,&fx,&fy);glfwSetCursorPos(window,fx+20,fy-5);frame();Check(app.GetCameraYaw()>editorYaw,"Play free-fly mouse look works");
+ app.SetEditorPaused(true);frame();Check(app.IsCameraControlActive(),"Pause does not steal editor free-fly capture");
+ app.SetEditorPlayMode(false);Near(app.GetCameraPosition().x,editorPose.x,0,"Stop restores editor camera X");Near(app.GetCameraPosition().z,editorPose.z,0,"Stop restores editor camera Z");Near(app.GetCameraYaw(),editorYaw,0,"Stop restores editor yaw");
+ Check(!app.IsCameraControlActive()&&glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_NORMAL,"Stop releases free-fly even while RMB held");frame();Near(app.GetCameraPosition().z,editorPose.z,0,"held RMB cannot move restored Stop pose");
+ key('W',false);SendMessageW(hwnd,WM_RBUTTONUP,0,MAKELPARAM(int(x),int(y)));SyntheticEditorInput::Button(1,false);frame();
+ auto start=ui.CreatePlayerStart(app);app.GetWorld().GetComponent<TransformComponent>(start)->position={0,2,0};
+ app.SetEditorPlayMode(true);frame();Entity player;for(auto e:app.GetWorld().Entities())if(app.GetWorld().HasComponent<PlayerComponent>(e))player=e;
+ auto* script=app.GetWorld().GetComponent<LuaScriptComponent>(player);Check(script&&script->inputEnabled&&script->cameraEnabled,"spawn assigns Lua permissions");
+ Check(script->scriptPath=="scripts/FirstPersonController.lua"&&app.GetLuaRuntime().Error(script->scriptPath).empty()&&app.GetLuaRuntime().InstanceCount()==1&&app.GetLuaRuntime().HasCameraOwner(),"active asset loads, starts and acquires camera");
+ point();frame();mouse(true);auto* viewport=ImGui::FindWindowByName("Viewport");ImGui::SetActiveID(viewport->MoveId,viewport);
+ Check(ImGui::IsAnyItemActive()&&!ui.BlocksGameplayInput(),"viewport MoveId allows gameplay capture");
+ auto* inspector=ImGui::FindWindowByName("Inspector");Check(inspector!=nullptr,"Inspector exists in fixture");ImGui::SetActiveID(inspector->GetID("Value"),inspector);Check(ui.BlocksGameplayInput(),"Inspector widget retains input protection");
+ ImGui::SetActiveID(viewport->GetID("RealWidget"),viewport);Check(ui.BlocksGameplayInput(),"real viewport widgets block gameplay");
+ ImGui::SetActiveID(viewport->MoveId,viewport);frame();
+ Check(glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_DISABLED,"Lua captures real GLFW cursor despite viewport active ID");mouse(false);key('W',true);frame(20);
+ auto* movement=app.GetWorld().GetComponent<CharacterMovementComponent>(player);auto* body=app.GetWorld().GetComponent<RigidbodyComponent>(player);
+ Check(std::hypot(movement->desiredDirection.x,movement->desiredDirection.z)>.9f&&std::hypot(body->velocity.x,body->velocity.z)>3.9f,"GLFW input reaches Lua then fixed CharacterMovement");
+ Check(!app.IsCameraControlActive(),"Lua camera excludes editor free-fly");
+ auto yaw=app.GetCameraYaw();double mx,my;glfwGetCursorPos(window,&mx,&my);glfwSetCursorPos(window,bounds[2]+200,my-8);frame();
+ Check(app.GetCameraYaw()>yaw+.01f,"disabled-cursor relative mouse reaches Lua camera");
+ key('W',false);key(VK_TAB,true);frame();Check(glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_NORMAL,"Tab releases gameplay cursor");key(VK_TAB,false);frame();
+ point();frame();mouse(true);frame();mouse(false);frame();Check(glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_DISABLED,"second viewport click recaptures");
+ ImGui::GetIO().WantTextInput=true;frame(1);Check(glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_NORMAL,"text editing releases gameplay capture");ImGui::GetIO().WantTextInput=false;
+ script->scriptPath="scripts/KeyboardTurnController.lua";point();frame();yaw=app.GetCameraYaw();key('E',true);key('W',true);frame(20);
+ Check(app.GetCameraYaw()>yaw&&std::hypot(movement->desiredDirection.x,movement->desiredDirection.z)>.9f&&glfwGetInputMode(window,GLFW_CURSOR)==GLFW_CURSOR_NORMAL,"keyboard alternative moves and turns without capture");key('E',false);key('W',false);
+ yaw=app.GetCameraYaw();key('Q',true);frame(20);Check(app.GetCameraYaw()<yaw,"keyboard alternative turns with Q");key('Q',false);
+ app.GetWorld().RemoveComponent<LuaScriptComponent>(player);key('W',true);frame(20);Near(std::hypot(body->velocity.x,body->velocity.z),0,.001f,"no controller means no automatic player WASD");key('W',false);
+ key(VK_ESCAPE,true);frame();Check(!app.IsEditorPlayMode(),"Escape stops Play");key(VK_ESCAPE,false);
+}
 #endif
 int main(int argc,char** argv){ScopedEditorPreferenceRestore preferences;try{Assets assets;
 #if defined(ENABLE_DX12)
- if(argc>1&&std::string(argv[1])=="--dx12")Native(assets);else
+ if(argc>1&&std::string(argv[1])=="--dx12"){Native(assets);NativePlayerInput();}else
 #endif
  {InputFrames();Fps();FixedEdgesAndErrors(assets);}std::cout<<"Lua gameplay controller: "<<checks<<" checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
