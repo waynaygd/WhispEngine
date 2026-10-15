@@ -5,6 +5,7 @@
 #include "../components/TransformComponent.h"
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
@@ -12,6 +13,7 @@
 #include "../../jobs/JobSystem.h"
 #include <vector>
 #include <array>
+#include <stdexcept>
 #if defined(TRACY_ENABLE)
 #include <tracy/Tracy.hpp>
 #else
@@ -20,6 +22,11 @@
 
 namespace {
 using ecs::Vec3;
+struct StageTimer {
+    double& value;
+    std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    ~StageTimer() { value += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(); }
+};
 static Vec3 Add(const Vec3&a,const Vec3&b){return {a.x+b.x,a.y+b.y,a.z+b.z};}
 static Vec3 Sub(const Vec3&a,const Vec3&b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
 static Vec3 Scale(const Vec3&v,float s){return {v.x*s,v.y*s,v.z*s};}
@@ -124,6 +131,8 @@ struct BodyRef
     ecs::TransformComponent* transform = nullptr;
     ecs::ColliderComponent* collider = nullptr;
     ecs::RigidbodyComponent* rigidbody = nullptr;
+    BoxAxes axes{};
+    Vec3 inverseInertia{};
 };
 static Vec3 InverseInertiaLocal(
     const ecs::RigidbodyComponent& rb,
@@ -178,10 +187,7 @@ static Vec3 ApplyInverseInertiaWorld(
         return Vec3{};
     }
 
-    const Vec3 invI =
-        InverseInertiaLocal(
-            *body.rigidbody,
-            *body.collider);
+    const Vec3 invI = body.inverseInertia;
 
     if (body.collider->type == ecs::ColliderType::Sphere)
     {
@@ -192,8 +198,7 @@ static Vec3 ApplyInverseInertiaWorld(
         };
     }
 
-    const BoxAxes axes =
-        BuildBoxAxes(body.transform->rotation);
+    const BoxAxes& axes = body.axes;
 
     const Vec3 local{
         Dot(worldVector, axes.xAxis),
@@ -227,7 +232,7 @@ static float InvMass(const BodyRef& b)
 }
 static std::array<Vec3, 3> Axes(const BodyRef& b)
 {
-    const auto axes = BuildBoxAxes(b.transform->rotation);
+    const auto& axes = b.axes;
     return { axes.xAxis, axes.yAxis, axes.zAxis };
 }
 static float Component(const Vec3& v, int i) { return i == 0 ? v.x : (i == 1 ? v.y : v.z); }
@@ -278,6 +283,9 @@ static void Rotate(BodyRef& b, const Vec3& rotationVector)
         euler.z = 0.0f;
     }
     b.transform->rotation = euler;
+    // Keep the exact Euler-derived basis used previously. Only the owner of
+    // this body writes it; pair jobs exclusively read this eagerly built cache.
+    b.axes = BuildBoxAxes(euler);
 }
 struct ContactPoint
 {
@@ -302,9 +310,28 @@ static float ProjectedRadius(const BodyRef& b, const Vec3& axis)
         Abs(Dot(axes[1], axis)) * b.collider->halfExtents.y +
         Abs(Dot(axes[2], axis)) * b.collider->halfExtents.z;
 }
-static std::vector<Vec3> Clip(const std::vector<Vec3>& polygon, const Vec3& normal, float offset)
+// A clipped quadrilateral has at most eight vertices after four half-planes.
+// Stack storage removes per-contact allocations, retaining the same point order.
+template<class T> struct ContactBuffer {
+    std::array<T, 12> values{};
+    std::size_t count = 0;
+    ContactBuffer() = default;
+    ContactBuffer(std::initializer_list<T> initial) { for (const auto& v : initial) push_back(v); }
+    bool empty() const { return count == 0; }
+    std::size_t size() const { return count; }
+    const T& back() const { return values[count - 1]; }
+    T& operator[](std::size_t i) { return values[i]; }
+    const T& operator[](std::size_t i) const { return values[i]; }
+    T* begin() { return values.data(); }
+    T* end() { return values.data() + count; }
+    const T* begin() const { return values.data(); }
+    const T* end() const { return values.data() + count; }
+    void push_back(const T& value) { values[count++] = value; }
+    void erase(T* point) { std::move(point + 1, end(), point); --count; }
+};
+static ContactBuffer<Vec3> Clip(const ContactBuffer<Vec3>& polygon, const Vec3& normal, float offset)
 {
-    std::vector<Vec3> result;
+    ContactBuffer<Vec3> result;
     if (polygon.empty()) return result;
     Vec3 previous = polygon.back();
     float previousDistance = Dot(previous, normal) - offset;
@@ -398,7 +425,7 @@ static bool BoxBox(const BodyRef& a, const BodyRef& b, Manifold& m)
         -Sign(Dot(ai[incident], outward)) * Component(inc.collider->halfExtents, incident)));
     const Vec3 u = Scale(ai[(incident + 1) % 3], Component(inc.collider->halfExtents, (incident + 1) % 3));
     const Vec3 v = Scale(ai[(incident + 2) % 3], Component(inc.collider->halfExtents, (incident + 2) % 3));
-    std::vector<Vec3> polygon{ Add(Add(incidentCenter, u), v), Add(Sub(incidentCenter, u), v),
+    ContactBuffer<Vec3> polygon{ Add(Add(incidentCenter, u), v), Add(Sub(incidentCenter, u), v),
         Sub(Sub(incidentCenter, u), v), Sub(Add(incidentCenter, u), v) };
     for (int i = 0; i < 3; ++i)
     {
@@ -407,7 +434,7 @@ static bool BoxBox(const BodyRef& a, const BodyRef& b, Manifold& m)
         polygon = Clip(polygon, ar[i], Dot(Center(ref), ar[i]) + half);
         polygon = Clip(polygon, Scale(ar[i], -1.0f), -Dot(Center(ref), ar[i]) + half);
     }
-    std::vector<ContactPoint> candidates;
+    ContactBuffer<ContactPoint> candidates;
     for (const Vec3& p : polygon)
     {
         const float separation = Dot(Sub(p, faceCenter), outward);
@@ -509,46 +536,120 @@ static Vec3 AabbHalf(const BodyRef& b)
         const float r = SphereRadius(*b.collider);
         return {r, r, r};
     }
-    return RotatedAabbHalfExtents(b.collider->halfExtents, b.transform->rotation);
+    const auto h = b.collider->halfExtents;
+    const auto& r = b.axes;
+    return {Abs(r.xAxis.x)*h.x + Abs(r.yAxis.x)*h.y + Abs(r.zAxis.x)*h.z,
+            Abs(r.xAxis.y)*h.x + Abs(r.yAxis.y)*h.y + Abs(r.zAxis.y)*h.z,
+            Abs(r.xAxis.z)*h.x + Abs(r.yAxis.z)*h.y + Abs(r.zAxis.z)*h.z};
 }
-static std::vector<std::pair<std::size_t, std::size_t>> Broadphase(const std::vector<BodyRef>& bodies)
+static const std::vector<std::pair<std::size_t, std::size_t>>& Broadphase(
+    const std::vector<BodyRef>& bodies, ecs::PhysicsBroadphaseStorage& s,
+    ecs::PhysicsSystem::Statistics& stats, bool validate)
 {
-    // Insert every occupied AABB cell, not just the center. Large colliders use
-    // an overflow list, avoiding both missed pairs and huge ground-plane grids.
+    ZoneScopedN("PhysicsBroadphaseSerial");
     constexpr float cellSize = 0.6f;
-    std::unordered_map<std::uint64_t, std::vector<std::size_t>> grid;
-    std::vector<std::size_t> large;
-    std::unordered_set<std::uint64_t> seen;
-    std::vector<std::pair<std::size_t, std::size_t>> pairs;
-    auto add = [&](std::size_t i, std::size_t j)
-    {
-        if (i == j || (InvMass(bodies[i]) == 0.0f && InvMass(bodies[j]) == 0.0f)) return;
-        const Vec3 d = Sub(Center(bodies[i]), Center(bodies[j]));
-        const Vec3 h = Add(AabbHalf(bodies[i]), AabbHalf(bodies[j]));
-        if (Abs(d.x) > h.x + contactMargin || Abs(d.y) > h.y + contactMargin || Abs(d.z) > h.z + contactMargin) return;
-        if (seen.insert(PairKey(i, j)).second) pairs.emplace_back(std::min(i,j), std::max(i,j));
-    };
-    for (std::size_t i = 0; i < bodies.size(); ++i)
-    {
-        const Vec3 h = Add(AabbHalf(bodies[i]), Vec3{contactMargin, contactMargin, contactMargin});
-        const Vec3 lo = Sub(Center(bodies[i]), h), hi = Add(Center(bodies[i]), h);
-        const int x0 = CellCoord(lo.x, cellSize), x1 = CellCoord(hi.x, cellSize);
-        const int y0 = CellCoord(lo.y, cellSize), y1 = CellCoord(hi.y, cellSize);
-        const int z0 = CellCoord(lo.z, cellSize), z1 = CellCoord(hi.z, cellSize);
-        const double cells = double(x1 - x0 + 1) * double(y1 - y0 + 1) * double(z1 - z0 + 1);
-        if (cells > 256) { large.push_back(i); continue; }
-        for (int x = x0; x <= x1; ++x)
-            for (int y = y0; y <= y1; ++y)
-                for (int z = z0; z <= z1; ++z)
-                {
-                    auto& entries = grid[CellKey(x,y,z)];
-                    for (auto j : entries) add(i,j);
-                    entries.push_back(i);
+    constexpr auto emptyKey = UINT64_MAX;
+    auto check = [&] {
+        if (!validate) return;
+        std::vector<std::pair<std::size_t,std::size_t>> reference;
+        for (std::size_t i=0;i<bodies.size();++i) for (std::size_t j=i+1;j<bodies.size();++j) {
+            if (InvMass(bodies[i])==0 && InvMass(bodies[j])==0) continue;
+            auto half = [](const BodyRef& b) {
+                if (b.collider->type==ecs::ColliderType::Sphere) {
+                    const float r=SphereRadius(*b.collider); return Vec3{r,r,r};
                 }
+                return RotatedAabbHalfExtents(b.collider->halfExtents,b.transform->rotation);
+            };
+            const Vec3 d=Sub(Center(bodies[i]),Center(bodies[j])), h=Add(half(bodies[i]),half(bodies[j]));
+            if (Abs(d.x)<=h.x+contactMargin && Abs(d.y)<=h.y+contactMargin && Abs(d.z)<=h.z+contactMargin)
+                reference.emplace_back(i,j);
+        }
+        if (reference != s.pairs) throw std::logic_error("Broadphase differs from quadratic AABB oracle");
+    };
+    auto same = [](Vec3 a, Vec3 b) { return a.x == b.x && a.y == b.y && a.z == b.z; };
+    auto reserve = [&](auto& v, std::size_t count) {
+        if (v.capacity() < count) { v.reserve(count); ++stats.broadphaseBufferGrowths; }
+    };
+    auto push = [&](auto& v, const auto& item) {
+        const auto capacity = v.capacity(); v.push_back(item);
+        if (capacity != v.capacity()) ++stats.broadphaseBufferGrowths;
+    };
+    bool unchanged = s.valid && s.geometry.size() == bodies.size();
+    reserve(s.geometry, bodies.size()); s.geometry.resize(bodies.size());
+    for (std::size_t i = 0; i < bodies.size(); ++i) {
+        const auto& b = bodies[i]; auto& g = s.geometry[i];
+        const Vec3 center = Center(b), rotation = b.transform->rotation, dimensions = b.collider->halfExtents;
+        const int shape = int(b.collider->type); const bool immovable = InvMass(b) == 0;
+        const bool sameShape = s.valid && g.entity == b.entity && g.shape == shape &&
+            same(g.rotation, rotation) && same(g.dimensions, dimensions);
+        unchanged &= sameShape && same(g.center, center) && g.immovable == immovable;
+        if (!sameShape) { g.aabb = AabbHalf(b); ++stats.aabbComputations; }
+        g.entity = b.entity; g.center = center; g.rotation = rotation;
+        g.dimensions = dimensions; g.shape = shape; g.immovable = immovable;
     }
-    for (auto i : large) for (std::size_t j = 0; j < bodies.size(); ++j) add(i,j);
-    std::sort(pairs.begin(), pairs.end());
-    return pairs;
+    // Includes awake/static bodies too. Exact geometry equality, not sleeping
+    // alone, justifies reuse. Narrowphase/islands/events still run every substep.
+    if (unchanged) { ++stats.broadphaseReuses; check(); return s.pairs; }
+    ++stats.broadphaseRebuilds;
+    s.valid = true; s.entries.clear(); s.large.clear(); s.pairs.clear(); s.seenCount = 0;
+    if (bodies.empty()) { s = {}; return s.pairs; }
+    reserve(s.entries, bodies.size() * 27); reserve(s.large, bodies.size());
+    reserve(s.pairs, bodies.size() * 4);
+    std::size_t slots = 16;
+    while (slots < bodies.size() * 8) slots *= 2;
+    reserve(s.seen, slots); if (s.seen.size() < slots) s.seen.resize(slots);
+    std::fill(s.seen.begin(), s.seen.end(), emptyKey);
+    auto storeKey = [&](std::uint64_t key) {
+        auto hash = key;
+        hash = (hash ^ (hash >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+        hash = (hash ^ (hash >> 27)) * UINT64_C(0x94d049bb133111eb);
+        hash ^= hash >> 31;
+        auto slot = hash & (s.seen.size() - 1);
+        while (s.seen[slot] != emptyKey && s.seen[slot] != key) slot = (slot + 1) & (s.seen.size() - 1);
+        if (s.seen[slot] == key) return false;
+        s.seen[slot] = key; return true;
+    };
+    auto add = [&](std::size_t i, std::size_t j) {
+        if (i == j || (s.geometry[i].immovable && s.geometry[j].immovable)) return;
+        const Vec3 d = Sub(s.geometry[i].center, s.geometry[j].center);
+        const Vec3 h = Add(s.geometry[i].aabb, s.geometry[j].aabb);
+        if (Abs(d.x) > h.x + contactMargin || Abs(d.y) > h.y + contactMargin || Abs(d.z) > h.z + contactMargin) return;
+        if (s.seenCount * 2 >= s.seen.size()) {
+            const auto newSlots = s.seen.size() * 2;
+            reserve(s.seen, newSlots); s.seen.resize(newSlots);
+            std::fill(s.seen.begin(), s.seen.end(), emptyKey);
+            for (auto [a,b] : s.pairs) storeKey(PairKey(a,b));
+        }
+        if (storeKey(PairKey(i,j))) {
+            ++s.seenCount;
+            push(s.pairs, std::pair<std::size_t, std::size_t>{std::min(i,j), std::max(i,j)});
+        }
+    };
+    for (std::size_t i = 0; i < bodies.size(); ++i) {
+        const auto& g = s.geometry[i];
+        const Vec3 h = Add(g.aabb, Vec3{contactMargin, contactMargin, contactMargin});
+        const Vec3 lo = Sub(g.center,h), hi = Add(g.center,h);
+        const int x0 = CellCoord(lo.x,cellSize), x1 = CellCoord(hi.x,cellSize);
+        const int y0 = CellCoord(lo.y,cellSize), y1 = CellCoord(hi.y,cellSize);
+        const int z0 = CellCoord(lo.z,cellSize), z1 = CellCoord(hi.z,cellSize);
+        const double cells = double(x1-x0+1) * double(y1-y0+1) * double(z1-z0+1);
+        if (cells > 256) { push(s.large,i); continue; }
+        for (int x=x0;x<=x1;++x) for (int y=y0;y<=y1;++y) for (int z=z0;z<=z1;++z)
+            push(s.entries, ecs::PhysicsBroadphaseStorage::Entry{CellKey(x,y,z),i});
+    }
+    std::sort(s.entries.begin(), s.entries.end(), [](const auto& a, const auto& b) {
+        return a.cell != b.cell ? a.cell < b.cell : a.body < b.body;
+    });
+    for (std::size_t begin=0;begin<s.entries.size();) {
+        std::size_t end=begin+1;
+        while (end<s.entries.size() && s.entries[end].cell==s.entries[begin].cell) ++end;
+        for (auto i=begin;i<end;++i) for (auto j=begin;j<i;++j) add(s.entries[i].body,s.entries[j].body);
+        begin=end;
+    }
+    for (auto i:s.large) for (std::size_t j=0;j<bodies.size();++j) add(i,j);
+    std::sort(s.pairs.begin(),s.pairs.end());
+    check();
+    return s.pairs;
 }
 } // namespace
 
@@ -558,7 +659,20 @@ namespace ecs {
 void PhysicsSystem::Update(World& world, float dt)
 {
     ZoneScopedN("PhysicsSystem");
-    if (!m_Enabled || dt <= 0.0f || !std::isfinite(dt)) return;
+    m_Statistics = {};
+    if (!m_Enabled || dt <= 0.0f || !std::isfinite(dt)) {
+        world.ForEach<ColliderComponent, TransformComponent, RigidbodyComponent>(
+            [&](Entity, ColliderComponent&, TransformComponent&, RigidbodyComponent& rb) {
+                if (rb.simulatePhysics || rb.isStatic) {
+                    ++m_Statistics.bodies;
+                    if (rb.sleeping) ++m_Statistics.sleeping;
+                    if (!rb.sleeping && !rb.isStatic && rb.simulatePhysics && rb.mass > 0.0001f)
+                        ++m_Statistics.activeBodies;
+                }
+            });
+        return;
+    }
+    StageTimer totalTimer{m_Statistics.totalMs};
     dt = std::min(dt, 0.05f);
     std::vector<BodyRef> bodies;
     world.ForEach<ColliderComponent, TransformComponent, RigidbodyComponent>(
@@ -567,6 +681,15 @@ void PhysicsSystem::Update(World& world, float dt)
             if (rb.simulatePhysics || rb.isStatic) bodies.push_back({e, &t, &c, &rb});
         });
     std::sort(bodies.begin(), bodies.end(), [](const BodyRef& a, const BodyRef& b) { return a.entity.index < b.entity.index; });
+    for (auto& b : bodies) {
+        b.axes = BuildBoxAxes(b.transform->rotation);
+        b.inverseInertia = InverseInertiaLocal(*b.rigidbody, *b.collider);
+    }
+    m_Statistics.bodies = bodies.size();
+    for (const auto& b : bodies) {
+        if (b.rigidbody->sleeping) ++m_Statistics.sleeping;
+        if (!b.rigidbody->sleeping && InvMass(b) > 0) ++m_Statistics.activeBodies;
+    }
     // Preserve the 240 Hz maximum step and additionally limit travel by body
     // thickness. This is adaptive substepping, not a velocity clamp or full CCD.
     float maxStep = 1.0f / 240.0f;
@@ -578,27 +701,41 @@ void PhysicsSystem::Update(World& world, float dt)
         const float speed = Length(b.rigidbody->velocity) + Length(b.rigidbody->angularVelocity) * BoundingRadius(*b.collider) + Abs(m_Gravity) * dt;
         if (speed > 0.0f) maxStep = std::min(maxStep, extent * 0.5f / speed);
     }
-    const int substeps = std::max(std::max(m_Substeps, 1), std::min(256, static_cast<int>(std::ceil(dt / maxStep))));
+    const int adaptiveSteps = static_cast<int>(std::ceil(std::min(256.0, double(dt) / maxStep)));
+    const int substeps = std::max(std::max(m_Substeps, 1), adaptiveSteps);
     const float h = dt / substeps;
     const int iterations = std::max(m_SolverIterations, 1);
+    m_Statistics.substeps = substeps;
+    m_Statistics.solverIterations = iterations;
     std::vector<CollisionEvent> events;
+    std::vector<Manifold> contacts, pairContacts;
+    std::vector<std::uint8_t> hasContact;
+    auto dispatch = [&](std::uint32_t count, std::uint32_t grain, ::JobSystem::RangeJob job) {
+        StageTimer timer{m_Statistics.dispatchMs};
+        return m_JobSystem->Dispatch(count, grain, std::move(job));
+    };
+    auto wait = [&](const ::JobSystem::TaskHandle& task) {
+        StageTimer timer{m_Statistics.waitMs};
+        m_JobSystem->Wait(task);
+    };
+    auto findPairs = [&]() -> const auto& {
+        StageTimer timer{m_Statistics.broadphaseMs};
+        return Broadphase(bodies, m_Broadphase, m_Statistics, m_ValidateBroadphase);
+    };
     for (int step = 0; step < substeps; ++step)
     {
         ZoneScopedN("PhysicsStep");
-        std::vector<Manifold> contacts;
+        contacts.clear();
 
-        const auto pairs =
-            Broadphase(bodies);
+        const auto& pairs =
+            findPairs();
 
         {
-            ZoneScopedN("PhysicsNarrowphase");
+            ZoneScopedN("PhysicsNarrowphase"); StageTimer timer{m_Statistics.narrowphaseMs};
 
-            std::vector<Manifold> pairContacts(
-                pairs.size());
+            pairContacts.resize(pairs.size());
 
-            std::vector<std::uint8_t> hasContact(
-                pairs.size(),
-                0);
+            hasContact.assign(pairs.size(), 0);
 
             auto narrowphaseRange =
                 [&](std::uint32_t begin,
@@ -639,7 +776,7 @@ void PhysicsSystem::Update(World& world, float dt)
                 64;
 
             const bool useJobs =
-                m_JobSystem != nullptr &&
+                m_Parallel && m_JobSystem != nullptr &&
                 m_JobSystem->IsInitialized() &&
                 pairs.size() >= parallelThreshold;
 
@@ -648,13 +785,13 @@ void PhysicsSystem::Update(World& world, float dt)
                 ZoneScopedN("PhysicsNarrowphaseParallel");
 
                 auto task =
-                    m_JobSystem->Dispatch(
+                    dispatch(
                         static_cast<std::uint32_t>(
                             pairs.size()),
                         minRange,
                         narrowphaseRange);
 
-                m_JobSystem->Wait(task);
+                wait(task);
             }
             else
             {
@@ -682,6 +819,11 @@ void PhysicsSystem::Update(World& world, float dt)
                         pairContacts[pairIndex]));
             }
         }
+        m_Statistics.pairs = std::max(m_Statistics.pairs, pairs.size());
+        m_Statistics.contacts = std::max(m_Statistics.contacts, contacts.size());
+        std::size_t points = 0;
+        for (const auto& m : contacts) points += m.count;
+        m_Statistics.contactPoints = std::max(m_Statistics.contactPoints, points);
         // Dynamic contact islands are also used for waking/sleeping. Static
         // bodies anchor an island but must never merge unrelated resting bodies.
         std::vector<std::size_t> parent(bodies.size());
@@ -715,7 +857,7 @@ void PhysicsSystem::Update(World& world, float dt)
         for (std::size_t i = 0; i < bodies.size(); ++i)
             if (InvMass(bodies[i]) > 0 && active[root(i)] && bodies[i].rigidbody->sleeping) Wake(bodies[i]);
         {
-            ZoneScopedN("PhysicsIntegrate");
+            ZoneScopedN("PhysicsIntegrate"); StageTimer timer{m_Statistics.integrateMs};
 
             auto integrateRange =
                 [&](std::uint32_t begin,
@@ -803,7 +945,7 @@ void PhysicsSystem::Update(World& world, float dt)
                 256;
 
             const bool useJobs =
-                m_JobSystem != nullptr &&
+                m_Parallel && m_JobSystem != nullptr &&
                 m_JobSystem->IsInitialized() &&
                 bodies.size() >= parallelThreshold;
 
@@ -812,13 +954,13 @@ void PhysicsSystem::Update(World& world, float dt)
                 ZoneScopedN("PhysicsIntegrateParallel");
 
                 auto task =
-                    m_JobSystem->Dispatch(
+                    dispatch(
                         static_cast<std::uint32_t>(
                             bodies.size()),
                         minRange,
                         integrateRange);
 
-                m_JobSystem->Wait(task);
+                wait(task);
             }
             else
             {
@@ -831,6 +973,8 @@ void PhysicsSystem::Update(World& world, float dt)
                     0);
             }
         }
+        {
+        ZoneScopedN("PhysicsSolverSerial"); StageTimer timer{m_Statistics.solverMs};
         // Prepare every restitution target BEFORE any warm-start impulses.
         for (auto& m : contacts)
         {
@@ -921,8 +1065,9 @@ void PhysicsSystem::Update(World& world, float dt)
                     PairImpulse(a,b,p,Add(Scale(m.t1,p.tangent1-old1),Scale(m.t2,p.tangent2-old2)));
                 }
             }
+        }
         {
-            ZoneScopedN("PhysicsPoseIntegrate");
+            ZoneScopedN("PhysicsPoseIntegrate"); StageTimer timer{m_Statistics.poseMs};
 
             auto poseRange =
                 [&](std::uint32_t begin,
@@ -966,7 +1111,7 @@ void PhysicsSystem::Update(World& world, float dt)
                 256;
 
             const bool useJobs =
-                m_JobSystem != nullptr &&
+                m_Parallel && m_JobSystem != nullptr &&
                 m_JobSystem->IsInitialized() &&
                 bodies.size() >= parallelThreshold;
 
@@ -975,13 +1120,13 @@ void PhysicsSystem::Update(World& world, float dt)
                 ZoneScopedN("PhysicsPoseParallel");
 
                 auto task =
-                    m_JobSystem->Dispatch(
+                    dispatch(
                         static_cast<std::uint32_t>(
                             bodies.size()),
                         minRange,
                         poseRange);
 
-                m_JobSystem->Wait(task);
+                wait(task);
             }
             else
             {
@@ -996,7 +1141,9 @@ void PhysicsSystem::Update(World& world, float dt)
         }
         // Nonlinear position projection uses angular effective mass and fresh
         // contact geometry. It changes poses only, never physical velocities.
-        const auto positionPairs = Broadphase(bodies);
+        const auto& positionPairs = findPairs();
+        {
+        ZoneScopedN("PhysicsPositionProjectionSerial"); StageTimer timer{m_Statistics.projectionMs};
         for (int iteration = 0; iteration < 4; ++iteration)
             for (auto [i,j] : positionPairs)
             {
@@ -1022,6 +1169,7 @@ void PhysicsSystem::Update(World& world, float dt)
                     }
                 }
             }
+        }
         // All members must remain quiet and supported for the entire interval.
         std::vector<bool> quiet(bodies.size(), true);
         std::vector<float> timer(bodies.size(), 1.0e30f);
@@ -1070,6 +1218,7 @@ void PhysicsSystem::Update(World& world, float dt)
         if (m_EventBus) for (const auto& m : contacts)
             events.push_back({bodies[m.a].entity,bodies[m.b].entity});
     }
-    if (m_EventBus) for (const auto& event : events) m_EventBus->PublishCollision(event);
+    if (m_EventBus) for (const auto& event : events)
+        if (world.IsAlive(event.a) && world.IsAlive(event.b)) m_EventBus->PublishCollision(event);
 }
 } // namespace ecs

@@ -5,6 +5,7 @@ ResourceManager::ResourceManager(JobSystem* jobSystem)
     : m_JobSystem(jobSystem)
 {
     m_DefaultMesh = CreateDefaultResource<MeshResource>("defaults/mesh", MeshLoader::CreateDefault());
+    m_DefaultEnvironment = CreateDefaultResource<EnvironmentResource>("defaults/environment", EnvironmentLoader::CreateDefault());
     m_DefaultTexture = CreateDefaultResource<TextureResource>("defaults/texture", TextureLoader::CreateDefault());
     m_DefaultShader = CreateDefaultResource<ShaderResource>("defaults/shader", ShaderLoader::CreateDefault());
     m_DefaultMaterial = CreateDefaultResource<MaterialResource>("defaults/material", MaterialLoader::CreateDefault());
@@ -27,8 +28,10 @@ void ResourceManager::ClearAll()
 
     m_MeshCache.clear();
     m_TextureCache.clear();
+    m_EnvironmentCache.clear();
     m_ShaderCache.clear();
     m_MaterialCache.clear();
+    m_DirtyMaterials.clear();
     m_HotReloadWatches.clear();
     m_PendingAsyncKeys.clear();
 
@@ -88,6 +91,9 @@ void ResourceManager::PollHotReload()
             break;
         case ResourceKind::Shader:
             (void)Reload<ShaderResource>(watch.key);
+            break;
+        case ResourceKind::Environment:
+            ReloadEnvironmentAsync(watch.key);
             break;
         case ResourceKind::Material:
             (void)Reload<MaterialResource>(watch.key);

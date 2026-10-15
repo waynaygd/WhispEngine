@@ -1,0 +1,6 @@
+newmtl Red
+Kd 1 0.25 0.125
+map_Kd ../textures/material_test.png
+newmtl Green
+Kd 0.125 1 0.25
+map_Kd ../textures/material_test.png

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "../core/ConfigLoader.h"
+#include "SceneSettings.h"
+#include "../ecs/World.h"
 
 #include <filesystem>
 #include <string>
@@ -27,5 +29,12 @@ public:
     static bool SaveWorld(
         const std::filesystem::path& path,
         ecs::World& world,
-        std::string* outError = nullptr);
+        std::string* outError = nullptr,
+        const SceneSettings* settings = nullptr);
+    static nlohmann::json CaptureWorld(ecs::World&,const SceneSettings& = {});
+    static bool RestoreWorld(const nlohmann::json&,ecs::World&,SceneSettings&,std::string* error=nullptr);
+    static bool LoadWorld(const std::filesystem::path&,ecs::World&,SceneSettings&,std::string* error=nullptr);
+    static bool WriteAtomic(const std::filesystem::path&,const nlohmann::json&,std::string* error=nullptr,bool replace=true);
+    static std::string EntitySceneId(const ecs::World&,ecs::Entity);
+    static std::string PrimaryDirectionalId(ecs::World&);
 };

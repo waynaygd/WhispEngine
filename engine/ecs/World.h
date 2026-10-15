@@ -4,6 +4,9 @@
 #include "systems/SystemPipeline.h"
 
 #include <cstddef>
+#include <atomic>
+#include <type_traits>
+#include <thread>
 #include <memory>
 #include <string>
 #include <stdexcept>
@@ -19,6 +22,23 @@ namespace ecs
 class World
 {
 public:
+    World() : m_Identity(s_NextIdentity.fetch_add(1)) {}
+    World(const World&)=delete;World& operator=(const World&)=delete;
+    [[nodiscard]] std::uint64_t GetIdentity() const {return m_Identity;}
+    [[nodiscard]] Entity LocalEntity(std::uint32_t index) const {
+        return index<m_Slots.size()&&m_Slots[index].alive?Entity{index,m_Slots[index].generation,m_Identity}:Entity{};
+    }
+    [[nodiscard]] std::vector<Entity> Entities() const {
+        std::vector<Entity> result;result.reserve(m_AliveCount);
+        for(std::uint32_t i=0;i<m_Slots.size();++i)if(m_Slots[i].alive)result.push_back(LocalEntity(i));return result;
+    }
+    using CloneMap=std::unordered_map<Entity,Entity,EntityHash>;
+    [[nodiscard]] std::unique_ptr<World> CloneData(CloneMap* mapping=nullptr) const;
+    void ReplaceData(World& source); // Keeps this World's systems, invalidates prior identity.
+    void UpdateFixedSystemsOn(World& target,float dt){m_Systems.UpdatePhase(target,dt,true);}
+    void UpdateFrameSystemsOn(World& target,float dt){m_Systems.UpdatePhase(target,dt,false);}
+    void AssertOwnerThread()const {if(std::this_thread::get_id()!=m_OwnerThread)throw std::logic_error("Mutate World only on its owner thread");}
+    [[nodiscard]] bool IsIterating()const{return m_IterationDepth!=0;}
     Entity CreateEntity();
     bool DestroyEntity(Entity entity);
 
@@ -59,6 +79,8 @@ public:
     {
         m_Systems.Clear();
     }
+    void UpdateFixedSystems(float dt) { m_Systems.UpdatePhase(*this, dt, true); }
+    void UpdateFrameSystems(float dt) { m_Systems.UpdatePhase(*this, dt, false); }
 
     void Clear();
     [[nodiscard]] std::string DebugDescribeEntity(Entity entity) const;
@@ -69,12 +91,17 @@ private:
         virtual ~IComponentStorage() = default;
         virtual void Remove(std::uint32_t entityIndex) = 0;
         virtual void Clear() = 0;
+        virtual std::unique_ptr<IComponentStorage> Clone() const = 0;
     };
 
     template <typename T>
     class ComponentStorage final : public IComponentStorage
     {
     public:
+        std::unique_ptr<IComponentStorage> Clone() const override {
+            if constexpr(std::is_copy_constructible_v<T>){auto copy=std::make_unique<ComponentStorage<T>>();copy->m_Components=m_Components;return copy;}
+            else throw std::logic_error("Component requires an explicit value clone policy");
+        }
         template <typename... Args>
         T& Emplace(std::uint32_t entityIndex, Args&&... args)
         {
@@ -166,6 +193,11 @@ private:
         bool alive = false;
     };
 
+    inline static std::atomic<std::uint64_t> s_NextIdentity{1};
+    std::uint64_t m_Identity;
+    const std::thread::id m_OwnerThread=std::this_thread::get_id();
+    unsigned m_IterationDepth=0;
+    void CheckMutation()const {AssertOwnerThread();if(IsIterating())throw std::logic_error("Structural mutation during World iteration: enqueue a command");}
     std::vector<EntitySlot> m_Slots;
     std::vector<std::uint32_t> m_FreeIndices;
     std::unordered_map<std::type_index, std::unique_ptr<IComponentStorage>> m_ComponentStorages;
@@ -176,8 +208,9 @@ private:
 template <typename T, typename... Args>
 T& World::AddComponent(Entity entity, Args&&... args)
 {
+    CheckMutation();
     if (!IsAlive(entity))
-        throw std::logic_error("Cannot add component to dead entity");
+        throw std::logic_error("Cannot add component to dead or foreign-world entity");
 
     return GetOrCreateStorage<T>().Emplace(entity.index, std::forward<Args>(args)...);
 }
@@ -215,6 +248,7 @@ const T* World::GetComponent(Entity entity) const
 template <typename T>
 bool World::RemoveComponent(Entity entity)
 {
+    CheckMutation();
     if (!IsAlive(entity))
         return false;
 
@@ -243,9 +277,10 @@ void World::ForEach(Func&& func)
             return;
     }
 
+    struct IterationGuard {unsigned& depth;explicit IterationGuard(unsigned& d):depth(d){++depth;}~IterationGuard(){--depth;}} guard(m_IterationDepth);
     for (auto& [entityIndex, primaryComponent] : primaryStorage->Items())
     {
-        Entity entity{ entityIndex, m_Slots[entityIndex].generation };
+        Entity entity{ entityIndex, m_Slots[entityIndex].generation, m_Identity };
         if (!IsAlive(entity))
             continue;
 

@@ -1,0 +1,37 @@
+{
+  "version": 2,
+  "entities": [
+    {
+      "tag": "OBJ material slots",
+      "meshPath": "models/material_slots.obj",
+      "position": [
+        -1.6,
+        0,
+        3
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "simulatePhysics": false,
+      "bounce": false
+    },
+    {
+      "tag": "glTF embedded material slots",
+      "meshPath": "models/material_slots.gltf",
+      "position": [
+        1.6,
+        0,
+        3
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "simulatePhysics": false,
+      "bounce": false
+    }
+  ]
+}

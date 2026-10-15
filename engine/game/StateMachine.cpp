@@ -20,6 +20,13 @@ void StateMachine::ApplyPending(Application& app)
         m_CurrentState->OnEnter(app);
 }
 
+void StateMachine::Clear(Application& app)
+{
+    m_PendingState.reset();
+    if(m_CurrentState)m_CurrentState->OnExit(app);
+    m_CurrentState.reset();
+}
+
 void StateMachine::Update(Application& app, float dt)
 {
     if (m_CurrentState)

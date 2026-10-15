@@ -38,3 +38,6 @@ compile_commands.json
 !external/dxc/bin/x64/dxcompiler.dll
 !external/dxc/bin/x64/dxil.dll
 !external/dxc/bin/x64/dxc.exe
+
+# Authored procedural model sources (not compiler object files).
+!engine/assets/models/primitives/*.obj

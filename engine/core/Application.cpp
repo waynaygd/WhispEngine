@@ -1,4 +1,7 @@
+#include "../ecs/ComponentRegistry.h"
 #include "Application.h"
+#include "../editor/SunSynchronization.h"
+#include "../ecs/components/LightComponent.h"
 #include "AssetDependencyValidation.h"
 #include "AssetPaths.h"
 #include "Logger.h"
@@ -14,10 +17,16 @@
 #include "../ecs/components/VelocityComponent.h"
 #include "../ecs/systems/BoundsBounceSystem.h"
 #include "../ecs/systems/PhysicsSystem.h"
+#include "../ecs/PhysicsStressScene.h"
+#include "PhysicsDiagnosticSample.h"
+#include "RenderDiagnosticSample.h"
+#include <chrono>
+#include <thread>
 #include "../platform/GlfwWindow.h"
 #include "../render/IRenderAdapter.h"
 #include "../resources/ResourceManager.h"
 #include "../scene/SceneSerializer.h"
+#include "../ecs/components/SceneIdentityComponent.h"
 #include "../jobs/JobSystem.h"
 #include <GLFW/glfw3.h>
 #include <imgui.h>
@@ -27,6 +36,7 @@
 #include "../game/states/LoadingState.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <filesystem>
 #include <array>
@@ -268,6 +278,9 @@ void Application::PreloadSceneResourcesAsync(const std::vector<EcsDemoEntityConf
         if (!materialKey.empty() && materialKeys.insert(materialKey).second)
             (void)m_ResourceManager->LoadAsync<MaterialResource>(materialKey);
 
+        for(const auto& slot:entity.slotMaterials) {const auto key=AssetPaths::NormalizeAssetKey(slot);if(!key.empty()&&materialKeys.insert(key).second)(void)m_ResourceManager->LoadAsync<MaterialResource>(key);}
+        if(entity.materialOverrides.texturePath&&!entity.materialOverrides.texturePath->empty())(void)m_ResourceManager->LoadAsync<TextureResource>(*entity.materialOverrides.texturePath);
+        if(entity.materialOverrides.shaderPath&&!entity.materialOverrides.shaderPath->empty())(void)m_ResourceManager->LoadAsync<ShaderResource>(*entity.materialOverrides.shaderPath);
         const std::string textureKey = AssetPaths::NormalizeAssetKey(entity.texturePath);
         if (!textureKey.empty() && textureKeys.insert(textureKey).second)
             (void)m_ResourceManager->LoadAsync<TextureResource>(textureKey);
@@ -329,29 +342,29 @@ void Application::RunEcsBootstrapCheck()
 {
     Logger::Get().Info("ECS bootstrap: starting entity and component self-check");
 
-    const ecs::Entity first = m_World.CreateEntity();
-    const ecs::Entity second = m_World.CreateEntity();
-    const ecs::Entity third = m_World.CreateEntity();
+    const ecs::Entity first = GetWorld().CreateEntity();
+    const ecs::Entity second = GetWorld().CreateEntity();
+    const ecs::Entity third = GetWorld().CreateEntity();
 
-    Logger::Get().Info("ECS bootstrap: created " + m_World.DebugDescribeEntity(first));
-    Logger::Get().Info("ECS bootstrap: created " + m_World.DebugDescribeEntity(second));
-    Logger::Get().Info("ECS bootstrap: created " + m_World.DebugDescribeEntity(third));
+    Logger::Get().Info("ECS bootstrap: created " + GetWorld().DebugDescribeEntity(first));
+    Logger::Get().Info("ECS bootstrap: created " + GetWorld().DebugDescribeEntity(second));
+    Logger::Get().Info("ECS bootstrap: created " + GetWorld().DebugDescribeEntity(third));
 
-    const bool destroyed = m_World.DestroyEntity(second);
+    const bool destroyed = GetWorld().DestroyEntity(second);
     Logger::Get().Info(std::string("ECS bootstrap: destroy second entity -> ") + (destroyed ? "ok" : "failed"));
-    Logger::Get().Info("ECS bootstrap: second entity after destroy -> " + m_World.DebugDescribeEntity(second));
+    Logger::Get().Info("ECS bootstrap: second entity after destroy -> " + GetWorld().DebugDescribeEntity(second));
 
-    const ecs::Entity recycled = m_World.CreateEntity();
-    Logger::Get().Info("ECS bootstrap: recycled slot into " + m_World.DebugDescribeEntity(recycled));
+    const ecs::Entity recycled = GetWorld().CreateEntity();
+    Logger::Get().Info("ECS bootstrap: recycled slot into " + GetWorld().DebugDescribeEntity(recycled));
 
-    auto& firstTransform = m_World.AddComponent<ecs::TransformComponent>(first);
+    auto& firstTransform = GetWorld().AddComponent<ecs::TransformComponent>(first);
     firstTransform.position = ecs::Vec3{ 1.5f, -0.5f, 0.0f };
     firstTransform.scale = ecs::Vec3{ 2.0f, 2.0f, 1.0f };
 
     Logger::Get().Info(std::string("ECS bootstrap: first has transform -> ") +
-        (m_World.HasComponent<ecs::TransformComponent>(first) ? "true" : "false"));
+        (GetWorld().HasComponent<ecs::TransformComponent>(first) ? "true" : "false"));
 
-    if (const auto* transform = m_World.GetComponent<ecs::TransformComponent>(first))
+    if (const auto* transform = GetWorld().GetComponent<ecs::TransformComponent>(first))
     {
         std::ostringstream ss;
         ss << "ECS bootstrap: first transform pos=("
@@ -363,54 +376,56 @@ void Application::RunEcsBootstrapCheck()
         Logger::Get().Info(ss.str());
     }
 
-    auto& firstTag = m_World.AddComponent<ecs::TagComponent>(first);
+    auto& firstTag = GetWorld().AddComponent<ecs::TagComponent>(first);
     firstTag.name = "BootstrapEntity";
     Logger::Get().Info(std::string("ECS bootstrap: first tag -> ") + firstTag.name);
 
-    auto& firstMeshRenderer = m_World.AddComponent<ecs::MeshRendererComponent>(first);
+    auto& firstMeshRenderer = GetWorld().AddComponent<ecs::MeshRendererComponent>(first);
     firstMeshRenderer.meshPath = "models/validation_triangle.obj";
-    auto& firstMaterial = m_World.AddComponent<ecs::MaterialComponent>(first);
+    auto& firstMaterial = GetWorld().AddComponent<ecs::MaterialComponent>(first);
     firstMaterial.materialPath = "materials/validation_checker.material.json";
     Logger::Get().Info(
         "ECS bootstrap: first mesh renderer asset refs -> mesh=" + firstMeshRenderer.meshPath +
         " material=" + firstMaterial.materialPath);
 
-    auto& recycledTransform = m_World.AddComponent<ecs::TransformComponent>(recycled);
+    auto& recycledTransform = GetWorld().AddComponent<ecs::TransformComponent>(recycled);
     recycledTransform.position = ecs::Vec3{ -2.0f, 3.0f, 0.0f };
     recycledTransform.rotation = ecs::Vec3{ 0.0f, 0.0f, 0.5f };
     recycledTransform.scale = ecs::Vec3{ 0.75f, 0.75f, 1.0f };
     Logger::Get().Info(std::string("ECS bootstrap: recycled has transform before remove -> ") +
-        (m_World.HasComponent<ecs::TransformComponent>(recycled) ? "true" : "false"));
+        (GetWorld().HasComponent<ecs::TransformComponent>(recycled) ? "true" : "false"));
 
-    const bool removedTransform = m_World.RemoveComponent<ecs::TransformComponent>(recycled);
+    const bool removedTransform = GetWorld().RemoveComponent<ecs::TransformComponent>(recycled);
     Logger::Get().Info(std::string("ECS bootstrap: remove transform from recycled -> ") +
         (removedTransform ? "ok" : "failed"));
     Logger::Get().Info(std::string("ECS bootstrap: recycled has transform after remove -> ") +
-        (m_World.HasComponent<ecs::TransformComponent>(recycled) ? "true" : "false"));
+        (GetWorld().HasComponent<ecs::TransformComponent>(recycled) ? "true" : "false"));
 
-    auto& thirdTransform = m_World.AddComponent<ecs::TransformComponent>(third);
+    auto& thirdTransform = GetWorld().AddComponent<ecs::TransformComponent>(third);
     thirdTransform.position = ecs::Vec3{ 4.0f, 2.0f, 0.0f };
     thirdTransform.rotation = ecs::Vec3{};
     thirdTransform.scale = ecs::Vec3{ 1.25f, 1.25f, 1.0f };
-    const bool destroyedThird = m_World.DestroyEntity(third);
+    const bool destroyedThird = GetWorld().DestroyEntity(third);
     Logger::Get().Info(std::string("ECS bootstrap: destroy third entity with transform -> ") +
         (destroyedThird ? "ok" : "failed"));
     Logger::Get().Info(std::string("ECS bootstrap: third has transform after destroy -> ") +
-        (m_World.HasComponent<ecs::TransformComponent>(third) ? "true" : "false"));
+        (GetWorld().HasComponent<ecs::TransformComponent>(third) ? "true" : "false"));
     Logger::Get().Info(std::string("ECS bootstrap: first has tag -> ") +
-        (m_World.HasComponent<ecs::TagComponent>(first) ? "true" : "false"));
+        (GetWorld().HasComponent<ecs::TagComponent>(first) ? "true" : "false"));
     Logger::Get().Info(std::string("ECS bootstrap: first has mesh renderer -> ") +
-        (m_World.HasComponent<ecs::MeshRendererComponent>(first) ? "true" : "false"));
+        (GetWorld().HasComponent<ecs::MeshRendererComponent>(first) ? "true" : "false"));
 
-    Logger::Get().Info("ECS bootstrap: alive entities=" + std::to_string(m_World.GetAliveCount()) +
-        ", capacity=" + std::to_string(m_World.GetCapacity()));
+    Logger::Get().Info("ECS bootstrap: alive entities=" + std::to_string(GetWorld().GetAliveCount()) +
+        ", capacity=" + std::to_string(GetWorld().GetCapacity()));
 
-    m_World.Clear();
+    GetWorld().Clear();
     Logger::Get().Info("ECS bootstrap: world reset after self-check");
 }
 
 void Application::SetupEcsRuntimeDemo()
 {
+    ClearPhysicsStressScene();
+    GetWorld().Clear();
     m_World.ClearSystems();
     m_PhysicsSystem = &m_World.AddSystem<ecs::PhysicsSystem>(
         &m_EventBus,
@@ -429,6 +444,13 @@ void Application::SetupEcsRuntimeDemo()
     m_PhysicsSystem->SetEnabled(m_EditorPlayMode);
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
+    m_RenderSystem->SetInterpolation(&m_RenderInterpolation);
+    m_RenderSystem->SetPhysicsDebugPose(m_PhysicsDebugPose);
+    m_RenderSystem->SetInstancingEnabled(m_GpuInstancing);
+    m_RenderSystem->SetShadingModelOverride(m_ShadingModelOverride);m_RenderSystem->SetTextureMapMask(m_PbrTextureMask);
+    m_RenderSystem->SetLightingSettings(&m_LightingSettings);m_RenderSystem->SetLightRenderingMode(m_LightMode);
+    m_RenderSystem->SetEnvironmentSettings(&m_EnvironmentSettings);
+    m_RenderSystem->SetShadowSettings(&m_ShadowSettings);
     m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled);
 
     m_EcsDebugEntities.clear();
@@ -528,7 +550,7 @@ void Application::SetupEcsRuntimeDemo()
 
     std::string saveError;
     const auto snapshotPath = AssetPaths::ResolveAssetOutputPath("scenes/pz3_runtime_snapshot.json");
-    if (!SceneSerializer::SaveWorld(snapshotPath, m_World, &saveError) && !saveError.empty())
+    if (!SceneSerializer::SaveWorld(snapshotPath, GetWorld(), &saveError) && !saveError.empty())
         Logger::Get().Warn(saveError);
 }
 
@@ -556,79 +578,18 @@ void Application::InitializeConfigHotReload()
     }
 }
 
-bool Application::ReloadSceneFromCurrentConfig(const char* reason)
-{
-    if (m_Config.ecsDemo.sceneFile.empty())
-    {
-        SetupEcsRuntimeDemo();
-        Logger::Get().Info(std::string("Application: rebuilt ECS demo from config entities because ") + reason);
-        return true;
-    }
-
-    std::string sceneError;
-    std::vector<EcsDemoEntityConfig> sceneEntities;
-    const auto scenePath = AssetPaths::ResolveAssetPath(m_Config.ecsDemo.sceneFile);
-    if (!SceneSerializer::LoadEntityConfigs(scenePath, sceneEntities, &sceneError))
-    {
-        if (!sceneError.empty())
-            Logger::Get().Warn(sceneError);
-        return false;
-    }
-
-    m_Config.ecsDemo.initialEntities = std::move(sceneEntities);
-    SetupEcsRuntimeDemo();
-    Logger::Get().Info(std::string("Application: hot-reloaded ECS scene because ") + reason);
-    return true;
+bool Application::ReloadSceneFromCurrentConfig(const char* reason){
+    if(m_Config.ecsDemo.sceneFile.empty()){SetupEcsRuntimeDemo();return true;}
+    std::string error;if(!OpenScene(m_Config.ecsDemo.sceneFile,&error)){Logger::Get().Error(error);return false;}
+    Logger::Get().Info(std::string("Scene reload: ")+reason);return true;
 }
 
-bool Application::SaveCurrentScene(std::string* outError)
-{
-    std::string sceneKey = m_Config.ecsDemo.sceneFile;
-    if (sceneKey.empty())
-        sceneKey = "scenes/editor_scene.json";
-
-    const std::filesystem::path scenePath = AssetPaths::ResolveAssetOutputPath(sceneKey);
-    if (scenePath.empty())
-    {
-        const std::string error = "Application: cannot resolve scene output path for " + sceneKey;
-        if (outError != nullptr)
-            *outError = error;
-        Logger::Get().Warn(error);
-        return false;
-    }
-
-    std::string saveError;
-    if (!SceneSerializer::SaveWorld(scenePath, m_World, &saveError))
-    {
-        if (outError != nullptr)
-            *outError = saveError;
-        if (!saveError.empty())
-            Logger::Get().Warn(saveError);
-        return false;
-    }
-
-    m_Config.ecsDemo.sceneFile = sceneKey;
-    std::error_code ec;
-    m_SceneWatchPath = scenePath;
-    m_SceneWriteTime = std::filesystem::last_write_time(scenePath, ec);
-    m_HasSceneWatch = !static_cast<bool>(ec);
-    Logger::Get().Info("Application: editor saved scene " + scenePath.string());
-    return true;
+bool Application::SaveCurrentScene(std::string* error){
+    return SaveSceneAs(m_SceneKey.empty()?"scenes/editor_scene.json":m_SceneKey,true,error);
 }
-
-bool Application::LoadCurrentScene(std::string* outError)
-{
-    if (!ReloadSceneFromCurrentConfig("editor load requested"))
-    {
-        const std::string error = "Application: editor scene load failed";
-        if (outError != nullptr)
-            *outError = error;
-        Logger::Get().Warn(error);
-        return false;
-    }
-
-    InitializeConfigHotReload();
-    return true;
+bool Application::LoadCurrentScene(std::string* error){
+    auto key=m_SceneKey.empty()?m_Config.ecsDemo.sceneFile:m_SceneKey;
+    if(key.empty()){if(error)*error="No scene selected; use Open Scene";return false;}return OpenScene(key,error);
 }
 
 void Application::ConfigureInputBindings()
@@ -648,7 +609,7 @@ void Application::ConfigureInputBindings()
     m_InputManager.BindAction("PauseToMenu", GLFW_KEY_ESCAPE);
     m_InputManager.BindAction("SpawnEntity", GLFW_KEY_SPACE);
     m_InputManager.BindAction("DestroyEntity", GLFW_KEY_BACKSPACE);
-    m_InputManager.BindAction("FireProjectile", GLFW_KEY_F);
+    m_InputManager.BindAction("FireProjectile", GLFW_KEY_R);
     m_InputManager.BindAction("ToggleDebugColliders", GLFW_KEY_F3);
 }
 
@@ -720,32 +681,42 @@ void Application::PollConfigHotReload()
 
 ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg)
 {
-    const ecs::Entity entity = m_World.CreateEntity();
+    const ecs::Entity entity = GetWorld().CreateEntity();
+    GetWorld().AddComponent<ecs::SceneIdentityComponent>(entity);
     const std::size_t entityOrdinal = m_EcsDebugEntities.size();
+    if(entityCfg.light){
+        auto& t=GetWorld().AddComponent<ecs::TransformComponent>(entity);
+        t.position=entityCfg.position;t.rotation=entityCfg.rotation;t.scale=entityCfg.scale;
+        GetWorld().AddComponent<ecs::TagComponent>(entity).name=entityCfg.tag;
+        ecs::AddSceneLight(GetWorld(),entity,*entityCfg.light);return entity;
+    }
 
-    auto& transform = m_World.AddComponent<ecs::TransformComponent>(entity);
+    auto& transform = GetWorld().AddComponent<ecs::TransformComponent>(entity);
     transform.position = entityCfg.position;
     transform.rotation = entityCfg.rotation;
     transform.scale = entityCfg.scale;
 
-    auto& velocity = m_World.AddComponent<ecs::VelocityComponent>(entity);
+    auto& velocity = GetWorld().AddComponent<ecs::VelocityComponent>(entity);
     velocity.linear = entityCfg.linearVelocity;
     velocity.angular = entityCfg.angularVelocity;
 
-    auto& tag = m_World.AddComponent<ecs::TagComponent>(entity);
+    auto& tag = GetWorld().AddComponent<ecs::TagComponent>(entity);
     tag.name = entityCfg.tag.empty() ? ("DemoEntity_" + std::to_string(entityOrdinal)) : entityCfg.tag;
 
-    auto& meshRenderer = m_World.AddComponent<ecs::MeshRendererComponent>(entity);
+    auto& meshRenderer = GetWorld().AddComponent<ecs::MeshRendererComponent>(entity);
     meshRenderer.meshPath = entityCfg.meshPath;
     meshRenderer.visible = entityCfg.visible;
 
-    if (!entityCfg.materialPath.empty() ||
+    if (!entityCfg.slotMaterials.empty() || entityCfg.materialOverrides.shaderPath || entityCfg.materialOverrides.texturePath ||
+        entityCfg.materialOverrides.doubleSided || entityCfg.materialOverrides.castShadows || entityCfg.materialOverrides.receiveShadows ||
+        !entityCfg.materialPath.empty() ||
         !entityCfg.texturePath.empty() ||
         !entityCfg.shaderPath.empty() ||
         HasNonDefaultTint(entityCfg.materialTint))
     {
-        auto& material = m_World.AddComponent<ecs::MaterialComponent>(entity);
+        auto& material = GetWorld().AddComponent<ecs::MaterialComponent>(entity);
         material.materialPath = entityCfg.materialPath;
+        material.slotMaterials=entityCfg.slotMaterials;material.overrides=entityCfg.materialOverrides;
         material.texturePath = entityCfg.texturePath;
         material.shaderPath = entityCfg.shaderPath;
         for (std::size_t i = 0; i < entityCfg.materialTint.size(); ++i)
@@ -753,16 +724,16 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     }
 
     if (entityCfg.bounce)
-        m_World.AddComponent<ecs::BoundsBounceComponent>(entity);
+        GetWorld().AddComponent<ecs::BoundsBounceComponent>(entity);
 
-    auto& rigidbody = m_World.AddComponent<ecs::RigidbodyComponent>(entity);
+    auto& rigidbody = GetWorld().AddComponent<ecs::RigidbodyComponent>(entity);
     rigidbody.useGravity = entityCfg.useGravity;
     rigidbody.mass = 1.0f;
     rigidbody.isStatic = entityCfg.isStatic || tag.name == "GroundPlane";
     rigidbody.simulatePhysics = entityCfg.simulatePhysics;
     rigidbody.velocity = entityCfg.linearVelocity;
     rigidbody.angularVelocity = entityCfg.angularVelocity;
-    auto& collider = m_World.AddComponent<ecs::ColliderComponent>(entity);
+    auto& collider = GetWorld().AddComponent<ecs::ColliderComponent>(entity);
     collider.type = (entityCfg.colliderType == "sphere" || entityCfg.colliderType == "Sphere")
         ? ecs::ColliderType::Sphere
         : ecs::ColliderType::Box;
@@ -804,7 +775,7 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     }
 
     std::ostringstream ss;
-    ss << "ECS runtime: spawned demo entity -> " << m_World.DebugDescribeEntity(entity)
+    ss << "ECS runtime: spawned demo entity -> " << GetWorld().DebugDescribeEntity(entity)
        << " tag=" << tag.name
        << " mesh=" << meshRenderer.meshPath
        << " material=" << entityCfg.materialPath
@@ -829,12 +800,12 @@ ecs::Entity Application::SpawnPhysicsProjectile()
     const ecs::Entity projectile = SpawnEcsDemoEntity(projectileCfg);
     m_EcsDebugEntities.push_back(projectile);
 
-    if (auto* rb = m_World.GetComponent<ecs::RigidbodyComponent>(projectile))
+    if (auto* rb = GetWorld().GetComponent<ecs::RigidbodyComponent>(projectile))
     {
         rb->velocity = projectileCfg.linearVelocity;
         rb->mass = 2.0f;
     }
-    if (auto* collider = m_World.GetComponent<ecs::ColliderComponent>(projectile))
+    if (auto* collider = GetWorld().GetComponent<ecs::ColliderComponent>(projectile))
     {
         collider->friction = 0.25f;
         collider->restitution = 0.10f;
@@ -873,7 +844,10 @@ void Application::UpdateCameraController(float dt)
     const bool editorWantsMouse =
         ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse;
     const bool mouseOverViewport = m_EditorLayer.IsPointInsideViewport(cursorX, cursorY);
-    const bool editorBlocksMouseLook = editorWantsMouse && !mouseOverViewport && !m_Camera.controlsActive;
+    const auto inputOwner=m_EditorLayer.InputOwnership(glfwGetMouseButton(window,GLFW_MOUSE_BUTTON_RIGHT)==GLFW_PRESS,glfwGetMouseButton(window,GLFW_MOUSE_BUTTON_LEFT)==GLFW_PRESS,m_Camera.controlsActive,IsEditorPlayMode());
+    const bool editorBlocksMouseLook = (!m_Camera.controlsActive&&inputOwner!=editor::InputOwner::Camera) || m_EditorLayer.BlocksCamera() || glfwGetMouseButton(window,GLFW_MOUSE_BUTTON_LEFT)==GLFW_PRESS ||
+        (!m_Camera.controlsActive&&(!mouseOverViewport||!m_EditorLayer.IsViewportHovered())) ||
+        (editorWantsMouse&&!mouseOverViewport&&!m_Camera.controlsActive);
     const bool rightMouseDown =
         focused &&
         !editorBlocksMouseLook &&
@@ -1057,10 +1031,10 @@ bool Application::DestroyLastGameplayEntity()
         const ecs::Entity entity = m_EcsDebugEntities.back();
         m_EcsDebugEntities.pop_back();
 
-        if (!m_World.IsAlive(entity))
+        if (!GetWorld().IsAlive(entity))
             continue;
 
-        const bool destroyed = m_World.DestroyEntity(entity);
+        const bool destroyed = GetWorld().DestroyEntity(entity);
         Logger::Get().Info(
             std::string("ECS runtime: gameplay destroy last entity -> ") +
             (destroyed ? "ok" : "failed") +
@@ -1082,22 +1056,43 @@ void Application::ToggleDebugColliders()
 
 bool Application::IsInputActionActive(const std::string& action) const
 {
+    if(action=="FireProjectile"&&(!IsSimulationRunning()||!m_EditorLayer.ProjectileTestEnabled()))return false;
     if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard)
         return false;
 
+    if(m_EditorLayer.BlocksCamera()||m_Camera.controlsActive||(IsEditorPlayMode()&&!m_EditorLayer.OwnsViewportKeyboard()))return false;
     return m_InputManager.IsActionActive(action);
 }
 
 void Application::SetEditorPlayMode(bool enabled)
 {
-    if (m_EditorPlayMode == enabled)
-        return;
-
-    m_EditorPlayMode = enabled;
-    if (m_PhysicsSystem != nullptr)
-        m_PhysicsSystem->SetEnabled(enabled);
-
-    Logger::Get().Info(std::string("Application: editor mode -> ") + (enabled ? "Play" : "Edit"));
+    if(m_EditorPlayMode==enabled)return;
+    if(enabled){
+        m_EditorLayer.FinishTransaction(*this);
+        const auto start=std::chrono::steady_clock::now();
+        auto runtime=m_World.CloneData(&m_CloneMapping);
+        m_EditDebugEntities=m_EcsDebugEntities;m_EditStressEntities=m_StressEntities;
+        m_EditLighting=m_LightingSettings;m_EditEnvironment=m_EnvironmentSettings;m_EditShadows=m_ShadowSettings;m_EditBackground=m_Background;m_EditAntiAliasing=m_AntiAliasing;
+        auto map=[&](std::vector<ecs::Entity>& entities){std::erase_if(entities,[&](auto e){return !m_CloneMapping.contains(e);});for(auto& e:entities)e=m_CloneMapping.at(e);};
+        map(m_EcsDebugEntities);map(m_StressEntities);
+        m_EditorLayer.EnterRuntime(m_CloneMapping);m_RuntimeWorld=std::move(runtime);
+        m_StateMachine.Clear(*this);RequestStateChange(std::make_unique<LoadingState>());m_StateMachine.ApplyPending(*this);
+        m_LastCloneMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+    }else{
+        if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
+        m_StateMachine.Clear(*this);
+        m_Mutations.Clear();m_RenderInterpolation.Clear();m_EditorLayer.LeaveRuntime();m_RuntimeWorld.reset();m_CloneMapping.clear();
+        m_EcsDebugEntities=std::move(m_EditDebugEntities);m_StressEntities=std::move(m_EditStressEntities);
+        m_LightingSettings=m_EditLighting;m_EnvironmentSettings=m_EditEnvironment;m_ShadowSettings=m_EditShadows;m_Background=m_EditBackground;m_AntiAliasing=m_EditAntiAliasing;
+    }
+    m_EditorPlayMode=enabled;m_EditorPaused=false;ResetPhysicsClock();m_ActiveCollisionPairs.clear();
+    if(m_PhysicsSystem){m_PhysicsSystem->ResetState();m_PhysicsSystem->SetEnabled(enabled);}
+    Logger::Get().Info(enabled?"Editor: Play isolated Runtime World":"Editor: Stop discarded Runtime World");
+}
+void Application::SetEditorPaused(bool paused){
+    if(!m_EditorPlayMode||m_EditorPaused==paused)return;m_EditorPaused=paused;
+    m_FixedClock.Reset();m_ResetPhysicsDelta=true;
+    if(m_PhysicsSystem)m_PhysicsSystem->SetEnabled(!paused);
 }
 
 void Application::UpdateEcs(float dt)
@@ -1119,11 +1114,11 @@ void Application::UpdateEcs(float dt)
     for (std::size_t i = 0; i < m_EcsDebugEntities.size(); ++i)
     {
         const ecs::Entity entity = m_EcsDebugEntities[i];
-        const auto* tag = m_World.GetComponent<ecs::TagComponent>(entity);
-        const auto* transform = m_World.GetComponent<ecs::TransformComponent>(entity);
-        const auto* velocity = m_World.GetComponent<ecs::VelocityComponent>(entity);
-        const auto* meshRenderer = m_World.GetComponent<ecs::MeshRendererComponent>(entity);
-        const auto* material = m_World.GetComponent<ecs::MaterialComponent>(entity);
+        const auto* tag = GetWorld().GetComponent<ecs::TagComponent>(entity);
+        const auto* transform = GetWorld().GetComponent<ecs::TransformComponent>(entity);
+        const auto* velocity = GetWorld().GetComponent<ecs::VelocityComponent>(entity);
+        const auto* meshRenderer = GetWorld().GetComponent<ecs::MeshRendererComponent>(entity);
+        const auto* material = GetWorld().GetComponent<ecs::MaterialComponent>(entity);
         if (transform == nullptr || velocity == nullptr || meshRenderer == nullptr)
             continue;
 
@@ -1242,8 +1237,10 @@ bool Application::Initialize()
         m_ActiveCollisionPairs.insert(BuildCollisionPairKey(e.a.index, e.b.index));
     });
     SetupEcsRuntimeDemo();
+    if(!m_Config.ecsDemo.sceneFile.empty()){std::string error;if(!OpenScene(m_Config.ecsDemo.sceneFile,&error))Logger::Get().Error(error);}
+    m_EditorLayer.InitializePreferences(*this);
     // SetupRenderStressScene();
-    SetupPhysicsStressScene();
+    // Stress scene is created explicitly from the editor panel.
     InitializeConfigHotReload();
 
     m_IsRunning = true;
@@ -1257,13 +1254,76 @@ bool Application::Initialize()
 
 int Application::Run()
 {
-    double accumulator = 0.0;
-    const double fixedDt = 1.0 / 60.0;
-    const int maxSteps = 5;
+    ResetPhysicsClock();
 
+    if (m_WaitForTracy) {
+#if defined(TRACY_ENABLE)
+        Logger::Get().Info("Diagnostics: waiting for Tracy connection (30 seconds)");
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (!TracyIsConnected && std::chrono::steady_clock::now() < deadline) {
+            if (GetWindow()) GetWindow()->PollEvents();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        if (!TracyIsConnected) { Logger::Get().Error("Diagnostics: Tracy connection timed out"); return 2; }
+        m_Time.Initialize();
+#else
+        Logger::Get().Error("Diagnostics: Tracy is disabled"); return 2;
+#endif
+    }
+    std::vector<RenderDiagnosticSample> renderSamples;
+    if(m_RenderBenchmark)renderSamples.reserve(m_ShadowBenchmark?1800:(m_LightingBenchmark?2400:1200));
+    std::vector<PhysicsDiagnosticSample> samples;
+    if (!m_DiagnosticOutput.empty()) samples.reserve(m_FrameLimit ? std::min(m_FrameLimit, 50000u) : 1000);
+    const char* diagnosticPhase = "Visual";
+    const auto lifecycleShadowSettings=m_ShadowSettings;
+    const auto lifecycleEnvironmentSettings=m_EnvironmentSettings;
+    std::uint32_t frameCount = 0;
     while (m_IsRunning)
     {
+        if (m_FrameLimit != 0 && frameCount >= m_FrameLimit) break;
+        const auto frameStart = std::chrono::steady_clock::now();
+        const auto currentFrame = frameCount++;
         ZoneScopedN("Frame");
+        if(m_RenderBenchmark) {
+            if(m_IblBenchmark&&!m_IblBenchmarkStart&&!m_Windows.empty()&&m_Windows.front().renderer->GetEnvironmentDiagnostics().gpuBytes){m_IblBenchmarkStart=currentFrame+100;m_FrameLimit=m_IblBenchmarkStart+2400;}
+            const auto warmup=m_IblBenchmark?m_IblBenchmarkStart:100;
+            const auto block=currentFrame>=warmup?(currentFrame-warmup)/300:0;
+            if(!m_LightBenchmark&&!m_PbrTexturesBenchmark&&!m_IblBenchmark)SetGpuInstancingEnabled(currentFrame>=100 && block%2==1);
+            if(m_IblBenchmark){unsigned mask=(!m_IblBenchmarkStart||currentFrame<m_IblBenchmarkStart)?3:block%4;m_EnvironmentSettings.enabled=mask!=0;m_EnvironmentSettings.diffuse=(mask&1)!=0;m_EnvironmentSettings.specular=(mask&2)!=0;}
+            if(m_LightBenchmark)SetLightRenderingMode(block%2?LightRenderingMode::Tiled:LightRenderingMode::Forward);
+            if(m_LightingBenchmark)m_LightingSettings.enabled=block%4>=2;
+            if(m_PbrTexturesBenchmark){const unsigned masks[]={0,1,6,7};SetPbrTextureMask(masks[block%4]);SetShadingModelOverride(1);m_LightingSettings.enabled=true;m_ShadowSettings.enabled=true;m_ShadowSettings.pcf=true;}
+            if(m_PbrBenchmark){SetGpuInstancingEnabled(true);SetShadingModelOverride(block%2);m_LightingSettings.enabled=true;m_ShadowSettings.enabled=true;m_ShadowSettings.pcf=true;}
+            if(m_ShadowBenchmark){m_LightingSettings.enabled=true;m_ShadowSettings.enabled=block%6>=2;m_ShadowSettings.pcf=block%6>=4;}
+        }
+        if (m_DiagnosticLifecycle) {
+            switch (currentFrame) {
+            case 0: SetupPhysicsStressScene(500); SetEditorPlayMode(true); diagnosticPhase = "InitialDrop"; break;
+            case 120: SetEditorPlayMode(false); diagnosticPhase = "Stopped"; break;
+            case 132: SetEditorPlayMode(true); diagnosticPhase = "Resumed"; break;
+            case 240: m_PhysicsSystem->SetParallel(false); diagnosticPhase = "Serial"; break;
+            case 360: m_PhysicsSystem->SetParallel(true); diagnosticPhase = "Parallel"; break;
+            case 480: SetupPhysicsStressScene(500); diagnosticPhase = "Restart"; break;
+            case 600: SetEditorPlayMode(false); diagnosticPhase = "StoppedAfterRestart"; break;
+            case 612: ClearPhysicsStressScene(); diagnosticPhase = "Cleared"; break;
+            case 624: SetupPhysicsStressScene(500); SetEditorPlayMode(true); diagnosticPhase = "Recreated"; break;
+            case 744:
+                if (auto* window = dynamic_cast<GlfwWindow*>(GetWindow()))
+                    glfwSetWindowShouldClose(window->GetGlfwHandle(), GLFW_TRUE);
+                break;
+            }
+            if(m_EnvironmentSettings!=lifecycleEnvironmentSettings){Logger::Get().Error("Diagnostics: lifecycle changed environment settings");return 3;}
+            if(m_ShadowSettings!=lifecycleShadowSettings) {
+                Logger::Get().Error("Diagnostics: lifecycle changed shadow settings");return 3;
+            }
+            // These checks use the same public operations as the ImGui panel.
+            if (currentFrame == 612 && (GetStressEntityCount() != 0 || GetWorld().GetAliveCount() != 0)) {
+                Logger::Get().Error("Diagnostics: Clear left scene entities"); return 3;
+            }
+            if ((currentFrame == 0 || currentFrame == 480 || currentFrame == 624) && GetStressEntityCount() != 501) {
+                Logger::Get().Error("Diagnostics: Create/Restart count mismatch"); return 3;
+            }
+        }
 
         if (!m_Windows.empty())
             m_Windows[0].window->PollEvents();
@@ -1308,6 +1368,9 @@ int Application::Run()
             }
 
             prevF7 = f7;
+
+
+
         }
 
         bool anyAlive = false;
@@ -1316,6 +1379,8 @@ int Application::Run()
 
         if (!anyAlive) break;
 
+        if (currentFrame == m_SlowFrame)
+            std::this_thread::sleep_for(std::chrono::milliseconds(m_SlowFrameMilliseconds));
         float dt = m_Time.Tick();
 
         {
@@ -1331,7 +1396,7 @@ int Application::Run()
 
                 m_ResourceManager->PollHotReload();
 
-                m_World.ForEach<ecs::ColliderComponent, ecs::MeshRendererComponent, ecs::TransformComponent>(
+                GetWorld().ForEach<ecs::ColliderComponent, ecs::MeshRendererComponent, ecs::TransformComponent>(
                     [&](ecs::Entity, ecs::ColliderComponent& collider, ecs::MeshRendererComponent& meshRenderer, ecs::TransformComponent& transform)
                     {
                         if (!collider.autoFitFromMesh)
@@ -1362,31 +1427,50 @@ int Application::Run()
 
             UpdateCameraController(dt);
 
-            if (m_UpdateMode == UpdateMode::Fixed)
-            {
-                accumulator += dt;
-
-                int steps = 0;
-                while (accumulator >= fixedDt && steps < maxSteps)
-                {
-                    m_StateMachine.Update(*this, fixedDt);
-                    m_StateMachine.ApplyPending(*this);
-
-                    accumulator -= fixedDt;
-                    ++steps;
-                }
-            }
-            else
-            {
+            if (IsSimulationRunning() && m_UpdateMode == UpdateMode::Variable) {
                 m_StateMachine.Update(*this, dt);
                 m_StateMachine.ApplyPending(*this);
             }
         }
+        {
+            ZoneScopedN("PhysicsFixedFrame");
+            m_ActiveCollisionPairs.clear();
+            m_PhysicsFrame = {};
+            const double physicsDelta = m_ResetPhysicsDelta ? 0.0 : m_Time.GetFrameDeltaTime();
+            m_ResetPhysicsDelta = false;
+            const auto plan = m_FixedClock.Advance(physicsDelta,
+                IsSimulationRunning());
+            m_PhysicsFrame.droppedSeconds = plan.droppedSeconds;
+            for (int tick = 0; tick < plan.ticks; ++tick) {
+                ZoneScopedN("PhysicsFixedTick");
+                if (IsSimulationRunning() && m_UpdateMode == UpdateMode::Fixed) {
+                    m_StateMachine.Update(*this, float(FixedStepClock::TickSeconds));
+                    m_StateMachine.ApplyPending(*this);
+                }
+                if (IsSimulationRunning() && m_PhysicsSystem) {
+                    m_RenderInterpolation.BeginTick(GetWorld());
+                    m_World.UpdateFixedSystemsOn(GetWorld(),float(FixedStepClock::TickSeconds));
+                    m_RenderInterpolation.EndTick(GetWorld());
+                    m_PhysicsFrame.AddTick(m_PhysicsSystem->GetStatistics());
+                    m_FixedSimulationSeconds += FixedStepClock::TickSeconds;
+                }
+                if (m_ResetPhysicsDelta) break;
+            }
+            if (m_PhysicsFrame.ticks == 0 && m_PhysicsSystem) {
+                m_PhysicsSystem->Update(GetWorld(), 0);
+                m_PhysicsFrame.physics = m_PhysicsSystem->GetStatistics();
+            }
+            m_PhysicsFrame.accumulatorSeconds = m_FixedClock.Accumulator();
+            m_PhysicsFrame.totalDroppedSeconds = m_FixedClock.DroppedSeconds();
+            m_PhysicsFrame.simulationSeconds = m_FixedSimulationSeconds;
+        }
+        ApplyStructuralCommands();
+        UpdateEcs(dt);
 
         static float fpsTimer = 0.0f;
         static int fpsFrames = 0;
 
-        fpsTimer += dt;
+        fpsTimer += m_Time.GetFrameDeltaTime();
         fpsFrames++;
 
         if (fpsTimer >= 1.0f)
@@ -1402,13 +1486,13 @@ int Application::Run()
                     "%s | FPS: %.1f | dt: %.3f ms",
                     wc.baseTitle.c_str(),
                     fps,
-                    dt * 1000.0f);
+                    m_Time.GetFrameDeltaTime() * 1000.0f);
 
                 wc.window->SetTitle(title);
             }
 
             std::ostringstream ss;
-            ss << "FPS=" << fps << " dt(ms)=" << dt * 1000.0f;
+            ss << "FPS=" << fps << " dt(ms)=" << m_Time.GetFrameDeltaTime() * 1000.0f;
             Logger::Get().Info(ss.str());
 
             fpsTimer = 0.0f;
@@ -1427,8 +1511,29 @@ int Application::Run()
                 {
                     wc.renderer->BeginEditorUiFrame();
                     m_EditorLayer.Render(*this, wc.renderer.get(), dt);
+                    if(&wc==&m_Windows.front()){
+                        const bool capture=ImGui::GetIO().WantCaptureKeyboard||ImGui::GetIO().WantTextInput||m_EditorLayer.BlocksCamera();
+                        if(m_ProjectileInput.Update(m_InputManager.IsActionActive("FireProjectile"),m_EditorLayer.ProjectileTestEnabled(),IsEditorPlayMode(),IsEditorPaused(),m_EditorLayer.OwnsViewportKeyboard(),capture,m_Camera.controlsActive))SpawnPhysicsProjectile();
+                    }
                 }
 
+                // Diagnostics own the comparison switches after editor input as well.
+                // Ordinary runs continue to apply UI edits immediately.
+                if(m_LightingBenchmark||m_ShadowBenchmark||m_PbrBenchmark||m_PbrTexturesBenchmark) {
+                    if(m_IblBenchmark&&!m_IblBenchmarkStart&&!m_Windows.empty()&&m_Windows.front().renderer->GetEnvironmentDiagnostics().gpuBytes){m_IblBenchmarkStart=currentFrame+100;m_FrameLimit=m_IblBenchmarkStart+2400;}
+            const auto warmup=m_IblBenchmark?m_IblBenchmarkStart:100;
+            const auto block=currentFrame>=warmup?(currentFrame-warmup)/300:0;
+                    if(!m_LightBenchmark&&!m_PbrTexturesBenchmark&&!m_IblBenchmark)SetGpuInstancingEnabled(currentFrame>=100 && block%2==1);
+                    if(m_IblBenchmark){unsigned mask=(!m_IblBenchmarkStart||currentFrame<m_IblBenchmarkStart)?3:block%4;m_EnvironmentSettings.enabled=mask!=0;m_EnvironmentSettings.diffuse=(mask&1)!=0;m_EnvironmentSettings.specular=(mask&2)!=0;}
+            if(m_LightBenchmark)SetLightRenderingMode(block%2?LightRenderingMode::Tiled:LightRenderingMode::Forward);
+            if(m_LightingBenchmark)m_LightingSettings.enabled=block%4>=2;
+            if(m_PbrTexturesBenchmark){const unsigned masks[]={0,1,6,7};SetPbrTextureMask(masks[block%4]);SetShadingModelOverride(1);m_LightingSettings.enabled=true;m_ShadowSettings.enabled=true;m_ShadowSettings.pcf=true;}
+            if(m_PbrBenchmark){SetGpuInstancingEnabled(true);SetShadingModelOverride(block%2);m_LightingSettings.enabled=true;m_ShadowSettings.enabled=true;m_ShadowSettings.pcf=true;}
+                    if(m_ShadowBenchmark){m_LightingSettings.enabled=true;m_ShadowSettings.enabled=block%6>=2;m_ShadowSettings.pcf=block%6>=4;}
+                }
+
+                wc.renderer->SetAntiAliasing(m_AntiAliasing);
+                wc.renderer->SetEditorVisuals(m_EditorLayer.BuildVisualFrame(*this));
                 const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
                 const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();
                 const bool renderSceneToViewport =
@@ -1439,7 +1544,6 @@ int Application::Run()
 
                 if (renderSceneToViewport)
                 {
-                    m_ActiveCollisionPairs.clear();
                     if (m_RenderSystem != nullptr)
                     {
                         m_RenderSystem->SetRenderAdapter(wc.renderer.get());
@@ -1448,9 +1552,11 @@ int Application::Run()
 
                     {
                         ZoneScopedN("WorldSystems");
-                        m_World.UpdateSystems(dt);
+                        m_RenderInterpolation.SetFrame(GetWorld(), IsSimulationRunning(),
+                            m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
+                        editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);
+                        m_World.UpdateFrameSystemsOn(GetWorld(),dt);
                     }
-                    UpdateEcs(dt);
                     m_StateMachine.Render(*this, *wc.renderer);
                     wc.renderer->EndViewportRender();
                 }
@@ -1459,7 +1565,6 @@ int Application::Run()
 
                 if (!renderSceneToViewport)
                 {
-                    m_ActiveCollisionPairs.clear();
                     if (m_RenderSystem != nullptr)
                     {
                         m_RenderSystem->SetRenderAdapter(wc.renderer.get());
@@ -1468,10 +1573,12 @@ int Application::Run()
 
                     {
                         ZoneScopedN("WorldSystems");
-                        m_World.UpdateSystems(dt);
+                        m_RenderInterpolation.SetFrame(GetWorld(), IsSimulationRunning(),
+                            m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
+                        editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);
+                        m_World.UpdateFrameSystemsOn(GetWorld(),dt);
                     }
 
-                    UpdateEcs(dt);
                     m_StateMachine.Render(*this, *wc.renderer);
                 }
 
@@ -1479,10 +1586,13 @@ int Application::Run()
                     wc.renderer->RenderEditorUiFrame();
 
                 wc.renderer->EndFrame();
+                if(!m_FrameCaptureOutput.empty()&&m_FrameLimit&&currentFrame+1==m_FrameLimit)
+                    if(!wc.renderer->SaveFrameImage(m_FrameCaptureOutput))Logger::Get().Warn("Frame capture unavailable");
 
                 {
                     ZoneScopedN("Present");
                     wc.renderer->Present();
+                    m_LastGpuTimings=wc.renderer->GetGpuTimings();
                 }
 
                 if (m_RenderSystem != nullptr)
@@ -1490,13 +1600,27 @@ int Application::Run()
             }
         }
 
+        if (!m_DiagnosticOutput.empty() && m_PhysicsSystem) {
+            const double frameMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frameStart).count();
+            samples.push_back({diagnosticPhase, m_PhysicsSystem->IsParallel(), currentFrame, frameMs, m_PhysicsFrame.physics, m_PhysicsFrame});
+        }
+        if(m_RenderBenchmark && currentFrame>=(m_IblBenchmark?m_IblBenchmarkStart:100) && (!m_IblBenchmark||m_IblBenchmarkStart) && m_RenderSystem) {
+            const auto ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-frameStart).count();
+            renderSamples.push_back({currentFrame,m_GpuInstancing,ms,m_RenderSystem->GetStatistics(),m_LightingSettings.enabled,m_ShadowSettings.enabled,m_ShadowSettings.pcf,m_ShadowSettings.resolution,m_LastGpuTimings,m_ShadingModelOverride,m_PbrTextureMask,unsigned(m_EnvironmentSettings.enabled?((m_EnvironmentSettings.diffuse?1:0)|(m_EnvironmentSettings.specular?2:0)):0),m_Windows.empty()?EnvironmentDiagnostics{}:m_Windows.front().renderer->GetEnvironmentDiagnostics(),GetLightDiagnostics(),m_EditorLayer.GetStatistics().uiMs,m_EditorLayer.GetStatistics().hierarchyMs,m_EditorLayer.GetStatistics().inspectorMs,unsigned(m_EditorLayer.GetViewportPixelWidth()),unsigned(m_EditorLayer.GetViewportPixelHeight()),m_Windows.empty()?EditorVisualDiagnostics{}:m_Windows.front().renderer->GetEditorVisualDiagnostics(),m_EditorLayer.GetStatistics().assetBrowserMs,m_ShadowSettings.filterTaps,m_Windows.empty()?AntiAliasingDiagnostics{}:m_Windows.front().renderer->GetAntiAliasingDiagnostics(),m_EditorLayer.IsGameView(),m_EditorLayer.GetStatistics().lightGizmoMs});
+        }
         FrameMark;
     }
+    if (!m_DiagnosticOutput.empty() && !SavePhysicsDiagnostics(m_DiagnosticOutput, samples)) {
+        Logger::Get().Error("Diagnostics: cannot write CSV " + m_DiagnosticOutput); return 4;
+    }
+    if(m_RenderBenchmark && !SaveRenderDiagnostics(m_RenderDiagnosticOutput,renderSamples))return 4;
     return 0;
 }
 
 void Application::Shutdown()
 {
+    SetEditorPlayMode(false);m_Mutations.Clear();
+    if(!m_Windows.empty())m_EditorLayer.PersistPreferences(*this);
     if (auto* primary = dynamic_cast<GlfwWindow*>(GetWindow()))
     {
         if (GLFWwindow* window = primary->GetGlfwHandle(); window != nullptr)
@@ -1510,6 +1634,7 @@ void Application::Shutdown()
     m_Camera.controlsActive = false;
     m_Camera.previousRightMouseDown = false;
 
+    m_EditorLayer.ReleaseAssetPreview(GetRenderAdapter());
     if (m_RenderSystem != nullptr)
         m_RenderSystem->ReleaseGpuResources();
 
@@ -1540,8 +1665,9 @@ void Application::Shutdown()
     m_PhysicsSystem = nullptr;
     m_RenderSystem = nullptr;
     m_EcsDebugEntities.clear();
+    m_StressEntities.clear();
     m_EcsDebugLogTimer = 0.0f;
-    m_World.Clear();
+    GetWorld().Clear();
     Logger::Get().Shutdown();
 }
 
@@ -1561,10 +1687,10 @@ void Application::SetupRenderStressScene()
     {
         for (int column = 0; column < columns; ++column)
         {
-            const ecs::Entity entity = m_World.CreateEntity();
+            const ecs::Entity entity = GetWorld().CreateEntity();
 
             auto& transform =
-                m_World.AddComponent<ecs::TransformComponent>(entity);
+                GetWorld().AddComponent<ecs::TransformComponent>(entity);
 
             transform.position = ecs::Vec3{
                 (column - columns / 2) * spacing,
@@ -1579,13 +1705,13 @@ void Application::SetupRenderStressScene()
             };
 
             auto& meshRenderer =
-                m_World.AddComponent<ecs::MeshRendererComponent>(entity);
+                GetWorld().AddComponent<ecs::MeshRendererComponent>(entity);
 
             meshRenderer.meshPath =
                 "models/validation_cube.obj";
 
             auto& material =
-                m_World.AddComponent<ecs::MaterialComponent>(entity);
+                GetWorld().AddComponent<ecs::MaterialComponent>(entity);
 
             material.materialPath =
                 "materials/blue.material.json";
@@ -1600,51 +1726,121 @@ void Application::SetupRenderStressScene()
         " render entities");
 }
 
-void Application::SetupPhysicsStressScene()
+void Application::ClearPhysicsStressScene()
 {
-    constexpr int bodyCount = 500;
+    ecs::ClearSceneLights(GetWorld());std::erase_if(m_EcsDebugEntities,[&](auto e){return !GetWorld().IsAlive(e);});m_EditorLayer.ResetHistory();
+    ResetPhysicsClock();
+    ecs::ClearPhysicsStressScene(GetWorld(), m_StressEntities);
+    m_EditorLayer.MarkDirty();
+    m_ActiveCollisionPairs.clear();
+    if (m_PhysicsSystem) m_PhysicsSystem->ResetState();
+}
 
-    for (int i = 0; i < bodyCount; ++i)
-    {
-        const ecs::Entity entity = m_World.CreateEntity();
-
-        auto& transform =
-            m_World.AddComponent<ecs::TransformComponent>(entity);
-
-        transform.position = ecs::Vec3{
-            static_cast<float>(i % 25) * 2.0f,
-            10.0f + static_cast<float>(i / 25) * 2.0f,
-            0.0f
-        };
-
-        auto& collider =
-            m_World.AddComponent<ecs::ColliderComponent>(entity);
-
-        collider.type = ecs::ColliderType::Box;
-        collider.halfExtents = ecs::Vec3{
-            0.5f, 0.5f, 0.5f
-        };
-        collider.autoFitFromMesh = false;
-
-        auto& rigidbody =
-            m_World.AddComponent<ecs::RigidbodyComponent>(entity);
-
-        rigidbody.isStatic = false;
-        rigidbody.simulatePhysics = true;
-        rigidbody.useGravity = true;
-        rigidbody.mass = 1.0f;
-
-        rigidbody.velocity = ecs::Vec3{
-            0.1f,
-            0.0f,
-            0.0f
-        };
+void Application::SetupPhysicsStressScene(int count)
+{
+    ClearPhysicsStressScene();
+    // Replace tracked demo bodies so their speed/size cannot drive the stress timestep.
+    for (auto entity : m_EcsDebugEntities) GetWorld().DestroyEntity(entity);
+    m_EcsDebugEntities.clear();
+    ecs::CreatePhysicsStressScene(GetWorld(), m_StressEntities, count);
+    for(auto e:m_StressEntities)GetWorld().AddComponent<ecs::SceneIdentityComponent>(e);
+    m_Camera.position = {22.0f, 20.0f, 0.0f};
+    m_Camera.yaw = std::atan2(-22.0f, 30.0f);
+    m_Camera.pitch = -0.35f;
+    m_Camera.farPlane = 150.0f;
+    Logger::Get().Info("Physics stress scene: " + std::to_string(m_StressEntities.size() - 1) + " visible cubes");
+}
+void Application::SetupMaterialDemoScene(int copies)
+{
+    ClearPhysicsStressScene();for(auto entity:m_EcsDebugEntities)GetWorld().DestroyEntity(entity);m_EcsDebugEntities.clear();
+    copies=std::clamp(copies,1,500);
+    for(int i=0;i<copies;++i)for(int model=0;model<2;++model) {
+        EcsDemoEntityConfig config;config.tag=(model?"glTF":"OBJ")+std::string(" Material Slots ")+std::to_string(i);
+        config.meshPath=model?"models/material_slots.gltf":"models/material_slots.obj";
+        config.scale={1,1,1};config.simulatePhysics=false;config.useGravity=false;config.bounce=false;
+        config.position=copies==1?ecs::Vec3{model?1.5f:-1.5f,0,3}:ecs::Vec3{(i%10-4.5f)*6.f+model*2.8f,(i/100)*2.f,10.f+(i/10%10)*3.f};
+        m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(config));
     }
+    m_Camera.position=copies==1?ecs::Vec3{0,0,2}:ecs::Vec3{22,20,-12};
+    m_Camera.yaw=copies==1?0:std::atan2(-22.f,42.f);m_Camera.pitch=copies==1?0:-.35f;m_Camera.farPlane=150;
+    if(m_ResourceManager){(void)m_ResourceManager->LoadAsync<MeshResource>("models/material_slots.obj");(void)m_ResourceManager->LoadAsync<MeshResource>("models/material_slots.gltf");(void)m_ResourceManager->LoadAsync<ShaderResource>("dx12/textured.hlsl");}
+}
 
-    Logger::Get().Info(
-        "Physics stress scene: spawned " +
-        std::to_string(bodyCount) +
-        " dynamic bodies");
+void Application::SetupPbrDemoScene()
+{
+    ClearPhysicsStressScene();for(auto entity:m_EcsDebugEntities)GetWorld().DestroyEntity(entity);m_EcsDebugEntities.clear();
+    for(int row=0;row<3;++row)for(int column=0;column<5;++column) {
+        EcsDemoEntityConfig config;config.tag="PBR metallic="+std::to_string(row*.5f)+" roughness="+std::to_string(.1f+column*.2f);
+        config.meshPath="models/pbr_sphere.obj";config.shaderPath="dx12/textured.hlsl";config.texturePath="defaults/texture";
+        config.position={float(column-2)*2.5f,float(2-row)*2.5f+1,8};config.scale={1,1,1};
+        config.simulatePhysics=false;config.useGravity=false;config.bounce=false;
+        config.materialTint[0]=.9f;config.materialTint[1]=.55f;config.materialTint[2]=.22f;
+        config.materialOverrides.shadingModel=ShadingModel::PBR;config.materialOverrides.metallic=row*.5f;config.materialOverrides.roughness=.1f+column*.2f;
+        m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(config));
+    }
+    EcsDemoEntityConfig floor;floor.tag="PBR floor";floor.meshPath="models/validation_cube.obj";floor.texturePath="defaults/texture";floor.shaderPath="dx12/textured.hlsl";
+    floor.position={0,-.15f,8};floor.scale={18,.3f,12};floor.simulatePhysics=false;floor.useGravity=false;floor.bounce=false;
+    floor.materialOverrides.shadingModel=ShadingModel::PBR;floor.materialOverrides.roughness=.8f;
+    m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(floor));
+    m_Camera.position={0,4,-8};m_Camera.yaw=0;m_Camera.pitch=-.06f;m_Camera.farPlane=150;
+    m_LightingSettings.directional.direction={-.3f,-.5f,1};m_LightingSettings.directional.color={1,1,1};m_LightingSettings.directional.intensity=2;
+    m_LightingSettings.ambientIntensity=.15f;m_ShadowSettings.enabled=true;
+    if(m_ResourceManager)(void)m_ResourceManager->LoadAsync<MeshResource>("models/pbr_sphere.obj");
+    SetShadingModelOverride(-1);SetEditorPlayMode(false);
+}
+
+void Application::SetupPbrTexturesBenchmarkScene(int count)
+{
+    SetupPhysicsStressScene(count);SetEditorPlayMode(false);
+    GetWorld().ForEach<ecs::MeshRendererComponent,ecs::MaterialComponent>([](ecs::Entity,auto&,auto& material) {
+        material.overrides.shadingModel=ShadingModel::PBR;material.overrides.metallic=.7f;material.overrides.roughness=.7f;
+        material.overrides.normalTexturePath="textures/pbr_normal.png";
+        material.overrides.metallicRoughnessTexturePath="textures/pbr_orm.png";
+        material.overrides.occlusionTexturePath="textures/pbr_orm.png";
+    });
+}
+void Application::SetupPbrTexturesDemoScene()
+{
+    SetupPbrDemoScene();
+    GetWorld().ForEach<ecs::MeshRendererComponent,ecs::MaterialComponent>([](ecs::Entity,auto& mesh,auto& material) {
+        if(mesh.meshPath!="models/pbr_sphere.obj")return;
+        mesh.texturePath="textures/pbr_base.png";material.texturePath.clear();
+        material.overrides.normalTexturePath="textures/pbr_normal.png";
+        material.overrides.metallicRoughnessTexturePath="textures/pbr_orm.png";
+        material.overrides.occlusionTexturePath="textures/pbr_orm.png";
+        material.overrides.occlusionStrength=.8f;
+    });
+    for(int i=0;i<2;++i) {
+        EcsDemoEntityConfig config;config.tag=i?"Embedded glTF mirrored node":"External glTF authored tangent";
+        config.meshPath=i?"models/pbr_textures_embedded.gltf":"models/pbr_textures.gltf";
+        config.position={i?2.5f:-2.5f,8.5f,8};config.scale={1,1,1};config.simulatePhysics=false;config.useGravity=false;config.bounce=false;
+        m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(config));
+    }
+    m_Camera.position={0,5,-12};SetPbrTextureMask(7);
+}
+
+void Application::SetupShadowQualityDemoScene()
+{
+    ClearPhysicsStressScene();for(auto entity:m_EcsDebugEntities)GetWorld().DestroyEntity(entity);m_EcsDebugEntities.clear();
+    auto add=[&](const char* tag,const char* mesh,ecs::Vec3 position,ecs::Vec3 scale,ecs::Vec3 rotation,std::array<float,4> tint,bool imported=false) {
+        EcsDemoEntityConfig config;config.tag=tag;config.meshPath=mesh;config.position=position;config.scale=scale;config.rotation=rotation;
+        config.simulatePhysics=false;config.useGravity=false;config.bounce=false;
+        if(!imported){config.shaderPath="dx12/textured.hlsl";config.texturePath="defaults/texture";for(int i=0;i<4;++i)config.materialTint[i]=tint[i];}
+        if(std::string(mesh)=="models/shadow_inclined.obj")config.materialOverrides.doubleSided=true;
+        m_EcsDebugEntities.push_back(SpawnEcsDemoEntity(config));
+        if(m_ResourceManager)(void)m_ResourceManager->LoadAsync<MeshResource>(mesh);
+    };
+    add("Receiver floor","models/validation_cube.obj",{0,-.1f,8},{18,.2f,18},{},{.7f,.7f,.7f,1});
+    add("Contact cube","models/validation_cube.obj",{-4,.5f,6},{1,1,1},{},{1,.6f,.2f,1});
+    add("Rotated nonuniform","models/validation_cube.obj",{-1,1.3f,6},{1.6f,1.2f,.8f},{.2f,.5f,.3f},{.4f,1,.5f,1});
+    add("Negative scale","models/validation_cube.obj",{2,.7f,6},{-1,1.4f,1},{0,.4f,0},{1,.4f,.4f,1});
+    add("Blue inclined plane","models/shadow_inclined.obj",{-4,1,10},{1,1,1},{},{.15f,.4f,1,1});
+    add("African head OBJ","models/african_head.obj",{0,1.3f,10},{1.2f,1.2f,1.2f},{},{.8f,.7f,.6f,1});
+    add("Sphere glTF","models/lighting_sphere.gltf",{3.7f,-1.6f,7.4f},{.65f,.65f,.65f},{},{.6f,.5f,1,1});
+    add("Material slots OBJ","models/material_slots.obj",{0,1,13},{1,1,1},{},{1,1,1,1},true);
+    add("Material slots glTF","models/material_slots.gltf",{3,1,13},{1,1,1},{},{1,1,1,1},true);
+    m_Camera.position={11,9,-3};m_Camera.yaw=std::atan2(-11.f,11.f);m_Camera.pitch=-.42f;m_Camera.farPlane=150;
+    SetEditorPlayMode(false);
 }
 
 void Application::RunAsyncResourceStressTest()
@@ -1770,4 +1966,110 @@ void Application::RunSyncResourceStressTest()
 
     Logger::Get().Info(
         "Sync resource stress: complete");
+}
+ecs::Entity Application::CreateLightEntity(LightType type){
+    EcsDemoEntityConfig c;c.tag=type==LightType::Directional?"Directional Light":type==LightType::Point?"Point Light":"Spot Light";
+    const float cp=std::cos(m_Camera.pitch);
+    c.position={m_Camera.position.x+3*std::sin(m_Camera.yaw)*cp,m_Camera.position.y+3*std::sin(m_Camera.pitch),m_Camera.position.z+3*std::cos(m_Camera.yaw)*cp};c.scale={1,1,1};
+    c.rotation=type==LightType::Directional?ecs::Vec3{1.1f,-.7f,0}:ecs::Vec3{-m_Camera.pitch,m_Camera.yaw,0};
+    c.light=SceneLightDescription{};c.light->type=type;c.light->parameters.castShadows=type==LightType::Directional;
+    c.simulatePhysics=false;c.bounce=false;auto e=SpawnEcsDemoEntity(c);m_EcsDebugEntities.push_back(e);return e;
+}
+bool Application::DestroySceneEntity(ecs::Entity e){bool result=GetWorld().DestroyEntity(e);std::erase(m_EcsDebugEntities,e);std::erase(m_StressEntities,e);return result;}
+void Application::SetupIblDemoScene(){SetupPbrTexturesDemoScene();m_EnvironmentSettings.enabled=true;m_EnvironmentSettings.toneMapping=true;m_LightingSettings.directional.enabled=false;m_LightingSettings.ambientIntensity=0;SetEditorPlayMode(false);}
+
+void Application::SetupIblBenchmarkScene(int count){SetupPbrTexturesBenchmarkScene(count);m_EnvironmentSettings.enabled=true;SetShadingModelOverride(1);m_ResourceManager->LoadAsync<EnvironmentResource>(m_EnvironmentSettings.assetPath);}
+
+void Application::SetupLightStressScene(int count,bool overlapping,int objects)
+{
+    count=std::clamp(count,0,16384);SetupPbrTexturesBenchmarkScene(objects);
+    m_LightingSettings.enabled=true;m_LightingSettings.directional.enabled=false;m_LightingSettings.ambientIntensity=0;
+    m_ShadowSettings.enabled=false;m_EnvironmentSettings.enabled=true;m_EnvironmentSettings.intensity=.15f;SetShadingModelOverride(1);
+    for(int i=0;i<count;++i){
+        auto type=i%3==0?LightType::Spot:LightType::Point;auto e=CreateLightEntity(type);
+        auto& t=*GetWorld().GetComponent<ecs::TransformComponent>(e);
+        t.position=overlapping?ecs::Vec3{0,7,30}:ecs::Vec3{float(i%20-10)*1.2f,3+float(i/400)*1.5f,19+float(i/20%20)*1.2f};
+        t.rotation={1.570796327f,0,0};auto& l=*ecs::GetLightParameters(GetWorld(),e);
+        l.range=overlapping?45.f:3.f;l.intensity=overlapping?12.f/std::max(1,count):4.f;
+        l.color={i%3==0?1.f:.2f,i%3==1?1.f:.2f,i%3==2?1.f:.2f};l.innerAngle=25;l.outerAngle=45;
+    }
+    m_EditorLayer.ResetHistory();m_EditorLayer.MarkDirty();
+}
+
+void Application::SetupLightDemoScene(){
+    SetupIblDemoScene();m_EnvironmentSettings.intensity=.25f;m_ShadowSettings.enabled=true;
+    auto dir=CreateLightEntity(LightType::Directional);auto& d=*GetWorld().GetComponent<ecs::DirectionalLightComponent>(dir);d.primary=true;d.intensity=.7f;
+    auto& dt=*GetWorld().GetComponent<ecs::TransformComponent>(dir);dt.position={-4,5,8};dt.rotation={1.1f,-.7f,0};
+    auto point=CreateLightEntity(LightType::Point);auto& p=*GetWorld().GetComponent<ecs::PointLightComponent>(point);p.range=8;p.color={1,.15f,.04f};p.intensity=18;
+    GetWorld().GetComponent<ecs::TransformComponent>(point)->position={-2,3,6};
+    auto spot=CreateLightEntity(LightType::Spot);auto& l=*GetWorld().GetComponent<ecs::SpotLightComponent>(spot);l.range=12;l.color={.08f,.3f,1};l.intensity=30;l.innerAngle=20;l.outerAngle=40;
+    auto& t=*GetWorld().GetComponent<ecs::TransformComponent>(spot);t.position={3,5,4};t.rotation={.7f,-.35f,0};m_EditorLayer.ResetHistory();m_EditorLayer.MarkDirty();m_EditorLayer.SelectEntity(spot);
+}
+
+namespace {
+std::filesystem::path SafeScenePath(const std::string& key,bool output){
+    const auto staged=AssetPaths::ResolveAssetRoot();if(output)return editor::AssetImport::SafeTarget(staged,key);
+    for(const auto& root:{staged,editor::AssetImport::ProjectRoot()}){auto candidate=editor::AssetImport::SafeTarget(root,key);if(std::filesystem::is_regular_file(candidate))return candidate;}
+    return editor::AssetImport::SafeTarget(staged,key);
+}
+bool SceneKeyValid(const std::string& key){
+    if(!key.starts_with("scenes/")||std::filesystem::u8path(key).extension()!=".json")return false;
+    return ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::None);
+}
+}
+SceneSettings Application::GetSceneSettings()const{
+    SceneSettings s;s.lighting=m_LightingSettings;s.environment=m_EnvironmentSettings;s.shadows=m_ShadowSettings;s.background=m_Background;s.antiAliasing=m_AntiAliasing;
+    s.primaryDirectional=SceneSerializer::PrimaryDirectionalId(const_cast<ecs::World&>(GetWorld()));return s;
+}
+bool Application::SetSceneSettings(const SceneSettings& s,std::string* error){
+    try{(void)SceneSettingsToJson(s);const bool enabled=m_LightingSettings.enabled;const int debug=m_ShadowSettings.debugMode;
+        m_LightingSettings=s.lighting;m_LightingSettings.enabled=enabled;m_EnvironmentSettings=s.environment;m_ShadowSettings=s.shadows;m_Background=s.background;m_AntiAliasing=s.antiAliasing;m_ShadowSettings.debugMode=debug;editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);return true;
+    }catch(const std::exception& e){if(error)*error=e.what();return false;}
+}
+bool Application::SaveSceneAs(const std::string& key,bool overwrite,std::string* error){
+    if(IsEditorPlayMode()){if(error)*error="Stop Play before saving the authoring scene";return false;}
+    if(!SceneKeyValid(key)){if(error)*error="Scene key must be a portable scenes/*.json path";return false;}
+    try{
+        m_EditorLayer.FinishTransaction(*this);auto document=SceneSerializer::CaptureWorld(m_World,GetSceneSettings());
+        if(!SceneSerializer::WriteAtomic(SafeScenePath(key,true),document,error,overwrite))return false;
+        m_SceneKey=key;m_Config.ecsDemo.sceneFile=key;m_EditorLayer.MarkSaved();m_EditorLayer.RememberScene(key);InitializeConfigHotReload();return true;
+    }catch(const std::exception& e){if(error)*error=e.what();return false;}
+}
+bool Application::OpenScene(const std::string& key,std::string* error){
+    if(!SceneKeyValid(key)){if(error)*error="Scene key must be a portable scenes/*.json path";return false;}
+    // Parse/validate completely before changing modes or discarding the current scene.
+    ecs::World staged;SceneSettings settings;std::filesystem::path path;try{path=SafeScenePath(key,false);}catch(const std::exception& e){if(error)*error=e.what();return false;}
+    if(!SceneSerializer::LoadWorld(path,staged,settings,error))return false;
+    SetEditorPlayMode(false);m_Mutations.Clear();if(m_PhysicsSystem)m_PhysicsSystem->ResetState();ResetPhysicsClock();
+    m_World.ReplaceData(staged);m_EcsDebugEntities=m_World.Entities();m_StressEntities.clear();m_ActiveCollisionPairs.clear();
+    SetSceneSettings(settings);m_SceneKey=key;m_Config.ecsDemo.sceneFile=key;m_EditorLayer.ResetHistory();m_EditorLayer.MarkSaved();m_EditorLayer.RememberScene(key);InitializeConfigHotReload();return true;
+}
+void Application::NewScene(){
+    SetEditorPlayMode(false);ClearPhysicsStressScene();m_World.Clear();m_EcsDebugEntities.clear();m_StressEntities.clear();m_Mutations.Clear();
+    m_SceneKey.clear();m_Config.ecsDemo.sceneFile.clear();SetSceneSettings(SceneSettings{});m_EditorLayer.ResetHistory();m_EditorLayer.MarkSaved();
+}
+ecs::Entity Application::CreateEmptyEntity(const std::string& name){
+    auto e=GetWorld().CreateEntity();GetWorld().AddComponent<ecs::TagComponent>(e).name=name;GetWorld().AddComponent<ecs::TransformComponent>(e);GetWorld().AddComponent<ecs::SceneIdentityComponent>(e);m_EcsDebugEntities.push_back(e);return e;
+}
+void Application::NotifyEditorMutation(ecs::Entity entity){
+    if(entity.IsValid()&&GetWorld().IsAlive(entity)){
+        NotifyTeleport(entity);if(auto* rb=GetWorld().GetComponent<ecs::RigidbodyComponent>(entity)){rb->sleeping=false;rb->sleepTimer=0;}
+    }
+    if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
+}
+void Application::FocusEntity(ecs::Entity entity){
+    if(auto* t=GetWorld().GetComponent<ecs::TransformComponent>(entity)){
+        float radius=std::max({std::abs(t->scale.x),std::abs(t->scale.y),std::abs(t->scale.z),1.f});
+        auto center=t->position;
+        if(m_ResourceManager)if(auto* mr=GetWorld().GetComponent<ecs::MeshRendererComponent>(entity))if(auto mesh=m_ResourceManager->Get<MeshResource>(mr->meshPath);mesh&&mesh->IsLoaded()&&!mesh->GetData().meshData.vertices.empty()){
+            ecs::Vec3 low{FLT_MAX,FLT_MAX,FLT_MAX},high{-FLT_MAX,-FLT_MAX,-FLT_MAX};
+            for(const auto& vertex:mesh->GetData().meshData.vertices){low.x=std::min(low.x,vertex.position[0]);low.y=std::min(low.y,vertex.position[1]);low.z=std::min(low.z,vertex.position[2]);high.x=std::max(high.x,vertex.position[0]);high.y=std::max(high.y,vertex.position[1]);high.z=std::max(high.z,vertex.position[2]);}
+            float model[16];ecs::BuildRenderModelMatrix(model,ecs::RenderPose::From(*t));const ecs::Vec3 p{(low.x+high.x)*.5f,(low.y+high.y)*.5f,(low.z+high.z)*.5f};
+            center={model[0]*p.x+model[4]*p.y+model[8]*p.z+model[12],model[1]*p.x+model[5]*p.y+model[9]*p.z+model[13],model[2]*p.x+model[6]*p.y+model[10]*p.z+model[14]};
+            radius=.5f*std::sqrt(std::pow((high.x-low.x)*t->scale.x,2)+std::pow((high.y-low.y)*t->scale.y,2)+std::pow((high.z-low.z)*t->scale.z,2));
+        }
+        if(auto* light=ecs::GetLightParameters(GetWorld(),entity))radius=std::clamp(light->range,1.f,30.f);
+        const float d=std::clamp(radius/std::tan(m_Camera.verticalFovRadians*.5f)*1.6f,2.f,100.f),cp=std::cos(m_Camera.pitch);
+        m_Camera.position={center.x-d*std::sin(m_Camera.yaw)*cp,center.y-d*std::sin(m_Camera.pitch),center.z-d*std::cos(m_Camera.yaw)*cp};
+    }
 }

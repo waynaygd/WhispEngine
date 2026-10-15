@@ -21,6 +21,7 @@ public:
     }
 
     void Update(World& world, float dt);
+    void UpdatePhase(World& world, float dt, bool fixed);
     void Clear();
 
 private:

@@ -4,12 +4,29 @@
 #include "../MathTypes.h"
 #include <array>
 #include <unordered_map>
+#include "PhysicsBroadphaseStorage.h"
 
 class JobSystem;
 
 namespace ecs {
 class PhysicsSystem final : public ISystem {
 public:
+    struct Statistics {
+        std::size_t bodies = 0, sleeping = 0, pairs = 0, contacts = 0, contactPoints = 0;
+        std::size_t activeBodies = 0;
+        int substeps = 0, solverIterations = 0;
+        double totalMs = 0, integrateMs = 0, broadphaseMs = 0, narrowphaseMs = 0;
+        double solverMs = 0, poseMs = 0, projectionMs = 0;
+        double dispatchMs = 0, waitMs = 0;
+        std::size_t broadphaseRebuilds = 0, broadphaseReuses = 0;
+        std::size_t broadphaseBufferGrowths = 0, aabbComputations = 0;
+    };
+    const Statistics& GetStatistics() const { return m_Statistics; }
+    void ResetState() { m_ContactCache.clear(); m_Broadphase = {}; m_Statistics = {}; }
+    void SetParallel(bool enabled) { m_Parallel = enabled; }
+    bool IsParallel() const { return m_Parallel; }
+    // Opt-in quadratic test oracle; keep disabled for performance measurements.
+    void SetBroadphaseValidation(bool enabled) { m_ValidateBroadphase = enabled; }
     explicit PhysicsSystem(
         EventBus* eventBus = nullptr,
         float gravity = 9.81f,
@@ -33,6 +50,7 @@ public:
         , m_SolverIterations(solverIterations)
     {}
     const char* Name() const override { return "PhysicsSystem"; }
+    bool IsFixedUpdate() const override { return true; }
     void Update(World& world, float dt) override;
     void SetEnabled(bool enabled) {
         if (m_Enabled != enabled) m_ContactCache.clear();
@@ -45,6 +63,10 @@ public:
     }
     bool IsEnabled() const { return m_Enabled; }
 private:
+    Statistics m_Statistics;
+    PhysicsBroadphaseStorage m_Broadphase;
+    bool m_ValidateBroadphase = false;
+    bool m_Parallel = true;
     struct CachedPoint {
         Vec3 localA{}, localB{}, tangentImpulse{};
         float normalImpulse = 0.0f;

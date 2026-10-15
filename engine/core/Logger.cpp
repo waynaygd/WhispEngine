@@ -39,6 +39,7 @@ void Logger::Log(const std::string& level, const std::string& msg)
 {
     std::lock_guard<std::mutex> lock(m_Mutex);
 
+    m_Messages.push_back({++m_Revision,level,msg});if(m_Messages.size()>1024)m_Messages.pop_front();
     auto now = std::chrono::system_clock::now();
     auto time = std::chrono::system_clock::to_time_t(now);
 
@@ -49,3 +50,6 @@ void Logger::Log(const std::string& level, const std::string& msg)
         << std::put_time(std::localtime(&time), "%H:%M:%S")
         << " " << msg << std::endl;
 }
+
+std::vector<Logger::Entry> Logger::Messages()const{std::lock_guard lock(m_Mutex);return {m_Messages.begin(),m_Messages.end()};}
+void Logger::ClearMessages(){std::lock_guard lock(m_Mutex);m_Messages.clear();++m_Revision;}

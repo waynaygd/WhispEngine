@@ -5,6 +5,8 @@
 #include "Resource.h"
 #include "ShaderResource.h"
 #include "TextureResource.h"
+#include "EnvironmentResource.h"
+#include "loaders/EnvironmentLoader.h"
 #include "loaders/MaterialLoader.h"
 #include "loaders/MeshLoader.h"
 #include "loaders/ShaderLoader.h"
@@ -45,7 +47,16 @@ public:
         std::uint64_t estimatedCpuBytes = 0;
     };
 
+    void SetMaterialDirty(const std::string& key,bool dirty) {std::lock_guard<std::recursive_mutex> lock(m_Mutex);if(dirty)m_DirtyMaterials.insert(key);else m_DirtyMaterials.erase(key);}
     std::size_t PumpFinalization(std::size_t maxItems);
+    void ReloadEnvironmentAsync(const std::filesystem::path& path) {
+        std::lock_guard<std::recursive_mutex> lock(m_Mutex);
+        const auto key=NormalizeKey<EnvironmentResource>(path);if(key.empty())return;
+        auto cached=FindCachedResource<EnvironmentResource>(key);if(!cached){(void)LoadAsync<EnvironmentResource>(path);return;}
+        if(m_PendingAsyncKeys.count(MakeAsyncToken<EnvironmentResource>(key)))return;
+        cached->ReplaceData(cached->GetData(),ResourceLoadState::Loading,true);
+        StartAsyncLoad<EnvironmentResource>(key,cached);
+    }
 
     std::mutex m_FinalizationMutex;
     std::deque<std::function<void()>> m_FinalizationQueue;
@@ -164,6 +175,7 @@ public:
 
         auto& cache = GetCache<T>();
         const std::size_t removed = cache.erase(key);
+        m_PendingAsyncKeys.erase(MakeAsyncToken<T>(key));if(removed)++m_CacheEpoch;
         if (removed > 0)
         {
             Logger::Get().Info("ResourceManager: unloaded [" + ResourceTypeName<T>() + "] key=" + key);
@@ -176,18 +188,21 @@ public:
         std::lock_guard<std::recursive_mutex> lock(m_Mutex);
         auto& cache = GetCache<T>();
         const std::size_t count = cache.size();
-        cache.clear();
+        for(const auto& [key,value]:cache)m_PendingAsyncKeys.erase(MakeAsyncToken<T>(key));
+        cache.clear();++m_CacheEpoch;
         Logger::Get().Info(
             "ResourceManager: cleared [" + ResourceTypeName<T>() + "] cache entries=" + std::to_string(count));
     }
 
     void ClearAll();
+    std::uint64_t GetCacheEpoch()const {std::lock_guard<std::recursive_mutex> lock(m_Mutex);return m_CacheEpoch;}
 
     template <typename T>
     ResourceHandle<T> Reload(const std::filesystem::path& path)
     {
         std::lock_guard<std::recursive_mutex> lock(m_Mutex);
         const std::string key = NormalizeKey<T>(path);
+        if constexpr(std::is_same_v<T,MaterialResource>)if(m_DirtyMaterials.count(key)) {Logger::Get().Warn("Material reload deferred while editor has unsaved changes: "+key);return FindCachedResource<T>(key);}
         if (key.empty())
             return CreateFallbackResource<T>("<invalid>", "reload path does not map to a normalized key");
 
@@ -262,6 +277,7 @@ public:
         CollectResourceStats(m_TextureCache, stats);
         CollectResourceStats(m_ShaderCache, stats);
         CollectResourceStats(m_MaterialCache, stats);
+        CollectResourceStats(m_EnvironmentCache, stats);
         return stats;
     }
 
@@ -282,7 +298,8 @@ private:
         Mesh,
         Texture,
         Shader,
-        Material
+        Material,
+        Environment
     };
 
     struct HotReloadWatch
@@ -307,6 +324,8 @@ private:
             return m_MeshCache;
         else if constexpr (std::is_same_v<T, TextureResource>)
             return m_TextureCache;
+        else if constexpr (std::is_same_v<T, EnvironmentResource>)
+            return m_EnvironmentCache;
         else if constexpr (std::is_same_v<T, ShaderResource>)
             return m_ShaderCache;
         else if constexpr (std::is_same_v<T, MaterialResource>)
@@ -322,6 +341,8 @@ private:
             return m_DefaultMesh;
         else if constexpr (std::is_same_v<T, TextureResource>)
             return m_DefaultTexture;
+        else if constexpr (std::is_same_v<T, EnvironmentResource>)
+            return m_DefaultEnvironment;
         else if constexpr (std::is_same_v<T, ShaderResource>)
             return m_DefaultShader;
         else if constexpr (std::is_same_v<T, MaterialResource>)
@@ -333,9 +354,15 @@ private:
     template <typename T>
     std::string NormalizeKey(const std::filesystem::path& path) const
     {
-        if constexpr (std::is_same_v<T, ShaderResource>)
+        if constexpr (std::is_same_v<T, EnvironmentResource>) {
+            if(path.empty()||path.is_absolute()||path.has_root_name())return {};
+            const auto raw=AssetPaths::ToUtf8String(path);if(raw.find(':')!=std::string::npos||raw.find('#')!=std::string::npos)return {};
+            for(const auto& part:path)if(part=="..")return {};
+            return AssetPaths::NormalizeAssetKey(path);
+        }
+        else if constexpr (std::is_same_v<T, ShaderResource>)
             return AssetPaths::NormalizeShaderKey(path);
-        else if constexpr (std::is_same_v<T, MeshResource> || std::is_same_v<T, TextureResource> || std::is_same_v<T, MaterialResource>)
+        else if constexpr (std::is_same_v<T, MeshResource> || std::is_same_v<T, TextureResource> || std::is_same_v<T, MaterialResource> || std::is_same_v<T, EnvironmentResource>)
             return AssetPaths::NormalizeAssetKey(path);
         else
             static_assert(kUnsupportedResourceType<T>, "Unsupported resource type");
@@ -346,7 +373,9 @@ private:
     {
         if constexpr (std::is_same_v<T, ShaderResource>)
             return AssetPaths::ResolveShaderPath(key);
-        else if constexpr (std::is_same_v<T, MeshResource> || std::is_same_v<T, TextureResource> || std::is_same_v<T, MaterialResource>)
+        else if constexpr (std::is_same_v<T, TextureResource>)
+            return AssetPaths::ResolveAssetPath(key.substr(0,key.find("#embedded/")));
+        else if constexpr (std::is_same_v<T, MeshResource> || std::is_same_v<T, MaterialResource> || std::is_same_v<T, EnvironmentResource>)
             return AssetPaths::ResolveAssetPath(key);
         else
             static_assert(kUnsupportedResourceType<T>, "Unsupported resource type");
@@ -361,6 +390,8 @@ private:
             return MeshLoader::Load(key, resolvedPath);
         else if constexpr (std::is_same_v<T, TextureResource>)
             return TextureLoader::Load(key, resolvedPath);
+        else if constexpr (std::is_same_v<T, EnvironmentResource>)
+            return EnvironmentLoader::Load(key, resolvedPath);
         else if constexpr (std::is_same_v<T, ShaderResource>)
             return ShaderLoader::Load(key, resolvedPath);
         else if constexpr (std::is_same_v<T, MaterialResource>)
@@ -380,11 +411,18 @@ private:
         return it->second;
     }
 
+    // A fallback shares CPU values, never ownership of another resource's GPU allocation.
+    template <typename T> T DefaultCpuData() const {
+        T data=GetDefault<T>()?GetDefault<T>()->GetData():T{};
+        if constexpr(requires(T t){t.gpuHandle;t.gpuHandleVersion;}) {data.gpuHandle={};data.gpuHandleVersion=0;}
+        return data;
+    }
+
     template <typename T>
     ResourceHandle<T> CreateFallbackResource(const std::string& key, const std::string& errorMessage) const
     {
         const auto defaultResource = GetDefault<T>();
-        T data = defaultResource != nullptr ? defaultResource->GetData() : T{};
+        T data = DefaultCpuData<T>();
 
         return std::make_shared<Resource<T>>(
             key,
@@ -408,7 +446,7 @@ private:
     ResourceHandle<T> CreateLoadingResource(const std::string& key, const std::string& message) const
     {
         const auto defaultResource = GetDefault<T>();
-        T data = defaultResource != nullptr ? defaultResource->GetData() : T{};
+        T data = DefaultCpuData<T>();
 
         return std::make_shared<Resource<T>>(
             key,
@@ -434,6 +472,8 @@ private:
             return "Mesh";
         else if constexpr (std::is_same_v<T, TextureResource>)
             return "Texture";
+        else if constexpr (std::is_same_v<T, EnvironmentResource>)
+            return "Environment";
         else if constexpr (std::is_same_v<T, ShaderResource>)
             return "Shader";
         else if constexpr (std::is_same_v<T, MaterialResource>)
@@ -449,6 +489,8 @@ private:
             return ResourceKind::Mesh;
         else if constexpr (std::is_same_v<T, TextureResource>)
             return ResourceKind::Texture;
+        else if constexpr (std::is_same_v<T, EnvironmentResource>)
+            return ResourceKind::Environment;
         else if constexpr (std::is_same_v<T, ShaderResource>)
             return ResourceKind::Shader;
         else if constexpr (std::is_same_v<T, MaterialResource>)
@@ -477,7 +519,8 @@ private:
 
     std::uint64_t EstimateResourceBytes(const MeshResource& resource) const
     {
-        return static_cast<std::uint64_t>(resource.meshData.vertices.size() * sizeof(MeshVertex)) +
+        std::uint64_t materialBytes=0;for(const auto& m:resource.meshData.materials)materialBytes+=EstimateResourceBytes(m);
+        return materialBytes+static_cast<std::uint64_t>(resource.meshData.vertices.size() * sizeof(MeshVertex)) +
             static_cast<std::uint64_t>(resource.meshData.indices.size() * sizeof(std::uint32_t)) +
             static_cast<std::uint64_t>(resource.meshData.submeshes.size() * sizeof(MeshSubmesh));
     }
@@ -485,6 +528,11 @@ private:
     std::uint64_t EstimateResourceBytes(const TextureResource& resource) const
     {
         return static_cast<std::uint64_t>(resource.textureData.pixels.size());
+    }
+
+    std::uint64_t EstimateResourceBytes(const EnvironmentResource& e) const {
+        std::uint64_t bytes=e.radiance.size()*sizeof(float);
+        for(const auto* cube:{&e.environment,&e.irradiance,&e.prefiltered})for(const auto& p:cube->subresources)bytes+=p.size()*sizeof(float);return bytes;
     }
 
     std::uint64_t EstimateResourceBytes(const ShaderResource& resource) const
@@ -499,7 +547,7 @@ private:
             resource.sourcePath.size() +
             resource.shaderPath.size() +
             resource.texturePath.size() +
-            sizeof(resource.baseColor));
+            sizeof(MaterialResource)+resource.diagnostics.size());
     }
 
     template <typename T>
@@ -526,9 +574,10 @@ private:
             m_PendingAsyncKeys.erase(token);
 
             T fallbackData =
-                GetDefault<T>() != nullptr
-                ? GetDefault<T>()->GetData()
-                : T{};
+                DefaultCpuData<T>();
+            if constexpr (std::is_same_v<T, EnvironmentResource>)
+                if (!resource->GetData().placeholder)
+                    fallbackData = resource->GetData();
 
             resource->ReplaceData(
                 std::move(fallbackData),
@@ -584,7 +633,7 @@ private:
 
                             if (cached == nullptr || cached != resource)
                             {
-                                m_PendingAsyncKeys.erase(token);
+                                // A replacement load owns the same key token now.
                                 return;
                             }
 
@@ -608,9 +657,8 @@ private:
                                         (void)LoadAsync<ShaderResource>(
                                             material.shaderPath);
 
-                                    if (!material.texturePath.empty())
-                                        (void)LoadAsync<TextureResource>(
-                                            material.texturePath);
+                                    for(const auto* texture:{&material.texturePath,&material.normalTexturePath,&material.metallicRoughnessTexturePath,&material.occlusionTexturePath})
+                                        if(!texture->empty())(void)LoadAsync<TextureResource>(*texture);
                                 }
                             }
                             else
@@ -620,10 +668,8 @@ private:
                                     ? result.errorMessage
                                     : error;
 
-                                T fallbackData =
-                                    GetDefault<T>() != nullptr
-                                    ? GetDefault<T>()->GetData()
-                                    : T{};
+                                T fallbackData = DefaultCpuData<T>();
+                                if constexpr(std::is_same_v<T,EnvironmentResource>)if(!cached->GetData().placeholder)fallbackData=cached->GetData();
 
                                 cached->ReplaceData(
                                     std::move(fallbackData),
@@ -656,14 +702,17 @@ private:
     mutable std::recursive_mutex m_Mutex;
     CacheMap<MeshResource> m_MeshCache;
     CacheMap<TextureResource> m_TextureCache;
+    CacheMap<EnvironmentResource> m_EnvironmentCache;
     CacheMap<ShaderResource> m_ShaderCache;
     CacheMap<MaterialResource> m_MaterialCache;
+    std::unordered_set<std::string> m_DirtyMaterials;
     std::unordered_map<std::string, HotReloadWatch> m_HotReloadWatches;
     std::vector<AsyncTask> m_AsyncTasks;
     std::unordered_set<std::string> m_PendingAsyncKeys;
 
     ResourceHandle<MeshResource> m_DefaultMesh;
     ResourceHandle<TextureResource> m_DefaultTexture;
+    ResourceHandle<EnvironmentResource> m_DefaultEnvironment;
     ResourceHandle<ShaderResource> m_DefaultShader;
     ResourceHandle<MaterialResource> m_DefaultMaterial;
 
@@ -672,6 +721,7 @@ public:
 
 private:
     bool m_AcceptAsyncLoads = true;
+    std::uint64_t m_CacheEpoch=0;
 };
 
 

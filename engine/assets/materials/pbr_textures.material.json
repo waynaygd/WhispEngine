@@ -1,0 +1,13 @@
+{
+  "version": 4,
+  "name": "PBR mapped copper",
+  "texturePath": "textures/pbr_base.png",
+  "normalTexturePath": "textures/pbr_normal.png",
+  "metallicRoughnessTexturePath": "textures/pbr_orm.png",
+  "occlusionTexturePath": "textures/pbr_orm.png",
+  "normalScale": 1,
+  "occlusionStrength": 0.8,
+  "metallic": 1,
+  "roughness": 1,
+  "shadingModel": "PBR"
+}

@@ -1,4 +1,10 @@
+#include "PrecisionInputs.h"
+#include <cstring>
+#include "TransformMath.h"
+#include "SunSynchronization.h"
+#include "EditorWidgets.h"
 #include "EditorLayer.h"
+#include "../scene/SceneSerializer.h"
 
 #include "../core/Application.h"
 #include "../ecs/World.h"
@@ -9,6 +15,7 @@
 #include "../ecs/components/TagComponent.h"
 #include "../ecs/components/TransformComponent.h"
 #include "../render/IRenderAdapter.h"
+#include "../render/ColorPipeline.h"
 #include "../resources/ResourceManager.h"
 #include "../core/AssetPaths.h"
 
@@ -288,44 +295,7 @@ void RestoreComponent(ecs::World& world, ecs::Entity entity, const std::optional
     }
 }
 
-bool SaveMaterialFile(const std::string& materialKey, const ecs::MaterialComponent& material, std::string* outError)
-{
-    if (materialKey.empty())
-    {
-        if (outError != nullptr)
-            *outError = "Material path is empty";
-        return false;
-    }
 
-    const std::filesystem::path materialPath = AssetPaths::ResolveAssetOutputPath(materialKey);
-    if (materialPath.empty())
-    {
-        if (outError != nullptr)
-            *outError = "Could not resolve material output path";
-        return false;
-    }
-
-    std::error_code ec;
-    std::filesystem::create_directories(materialPath.parent_path(), ec);
-
-    nlohmann::json json;
-    json["name"] = materialPath.stem().string();
-    json["shaderPath"] = material.shaderPath.empty() ? "dx12/textured.hlsl" : material.shaderPath;
-    if (!material.texturePath.empty())
-        json["texturePath"] = material.texturePath;
-    json["baseColor"] = nlohmann::json::array({ material.tint[0], material.tint[1], material.tint[2], material.tint[3] });
-
-    std::ofstream file(materialPath);
-    if (!file.is_open())
-    {
-        if (outError != nullptr)
-            *outError = "Could not write material file: " + materialPath.string();
-        return false;
-    }
-
-    file << json.dump(2);
-    return true;
-}
 }
 
 namespace editor
@@ -341,17 +311,82 @@ bool EditorLayer::IsPointInsideViewport(double x, double y) const
 
 void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
 {
+    ZoneScopedN("EditorLayer");
+    m_Statistics.hierarchyMs=m_Statistics.inspectorMs=m_Statistics.assetBrowserMs=m_Statistics.lightGizmoMs=0;
+    const auto uiStart=std::chrono::steady_clock::now();
+    struct FinishUi {Statistics& stats;std::chrono::steady_clock::time_point start;~FinishUi(){stats.uiMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}} finish{m_Statistics,uiStart};
     RefreshAssetLists(dt);
+    if(m_Transaction&&!m_Transaction->before.settings&&m_Transaction->before.entity!=m_SelectedEntity)FinishTransaction(app);
+    m_InputTextActive=ImGui::GetIO().WantTextInput;m_ModalActive=ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel);
+    if(m_LightPointerCaptured&&!ImGui::IsMouseDown(0)){FinishTransaction(app);m_LightPointerCaptured=false;}
+    m_EscapeConsumed=false;
+    if((ImGui::GetIO().AppFocusLost||ImGui::IsKeyPressed(ImGuiKey_Escape,false))&&m_Transaction){CancelTransaction(app);m_PropertyDrafts.clear();m_CancelGizmoUntilRelease=true;m_LightPointerCaptured=false;m_EscapeConsumed=true;}
+    ConfigureDocking();DrawToolbar(app);
 
-    m_ViewportPixelWidth = 0;
+
+        m_ViewportPixelWidth = 0;
     m_ViewportPixelHeight = 0;
     m_ViewportHovered = false;
     m_ViewportHasBounds = false;
-
-    ImGui::DockSpaceOverViewport(0, nullptr, ImGuiDockNodeFlags_PassthruCentralNode);
-
-    DrawMainMenu(app);
-    HandleEditorShortcuts(app);
+    m_ViewportFocused=false;m_HierarchyFocused=false;
+    DrawMainMenu(app);DrawSceneDialogs(app);
+    if(m_ShowSceneSettings)DrawSceneSettings(app,renderer,dt);
+    if(m_ShowVisualSettings)DrawEditorVisualSettings(app,renderer);
+    PrepareEditorSky(app,renderer);
+    if(m_ShowConsole)DrawConsole(app,renderer);
+    ImGui::SetNextWindowSize(ImVec2(340, 330), ImGuiCond_FirstUseEver);
+    if(m_ShowPhysicsStress){
+    if (ImGui::Begin("Physics Stress Test",&m_ShowPhysicsStress)) {
+        static int selection = 2;
+        constexpr int counts[] = {100, 250, 500, 1000};
+        ImGui::Combo("Cubes", &selection, "100\0" "250\0" "500\0" "1000\0");
+        if (ImGui::Button("Create")) app.SetupPhysicsStressScene(counts[selection]);
+        ImGui::SameLine();
+        if (ImGui::Button("Clear")) app.ClearPhysicsStressScene();
+        ImGui::SameLine();
+        if (ImGui::Button("Restart")) app.SetupPhysicsStressScene(counts[selection]);
+        ImGui::Text("Stress entities (with floor): %zu", app.GetStressEntityCount());
+        bool instancing=app.IsGpuInstancingEnabled();
+        if(ImGui::Checkbox("GPU Instancing", &instancing))app.SetGpuInstancingEnabled(instancing);
+        const auto& render=app.GetRenderStatistics();
+        ImGui::Text("Visible ready objects: %zu", render.visibleObjects);
+        ImGui::Text("Draws: %llu / Instanced: %llu / Instances: %llu",
+            static_cast<unsigned long long>(render.submitted.drawCalls),static_cast<unsigned long long>(render.submitted.instancedDrawCalls),static_cast<unsigned long long>(render.submitted.renderedInstances));
+        ImGui::Text("Instance batches: %llu / Capacity: %llu",static_cast<unsigned long long>(render.submitted.instancedDrawCalls),static_cast<unsigned long long>(render.submitted.instanceBufferCapacity));
+        ImGui::Text("Scene upload: %llu bytes",static_cast<unsigned long long>(render.submitted.uploadBytes));
+        ImGui::Text("Material resolve %.3f ms / hits %zu / misses %zu",render.materialResolveMs,render.materialCacheHits,render.materialCacheMisses);
+        ImGui::Text("Gather %.3f / Prepare %.3f / Submit %.3f ms",render.gatherMs,render.prepareMs,render.submitMs);
+        auto& interpolation = app.GetRenderInterpolation();
+        bool interpolate = interpolation.IsEnabled();
+        if(ImGui::Checkbox("Render Interpolation", &interpolate)) interpolation.SetEnabled(interpolate);
+        ImGui::Text("Alpha: %.3f  Interpolated bodies: %zu", interpolation.Alpha(), interpolation.Count());
+        bool physicsDebugPose = app.IsPhysicsDebugPose();
+        if(ImGui::Checkbox("Physics Debug Pose (colliders)", &physicsDebugPose)) app.SetPhysicsDebugPose(physicsDebugPose);
+        if (ImGui::Button(app.IsEditorPlayMode() ? "Stop##stress" : "Play##stress"))
+            app.SetEditorPlayMode(!app.IsEditorPlayMode());
+        if (auto* physics = app.GetPhysicsSystem()) {
+            bool parallel = physics->IsParallel();
+            if (ImGui::Checkbox("Parallel (unchecked = Serial)", &parallel)) physics->SetParallel(parallel);
+            const auto& frame = app.GetPhysicsFrameStatistics();
+            const auto& stats = frame.physics;
+            ImGui::Text("Bodies: %zu  Sleeping: %zu", stats.bodies, stats.sleeping);
+            ImGui::Text("Pairs: %zu  Contacts: %zu (%zu points)", stats.pairs, stats.contacts, stats.contactPoints);
+            ImGui::Text("Substeps: %d  Velocity iterations: %d", stats.substeps, stats.solverIterations);
+            ImGui::Text("Physics/frame: %.3f ms  Last tick: %.3f ms", stats.totalMs, frame.lastTickMs);
+            ImGui::Text("60 Hz / max 4 ticks; this frame: %d", frame.ticks);
+            ImGui::Text("Backlog: %.3f ms / Dropped: %.3f s", frame.accumulatorSeconds * 1000, frame.totalDroppedSeconds);
+            ImGui::Text("Internal substeps/frame: %d  Active: %zu", frame.internalSubsteps, stats.activeBodies);
+            ImGui::Text("Broadphase rebuild/reuse: %zu/%zu", stats.broadphaseRebuilds, stats.broadphaseReuses);
+            ImGui::Text("Integrate %.2f / Broadphase %.2f ms", stats.integrateMs, stats.broadphaseMs);
+            ImGui::Text("Narrowphase %.2f / Solver %.2f ms", stats.narrowphaseMs, stats.solverMs);
+            ImGui::Text("Pose %.2f / Projection %.2f ms", stats.poseMs, stats.projectionMs);
+        }
+        const float frameDt = app.GetFrameDeltaTime();
+        ImGui::Text("Frame: %.2f ms  FPS: %.1f", frameDt * 1000, frameDt > 0 ? 1 / frameDt : 0);
+        ImGui::TextWrapped("Create/Restart replace the active scene. Pause freezes Runtime; Stop restores Editor World. Pair/contact counts are peak per substep.");
+    }
+    ImGui::End();
+    }
 
     if (m_ShowHierarchy)
         DrawSceneHierarchy(app);
@@ -359,6 +394,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
         DrawInspector(app);
     if (m_ShowStatistics)
         DrawStatistics(app, dt);
+    m_InputTextActive=ImGui::IsAnyItemActive();m_ModalActive=ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel);
     if (m_ShowViewport)
         DrawViewport(app, renderer);
     else
@@ -366,6 +402,10 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
         m_ViewportPixelWidth = 0;
         m_ViewportPixelHeight = 0;
     }
+    // Re-evaluate after widgets: a popup/text field may have opened this frame.
+    m_ModalActive=ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel);
+    m_InputTextActive=ImGui::GetIO().WantTextInput||ImGui::IsAnyItemActive();
+    HandleEditorShortcuts(app);
     if (m_ShowAssetBrowser)
         DrawAssetBrowser(app);
     if (m_ShowMaterialEditor)
@@ -374,360 +414,48 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
         ImGui::ShowDemoWindow(&m_ShowDemoWindow);
 }
 
-EditorLayer::EntitySnapshot EditorLayer::CaptureSelectedEntity(Application& app) const
-{
-    EntitySnapshot snapshot;
-    snapshot.entity = m_SelectedEntity;
+void EditorLayer::HandleEditorShortcuts(Application& app){
+    const auto& io=ImGui::GetIO();if(io.WantTextInput||m_ModalActive||m_EscapeConsumed)return;
+    if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)&&!app.IsEditorPlayMode()){
+        if(HasPendingTransaction()){CancelTransaction(app);m_LightPointerCaptured=false;m_CancelGizmoUntilRelease=true;}else if((m_ViewportFocused||m_HierarchyFocused)&&!m_InputTextActive&&!app.IsCameraControlActive())ClearSelection();return;
+    }
+    const bool entityKeys=!app.IsEditorPlayMode()&&(m_ViewportFocused||m_HierarchyFocused)&&!m_InputTextActive&&!m_ToolActive&&!app.IsCameraControlActive();
+    if(entityKeys){if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_C,false))CopyEntity(app,m_SelectedEntity);if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_V,false))PasteEntity(app);if(ImGui::IsKeyPressed(ImGuiKey_Delete,false))DeleteEntity(app,m_SelectedEntity);}
+    if(io.KeyCtrl){
+        if(ImGui::IsKeyPressed(ImGuiKey_Z,false))Undo(app);
+        if(ImGui::IsKeyPressed(ImGuiKey_Y,false))Redo(app);
+        if(ImGui::IsKeyPressed(ImGuiKey_S,false)){if(io.KeyShift){m_SceneDialogAction=3;m_SceneDialogRequested=true;}else{std::string error;if(!app.SaveCurrentScene(&error)){m_EditorError=error;Logger::Get().Error(error);}}}
+        if(ImGui::IsKeyPressed(ImGuiKey_D,false))DuplicateEntity(app,m_SelectedEntity);
+    }
+    if(!EditorHotkeysAllowed(app.IsEditorPlayMode(),OwnsViewportKeyboard(),io.WantCaptureKeyboard,app.IsCameraControlActive()))return;
+    if(!io.KeyCtrl&&!io.KeyAlt&&!m_InputTextActive&&ImGui::IsKeyPressed(ImGuiKey_G,false))m_GameView=!m_GameView;
+    if(ImGui::IsKeyPressed(ImGuiKey_F,false))app.FocusEntity(m_SelectedEntity);
+    if(ImGui::IsKeyPressed(ImGuiKey_W,false))m_GizmoOperation=0;
+    if(ImGui::IsKeyPressed(ImGuiKey_E,false))m_GizmoOperation=1;
+    if(ImGui::IsKeyPressed(ImGuiKey_R,false))m_GizmoOperation=2;
 
-    const auto& world = app.GetWorld();
-    if (!m_SelectedEntity.IsValid() || !world.IsAlive(m_SelectedEntity))
-        return snapshot;
-
-    if (const auto* component = world.GetComponent<ecs::TagComponent>(m_SelectedEntity))
-        snapshot.tag = *component;
-    if (const auto* component = world.GetComponent<ecs::TransformComponent>(m_SelectedEntity))
-        snapshot.transform = *component;
-    if (const auto* component = world.GetComponent<ecs::MeshRendererComponent>(m_SelectedEntity))
-        snapshot.meshRenderer = *component;
-    if (const auto* component = world.GetComponent<ecs::MaterialComponent>(m_SelectedEntity))
-        snapshot.material = *component;
-    if (const auto* component = world.GetComponent<ecs::RigidbodyComponent>(m_SelectedEntity))
-        snapshot.rigidbody = *component;
-    if (const auto* component = world.GetComponent<ecs::ColliderComponent>(m_SelectedEntity))
-        snapshot.collider = *component;
-
-    return snapshot;
-}
-
-void EditorLayer::RestoreSnapshot(Application& app, const EntitySnapshot& snapshot)
-{
-    auto& world = app.GetWorld();
-    if (!snapshot.entity.IsValid() || !world.IsAlive(snapshot.entity))
-        return;
-
-    RestoreComponent(world, snapshot.entity, snapshot.tag);
-    RestoreComponent(world, snapshot.entity, snapshot.transform);
-    RestoreComponent(world, snapshot.entity, snapshot.meshRenderer);
-    RestoreComponent(world, snapshot.entity, snapshot.material);
-    RestoreComponent(world, snapshot.entity, snapshot.rigidbody);
-    RestoreComponent(world, snapshot.entity, snapshot.collider);
-    m_SelectedEntity = snapshot.entity;
-}
-
-void EditorLayer::PushUndo(const std::string& label, const EntitySnapshot& snapshot)
-{
-    if (!snapshot.entity.IsValid())
-        return;
-
-    m_UndoStack.push_back(UndoRecord{ label, snapshot });
-    if (m_UndoStack.size() > MaxUndoRecords)
-        m_UndoStack.erase(m_UndoStack.begin());
-    m_RedoStack.clear();
-}
-
-void EditorLayer::PushUndoBeforeChange(Application& app, const std::string& label)
-{
-    PushUndo(label, CaptureSelectedEntity(app));
-}
-
-void EditorLayer::Undo(Application& app)
-{
-    if (m_UndoStack.empty())
-        return;
-
-    UndoRecord record = m_UndoStack.back();
-    m_UndoStack.pop_back();
-    m_RedoStack.push_back(UndoRecord{ record.label, CaptureSelectedEntity(app) });
-    RestoreSnapshot(app, record.snapshot);
-}
-
-void EditorLayer::Redo(Application& app)
-{
-    if (m_RedoStack.empty())
-        return;
-
-    UndoRecord record = m_RedoStack.back();
-    m_RedoStack.pop_back();
-    m_UndoStack.push_back(UndoRecord{ record.label, CaptureSelectedEntity(app) });
-    RestoreSnapshot(app, record.snapshot);
-}
-
-void EditorLayer::HandleEditorShortcuts(Application& app)
-{
-    const ImGuiIO& io = ImGui::GetIO();
-    if (io.WantTextInput || !io.KeyCtrl)
-        return;
-
-    if (ImGui::IsKeyPressed(ImGuiKey_Z, false))
-        Undo(app);
-    if (ImGui::IsKeyPressed(ImGuiKey_Y, false))
-        Redo(app);
 }
 
 void EditorLayer::RefreshAssetLists(float dt)
 {
     m_AssetRefreshTimer += dt;
-    if (!m_AssetListsDirty && m_AssetRefreshTimer < 2.0f)
+    if (!m_AssetListsDirty)
         return;
 
     m_AssetRefreshTimer = 0.0f;
     m_AssetListsDirty = false;
 
-    const std::filesystem::path assetRoot = AssetPaths::ResolveAssetRoot();
-    const std::filesystem::path shaderRoot = AssetPaths::ResolveShaderRoot();
-
-    m_MeshAssets = ScanAssetKeys(assetRoot, "models", { ".obj", ".fbx", ".gltf", ".glb" });
-    m_TextureAssets = ScanAssetKeys(assetRoot, "textures", { ".png", ".jpg", ".jpeg", ".bmp", ".tga", ".dds" });
-    m_MaterialAssets = ScanAssetKeys(assetRoot, "materials", { ".json", ".material" });
-    m_ShaderAssets = ScanAssetKeys(shaderRoot, "", { ".hlsl" });
-}
-
-void EditorLayer::DrawMainMenu(Application& app)
-{
-    if (!ImGui::BeginMainMenuBar())
-        return;
-
-    if (ImGui::BeginMenu("File"))
-    {
-        if (ImGui::MenuItem("Save Scene"))
-        {
-            std::string error;
-            (void)app.SaveCurrentScene(&error);
+    try{m_AssetCatalog.Refresh();m_MeshAssets.clear();m_TextureAssets.clear();m_MaterialAssets.clear();m_ShaderAssets.clear();m_EnvironmentAssets.clear();
+        for(const auto& row:m_AssetCatalog.Entries())switch(m_AssetCatalog.Types()[row.type].kind){
+            case ecs::AssetKind::Mesh:m_MeshAssets.push_back(row.key);break;case ecs::AssetKind::Texture:m_TextureAssets.push_back(row.key);break;case ecs::AssetKind::Material:m_MaterialAssets.push_back(row.key);break;case ecs::AssetKind::Shader:m_ShaderAssets.push_back(row.key);break;case ecs::AssetKind::Environment:m_EnvironmentAssets.push_back(row.key);break;default:break;
         }
-        if (ImGui::MenuItem("Load Scene"))
-        {
-            std::string error;
-            (void)app.LoadCurrentScene(&error);
-        }
-        ImGui::EndMenu();
-    }
+    }catch(const std::exception& error){m_EditorError=error.what();}
 
-    if (ImGui::BeginMenu("Edit"))
-    {
-        if (ImGui::MenuItem("Undo", "Ctrl+Z", false, CanUndo()))
-            Undo(app);
-        if (ImGui::MenuItem("Redo", "Ctrl+Y", false, CanRedo()))
-            Redo(app);
-        ImGui::EndMenu();
-    }
-
-    if (ImGui::BeginMenu("View"))
-    {
-        ImGui::MenuItem("Scene Hierarchy", nullptr, &m_ShowHierarchy);
-        ImGui::MenuItem("Inspector", nullptr, &m_ShowInspector);
-        ImGui::MenuItem("Statistics", nullptr, &m_ShowStatistics);
-        ImGui::MenuItem("Viewport", nullptr, &m_ShowViewport);
-        ImGui::MenuItem("Asset Browser", nullptr, &m_ShowAssetBrowser);
-        ImGui::MenuItem("Material Editor", nullptr, &m_ShowMaterialEditor);
-        ImGui::Separator();
-        ImGui::MenuItem("ImGui Demo", nullptr, &m_ShowDemoWindow);
-        ImGui::EndMenu();
-    }
-
-    if (ImGui::BeginMenu("Tools"))
-    {
-        if (ImGui::MenuItem("Spawn Entity"))
-            app.SpawnGameplayEntity();
-        if (ImGui::MenuItem("Fire Projectile"))
-            app.SpawnPhysicsProjectile();
-        if (ImGui::MenuItem("Toggle Debug Colliders"))
-            app.ToggleDebugColliders();
-        ImGui::EndMenu();
-    }
-
-    if (ImGui::BeginMenu("Help"))
-    {
-        ImGui::TextUnformatted("WhispEngine Editor");
-        ImGui::TextUnformatted("Dear ImGui WYSIWYG tool layer");
-        ImGui::EndMenu();
-    }
-
-    ImGui::EndMainMenuBar();
-}
-
-void EditorLayer::DrawSceneHierarchy(Application& app)
-{
-    ImGui::SetNextWindowSize(ImVec2(260.0f, 520.0f), ImGuiCond_FirstUseEver);
-    ImGui::Begin("Scene Hierarchy", &m_ShowHierarchy);
-
-    auto& world = app.GetWorld();
-    std::vector<ecs::Entity> entities;
-    world.ForEach<ecs::TagComponent>(
-        [&](ecs::Entity entity, ecs::TagComponent&)
-        {
-            entities.push_back(entity);
-        });
-
-    std::sort(
-        entities.begin(),
-        entities.end(),
-        [](const ecs::Entity& lhs, const ecs::Entity& rhs)
-        {
-            return lhs.index < rhs.index;
-        });
-
-    if (!m_SelectedEntity.IsValid() || !world.IsAlive(m_SelectedEntity))
-    {
-        m_SelectedEntity = entities.empty() ? ecs::Entity{} : entities.front();
-    }
-
-    for (const ecs::Entity& entity : entities)
-    {
-        auto* tag = world.GetComponent<ecs::TagComponent>(entity);
-        const std::string label =
-            (tag != nullptr && !tag->name.empty())
-                ? tag->name + "##" + std::to_string(entity.index)
-                : "Entity " + std::to_string(entity.index);
-
-        const bool selected = entity == m_SelectedEntity;
-        if (ImGui::Selectable(label.c_str(), selected))
-            m_SelectedEntity = entity;
-    }
-
-    ImGui::End();
-}
-
-void EditorLayer::DrawInspector(Application& app)
-{
-    ImGui::SetNextWindowSize(ImVec2(360.0f, 560.0f), ImGuiCond_FirstUseEver);
-    ImGui::Begin("Inspector", &m_ShowInspector);
-
-    auto& world = app.GetWorld();
-    if (!m_SelectedEntity.IsValid() || !world.IsAlive(m_SelectedEntity))
-    {
-        ImGui::TextUnformatted("No entity selected");
-        ImGui::End();
-        return;
-    }
-
-    ImGui::Text("Entity %u:%u", m_SelectedEntity.index, m_SelectedEntity.generation);
-
-    if (auto* tag = world.GetComponent<ecs::TagComponent>(m_SelectedEntity))
-    {
-        if (ImGui::TreeNodeEx("Tag", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            const EntitySnapshot before = CaptureSelectedEntity(app);
-            if (ImGui::InputText("Name", &tag->name))
-                PushUndo("Edit Tag", before);
-            ImGui::TreePop();
-        }
-    }
-
-    if (auto* transform = world.GetComponent<ecs::TransformComponent>(m_SelectedEntity))
-    {
-        if (ImGui::TreeNodeEx("Transform", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            EntitySnapshot before = CaptureSelectedEntity(app);
-            if (ImGui::DragFloat3("Position", Vec3Data(transform->position), 0.01f))
-                PushUndo("Edit Position", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::DragFloat3("Rotation", Vec3Data(transform->rotation), 0.01f))
-                PushUndo("Edit Rotation", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::DragFloat3("Scale", Vec3Data(transform->scale), 0.01f, 0.001f, 100.0f))
-                PushUndo("Edit Scale", before);
-            ImGui::TreePop();
-        }
-    }
-
-    if (auto* mesh = world.GetComponent<ecs::MeshRendererComponent>(m_SelectedEntity))
-    {
-        if (ImGui::TreeNodeEx("Mesh Renderer", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            EntitySnapshot before = CaptureSelectedEntity(app);
-            if (ImGui::Checkbox("Visible", &mesh->visible))
-                PushUndo("Toggle Mesh Visibility", before);
-            before = CaptureSelectedEntity(app);
-            if (DrawResourceCombo("Mesh", mesh->meshPath, m_MeshAssets, false))
-                PushUndo("Change Mesh", before);
-            before = CaptureSelectedEntity(app);
-            if (DrawResourceCombo("Texture", mesh->texturePath, m_TextureAssets, true))
-                PushUndo("Change Texture", before);
-            before = CaptureSelectedEntity(app);
-            if (DrawResourceCombo("Shader", mesh->shaderPath, m_ShaderAssets, false))
-                PushUndo("Change Shader", before);
-            ImGui::TreePop();
-        }
-    }
-
-    if (auto* material = world.GetComponent<ecs::MaterialComponent>(m_SelectedEntity))
-    {
-        if (ImGui::TreeNodeEx("Material", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            EntitySnapshot before = CaptureSelectedEntity(app);
-            if (DrawResourceCombo("Material", material->materialPath, m_MaterialAssets, true))
-                PushUndo("Change Material", before);
-            before = CaptureSelectedEntity(app);
-            if (DrawResourceCombo("Material Shader", material->shaderPath, m_ShaderAssets, true))
-                PushUndo("Change Material Shader", before);
-            before = CaptureSelectedEntity(app);
-            if (DrawResourceCombo("Material Texture", material->texturePath, m_TextureAssets, true))
-                PushUndo("Change Material Texture", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::ColorEdit4("Tint", material->tint))
-                PushUndo("Edit Material Tint", before);
-            ImGui::TreePop();
-        }
-    }
-
-    if (auto* rb = world.GetComponent<ecs::RigidbodyComponent>(m_SelectedEntity))
-    {
-        if (ImGui::TreeNodeEx("Rigidbody", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            EntitySnapshot before = CaptureSelectedEntity(app);
-            if (ImGui::Checkbox("Use Gravity", &rb->useGravity))
-                PushUndo("Toggle Gravity", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::Checkbox("Static", &rb->isStatic))
-                PushUndo("Toggle Static Rigidbody", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::Checkbox("Simulate Physics", &rb->simulatePhysics))
-                PushUndo("Toggle Physics Simulation", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::DragFloat("Mass", &rb->mass, 0.05f, 0.001f, 1000.0f))
-                PushUndo("Edit Rigidbody Mass", before);
-            ImGui::Text("Velocity: %.3f, %.3f, %.3f", rb->velocity.x, rb->velocity.y, rb->velocity.z);
-            ImGui::TreePop();
-        }
-    }
-
-    if (auto* collider = world.GetComponent<ecs::ColliderComponent>(m_SelectedEntity))
-    {
-        if (ImGui::TreeNodeEx("Collider", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            int typeIndex = collider->type == ecs::ColliderType::Sphere ? 1 : 0;
-            const char* types[] = { "Box", "Sphere" };
-            EntitySnapshot before = CaptureSelectedEntity(app);
-            if (ImGui::Combo("Type", &typeIndex, types, 2))
-            {
-                collider->type = typeIndex == 1 ? ecs::ColliderType::Sphere : ecs::ColliderType::Box;
-                PushUndo("Change Collider Type", before);
-            }
-            ImGui::Text("Current: %s", ColliderTypeName(collider->type));
-            before = CaptureSelectedEntity(app);
-            if (ImGui::DragFloat3("Half Extents", Vec3Data(collider->halfExtents), 0.01f, 0.001f, 100.0f))
-                PushUndo("Edit Collider Size", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::DragFloat3("Offset", Vec3Data(collider->offset), 0.01f))
-                PushUndo("Edit Collider Offset", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::DragFloat("Restitution", &collider->restitution, 0.01f, 0.0f, 1.0f))
-                PushUndo("Edit Restitution", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::DragFloat("Friction", &collider->friction, 0.01f, 0.0f, 1.0f))
-                PushUndo("Edit Friction", before);
-            before = CaptureSelectedEntity(app);
-            if (ImGui::Checkbox("Auto Fit From Mesh", &collider->autoFitFromMesh))
-                PushUndo("Toggle Collider Auto Fit", before);
-            ImGui::TreePop();
-        }
-    }
-
-    ImGui::End();
 }
 
 void EditorLayer::DrawStatistics(Application& app, float dt)
 {
+    dt = app.GetFrameDeltaTime();
     m_FpsTimer += dt;
     ++m_FpsFrames;
     if (m_FpsTimer >= 1.0f)
@@ -779,26 +507,18 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
 {
     ImGui::SetNextWindowSize(ImVec2(760.0f, 520.0f), ImGuiCond_Appearing);
     ImGui::SetNextWindowSizeConstraints(ImVec2(420.0f, 280.0f), ImVec2(FLT_MAX, FLT_MAX));
-    ImGui::Begin("Viewport", &m_ShowViewport);
+    ImGui::Begin("Viewport", &m_ShowViewport,ImGuiWindowFlags_NoNavInputs);
 
     const bool playMode = app.IsEditorPlayMode();
     if (ImGui::Button(playMode ? "Stop" : "Play"))
         app.SetEditorPlayMode(!playMode);
     ImGui::SameLine();
     ImGui::TextUnformatted(playMode ? "Play" : "Edit");
+    if(!playMode){ImGui::SameLine();ImGui::Checkbox("Game View (G)",&m_GameView);}
 
     ImGui::Separator();
 
-    ImGui::RadioButton("Move", &m_GizmoOperation, 0);
-    ImGui::SameLine();
-    ImGui::RadioButton("Rotate", &m_GizmoOperation, 1);
-    ImGui::SameLine();
-    ImGui::RadioButton("Scale", &m_GizmoOperation, 2);
-
-    ImGui::RadioButton("Local", &m_GizmoMode, 0);
-    ImGui::SameLine();
-    ImGui::RadioButton("World", &m_GizmoMode, 1);
-
+    if(m_FixedDiagnosticLayout)ImGui::Dummy(ImVec2(1,ImGui::GetFrameHeightWithSpacing()*2-ImGui::GetStyle().ItemSpacing.y));
     const ImVec2 contentMin = ImGui::GetCursorScreenPos();
     const ImVec2 available = ImGui::GetContentRegionAvail();
     const ImVec2 viewportSize(std::max(available.x, 1.0f), std::max(available.y, 1.0f));
@@ -806,12 +526,14 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     const ImVec2 framebufferScale = ImGui::GetIO().DisplayFramebufferScale;
     m_ViewportPixelWidth = std::max(1, static_cast<int>(std::lround(viewportSize.x * framebufferScale.x)));
     m_ViewportPixelHeight = std::max(1, static_cast<int>(std::lround(viewportSize.y * framebufferScale.y)));
+    if(m_DiagnosticWidth>1&&m_DiagnosticHeight>1){m_ViewportPixelWidth=m_DiagnosticWidth;m_ViewportPixelHeight=m_DiagnosticHeight;}
     m_ViewportMinX = contentMin.x;
     m_ViewportMinY = contentMin.y;
     m_ViewportMaxX = contentMax.x;
     m_ViewportMaxY = contentMax.y;
     m_ViewportHasBounds = true;
     m_ViewportHovered = ImGui::IsMouseHoveringRect(contentMin, contentMax, false);
+    m_ViewportFocused=ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
 
     const std::uint64_t viewportTextureId = renderer != nullptr ? renderer->GetViewportTextureId() : 0;
     if (viewportTextureId != 0)
@@ -836,235 +558,130 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
             "Viewport render target will appear here");
     }
 
-    DrawGizmo(app, contentMin, viewportSize);
-    ImGui::End();
-}
-
-void EditorLayer::DrawAssetBrowser(Application& app)
-{
-    ImGui::SetNextWindowSize(ImVec2(430.0f, 360.0f), ImGuiCond_FirstUseEver);
-    ImGui::Begin("Asset Browser", &m_ShowAssetBrowser);
-
-    auto drawAssetList =
-        [&](const char* kind, const std::vector<std::string>& assets)
-        {
-            for (const std::string& asset : assets)
-            {
-                const bool selected = m_SelectedAssetKind == kind && m_SelectedAsset == asset;
-                if (ImGui::Selectable(asset.c_str(), selected))
-                {
-                    m_SelectedAssetKind = kind;
-                    m_SelectedAsset = asset;
-                }
+    if(!playMode&&!m_ModalActive&&!m_ToolActive&&!m_LightPointerCaptured&&!m_PlaneScaleCaptured&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&ImGui::BeginDragDropTarget()){
+        if(const auto* payload=ImGui::AcceptDragDropPayload("WHISP_ASSET"))if(payload->DataSize==sizeof(AssetPayload)){
+            const auto& asset=*static_cast<const AssetPayload*>(payload->Data);
+            if((asset.kind==ecs::AssetKind::Mesh||asset.kind==ecs::AssetKind::None)&&std::memchr(asset.key,0,sizeof(asset.key))){
+                auto mouse=ImGui::GetMousePos();auto point=PlacementPoint(app,(mouse.x-contentMin.x)/viewportSize.x,(mouse.y-contentMin.y)/viewportSize.y);if(asset.kind==ecs::AssetKind::Mesh)PlaceModel(app,asset.key,point);else if(std::string(asset.key).ends_with(".wscene"))PlaceImportedScene(app,asset.key,point);
             }
-        };
-
-    if (ImGui::BeginTabBar("AssetTabs"))
-    {
-        if (ImGui::BeginTabItem("Meshes"))
-        {
-            drawAssetList("Mesh", m_MeshAssets);
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Textures"))
-        {
-            drawAssetList("Texture", m_TextureAssets);
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Materials"))
-        {
-            drawAssetList("Material", m_MaterialAssets);
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Shaders"))
-        {
-            drawAssetList("Shader", m_ShaderAssets);
-            ImGui::EndTabItem();
-        }
-        ImGui::EndTabBar();
+        }ImGui::EndDragDropTarget();
     }
-
-    ImGui::Separator();
-    ImGui::Text("Selected: %s", m_SelectedAsset.empty() ? "<none>" : m_SelectedAsset.c_str());
-
-    auto& world = app.GetWorld();
-    const bool canApply = !m_SelectedAsset.empty() && m_SelectedEntity.IsValid() && world.IsAlive(m_SelectedEntity);
-    if (!canApply)
-    {
-        ImGui::BeginDisabled();
-    }
-
-    if (m_SelectedAssetKind == "Mesh")
-    {
-        if (ImGui::Button("Use Mesh"))
-        {
-            const EntitySnapshot before = CaptureSelectedEntity(app);
-            if (auto* mesh = world.GetComponent<ecs::MeshRendererComponent>(m_SelectedEntity))
-            {
-                mesh->meshPath = m_SelectedAsset;
-                PushUndo("Apply Mesh Asset", before);
-            }
-        }
-    }
-    else if (m_SelectedAssetKind == "Texture")
-    {
-        if (ImGui::Button("Use Texture"))
-        {
-            const EntitySnapshot before = CaptureSelectedEntity(app);
-            if (auto* material = world.GetComponent<ecs::MaterialComponent>(m_SelectedEntity))
-            {
-                material->texturePath = m_SelectedAsset;
-                PushUndo("Apply Texture Asset", before);
-            }
-            else if (auto* mesh = world.GetComponent<ecs::MeshRendererComponent>(m_SelectedEntity))
-            {
-                mesh->texturePath = m_SelectedAsset;
-                PushUndo("Apply Texture Asset", before);
-            }
-        }
-    }
-    else if (m_SelectedAssetKind == "Material")
-    {
-        if (ImGui::Button("Use Material"))
-        {
-            const EntitySnapshot before = CaptureSelectedEntity(app);
-            if (auto* material = world.GetComponent<ecs::MaterialComponent>(m_SelectedEntity))
-            {
-                material->materialPath = m_SelectedAsset;
-                PushUndo("Apply Material Asset", before);
-            }
-        }
-    }
-    else if (m_SelectedAssetKind == "Shader")
-    {
-        if (ImGui::Button("Use Shader"))
-        {
-            const EntitySnapshot before = CaptureSelectedEntity(app);
-            if (auto* material = world.GetComponent<ecs::MaterialComponent>(m_SelectedEntity))
-            {
-                material->shaderPath = m_SelectedAsset;
-                PushUndo("Apply Shader Asset", before);
-            }
-            else if (auto* mesh = world.GetComponent<ecs::MeshRendererComponent>(m_SelectedEntity))
-            {
-                mesh->shaderPath = m_SelectedAsset;
-                PushUndo("Apply Shader Asset", before);
-            }
-        }
-    }
-    else
-    {
-        ImGui::BeginDisabled();
-        ImGui::Button("Use Asset");
-        ImGui::EndDisabled();
-    }
-
-    if (!canApply)
-    {
-        ImGui::EndDisabled();
-    }
-
+    m_ViewportHovered=ImGui::IsItemHovered();
+    if(m_ViewportHovered&&ImGui::IsMouseClicked(1))ImGui::SetWindowFocus();
+    if(m_ViewportHovered&&ImGui::IsMouseClicked(0))ImGui::SetWindowFocus();
+    m_LightHandleHovered=m_LightIconClicked=false;
+    DrawLightGizmos(app,renderer,contentMin,viewportSize);
+    ImGui::GetWindowDrawList()->PushClipRect(contentMin,ImVec2(contentMin.x+viewportSize.x,contentMin.y+viewportSize.y),true);
+    if(!m_LightPointerCaptured&&!m_LightHandleHovered)DrawGizmo(app, contentMin, viewportSize);
+    ImGui::GetWindowDrawList()->PopClipRect();
+    DrawViewportOverlays(app,contentMin,viewportSize);
+    m_ToolActive=ImGuizmo::IsUsing()||(m_Transaction&&!m_Transaction->before.settings);
     ImGui::End();
 }
 
 void EditorLayer::DrawMaterialEditor(Application& app)
 {
-    ImGui::SetNextWindowSize(ImVec2(380.0f, 300.0f), ImGuiCond_FirstUseEver);
-    ImGui::Begin("Material Editor", &m_ShowMaterialEditor);
-
-    auto& world = app.GetWorld();
-    if (!m_SelectedEntity.IsValid() || !world.IsAlive(m_SelectedEntity))
-    {
-        ImGui::TextUnformatted("No entity selected");
-        ImGui::End();
-        return;
+    if(m_FocusMaterial){ImGui::SetNextWindowFocus();ImGui::SetNextWindowCollapsed(false);m_FocusMaterial=false;}
+    ImGui::SetNextWindowSize(ImVec2(390,480),ImGuiCond_FirstUseEver);
+    if(!ImGui::Begin("Material Editor",&m_ShowMaterialEditor)){ImGui::End();return;}
+    if(app.IsEditorPlayMode())ImGui::TextWrapped("Stop Play before modifying shared material assets.");
+    ImGui::BeginDisabled(app.IsEditorPlayMode());
+    auto* resources=app.GetResourceManager();auto& world=app.GetWorld();
+    auto* component=world.GetComponent<ecs::MaterialComponent>(m_SelectedEntity);
+    const auto open=[&](const std::string& key) {
+        if(m_MaterialDirty&&key!=m_EditingMaterial){m_MaterialError="Unsaved changes: Save or Revert before opening another asset.";return;}
+        m_EditingMaterial=key;m_MaterialError.clear();
+        if(resources&&!key.empty()) {resources->Load<MaterialResource>(key);resources->WatchForHotReload<MaterialResource>(key);}
+    };
+    if(m_SelectedAssetKind=="Material"&&ImGui::Button("Open selected asset"))open(m_SelectedAsset);
+    if(component&&!component->materialPath.empty()) {ImGui::SameLine();if(ImGui::Button("Open entity material"))open(component->materialPath);}
+    int comparison=app.GetShadingModelOverride()+1;const char* comparisonModes[]={"Material setting","Force Lambert","Force PBR"};
+    if(ImGui::Combo("Scene shading comparison",&comparison,comparisonModes,3))app.SetShadingModelOverride(comparison-1);
+    if(ImGui::Button("PBR spheres demo"))app.SetupPbrDemoScene();
+    ImGui::SameLine();if(ImGui::Button("PBR textures demo"))app.SetupPbrTexturesDemoScene();
+    unsigned mask=app.GetPbrTextureMask();const char* labels[]={"Normal mapping","MR maps","AO maps"};
+    for(unsigned i=0;i<3;++i){bool enabled=(mask&(1u<<i))!=0;if(ImGui::Checkbox(labels[i],&enabled)){mask=enabled?mask|(1u<<i):mask&~(1u<<i);app.SetPbrTextureMask(mask);}if(i<2)ImGui::SameLine();}
+    if(ImGui::Button("Material slots demo"))app.SetupMaterialDemoScene();
+    ImGui::InputText("New asset key",&m_NewMaterialKey);
+    if(ImGui::Button("Create Material")) {
+        if(m_MaterialDirty)m_MaterialError="Unsaved changes: Save or Revert before creating an asset.";
+        else if(std::filesystem::exists(AssetPaths::ResolveAssetPath(m_NewMaterialKey)))m_MaterialError="Asset already exists; open it instead.";
+        else {MaterialResource data;data.name=std::filesystem::path(m_NewMaterialKey).stem().string();data.placeholder=false;
+            if(CreateMaterialAsset(app,m_NewMaterialKey,&m_MaterialError)){open(AssetPaths::NormalizeAssetKey(m_NewMaterialKey));m_AssetListsDirty=true;}}
     }
-
-    auto* material = world.GetComponent<ecs::MaterialComponent>(m_SelectedEntity);
-    if (material == nullptr)
-    {
-        ImGui::TextUnformatted("Selected entity has no Material component");
-        ImGui::End();
-        return;
-    }
-
-    if (const auto* tag = world.GetComponent<ecs::TagComponent>(m_SelectedEntity))
-        ImGui::Text("Entity: %s", tag->name.c_str());
-    else
-        ImGui::Text("Entity: %u:%u", m_SelectedEntity.index, m_SelectedEntity.generation);
-
-    EntitySnapshot before = CaptureSelectedEntity(app);
-    if (DrawResourceCombo("Material Asset", material->materialPath, m_MaterialAssets, true))
-        PushUndo("Edit Material Asset", before);
-
-    before = CaptureSelectedEntity(app);
-    if (DrawResourceCombo("Shader", material->shaderPath, m_ShaderAssets, true))
-        PushUndo("Edit Material Shader", before);
-
-    before = CaptureSelectedEntity(app);
-    if (DrawResourceCombo("Texture", material->texturePath, m_TextureAssets, true))
-        PushUndo("Edit Material Texture", before);
-
-    before = CaptureSelectedEntity(app);
-    if (ImGui::ColorEdit4("Base Color", material->tint))
-        PushUndo("Edit Material Color", before);
-
-    if (ImGui::Button("Load Asset Values"))
-    {
-        if (!material->materialPath.empty())
-        {
-            if (auto* resources = app.GetResourceManager())
-            {
-                const auto loaded = resources->Load<MaterialResource>(material->materialPath);
-                if (loaded != nullptr && loaded->IsUsable())
-                {
-                    before = CaptureSelectedEntity(app);
-                    const MaterialResource& data = loaded->GetData();
-                    material->shaderPath = data.shaderPath;
-                    material->texturePath = data.texturePath;
-                    for (int i = 0; i < 4; ++i)
-                        material->tint[i] = data.baseColor[i];
-                    PushUndo("Load Material Asset Values", before);
-                }
-            }
+    ImGui::Separator();ImGui::Text("Asset: %s%s",m_EditingMaterial.c_str(),m_MaterialDirty?" *":"");
+    auto resource=resources?resources->Get<MaterialResource>(m_EditingMaterial):nullptr;
+    if(resource&&resource->IsLoaded()) {
+        auto data=resource->GetData();bool changed=false;
+        changed|=ImGui::InputText("Name",&data.name);
+        changed|=DrawResourceCombo("Shader",data.shaderPath,m_ShaderAssets,false);
+        changed|=DrawResourceCombo("Base texture (sRGB)",data.texturePath,m_TextureAssets,true);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,data.texturePath);
+        changed|=DrawResourceCombo("Normal texture (linear)",data.normalTexturePath,m_TextureAssets,true);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,data.normalTexturePath);
+        changed|=DrawResourceCombo("MR texture (G rough / B metal)",data.metallicRoughnessTexturePath,m_TextureAssets,true);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,data.metallicRoughnessTexturePath);
+        changed|=DrawResourceCombo("AO texture (R)",data.occlusionTexturePath,m_TextureAssets,true);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,data.occlusionTexturePath);
+        changed|=PrecisionSliderFloat("Normal scale",&data.normalScale,0,4);
+        changed|=PrecisionSliderFloat("AO strength",&data.occlusionStrength,0,1);
+        const char* slotLabels[]={"Base UV set","Normal UV set","MR UV set","AO UV set"};
+        for(int i=0;i<4;++i) {
+            changed|=ImGui::InputInt(slotLabels[i],&data.textureTexCoords[i]);data.textureTexCoords[i]=std::clamp(data.textureTexCoords[i],0,7);
+            if(data.textureTexCoords[i]!=0)ImGui::TextUnformatted("UV0 only: this map is disabled.");
         }
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Clear Overrides"))
-    {
-        before = CaptureSelectedEntity(app);
-        material->shaderPath.clear();
-        material->texturePath.clear();
-        material->tint[0] = 1.0f;
-        material->tint[1] = 1.0f;
-        material->tint[2] = 1.0f;
-        material->tint[3] = 1.0f;
-        PushUndo("Clear Material Overrides", before);
-    }
-
-    const bool canSaveMaterial = !material->materialPath.empty();
-    if (!canSaveMaterial)
-        ImGui::BeginDisabled();
-    if (ImGui::Button("Save Material File"))
-    {
-        std::string error;
-        if (SaveMaterialFile(material->materialPath, *material, &error))
-        {
-            if (auto* resources = app.GetResourceManager())
-                (void)resources->Reload<MaterialResource>(material->materialPath);
+        const std::string* maps[]={&data.texturePath,&data.normalTexturePath,&data.metallicRoughnessTexturePath,&data.occlusionTexturePath};
+        for(const auto* key:maps)if(!key->empty()) {
+            auto map=resources->Get<TextureResource>(*key);
+            if(!map)(void)resources->LoadAsync<TextureResource>(*key);
+            if(!map||map->IsLoading())ImGui::Text("Loading: %s",key->c_str());
+            else if(map->IsFailed())ImGui::Text("Missing map, neutral fallback: %s",key->c_str());
         }
-    }
-    if (!canSaveMaterial)
-        ImGui::EndDisabled();
-
-    ImGui::End();
+        changed|=LinearColorEdit("Asset Base Color",data.baseColor,4);
+        int shading=int(data.shadingModel);const char* shadingModels[]={"Lambert","PBR (GGX)"};
+        if(ImGui::Combo("Shading Model",&shading,shadingModels,2)){data.shadingModel=ShadingModel(shading);changed=true;}
+        changed|=PrecisionSliderFloat("Metallic",&data.metallic,0,1);
+        changed|=PrecisionSliderFloat("Roughness",&data.roughness,0,1);
+        if(data.shadingModel==ShadingModel::PBR)ImGui::TextWrapped("PBR uses direct GGX and optional scene IBL. Map values use their existing color semantics.");
+        ImGui::TextUnformatted("Base Color factor is linear. BRDF roughness minimum: 0.04.");
+        int mode=int(data.surfaceMode);const char* modes[]={"Opaque","Masked (unsupported)","Transparent (unsupported)"};
+        if(ImGui::Combo("Surface Mode",&mode,modes,3)){data.surfaceMode=MaterialSurfaceMode(mode);changed=true;}
+        if(data.surfaceMode!=MaterialSurfaceMode::Opaque)ImGui::TextWrapped("This surface mode is preserved in the asset but omitted from main and shadow passes.");
+        if(data.surfaceMode==MaterialSurfaceMode::Masked)changed|=PrecisionSliderFloat("Alpha Cutoff",&data.alphaCutoff,0,1);
+        changed|=ImGui::Checkbox("Double Sided",&data.doubleSided);
+        changed|=ImGui::Checkbox("Cast Shadows",&data.castShadows);
+        changed|=ImGui::Checkbox("Receive Shadows",&data.receiveShadows);
+        if(changed) {
+            resource->ReplaceData(std::move(data),ResourceLoadState::Loaded);m_MaterialDirty=true;
+            resources->SetMaterialDirty(m_EditingMaterial,true);
+        }
+        if(ImGui::Button("Save")) {
+            if(MaterialLoader::Save(m_EditingMaterial,resource->GetData(),&m_MaterialError)){m_MaterialDirty=false;resources->SetMaterialDirty(m_EditingMaterial,false);resources->Reload<MaterialResource>(m_EditingMaterial);}
+        }
+        ImGui::SameLine();if(ImGui::Button("Revert"))ImGui::OpenPopup("Discard unsaved material edits?");
+        if(ImGui::BeginPopupModal("Discard unsaved material edits?",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextUnformatted("Revert this shared asset to its saved file?");
+            if(ImGui::Button("Revert to file")) {resources->SetMaterialDirty(m_EditingMaterial,false);auto reloaded=resources->Reload<MaterialResource>(m_EditingMaterial);
+                if(reloaded&&reloaded->IsLoaded()){m_MaterialDirty=false;m_MaterialError.clear();}else {m_MaterialError=reloaded?reloaded->GetErrorMessage():"Reload failed";resources->SetMaterialDirty(m_EditingMaterial,m_MaterialDirty);}
+                ImGui::CloseCurrentPopup();}
+            ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();ImGui::EndPopup();
+        }
+        if(!resource->GetData().diagnostics.empty())ImGui::TextWrapped("%s",resource->GetData().diagnostics.c_str());
+        if(!resource->GetData().texturePath.empty()) {
+            auto texture=resources->Get<TextureResource>(resource->GetData().texturePath);
+            if(texture&&texture->HasError())ImGui::TextWrapped("Texture fallback: %s",texture->GetErrorMessage().c_str());
+            else if(texture&&texture->IsLoading())ImGui::TextUnformatted("Texture loading asynchronously...");
+        }
+    } else if(resource&&resource->HasError())ImGui::TextWrapped("%s",resource->GetErrorMessage().c_str());
+    if(!m_MaterialError.empty())ImGui::TextWrapped("%s",m_MaterialError.c_str());
+    ImGui::Separator();ImGui::TextWrapped("Per-entity references and overrides are edited in Inspector. Asset disk editing has a separate Save/Revert domain.");
+    ImGui::EndDisabled();ImGui::End();
 }
 
 void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const ImVec2& viewportSize)
 {
-    if (viewportSize.x <= 1.0f || viewportSize.y <= 1.0f)
+    if(m_ModalActive){if(m_GizmoUndoCaptured)CancelTransaction(app);m_GizmoUndoCaptured=false;m_CancelGizmoUntilRelease=true;ImGuizmo::Enable(false);return;}
+    if((app.IsCameraControlActive()||ImGui::IsMouseDown(1))&&!ImGuizmo::IsUsing())return;
+    if (app.IsEditorPlayMode() || m_GameView || viewportSize.x <= 1.0f || viewportSize.y <= 1.0f)
         return;
 
+    if(m_CancelGizmoUntilRelease){ImGuizmo::Enable(false);if(ImGui::IsMouseDown(0))return;m_CancelGizmoUntilRelease=false;}ImGuizmo::Enable(true);
     auto& world = app.GetWorld();
     if (!m_SelectedEntity.IsValid() || !world.IsAlive(m_SelectedEntity))
         return;
@@ -1093,37 +710,208 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
     float scale[3] = { transform->scale.x, transform->scale.y, transform->scale.z };
     float matrix[16];
     ImGuizmo::RecomposeMatrixFromComponents(translation, rotation, scale, matrix);
-    const EntitySnapshot before = CaptureSelectedEntity(app);
 
     ImGuizmo::BeginFrame();
     ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
     ImGuizmo::SetRect(viewportMin.x, viewportMin.y, viewportSize.x, viewportSize.y);
 
+    if(!ImGuizmo::IsUsing()&&DrawScalePlanes(app,viewportMin,viewportSize))return;
     const ImGuizmo::MODE mode = m_GizmoMode == 0 ? ImGuizmo::LOCAL : ImGuizmo::WORLD;
-    if (ImGuizmo::Manipulate(view, projection, ToGizmoOperation(m_GizmoOperation), mode, matrix))
+    float snapValue=m_GizmoOperation==0?m_SnapTranslation:m_GizmoOperation==1?m_SnapRotation:m_SnapScale;float snap[3]={snapValue,snapValue,snapValue};
+    float originalMatrix[16];std::copy(matrix,matrix+16,originalMatrix);
+    const bool manipulated=ImGuizmo::Manipulate(view, projection, ToGizmoOperation(m_GizmoOperation), mode, matrix,nullptr,(m_GizmoOperation==1?m_RotationSnapping:m_Snapping)?snap:nullptr);
+    bool matrixChanged=false;for(int i=0;i<16;++i)matrixChanged|=std::abs(matrix[i]-originalMatrix[i])>1e-6f;
+    // ImGuizmo's previous delta may report "modified" on a later stationary drag.
+    // Duplicate only when the target matrix actually changes (including snapped movement).
+    const bool gestureMoved=ImGuizmo::IsUsing()&&ImGui::IsMouseDragging(0,.5f*ImGui::GetStyle().FontScaleDpi);
+    if (manipulated&&matrixChanged&&gestureMoved)
     {
         if (!m_GizmoUndoCaptured)
         {
-            PushUndo("Transform Gizmo", before);
+            if(m_GizmoOperation==0&&ImGui::GetIO().KeyAlt){auto copy=BeginDuplicateDrag(app);if(copy.IsValid())transform=world.GetComponent<ecs::TransformComponent>(copy);}
+            else PushUndoBeforeChange(app,"Transform Gizmo");
             m_GizmoUndoCaptured = true;
         }
 
-        ImGuizmo::DecomposeMatrixToComponents(matrix, translation, rotation, scale);
-        transform->position = ecs::Vec3{ translation[0], translation[1], translation[2] };
-        transform->rotation = ecs::Vec3{
-            DegreesToRadians(rotation[0]),
-            DegreesToRadians(rotation[1]),
-            DegreesToRadians(rotation[2])
-        };
-        transform->scale = ecs::Vec3{
-            std::max(scale[0], 0.001f),
-            std::max(scale[1], 0.001f),
-            std::max(scale[2], 0.001f)
-        };
+        ImportMatrix result;std::copy(matrix,matrix+16,result.begin());
+        if(auto decomposed=DecomposeTransform(result,transform->scale)){*transform=*decomposed;app.NotifyEditorMutation(m_SelectedEntity);}else m_EditorError="Transform requires shear/singular scale; use Local scale handles";
     }
     else if (!ImGuizmo::IsUsing())
     {
+        if(m_GizmoUndoCaptured){FinishTransaction(app);m_DuplicateDrag=false;}
         m_GizmoUndoCaptured = false;
     }
+}
+}
+
+namespace editor {
+void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,float dt){
+    if(m_FocusSceneSettings&&ImGui::GetFrameCount()>2){ImGui::SetNextWindowFocus();m_FocusSceneSettings=false;}
+    ImGui::SetNextWindowSizeConstraints(ImVec2(270,180),ImVec2(FLT_MAX,FLT_MAX));
+    if(!ImGui::Begin("Scene Settings",&m_ShowSceneSettings)){ImGui::End();return;}
+    auto beforeSettings=app.GetSceneSettings();
+    {auto settings=beforeSettings;int aa=int(settings.antiAliasing);if(ImGui::Combo("Anti-Aliasing",&aa,"OFF\0FXAA Low\0FXAA High\0")){BeginSceneTransaction(app,"Anti-aliasing");settings.antiAliasing=AntiAliasingMode(aa);app.SetSceneSettings(settings);FinishTransaction(app);beforeSettings=app.GetSceneSettings();}
+    if(renderer){auto d=renderer->GetAntiAliasingDiagnostics();ImGui::Text("Effective samples: %u (post-process AA), intermediate %.2f MiB",d.effectiveSamples,d.intermediateBytes/1048576.);ImGui::Text("HDR/output GPU %.3f ms",renderer->GetGpuTimings().outputMs);}}
+
+    {
+        ImGui::PushItemWidth(std::max(90.f,ImGui::GetContentRegionAvail().x*.43f));
+        if(ImGui::CollapsingHeader("Scene Background",ImGuiTreeNodeFlags_DefaultOpen)){
+            auto settings=app.GetSceneSettings();auto& b=settings.background;const auto previousHdr=b.useIblEnvironment?settings.environment.assetPath:b.cubemap;bool changed=false;int mode=int(b.background);
+            if(ImGui::BeginTable("BackgroundProperties",2,ImGuiTableFlags_SizingStretchProp)){
+                ImGui::TableSetupColumn("Property",ImGuiTableColumnFlags_WidthFixed,90*ImGui::GetStyle().FontScaleDpi);ImGui::TableSetupColumn("Value",ImGuiTableColumnFlags_WidthStretch);
+                auto row=[&](const char* label,auto control){ImGui::TableNextRow();ImGui::TableSetColumnIndex(0);ImGui::AlignTextToFramePadding();ImGui::TextUnformatted(label);ImGui::TableSetColumnIndex(1);ImGui::SetNextItemWidth(-1);control();};
+                row("Mode",[&]{changed|=ImGui::Combo("##bgMode",&mode,"Solid\0Gradient\0HDR sky\0Procedural Day/Night\0");});if(b.background!=EditorBackground(mode)&&mode==3&&b.sunSync==SunSyncMode::SkyDrivesLight)b.sunSync=SunSyncMode::LightDrivesSky;b.background=EditorBackground(mode);
+                row("Intensity",[&]{changed|=PrecisionSliderFloat("##skyIntensity",&b.skyIntensity,0,8);});
+                if(b.background==EditorBackground::Solid)row("Color",[&]{changed|=LinearColorEdit("##bgSolid",b.solid.data(),3,ImGuiColorEditFlags_NoInputs);});
+                else if(b.background==EditorBackground::Gradient){row("Top",[&]{changed|=LinearColorEdit("##bgTop",b.top.data(),3,ImGuiColorEditFlags_NoInputs);});row("Horizon",[&]{changed|=LinearColorEdit("##bgHorizon",b.horizon.data(),3,ImGuiColorEditFlags_NoInputs);});row("Ground",[&]{changed|=LinearColorEdit("##bgBottom",b.bottom.data(),3,ImGuiColorEditFlags_NoInputs);});row("Blend",[&]{changed|=PrecisionSliderFloat("##bgBlend",&b.gradientBlend,.1f,4);});}
+                else if(b.background==EditorBackground::Cubemap){row("Use IBL",[&]{changed|=ImGui::Checkbox("##bgUseIbl",&b.useIblEnvironment);if(ImGui::IsItemHovered())ImGui::SetTooltip("Share the IBL HDR asset and rotation. Visible sky intensity stays independent.");});ImGui::BeginDisabled(b.useIblEnvironment);row("HDR asset",[&]{
+                    const auto world=app.GetWorld().GetIdentity();if(!m_BackgroundAssetEditing||m_BackgroundDraftWorld!=world){m_BackgroundAssetDraft=b.cubemap;m_BackgroundDraftWorld=world;}
+                    bool edited=ImGui::InputText("##bgAsset",&m_BackgroundAssetDraft);m_BackgroundAssetEditing=ImGui::IsItemActive();edited|=AcceptAssetDrop(ecs::AssetKind::Environment,m_BackgroundAssetDraft);
+                    std::string error;const bool valid=ecs::ComponentRegistry::ValidateAssetKey(m_BackgroundAssetDraft,ecs::AssetKind::Environment,&error);
+                    if(edited&&valid){b.cubemap=m_BackgroundAssetDraft;changed=true;}if(ImGui::IsItemHovered())ImGui::SetTooltip("%s",m_BackgroundAssetDraft.c_str());if(!valid)ImGui::TextWrapped("%s",error.c_str());
+                });row("Rotation",[&]{changed|=PrecisionSliderFloat("##bgRotation",&b.skyRotation,-180,180,"%.1f deg");});ImGui::EndDisabled();}
+                ImGui::EndTable();
+            }
+            if(b.background==EditorBackground::DayNight){changed|=LinearColorEdit("Zenith color",b.top.data(),3);changed|=LinearColorEdit("Horizon tint",b.horizon.data(),3);changed|=LinearColorEdit("Ground tint",b.bottom.data(),3);changed|=LinearColorEdit("Night color",b.nightColor.data(),3);changed|=PrecisionSliderFloat("Horizon glow",&b.horizonGlow,0,8);changed|=PrecisionSliderFloat("Sunset warmth",&b.sunsetWarmth,0,4);changed|=PrecisionSliderFloat("Night intensity",&b.nightIntensity,0,4);changed|=ImGui::Checkbox("Drive Light Properties",&b.driveLightProperties);if(b.driveLightProperties)changed|=PrecisionSliderFloat("Daylight intensity",&b.dayLightIntensity,0,8);ImGui::TextWrapped("Artist-friendly sky follows Primary Directional elevation/azimuth. No physical atmosphere or dynamic IBL convolution.");if(settings.environment.enabled)ImGui::TextWrapped("Warning: IBL uses a static HDRI and may not match time of day.");}
+            ImGui::Text("Sun Source: %s",b.background==EditorBackground::Cubemap?"HDRI radiance / optional procedural disc":"Primary Directional / procedural disc");
+            auto primarySun=PrimarySun(app.GetWorld());if(primarySun.IsValid()){auto* tag=app.GetWorld().GetComponent<ecs::TagComponent>(primarySun);auto rays=ecs::LightDirection(ecs::RenderPose::From(*app.GetWorld().GetComponent<ecs::TransformComponent>(primarySun)));ImGui::TextWrapped("Primary Directional Light: %s",tag?tag->name.c_str():"Directional");ImGui::Text("Outgoing rays %.3f %.3f %.3f",rays.x,rays.y,rays.z);ImGui::Text("Sun elevation %.1f / azimuth %.1f deg",std::asin(std::clamp(-rays.y,-1.f,1.f))*57.2957795f,std::atan2(-rays.x,-rays.z)*57.2957795f);}else ImGui::TextWrapped("No enabled Primary Directional; Day/Night preview uses default midday.");
+            if(previousHdr!=(b.useIblEnvironment?settings.environment.assetPath:b.cubemap)){b.sunMetadata=false;if(b.sunSync==SunSyncMode::SkyDrivesLight)b.sunSync=SunSyncMode::Independent;ImGui::TextWrapped("HDR selection changed: confirm explicit Sun Direction for this asset.");}
+            int sync=int(b.sunSync);changed|=ImGui::Combo("Sync Mode",&sync,"Independent\0Light Drives Sky (disc)\0Sky Drives Light (metadata)\0");b.sunSync=SunSyncMode(sync);
+            changed|=ImGui::Checkbox("Use Explicit Sun Direction",&b.sunMetadata);
+            if(b.sunMetadata)changed|=PrecisionDragFloat3("HDR Sun Direction (sky local)",b.sunDirection.data(),.01f,-1,1,"%.6g",ImGuiSliderFlags_NoRoundToFormat);
+            changed|=ImGui::Checkbox("Visible Sun Disc",&b.visibleSunDisc);
+            if(b.background==EditorBackground::Cubemap){if(!b.sunMetadata)ImGui::TextWrapped("Warning: HDRI has no confirmed sun metadata. Set HDR Sun Direction explicitly; no brightest-pixel detection is performed.");ImGui::TextWrapped("HDRI may already contain a sun. Light Drives Sky moves only the procedural disc, not pixels inside the HDR map; enabling both can show two suns.");}
+            if(b.sunSync==SunSyncMode::LightDrivesSky||b.background==EditorBackground::DayNight){changed|=PrecisionDragFloat("Sun diameter (deg)",&b.sunRadius,.01f,.01f,10,"%.6g",ImGuiSliderFlags_NoRoundToFormat);changed|=PrecisionDragFloat("Visible sun intensity",&b.sunIntensity,.01f,0,32,"%.6g",ImGuiSliderFlags_NoRoundToFormat);changed|=PrecisionDragFloat("Glow radius (deg)",&b.sunGlowRadius,.1f,.01f,60);changed|=PrecisionSliderFloat("Glow intensity",&b.sunGlowIntensity,0,4);ImGui::TextWrapped("Disc follows primary light at any elevation. HDR rotation and precomputed IBL stay unchanged. Use an HDR without an existing sun to avoid two visible discs.");}
+            if(changed){BeginSceneTransaction(app,"Sky / Sun settings");std::string error;if(!app.SetSceneSettings(settings,&error))m_EditorError=error;else m_EditorError.clear();}
+            if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());
+            ImGui::TextDisabled("Shared by Edit / Play");
+        }
+        auto& lighting=app.GetLightingSettings();
+        ImGui::Checkbox("Lighting enabled", &lighting.enabled);
+        const auto sceneLights=app.GetLightDiagnostics();
+        if(ImGui::TreeNode("Render diagnostics")){
+        ImGui::Text("Lights %u / enabled %u / frustum %u",sceneLights.total,sceneLights.enabled,sceneLights.influencing);
+        ImGui::Text("D/P/S %u/%u/%u",sceneLights.directional,sceneLights.point,sceneLights.spot);
+        bool tiled=app.GetLightRenderingMode()==LightRenderingMode::Tiled;
+        if(ImGui::Checkbox("Tiled Forward+",&tiled))app.SetLightRenderingMode(tiled?LightRenderingMode::Tiled:LightRenderingMode::Forward);
+        ImGui::Checkbox("Show Light Gizmos",&m_ShowLightGizmos);ImGui::SameLine();ImGui::Combo("Occlusion",&m_LightXrayMode,"Visible Only\0Selected X-Ray\0Always X-Ray\0");
+        ImGui::Text("Tiles %u / indices %u",sceneLights.tiles,sceneLights.indices);
+        ImGui::Text("Avg %.1f / max %u / overflow %u",sceneLights.averagePerTile,sceneLights.maxPerTile,sceneLights.overflow);
+        ImGui::Text("Gather %.3f / cull CPU %.3f / GPU %.3f ms",sceneLights.gatherMs,sceneLights.cullingCpuMs,sceneLights.cullingGpuMs);
+        if(renderer){const auto t=renderer->GetGpuTimings();if(t.valid)ImGui::Text("Main GPU %.3f / frame GPU %.3f ms",t.mainMs,t.frameMs);}
+        ImGui::Text("CPU frame %.3f ms / light upload %llu B",dt*1000.f,static_cast<unsigned long long>(sceneLights.uploadBytes));
+        if(!sceneLights.error.empty())ImGui::TextWrapped("%s",sceneLights.error.c_str());
+        ImGui::TreePop();}
+        if(ImGui::TreeNode("Legacy Directional (fallback)")){
+        if(sceneLights.primaryEcs)ImGui::TextWrapped("Scene primary %u:%u. Edit its Inspector/rotation.",sceneLights.primaryIndex,sceneLights.primaryGeneration);
+        ImGui::BeginDisabled(sceneLights.primaryEcs);
+        ImGui::Checkbox("Enabled", &lighting.directional.enabled);
+        PrecisionDragFloat3("Direction (rays)",lighting.directional.direction.data(),.02f);
+        LinearColorEdit("Color",lighting.directional.color.data(),3);
+        PrecisionSliderFloat("Intensity",&lighting.directional.intensity,0.f,3.f);
+        ImGui::EndDisabled();
+        ImGui::TreePop();}
+        auto primary=SceneSerializer::PrimaryDirectionalId(app.GetWorld());
+        if(ImGui::BeginCombo("Primary directional",primary.empty()?"Legacy fallback":primary.c_str())){
+            for(auto e:app.GetWorld().Entities())if(auto* light=app.GetWorld().GetComponent<ecs::DirectionalLightComponent>(e)){
+                if(!light->enabled)continue;auto* tag=app.GetWorld().GetComponent<ecs::TagComponent>(e);const auto label=(tag?tag->name:"Directional")+"##"+std::to_string(e.index);
+                if(ImGui::Selectable(label.c_str(),SceneSerializer::EntitySceneId(app.GetWorld(),e)==primary)){
+                    BeginSceneTransaction(app,"Choose primary directional");
+                    app.GetWorld().ForEach<ecs::DirectionalLightComponent>([&](auto candidate,auto& d){d.primary=candidate==e;});FinishTransaction(app);
+                }
+            }ImGui::EndCombo();
+        }
+        if(ImGui::BeginDragDropTarget()){
+            if(auto* payload=ImGui::AcceptDragDropPayload("WHISP_ENTITY"))if(payload->DataSize==sizeof(ecs::Entity)){
+                auto e=*static_cast<const ecs::Entity*>(payload->Data);if(app.GetWorld().IsAlive(e)&&app.GetWorld().HasComponent<ecs::DirectionalLightComponent>(e)){
+                    BeginSceneTransaction(app,"Choose primary directional");app.GetWorld().ForEach<ecs::DirectionalLightComponent>([&](auto candidate,auto& d){d.primary=candidate==e;});FinishTransaction(app);
+                }
+            }ImGui::EndDragDropTarget();
+        }
+        if(ImGui::CollapsingHeader("Environment / IBL",ImGuiTreeNodeFlags_DefaultOpen)) {
+            auto& env=app.GetEnvironmentSettings();ImGui::Checkbox("IBL Enabled",&env.enabled);
+            ImGui::InputText("HDR asset",&env.assetPath);
+            std::string dropped; if(AcceptAssetDrop(ecs::AssetKind::Environment,dropped))env.assetPath=dropped;
+            PrecisionDragFloat("Environment Intensity",&env.intensity,.05f,0,10000);
+            PrecisionSliderFloat("Environment Rotation",&env.rotationDegrees,-180,180);
+            PrecisionSliderFloat("Exposure (EV)",&env.exposure,-8,8);
+            ImGui::Checkbox("Tone Mapping (Reinhard)",&env.toneMapping);
+            ImGui::Checkbox("Diffuse IBL",&env.diffuse);ImGui::Checkbox("Specular IBL",&env.specular);
+            if(ImGui::Button("Reload HDR")&&app.GetResourceManager())app.GetResourceManager()->ReloadEnvironmentAsync(env.assetPath);
+            auto status=renderer->GetEnvironmentDiagnostics();
+            auto asset=app.GetResourceManager()?app.GetResourceManager()->Get<EnvironmentResource>(env.assetPath):nullptr;
+            if(asset&&asset->IsLoading())ImGui::TextUnformatted("Loading / CPU preprocessing");
+            else if(asset&&asset->HasError())ImGui::TextWrapped("Failed: %s (last ready environment retained)",asset->GetErrorMessage().c_str());
+            else if(!asset&&env.enabled)ImGui::TextWrapped("Invalid or pending relative HDR key; last Ready environment retained");
+            else ImGui::Text("%s",status.status.c_str());
+            ImGui::Text("Cube %u / Irradiance %u / Mips %u / LUT %u",status.cubeResolution,status.irradianceResolution,status.mipCount,status.lutResolution);
+            ImGui::Text("Environment GPU: %.2f MiB",status.gpuBytes/1048576.);
+            ImGui::Text("CPU preprocess %.2f ms / upload %.2f ms",status.preprocessMs,status.uploadMs);
+            if(!status.error.empty())ImGui::TextWrapped("%s",status.error.c_str());
+            env=SanitizeEnvironment(env);
+        }
+        ImGui::SeparatorText("Ambient Lighting");
+        LinearColorEdit("Ambient Color",lighting.ambientColor.data(),3);
+        PrecisionSliderFloat("Ambient Intensity",&lighting.ambientIntensity,0.f,1.f);
+        if(ImGui::CollapsingHeader("Shadows (DX12)",ImGuiTreeNodeFlags_DefaultOpen)) {
+        auto& shadows=app.GetShadowSettings();
+        ImGui::Checkbox("Shadows enabled",&shadows.enabled);
+        if(ImGui::Button("Shadow quality demo"))app.SetupShadowQualityDemoScene();
+        int quality=int(GetShadowQuality(shadows));if(ImGui::Combo("Quality preset",&quality,"Low\0Medium\0High\0Ultra\0Custom\0"))ApplyShadowQuality(shadows,ShadowQuality(quality));
+        ImGui::Text("Depth map: %.1f MiB",ShadowMapBytes(shadows)/1048576.);
+        int filtering=shadows.pcf?(shadows.filterTaps==5?2:1):0;
+        if(ImGui::Combo("Filtering",&filtering,"Hard (point)\0Legacy PCF 3x3\0Smooth tent 5x5\0")){shadows.pcf=filtering!=0;shadows.filterTaps=filtering==2?5:3;}
+        if(shadows.pcf)PrecisionSliderFloat("Radius (texels)",&shadows.filterRadius,0,2);
+        ImGui::Checkbox("Fit near camera frustum",&shadows.cameraFitted);
+        if(ImGui::Button("Restore shadow defaults"))shadows=ShadowSettings{};
+        const unsigned resolutions[]={512,1024,2048,4096};
+        int choice=2;for(int i=0;i<4;++i)if(shadows.resolution==resolutions[i])choice=i;
+        if(ImGui::Combo("Resolution",&choice,"512\0" "1024\0" "2048\0" "4096\0"))shadows.resolution=resolutions[choice];
+        PrecisionSliderFloat(shadows.cameraFitted?"Minimum coverage":"Coverage",&shadows.coverage,2,150);
+
+        PrecisionSliderInt("Constant bias",&shadows.depthBias,0,1000);
+        if(ImGui::IsItemHovered())ImGui::SetTooltip("D32 rasterizer units; positive bias moves stored depth away from light.");
+        PrecisionSliderFloat("Slope Bias",&shadows.slopeBias,0,4);
+        if(ImGui::TreeNode("Advanced shadow settings")) {
+            PrecisionSliderFloat(shadows.cameraFitted?"Shadow distance":"Focus distance",&shadows.focusDistance,0,100);
+            PrecisionSliderFloat("Depth range",&shadows.depthRange,10,200);
+            PrecisionSliderFloat("Receiver Bias",&shadows.receiverBias,0,.003f,"%.5f");
+            PrecisionSliderFloat("Normal (texels)",&shadows.normalBias,0,2,"%.2f");
+            ImGui::Checkbox("Receiver plane correction",&shadows.receiverPlaneBias);
+            PrecisionSliderFloat("Coverage edge fade",&shadows.edgeFade,0,.2f);
+            ImGui::Combo("Shadow debug",&shadows.debugMode,"Shaded\0Visibility\0Coverage\0");
+            ImGui::TreePop();
+        }
+        PrecisionSliderFloat("Shadow Strength",&shadows.strength,0,1);
+        if(renderer) {
+            const auto stats=app.GetRenderStatistics().submitted;
+            const auto times=renderer->GetGpuTimings();
+            ImGui::Text("%s projection",shadows.cameraFitted?"Stabilized camera fit":"Fixed forward focus");
+            if(stats.shadowResolution) {
+                ImGui::Text("Effective coverage: %.2f",stats.shadowCoverage);
+                ImGui::Text("Texel: %.5f world units",stats.shadowCoverage/stats.shadowResolution);
+                ImGui::Text("Light near/far: 0 / %.2f",stats.shadowDepthRange);
+            }
+            ImGui::Text("Shadow draws: %llu",static_cast<unsigned long long>(stats.shadowDrawCalls));
+            if(times.valid)ImGui::Text("Shadow GPU: %.3f ms",times.shadowMs);
+        }
+        if(renderer&&ImGui::TreeNode("Shadow map preview")) {
+            const auto preview=renderer->GetShadowPreviewTextureId();
+            if(preview)ImGui::Image((ImTextureID)preview,ImVec2(192,192));
+            else ImGui::TextUnformatted("No shadow map available");
+            ImGui::TreePop();
+        }
+        }
+        ImGui::PopItemWidth();
+        ImGui::TextWrapped("World-space rays. Zero direction uses downward light. Scene lighting is saved with the scene; diagnostic switches are temporary.");
+    }
+    ImGui::End();
+
+
+    const auto afterSettings=app.GetSceneSettings();
+    beforeSettings.lighting.enabled=afterSettings.lighting.enabled;beforeSettings.shadows.debugMode=afterSettings.shadows.debugMode;
+    if(beforeSettings!=afterSettings&&!m_Transaction){EntitySnapshot before;before.world=app.GetWorld().GetIdentity();before.settings=beforeSettings;BeginTransaction("Scene settings",std::move(before));}
+    if(m_Transaction&&m_Transaction->before.settings&&!ImGui::IsAnyItemActive())FinishTransaction(app);
+
 }
 }

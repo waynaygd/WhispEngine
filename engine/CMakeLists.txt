@@ -31,6 +31,7 @@ add_library(Engine
   core/Time.cpp
   core/Logger.cpp
   ecs/World.cpp
+  ecs/ComponentRegistry.cpp
   ecs/systems/BoundsBounceSystem.cpp
   ecs/systems/MotionSystem.cpp
   ecs/systems/PhysicsSystem.cpp
@@ -43,9 +44,25 @@ add_library(Engine
   resources/loaders/MeshLoader.cpp
   resources/loaders/MaterialLoader.cpp
   resources/loaders/TextureLoader.cpp
+  resources/loaders/EnvironmentLoader.cpp
   resources/loaders/ShaderLoader.cpp
   scene/SceneSerializer.cpp
+  scene/SceneSettings.cpp
   editor/EditorLayer.cpp
+  editor/EditorTransactions.cpp
+  editor/EditorInspector.cpp
+  editor/EditorPreferences.cpp
+  editor/EditorUi.cpp
+  editor/EditorVisualSettings.cpp
+  editor/AssetCatalog.cpp
+  editor/EditorAssetPreview.cpp
+  editor/EditorAssets.cpp
+  editor/GltfSceneImport.cpp
+  editor/EditorLevelWorkflow.cpp
+  editor/EditorScalePlanes.cpp
+  editor/AssetImport.cpp
+  editor/EditorImportUi.cpp
+  editor/LightGizmos.cpp
   render/RenderFactory.cpp
   platform/GlfwWindow.cpp
   platform/InputManager.cpp
@@ -58,7 +75,7 @@ target_sources(Engine PRIVATE
 )
 
 target_include_directories(Engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(Engine PUBLIC glfw)
+target_link_libraries(Engine PUBLIC glfw WhispEngineJson)
 target_link_libraries(
     Engine
     PRIVATE
@@ -84,6 +101,10 @@ if (WIN32 AND ENABLE_DX12)
   target_compile_definitions(Engine PRIVATE ENABLE_DX12=1)
   target_sources(Engine PRIVATE
     render/backends/dx12/Dx12RenderAdapter.cpp
+    render/backends/dx12/Dx12Shadows.cpp
+    render/backends/dx12/Dx12EditorVisuals.cpp
+    render/backends/dx12/Dx12Environment.cpp
+    render/backends/dx12/Dx12SceneLights.cpp
   )
   target_link_libraries(Engine PRIVATE d3d12 dxgi dxguid d3dcompiler)
   target_include_directories(Engine PRIVATE ${CMAKE_SOURCE_DIR}/external/dxc/include)
@@ -97,4 +118,8 @@ if (ENABLE_VULKAN)
     render/backends/vulkan/VkRenderAdapter.cpp
   )
   target_link_libraries(Engine PRIVATE Vulkan::Vulkan)
+endif()
+
+if(WIN32)
+  target_link_libraries(Engine PRIVATE comdlg32)
 endif()

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "directionSkyLocal": [
+    0.0,
+    0.3420201433256687,
+    0.9396926207859084
+  ],
+  "elevationDegrees": 20,
+  "azimuthDegrees": 0,
+  "diameterDegrees": 8,
+  "note": "Authored synthetic sun; metadata is explicit, not a brightest-pixel estimate."
+}
