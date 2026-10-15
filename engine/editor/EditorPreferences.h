@@ -9,9 +9,11 @@ struct EditorPreferences {
     bool hierarchy=true,inspector=true,viewport=true,assets=true,material=false,settings=true,console=true,diagnostics=false;
     EditorVisualSettings visuals;
     std::vector<std::string> recentScenes;
-    bool assetGrid=false;
+    bool assetGrid=false,projectAssets=true;
+    float assetCardSize=180;
     bool visualPanel=false,backgroundOverride=false,projectileTestInput=false;
-    bool grid=true,lightGizmos=true,xray=false,snapping=false;
+    bool grid=true,lightGizmos=true,xray=false,snapping=false,rotationSnapping=false,physicsStress=false;
+    int transformPrecision=1,lightXrayMode=1;
     int operation=0,space=0;
     float translationSnap=1,rotationSnap=15,scaleSnap=.1f,cameraSpeed=1.8f,cameraSensitivity=.0025f;
     bool operator==(const EditorPreferences&)const=default;

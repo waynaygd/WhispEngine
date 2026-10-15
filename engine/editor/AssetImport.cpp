@@ -1,5 +1,6 @@
 #define NOMINMAX
 #include "AssetImport.h"
+#include "GltfSceneImport.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <sstream>
@@ -88,7 +89,7 @@ bool AssetImport::Scan(const fs::path& source,const std::string& package,ImportP
  for(const auto& f:plan.files)if(!dependencies.contains(Ext(f.source)))throw std::runtime_error("Unsupported dependency: "+f.relative);
  output=std::move(plan);return true;
  }catch(const std::exception& e){if(error)*error=e.what();return false;}}
-bool AssetImport::Publish(const fs::path& root,const ImportPlan& plan,std::string* error){
+bool AssetImport::Publish(const fs::path& root,const ImportPlan& plan,std::string* error,ModelImportMode mode){
  fs::path stage;
  bool ownsStage=false;
  std::vector<fs::path> ownedParents;
@@ -119,6 +120,8 @@ bool AssetImport::Publish(const fs::path& root,const ImportPlan& plan,std::strin
   auto ext=Ext(fs::u8path(plan.entry));if(ext==".obj"||ext==".gltf"||ext==".glb"){
    auto decoded=MeshLoader::Load(plan.package+"/"+plan.entry,stage/fs::u8path(plan.entry));if(!decoded.success||decoded.data.meshData.vertices.empty())throw std::runtime_error("Mesh validation failed: "+decoded.errorMessage);
   }
+  if(mode!=ModelImportMode::SingleMesh)GltfSceneImport::Prepare(stage,verified);
+  for(const auto& item:fs::recursive_directory_iterator(stage))if(item.is_regular_file()&&(item.path().extension()==".wmesh"||item.path().extension()==".wtex")){std::error_code ec;fs::remove(item.path(),ec);}
   for(const auto& f:verified.files)for(const char* suffix:{".wmesh",".wtex"}){auto cache=stage/fs::u8path(f.relative);cache+=suffix;std::error_code ec;fs::remove(cache,ec);}
   CheckLinks(destination.parent_path());
   // Windows scanners can retain a just-decoded file briefly. Keep the atomic

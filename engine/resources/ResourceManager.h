@@ -175,6 +175,7 @@ public:
 
         auto& cache = GetCache<T>();
         const std::size_t removed = cache.erase(key);
+        m_PendingAsyncKeys.erase(MakeAsyncToken<T>(key));if(removed)++m_CacheEpoch;
         if (removed > 0)
         {
             Logger::Get().Info("ResourceManager: unloaded [" + ResourceTypeName<T>() + "] key=" + key);
@@ -187,12 +188,14 @@ public:
         std::lock_guard<std::recursive_mutex> lock(m_Mutex);
         auto& cache = GetCache<T>();
         const std::size_t count = cache.size();
-        cache.clear();
+        for(const auto& [key,value]:cache)m_PendingAsyncKeys.erase(MakeAsyncToken<T>(key));
+        cache.clear();++m_CacheEpoch;
         Logger::Get().Info(
             "ResourceManager: cleared [" + ResourceTypeName<T>() + "] cache entries=" + std::to_string(count));
     }
 
     void ClearAll();
+    std::uint64_t GetCacheEpoch()const {std::lock_guard<std::recursive_mutex> lock(m_Mutex);return m_CacheEpoch;}
 
     template <typename T>
     ResourceHandle<T> Reload(const std::filesystem::path& path)
@@ -408,11 +411,18 @@ private:
         return it->second;
     }
 
+    // A fallback shares CPU values, never ownership of another resource's GPU allocation.
+    template <typename T> T DefaultCpuData() const {
+        T data=GetDefault<T>()?GetDefault<T>()->GetData():T{};
+        if constexpr(requires(T t){t.gpuHandle;t.gpuHandleVersion;}) {data.gpuHandle={};data.gpuHandleVersion=0;}
+        return data;
+    }
+
     template <typename T>
     ResourceHandle<T> CreateFallbackResource(const std::string& key, const std::string& errorMessage) const
     {
         const auto defaultResource = GetDefault<T>();
-        T data = defaultResource != nullptr ? defaultResource->GetData() : T{};
+        T data = DefaultCpuData<T>();
 
         return std::make_shared<Resource<T>>(
             key,
@@ -436,7 +446,7 @@ private:
     ResourceHandle<T> CreateLoadingResource(const std::string& key, const std::string& message) const
     {
         const auto defaultResource = GetDefault<T>();
-        T data = defaultResource != nullptr ? defaultResource->GetData() : T{};
+        T data = DefaultCpuData<T>();
 
         return std::make_shared<Resource<T>>(
             key,
@@ -564,9 +574,7 @@ private:
             m_PendingAsyncKeys.erase(token);
 
             T fallbackData =
-                GetDefault<T>() != nullptr
-                ? GetDefault<T>()->GetData()
-                : T{};
+                DefaultCpuData<T>();
             if constexpr (std::is_same_v<T, EnvironmentResource>)
                 if (!resource->GetData().placeholder)
                     fallbackData = resource->GetData();
@@ -625,7 +633,7 @@ private:
 
                             if (cached == nullptr || cached != resource)
                             {
-                                m_PendingAsyncKeys.erase(token);
+                                // A replacement load owns the same key token now.
                                 return;
                             }
 
@@ -660,7 +668,7 @@ private:
                                     ? result.errorMessage
                                     : error;
 
-                                T fallbackData = GetDefault<T>() != nullptr ? GetDefault<T>()->GetData() : T{};
+                                T fallbackData = DefaultCpuData<T>();
                                 if constexpr(std::is_same_v<T,EnvironmentResource>)if(!cached->GetData().placeholder)fallbackData=cached->GetData();
 
                                 cached->ReplaceData(
@@ -713,6 +721,7 @@ public:
 
 private:
     bool m_AcceptAsyncLoads = true;
+    std::uint64_t m_CacheEpoch=0;
 };
 
 

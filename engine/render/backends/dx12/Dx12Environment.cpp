@@ -278,7 +278,8 @@ void Dx12RenderAdapter::ReleaseHdrTargets()
 void Dx12RenderAdapter::BeginHdrScene()
 {
     const bool hdrSky=m_EditorVisualFrame.active&&m_EditorVisualFrame.backgroundEnabled&&m_EditorVisualFrame.settings.background==EditorBackground::Cubemap;
-    if (!m_EnvironmentSettings.enabled&&!hdrSky)
+    m_HdrNative=m_EnvironmentSettings.enabled||hdrSky;
+    if (!m_HdrNative&&m_AntiAliasing==AntiAliasingMode::Off)
         return;
     ZoneScopedN("HdrSceneBegin");
     UINT w = m_ViewportTarget.rendering ? m_ViewportTarget.width : m_Width,
@@ -319,6 +320,7 @@ void Dx12RenderAdapter::BeginHdrScene()
         srv.Texture2D.MipLevels = 1;
         m_Device->CreateShaderResourceView(
             target.color.Get(), &srv, target.descriptors->GetCPUDescriptorHandleForHeapStart());
+        target.allocationBytes=m_Device->GetResourceAllocationInfo(0,1,&desc).SizeInBytes;
         target.width = w;
         target.height = h;
     }
@@ -346,10 +348,35 @@ void Dx12RenderAdapter::EndHdrScene()
     if (!m_OutputPso)
     {
         const char *source = R"(
-Texture2D<float4> scene:register(t0);SamplerState clampSampler:register(s0);cbuffer Output:register(b0){float exposure;float tone;float2 pad;};
+Texture2D<float4> scene:register(t0);SamplerState clampSampler:register(s0);cbuffer Output:register(b0){float exposure;float tone;float aa;float pad;};
 struct Out{float4 pos:SV_Position;float2 uv:TEXCOORD;};Out VS(uint id:SV_VertexID){Out o;o.uv=float2((id<<1)&2,id&2);o.pos=float4(o.uv*float2(2,-2)+float2(-1,1),0,1);return o;}
 float Encode(float c){return c<=.0031308?c*12.92:1.055*pow(c,1/2.4)-.055;}
-float4 PS(Out i):SV_Target{float scale=exp2(exposure);float3 c=min(max(scene.SampleLevel(clampSampler,i.uv,0).rgb,0),3.402823e38/max(scale,1))*scale;if(tone>.5)c=c/(1+c);c=saturate(c);return float4(Encode(c.r),Encode(c.g),Encode(c.b),1);})";
+float3 DisplayColor(float3 radiance){float scale=exp2(exposure);float3 c=min(max(radiance,0),3.402823e38/max(scale,1))*scale;if(tone>.5)c=c/(1+c);c=saturate(c);return float3(Encode(c.r),Encode(c.g),Encode(c.b));}
+float3 Color(float2 uv){
+ [branch] if(aa<.5)return DisplayColor(scene.SampleLevel(clampSampler,uv,0).rgb);
+ // FXAA interpolates display-referred colors AFTER tone mapping, not HDR radiance.
+ // Four point loads avoid another target while preserving that nonlinear order.
+ uint w,h;scene.GetDimensions(w,h);float2 p=uv*float2(w,h)-.5;int2 at=int2(floor(p)),last=int2(w,h)-1;float2 f=frac(p);
+ float3 a=DisplayColor(scene.Load(int3(clamp(at,int2(0,0),last),0)).rgb);
+ float3 b=DisplayColor(scene.Load(int3(clamp(at+int2(1,0),int2(0,0),last),0)).rgb);
+ float3 c=DisplayColor(scene.Load(int3(clamp(at+int2(0,1),int2(0,0),last),0)).rgb);
+ float3 d=DisplayColor(scene.Load(int3(clamp(at+int2(1,1),int2(0,0),last),0)).rgb);
+ return lerp(lerp(a,b,f.x),lerp(c,d,f.x),f.y);
+}
+float Luma(float3 c){return dot(c,float3(.299,.587,.114));}
+float4 PS(Out i):SV_Target{
+ float3 center=Color(i.uv);if(aa<.5)return float4(center,1);
+ uint w,h;scene.GetDimensions(w,h);float2 pixel=1.0/float2(w,h);
+ float3 nw=Color(i.uv+float2(-1,-1)*pixel),ne=Color(i.uv+float2(1,-1)*pixel),sw=Color(i.uv+float2(-1,1)*pixel),se=Color(i.uv+pixel);
+ float lnw=Luma(nw),lne=Luma(ne),lsw=Luma(sw),lse=Luma(se),lm=Luma(center);
+ float low=min(lm,min(min(lnw,lne),min(lsw,lse))),high=max(lm,max(max(lnw,lne),max(lsw,lse)));
+ if(high-low<max(aa>1.5?.015625:.03125,high*(aa>1.5?.083333:.166667)))return float4(center,1);
+ float2 dir=float2(-((lnw+lne)-(lsw+lse)),(lnw+lsw)-(lne+lse));
+ float reduce=max((lnw+lne+lsw+lse)*.03125,.0078125);float reciprocal=1/(min(abs(dir.x),abs(dir.y))+reduce);float span=aa>1.5?8:4;dir=clamp(dir*reciprocal,-span,span)*pixel;
+ float3 a=.5*(Color(i.uv+dir*(1.0/3-.5))+Color(i.uv+dir*(2.0/3-.5)));
+ float3 b=a*.5+.25*(Color(i.uv-dir*.5)+Color(i.uv+dir*.5));float lb=Luma(b);
+ return float4(lb<low||lb>high?a:b,1);
+})";
         auto vs = Compile(source, "VS", "vs_5_1"), ps = Compile(source, "PS", "ps_5_1");
         CD3DX12_DESCRIPTOR_RANGE range;
         range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
@@ -412,8 +439,8 @@ float4 PS(Out i):SV_Target{float scale=exp2(exposure);float3 c=min(max(scene.Sam
     m_CmdList->SetGraphicsRootSignature(m_OutputRoot.Get());
     m_CmdList->SetPipelineState(m_OutputPso.Get());
     m_CmdList->SetGraphicsRootDescriptorTable(0, gpu);
-    float params[4] = {m_EnvironmentSettings.exposure,
-                       m_EnvironmentSettings.toneMapping ? 1.f : 0.f, 0, 0};
+    float params[4] = {m_HdrNative?m_EnvironmentSettings.exposure:0,
+                       m_HdrNative&&m_EnvironmentSettings.toneMapping ? 1.f : 0.f, float(m_AntiAliasing), 0};
     if (m_ShadowConstants.parameters[3] > .5)
     {
         params[0] = 0;

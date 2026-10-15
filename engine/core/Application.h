@@ -148,6 +148,7 @@ public:
     void SetCameraNavigation(float speed,float sensitivity){m_Camera.moveSpeed=std::clamp(speed,.2f,25.f);m_Camera.mouseSensitivity=std::clamp(sensitivity,.0001f,.02f);}
     float GetCameraMoveSpeed()const{return m_Camera.moveSpeed;}
     float GetCameraSensitivity()const{return m_Camera.mouseSensitivity;}
+    bool SetEditorCameraPose(ecs::Vec3 position,float yaw,float pitch){if(IsEditorPlayMode()||!std::isfinite(position.x)||!std::isfinite(position.y)||!std::isfinite(position.z)||!std::isfinite(yaw)||!std::isfinite(pitch))return false;m_Camera.position=position;m_Camera.yaw=std::remainder(yaw,6.283185307f);m_Camera.pitch=std::clamp(pitch,-1.553343f,1.553343f);return true;}
 
     void RequestStateChange(std::unique_ptr<IGameState> s);
 
@@ -226,6 +227,7 @@ private:
     editor::ProjectileInput m_ProjectileInput;
     ShadowSettings m_EditShadows;
     SceneBackground m_Background,m_EditBackground;
+    AntiAliasingMode m_AntiAliasing=AntiAliasingMode::Off,m_EditAntiAliasing=AntiAliasingMode::Off;
     bool m_EditorPaused=false;
     double m_LastCloneMs=0;
     ecs::PhysicsSystem* m_PhysicsSystem = nullptr;

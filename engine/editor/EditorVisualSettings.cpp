@@ -12,10 +12,10 @@ namespace editor {
 EditorVisualFrame EditorLayer::BuildVisualFrame(const Application& app)const{
     EditorVisualFrame f;const bool viewport=m_ShowViewport&&m_ViewportPixelWidth>1&&m_ViewportPixelHeight>1;int width=m_ViewportPixelWidth,height=m_ViewportPixelHeight;
     if(!viewport)if(auto* window=dynamic_cast<const GlfwWindow*>(app.GetWindow()))glfwGetFramebufferSize(window->GetGlfwHandle(),&width,&height);
-    f.active=width>1&&height>1;f.play=app.IsEditorPlayMode();f.showGrid=viewport&&m_ShowGrid;f.settings=m_VisualSettings;f.backgroundEnabled=m_SkyDiagnosticEnabled;
-    if(f.play||!m_BackgroundOverride){static_cast<SceneBackground&>(f.settings)=app.GetSceneBackground();if(f.settings.useIblEnvironment){f.settings.cubemap=app.GetEnvironmentSettings().assetPath;f.settings.skyRotation=app.GetEnvironmentSettings().rotationDegrees;}}
-    if(f.settings.sunSync==SunSyncMode::LightDrivesSky){auto& world=const_cast<ecs::World&>(app.GetWorld());auto primary=PrimarySun(world);if(primary.IsValid()){
-        auto rays=ecs::LightDirection(ecs::RenderPose::From(*world.GetComponent<ecs::TransformComponent>(primary)));f.sunDirection={-rays.x,-rays.y,-rays.z};f.sunColor=SanitizeLight(*world.GetComponent<ecs::DirectionalLightComponent>(primary)).color;f.sunVisible=true;
+    f.active=width>1&&height>1;f.play=app.IsEditorPlayMode();f.game=m_GameView;f.showGrid=viewport&&m_ShowGrid;f.settings=m_VisualSettings;f.backgroundEnabled=m_SkyDiagnosticEnabled;
+    if(f.play||f.game||!m_BackgroundOverride){static_cast<SceneBackground&>(f.settings)=app.GetSceneBackground();if(f.settings.useIblEnvironment){f.settings.cubemap=app.GetEnvironmentSettings().assetPath;f.settings.skyRotation=app.GetEnvironmentSettings().rotationDegrees;}}
+    if(f.settings.sunSync!=SunSyncMode::Independent||f.settings.background==EditorBackground::DayNight){auto& world=const_cast<ecs::World&>(app.GetWorld());auto primary=PrimarySun(world);if(primary.IsValid()){
+        auto rays=ecs::LightDirection(ecs::RenderPose::From(*world.GetComponent<ecs::TransformComponent>(primary)));f.sunDirection={-rays.x,-rays.y,-rays.z};f.sunColor=SanitizeLight(*world.GetComponent<ecs::DirectionalLightComponent>(primary)).color;f.sunVisible=f.settings.visibleSunDisc;
     }}
     f.aspect=float(std::max(1,width))/std::max(1,height);f.tanHalfFov=std::tan(app.GetCameraVerticalFovRadians()*.5f);f.nearPlane=app.GetCameraNearPlane();f.farPlane=app.GetCameraFarPlane();
     const auto p=app.GetCameraPosition();f.camera={p.x,p.y,p.z};const auto c=GizmoCamera(p,app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),f.aspect,f.nearPlane,f.farPlane);

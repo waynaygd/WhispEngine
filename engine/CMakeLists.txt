@@ -55,7 +55,11 @@ add_library(Engine
   editor/EditorUi.cpp
   editor/EditorVisualSettings.cpp
   editor/AssetCatalog.cpp
+  editor/EditorAssetPreview.cpp
   editor/EditorAssets.cpp
+  editor/GltfSceneImport.cpp
+  editor/EditorLevelWorkflow.cpp
+  editor/EditorScalePlanes.cpp
   editor/AssetImport.cpp
   editor/EditorImportUi.cpp
   editor/LightGizmos.cpp

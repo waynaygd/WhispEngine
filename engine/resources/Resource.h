@@ -46,6 +46,11 @@ public:
 
     void ReplaceData(T data, ResourceLoadState state, bool usesFallback = false, std::string errorMessage = {})
     {
+        // Keep this resource's previous GPU allocation until the renderer retires it.
+        // Decoders and fallback CPU copies cannot transfer GPU ownership between keys.
+        if constexpr(requires(T t){t.gpuHandle;t.gpuHandleVersion;}) {
+            data.gpuHandle=m_Data.gpuHandle;data.gpuHandleVersion=m_Data.gpuHandleVersion;
+        }
         m_Data = std::move(data);
         m_State = state;
         m_UsesFallback = usesFallback;

@@ -6,6 +6,7 @@
 #include "Shadows.h"
 #include "MaterialState.h"
 #include "Environment.h"
+#include "AntiAliasing.h"
 #include "EditorVisuals.h"
 #include "SceneLights.h"
 struct EnvironmentResource;
@@ -40,6 +41,7 @@ public:
     }
     virtual void EndViewportRender() {}
     virtual std::uint64_t GetViewportTextureId() const { return 0; }
+    virtual std::uint64_t GetTexturePreviewId(RenderTextureHandle)const{return 0;}
     virtual void BeginFrame() = 0;
     virtual void Clear(float r, float g, float b, float a) = 0;
 
@@ -118,6 +120,8 @@ public:
     virtual void SetSceneLights(std::span<const GpuSceneLight>,LightRenderingMode,const SceneLightDiagnostics& = {}) {}
     virtual SceneLightDiagnostics GetSceneLightDiagnostics() const {return {};}
 
+    virtual void SetAntiAliasing(AntiAliasingMode) {}
+    virtual AntiAliasingDiagnostics GetAntiAliasingDiagnostics()const{return {};}
     virtual void SetEnvironmentSettings(const EnvironmentSettings&) {}
     virtual bool UploadEnvironment(const EnvironmentResource&,std::uint64_t) { return false; }
     virtual void ReleaseEnvironment() {}

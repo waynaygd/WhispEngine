@@ -1,7 +1,9 @@
 #include "EditorLayer.h"
 #include "EditorWidgets.h"
+#include "PrecisionInputs.h"
 #include "AssetImport.h"
 #include "../core/Application.h"
+#include "../core/AssetPaths.h"
 #include "../resources/ResourceManager.h"
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
@@ -61,37 +63,57 @@ void EditorLayer::DrawAssetBrowser(Application& app){
     auto openMaterial=[&](const std::string& key){OpenMaterial(app,key);};
     auto action=[&](int kind,const std::string& key){m_AssetAction=kind;m_AssetActionSource=key;m_AssetActionKey=key;m_AssetActionRequested=true;m_EditorError.clear();};
     ImGui::BeginDisabled(app.IsEditorPlayMode());if(ImGui::Button("Create Material")){std::string directory=m_AssetDirectory.starts_with("materials")?m_AssetDirectory:"materials";action(1,directory+"/new.material.json");}ImGui::EndDisabled();
-    ImGui::SameLine();ImGui::BeginDisabled(app.IsEditorPlayMode());if(ImGui::Button("Import Asset...")){m_ImportPopup=true;m_ImportPreview.clear();}ImGui::EndDisabled();
-    ImGui::SameLine();if(ImGui::Button("Refresh"))m_AssetListsDirty=true;ImGui::SameLine();ImGui::Checkbox("Grid",&m_AssetGrid);
+    ImGui::SameLine();ImGui::BeginDisabled(app.IsEditorPlayMode());if(ImGui::Button("Import Asset...")){BeginAssetImport();}ImGui::EndDisabled();
+    ImGui::SameLine();if(ImGui::Button("Refresh"))m_AssetListsDirty=true;ImGui::SameLine();ImGui::Checkbox("Grid",&m_AssetGrid);ImGui::SameLine();ImGui::Checkbox("Project Assets",&m_ProjectAssets);
+    if(m_AssetGrid){ImGui::SetNextItemWidth(160);PrecisionSliderFloat("Card size",&m_AssetCardSize,120,320,"%.0f px");}
+    if(!m_SelectedAsset.empty()&&ImGui::SmallButton("Locate selected")){NavigateAssetFolder(AssetPaths::ToUtf8String(std::filesystem::u8path(m_SelectedAsset).parent_path()));m_AssetFilter.clear();m_AssetKindFilter=0;}
     ImGui::SetNextItemWidth(std::max(100.f,ImGui::GetContentRegionAvail().x*.55f));ImGui::InputTextWithHint("##search","Search assets",&m_AssetFilter);ImGui::SameLine();ImGui::SetNextItemWidth(130);
     if(ImGui::BeginCombo("##type",m_AssetKindFilter>0&&m_AssetKindFilter<=int(types.size())?types[m_AssetKindFilter-1].name.c_str():"All types")){
         if(ImGui::Selectable("All types",m_AssetKindFilter==0))m_AssetKindFilter=0;for(int i=0;i<int(types.size());++i)if(ImGui::Selectable(types[i].name.c_str(),m_AssetKindFilter==i+1))m_AssetKindFilter=i+1;ImGui::EndCombo();
     }
-    if(ImGui::SmallButton("Project"))m_AssetDirectory.clear();std::string breadcrumb;
-    for(const auto& part:std::filesystem::u8path(m_AssetDirectory)){if(!breadcrumb.empty())breadcrumb+="/";breadcrumb+=part.string();ImGui::SameLine();ImGui::TextDisabled("/");ImGui::SameLine();ImGui::PushID(breadcrumb.c_str());if(ImGui::SmallButton(part.string().c_str()))m_AssetDirectory=breadcrumb;ImGui::PopID();}
+    m_AssetNavigation.Build(m_AssetCatalog.Folders(),m_AssetCatalog.Entries(),m_AssetCatalog.Revision());
+    ImGui::BeginDisabled(m_AssetNavigation.cursor==0);if(ImGui::SmallButton("Back"))m_AssetDirectory=m_AssetNavigation.Back();ImGui::EndDisabled();ImGui::SameLine();
+    ImGui::BeginDisabled(m_AssetNavigation.cursor+1>=m_AssetNavigation.history.size());if(ImGui::SmallButton("Forward"))m_AssetDirectory=m_AssetNavigation.Forward();ImGui::EndDisabled();ImGui::SameLine();
+    if(ImGui::SmallButton("Up"))NavigateAssetFolder(AssetNavigation::Parent(m_AssetDirectory));ImGui::SameLine();ImGui::Checkbox("Search project",&m_AssetNavigation.projectSearch);
+    ImGui::SameLine();if(ImGui::SmallButton("Project"))NavigateAssetFolder("");std::string breadcrumb;
+    for(const auto& part:std::filesystem::u8path(m_AssetDirectory)){if(!breadcrumb.empty())breadcrumb+="/";breadcrumb+=AssetPaths::ToUtf8String(part);ImGui::SameLine();ImGui::TextDisabled("/");ImGui::SameLine();ImGui::PushID(breadcrumb.c_str());if(ImGui::SmallButton(AssetPaths::ToUtf8String(part).c_str()))NavigateAssetFolder(breadcrumb);ImGui::PopID();}
     ImGui::BeginChild("Directories",ImVec2(std::clamp(ImGui::GetContentRegionAvail().x*.2f,100.f,210.f),0),ImGuiChildFlags_Borders);
-    if(ImGui::Selectable("All assets",m_AssetDirectory.empty()))m_AssetDirectory.clear();
-    for(const auto& folder:m_AssetCatalog.Folders()){
-        if(ImGui::Selectable(folder.c_str(),m_AssetDirectory==folder))m_AssetDirectory=folder;
-        if(ImGui::BeginPopupContextItem(folder.c_str())){if(ImGui::MenuItem("New Folder",nullptr,false,!app.IsEditorPlayMode())){m_FolderParent=folder;m_FolderPopup=true;}ImGui::EndPopup();}
-    }
+    if(ImGui::Selectable("Project root",m_AssetDirectory.empty()))NavigateAssetFolder("");
+    auto tree=[&](auto&& self,const std::string& parent)->void {
+        for(auto& folder:m_AssetNavigation.children[parent]){
+            const auto name=folder.substr(parent.empty()?0:parent.size()+1);ImGui::PushID(folder.c_str());
+            const bool leaf=m_AssetNavigation.children[folder].empty();auto flags=ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_SpanAvailWidth;
+            if(m_AssetDirectory==folder)flags|=ImGuiTreeNodeFlags_Selected;if(leaf)flags|=ImGuiTreeNodeFlags_Leaf;
+            bool open=ImGui::TreeNodeEx("Folder",flags,"%s (%zu)",name.c_str(),m_AssetNavigation.counts[folder]);
+            if(ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen())NavigateAssetFolder(folder);
+            if(ImGui::BeginPopupContextItem("FolderActions")){if(ImGui::MenuItem("New Folder",nullptr,false,!app.IsEditorPlayMode())){m_FolderParent=folder;m_FolderPopup=true;}ImGui::EndPopup();}
+            if(open){self(self,folder);ImGui::TreePop();}ImGui::PopID();
+        }
+    };tree(tree,"");
     if(ImGui::BeginPopupContextWindow("FolderRoot",ImGuiPopupFlags_MouseButtonRight|ImGuiPopupFlags_NoOpenOverItems)){if(ImGui::MenuItem("New Folder",nullptr,false,!app.IsEditorPlayMode())){m_FolderParent=m_AssetDirectory;m_FolderPopup=true;}ImGui::EndPopup();}
     ImGui::EndChild();ImGui::SameLine();ImGui::BeginChild("Content");
     std::vector<const AssetEntry*> rows;for(const auto& row:m_AssetCatalog.Entries()){
-        if(m_AssetKindFilter&&int(row.type)+1!=m_AssetKindFilter)continue;if(!m_AssetDirectory.empty()&&!row.key.starts_with(m_AssetDirectory+"/"))continue;
+        if(m_ProjectAssets&&types[row.type].shaderRoot)continue;
+        if(m_AssetKindFilter&&int(row.type)+1!=m_AssetKindFilter)continue;if((m_AssetFilter.empty()||!m_AssetNavigation.projectSearch)&&!AssetNavigation::InFolder(row.key,m_AssetDirectory))continue;
         if(!m_AssetFilter.empty()&&std::search(row.key.begin(),row.key.end(),m_AssetFilter.begin(),m_AssetFilter.end(),[](unsigned char a,unsigned char b){return std::tolower(a)==std::tolower(b);})==row.key.end())continue;rows.push_back(&row);
     }
-    const int columns=m_AssetGrid?std::max(1,int(ImGui::GetContentRegionAvail().x/150)):1;
+    const int columns=m_AssetGrid?std::max(1,int(ImGui::GetContentRegionAvail().x/(m_AssetCardSize*ImGui::GetStyle().FontScaleDpi))):1;
+    for(const auto& folder:m_AssetNavigation.children[m_AssetDirectory]){
+        auto name=folder.substr(m_AssetDirectory.empty()?0:m_AssetDirectory.size()+1);ImGui::PushID(folder.c_str());
+        if(ImGui::Selectable(("[Folder] "+name).c_str(),false,ImGuiSelectableFlags_AllowDoubleClick)&&ImGui::IsMouseDoubleClicked(0)){NavigateAssetFolder(folder);ImGui::PopID();break;}ImGui::PopID();
+    }
     if(rows.empty())ImGui::TextWrapped("No assets match. Choose another folder or filter, Refresh, or Create Material.");
     if(ImGui::BeginTable("ContentItems",columns,ImGuiTableFlags_SizingStretchSame)){
         ImGuiListClipper clipper;clipper.Begin(int((rows.size()+columns-1)/columns),m_AssetGrid?92.f*ImGui::GetStyle().FontScaleDpi:ImGui::GetFrameHeightWithSpacing());
-        while(clipper.Step())for(int rowIndex=clipper.DisplayStart;rowIndex<clipper.DisplayEnd;++rowIndex){ImGui::TableNextRow();for(int col=0;col<columns;++col){auto index=rowIndex*columns+col;if(index>=int(rows.size()))break;ImGui::TableSetColumnIndex(col);const auto& entry=*rows[index];const auto& type=types[entry.type];const auto& key=entry.key;auto name=std::filesystem::u8path(key).filename().string();ImGui::PushID(key.c_str());
+        while(clipper.Step())for(int rowIndex=clipper.DisplayStart;rowIndex<clipper.DisplayEnd;++rowIndex){ImGui::TableNextRow();for(int col=0;col<columns;++col){auto index=rowIndex*columns+col;if(index>=int(rows.size()))break;ImGui::TableSetColumnIndex(col);const auto& entry=*rows[index];const auto& type=types[entry.type];const auto& key=entry.key;auto name=AssetPaths::ToUtf8String(std::filesystem::u8path(key).filename());ImGui::PushID(key.c_str());
             const char* state=AssetLoadState(resources,type.kind,key);std::string label=m_AssetGrid?type.icon+"\n"+name+"\n"+state:type.icon+" "+name+"  |  "+type.name+"  |  "+state;
             if(ImGui::Selectable(label.c_str(),m_SelectedAsset==key,ImGuiSelectableFlags_None,ImVec2(0,m_AssetGrid?84.f*ImGui::GetStyle().FontScaleDpi:0))){m_SelectedAsset=key;m_SelectedAssetKind=type.name;}
             if(ImGui::IsItemHovered())ImGui::SetTooltip("%s\n%s / %s\nDouble-click material: open editor. Drag: assign compatible slot.",key.c_str(),type.name.c_str(),state);
-            if(type.kind!=ecs::AssetKind::None&&ImGui::BeginDragDropSource()){AssetPayload payload{};payload.kind=type.kind;std::memcpy(payload.key,key.data(),std::min(key.size(),sizeof(payload.key)-1));ImGui::SetDragDropPayload("WHISP_ASSET",&payload,sizeof(payload));ImGui::Text("%s %s",type.icon.c_str(),name.c_str());ImGui::EndDragDropSource();}
+            if((type.kind!=ecs::AssetKind::None||type.name=="Imported Scene")&&ImGui::BeginDragDropSource()){AssetPayload payload{};payload.kind=type.kind;std::memcpy(payload.key,key.data(),std::min(key.size(),sizeof(payload.key)-1));ImGui::SetDragDropPayload("WHISP_ASSET",&payload,sizeof(payload));ImGui::Text("%s %s",type.icon.c_str(),name.c_str());ImGui::EndDragDropSource();}
             if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::Material)openMaterial(key);
             if(ImGui::BeginPopupContextItem("AssetActions")){
+                if(type.name=="Imported Scene"&&ImGui::MenuItem("Instantiate imported scene"))InstantiateImportedScene(app,key);
+                if(type.kind==ecs::AssetKind::Mesh&&ImGui::MenuItem("Create model entity"))CreateModelEntity(app,key,name);
                 if(type.kind==ecs::AssetKind::Material&&ImGui::MenuItem("Open Material Editor"))openMaterial(key);
                 if(type.kind!=ecs::AssetKind::None&&ImGui::MenuItem("Assign to selection"))AssignAsset(app,m_SelectedEntity,type.kind,key);
                 ImGui::BeginDisabled(app.IsEditorPlayMode()||m_MaterialDirty||!m_AssetCatalog.CreatedHere(key));
@@ -102,7 +124,8 @@ void EditorLayer::DrawAssetBrowser(Application& app){
     }
     ImGui::Separator();ImGui::TextWrapped("Selected: %s",m_SelectedAsset.empty()?"None":m_SelectedAsset.c_str());
     if(!m_SelectedAsset.empty())for(auto& type:types)if(type.name==m_SelectedAssetKind){ImGui::Text("%s %s / %s",type.icon.c_str(),type.name.c_str(),AssetLoadState(resources,type.kind,m_SelectedAsset));if(type.kind!=ecs::AssetKind::None&&ImGui::Button("Assign selected to entity"))AssignAsset(app,m_SelectedEntity,type.kind,m_SelectedAsset);}
-    if(m_SelectedAssetKind=="Mesh"&&!m_SelectedAsset.empty()&&!app.IsEditorPlayMode()&&ImGui::Button("Create Model Entity")){CreateModelEntity(app,m_SelectedAsset,std::filesystem::u8path(m_SelectedAsset).stem().string());}
+    if(m_SelectedAssetKind=="Mesh"&&!m_SelectedAsset.empty()&&!app.IsEditorPlayMode()&&ImGui::Button("Create Model Entity")){CreateModelEntity(app,m_SelectedAsset,AssetPaths::ToUtf8String(std::filesystem::u8path(m_SelectedAsset).stem()));}
+    if(m_SelectedAssetKind=="Imported Scene"&&!m_SelectedAsset.empty()&&!app.IsEditorPlayMode()&&ImGui::Button("Instantiate imported scene"))InstantiateImportedScene(app,m_SelectedAsset);
     if(m_SelectedAssetKind=="Material"&&!m_SelectedAsset.empty()&&ImGui::Button("Open selected material"))openMaterial(m_SelectedAsset);
     if(resources&&!m_SelectedAsset.empty()){
         if(ImGui::Button("Load preview metadata")){
@@ -113,6 +136,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
         if(m_SelectedAssetKind=="Texture"){auto r=resources->Get<TextureResource>(m_SelectedAsset);if(r&&r->IsLoaded()){const auto& d=r->GetData().textureData;ImGui::Text("%d x %d / RGBA / %.2f MiB decoded",d.width,d.height,d.pixels.size()/1048576.);}}
         if(m_SelectedAssetKind=="Environment"){auto r=resources->Get<EnvironmentResource>(m_SelectedAsset);if(r&&r->IsLoaded()){const auto& d=r->GetData();ImGui::Text("HDR %u x %u / sky %u / IBL %u",d.width,d.height,d.sky.resolution,d.environment.resolution);}}
     }
+    DrawAssetPreview(app);
     ImGui::TextDisabled("Type previews; content is indexed on Refresh, never every frame.");
     if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::EndChild();
     if(m_AssetActionRequested){ImGui::OpenPopup("Material Asset Action");m_AssetActionRequested=false;}

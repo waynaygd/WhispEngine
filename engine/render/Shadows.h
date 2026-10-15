@@ -2,6 +2,7 @@
 #include "Lighting.h"
 #include <algorithm>
 #include <cstdint>
+#include <span>
 
 struct ShadowSettings {
     bool enabled=true, pcf=true;
@@ -115,5 +116,27 @@ inline ShadowFrame BuildCameraDirectionalShadowFrame(const LightingConstants& li
 }
 struct RenderGpuTimings {
     bool valid=false;
-    double shadowMs=0,mainMs=0,frameMs=0;
+    double shadowMs=0,mainMs=0,frameMs=0,outputMs=0;
 };
+
+// Include upstream opaque casters whose light-space XY bounds overlap the receiver map.
+// Camera fitting defines receivers, not the set of potential off-camera occluders.
+struct ShadowCasterBounds {ShadowVector minimum{},maximum{};};
+inline bool ExtendDirectionalCasterDepth(ShadowFrame& f,std::span<const ShadowCasterBounds> casters){
+ if(!f.settings.cameraFitted||f.constants.parameters[0]<.5f)return false;
+ float upstream=0;const float half=f.settings.coverage*.5f;
+ for(const auto& b:casters){ShadowVector lo{INFINITY,INFINITY,INFINITY},hi{-INFINITY,-INFINITY,-INFINITY};
+  for(int corner=0;corner<8;++corner){ShadowVector p;for(int k=0;k<3;++k)p[k]=corner&(1<<k)?b.maximum[k]:b.minimum[k];
+   for(int row=0;row<3;++row){float v=f.view[12+row];for(int k=0;k<3;++k)v+=f.view[k*4+row]*p[k];lo[row]=std::min(lo[row],v);hi[row]=std::max(hi[row],v);}}
+  if(hi[0]<-half||lo[0]>half||hi[1]<-half||lo[1]>half)continue;
+  upstream=std::min(upstream,lo[2]);
+ }
+ if(!std::isfinite(upstream)||upstream>=0)return false;
+ // Quantized and bounded to avoid projection pumping and unbounded precision loss.
+ const float extension=std::min(4096.f,std::ceil(-upstream+1.f));const float oldRange=f.settings.depthRange;
+ f.view[14]+=extension;f.settings.depthRange+=extension;
+ // Preserve the original world-space fade width and receiver comparison offset.
+ // Otherwise a long upstream extension would fade receivers near the unchanged far plane.
+ f.constants.coverage[1]*=oldRange/f.settings.depthRange;f.constants.sampling[1]*=oldRange/f.settings.depthRange;
+ f.projection[10]=1/f.settings.depthRange;f.constants.lightVP=ShadowMultiply(f.projection,f.view);return true;
+}

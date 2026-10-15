@@ -3,9 +3,12 @@
 #include "../ecs/Entity.h"
 #include "../ecs/ComponentRegistry.h"
 #include "../scene/SceneSettings.h"
+#include "../render/RenderResourceHandles.h"
 #include "EditorPreferences.h"
 #include "InputRouting.h"
 #include "AssetCatalog.h"
+#include "AssetNavigation.h"
+#include "TransformPrecision.h"
 #include "SceneCatalog.h"
 #include "../core/Logger.h"
 #include "../ecs/components/LightComponent.h"
@@ -31,7 +34,7 @@ namespace editor
 class EditorLayer
 {
 public:
-    struct Statistics {double uiMs=0,hierarchyMs=0,inspectorMs=0,assetBrowserMs=0;};
+    struct Statistics {double uiMs=0,hierarchyMs=0,inspectorMs=0,assetBrowserMs=0,lightGizmoMs=0;};
     const Statistics& GetStatistics()const{return m_Statistics;}
     EditorVisualSettings& GetVisualSettings(){return m_VisualSettings;}
     bool ProjectileTestEnabled()const{return m_ProjectileTestInput;}
@@ -39,10 +42,22 @@ public:
     void SetBackgroundOverride(bool enabled){m_BackgroundOverride=enabled;}
     void SetGridVisible(bool show){m_ShowGrid=show;}
     void SetGizmoOperation(int operation){m_GizmoOperation=std::clamp(operation,0,2);}
-    void SetSnapping(bool enabled){m_Snapping=enabled;}
+    void SetSnapping(bool enabled){m_Snapping=m_RotationSnapping=enabled;}
+    void SetRotationSnapping(bool enabled){m_RotationSnapping=enabled;}
+    bool IsRotationSnapping()const{return m_RotationSnapping;}
     void SetSkyDiagnosticEnabled(bool enabled){m_SkyDiagnosticEnabled=enabled;}
     void SetDiagnosticViewport(int w,int h){m_DiagnosticWidth=w;m_DiagnosticHeight=h;}
     void SetAssetGrid(bool grid){m_AssetGrid=grid;}
+    void NavigateAssetFolder(const std::string& folder){auto key=AssetCatalog::DirectoryKey(std::filesystem::u8path(folder));m_AssetNavigation.Go(key);m_AssetDirectory=key;}
+    const std::string& AssetFolder()const{return m_AssetDirectory;}
+    const std::string& ImportTargetFolder()const{return m_ImportTargetFolder;}
+    void BeginAssetImport(){m_ImportTargetFolder=m_AssetDirectory;m_ImportTarget.clear();m_ImportPackageName.clear();m_ImportPopup=true;m_ImportPreview.clear();}
+    bool RotateSelectedQuarter(Application&,int axis,int turns,bool world);
+    void SetPhysicsPanelVisible(bool v){m_ShowPhysicsStress=v;}
+    bool IsPhysicsPanelVisible()const{return m_ShowPhysicsStress;}
+    void SetTransformPrecision(int v){m_TransformPrecision=std::clamp(v,0,2);}
+    void SetLightXrayMode(int v){m_LightXrayMode=std::clamp(v,0,2);}
+
     void ShowSceneBackground(){m_ShowSceneSettings=true;m_FocusSceneSettings=true;}
     void ShowVisualSettings(){m_ShowVisualSettings=true;m_FocusVisualSettings=true;}
     EditorVisualFrame BuildVisualFrame(const Application&)const;
@@ -57,7 +72,7 @@ public:
     void SetLightGizmosVisible(bool v){m_ShowLightGizmos=v;}
     void EnterRuntime(const ecs::World::CloneMap&);
     void LeaveRuntime();
-    void ResetHistory(){m_UndoStack.clear();m_RedoStack.clear();m_SelectedEntity={};m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;}
+    void ResetHistory(){m_UndoStack.clear();m_RedoStack.clear();m_SelectedEntity={};m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
     void FinishTransaction(Application&);
     void CancelTransaction(Application&);
     bool HasPendingTransaction()const{return m_Transaction.has_value();}
@@ -74,6 +89,14 @@ public:
     ecs::Entity CreateModelEntity(Application&,const std::string& key,const std::string& name="Model");
     void ClearSelection(){m_SelectedEntity={};m_PropertyDrafts.clear();}
     enum class OpenDecision {Cancel,Discard,Save};
+    void ReleaseAssetPreview(IRenderAdapter*);
+    bool RequestRecentScene(Application&,const std::string&);
+    bool IsGameView()const{return m_GameView;}
+    void SetGameView(bool value){m_GameView=value;}
+    std::vector<ecs::Entity> PlaceImportedScene(Application&,const std::string&,ecs::Vec3 point);
+    std::vector<ecs::Entity> InstantiateImportedScene(Application&,const std::string&,ecs::Vec3 offset={});
+    ecs::Entity PlaceModel(Application&,const std::string&,ecs::Vec3);
+    ecs::Vec3 PlacementPoint(Application&,float u,float v)const;
     bool OpenSceneGuarded(Application&,const std::string&,OpenDecision,std::string* error=nullptr);
     void RememberScene(const std::string&);
     const auto& RecentScenes()const{return m_RecentScenes;}
@@ -103,6 +126,8 @@ public:
     bool IsViewportHovered() const { return m_ViewportHovered; }
     std::array<float,4> GetViewportBounds()const{return {m_ViewportMinX,m_ViewportMinY,m_ViewportMaxX,m_ViewportMaxY};}
     bool HasLightPointerCapture()const{return m_LightPointerCaptured;}
+    bool HasPlaneScaleCapture()const{return m_PlaneScaleCaptured;}
+    int GetCapturedScalePlane()const{return m_ScalePlane;}
     bool IsPointInsideViewport(double x, double y) const;
 
 private:
@@ -148,14 +173,27 @@ private:
     void DrawInspector(Application& app);
     void DrawStatistics(Application& app, float dt);
     void DrawViewport(Application& app, IRenderAdapter* renderer);
+    void DrawAssetPreview(Application&);
+    RenderTextureHandle m_AssetPreviewTexture;
+    std::string m_AssetPreviewKey,m_AssetMetadataKey,m_AssetMetadata;
+    std::uint64_t m_AssetPreviewVersion=0,m_AssetMetadataVersion=0;
     void DrawAssetBrowser(Application& app);
     void DrawImportDialogs(Application& app);
     void DrawMaterialEditor(Application& app);
     void DrawLightGizmos(Application&,IRenderAdapter*,const ImVec2&,const ImVec2&);
     bool m_ShowLightGizmos=true,m_LightXray=false;
+    int m_LightXrayMode=1,m_TransformPrecision=1,m_RotateAxis=1;
+    bool m_RotationSnapping=false,m_ShowPhysicsStress=false;
+    AssetNavigation m_AssetNavigation;
+    std::string m_ImportTargetFolder,m_ImportPackageName;
+
+    bool DrawScalePlanes(Application&,const ImVec2&,const ImVec2&);
+    int m_ScalePlane=0;
+    ecs::TransformComponent m_ScaleOriginal;
+    std::array<float,2> m_ScaleMouse{},m_ScaleDirection{};
     void DrawGizmo(Application& app, const ImVec2& viewportMin, const ImVec2& viewportSize);
     EntitySnapshot CaptureSelectedEntity(Application& app,ecs::Entity entity={}) const;
-    ecs::Entity RestoreSnapshot(Application& app, const EntitySnapshot& snapshot);
+    ecs::Entity RestoreSnapshot(Application& app, const EntitySnapshot& snapshot,EntitySnapshot* inverse=nullptr);
 
     void PushUndoBeforeChange(Application& app, const std::string& label);
     void Undo(Application& app);
@@ -166,6 +204,8 @@ private:
     ecs::Entity m_SelectedEntity{};
     int m_GizmoOperation = 0;
     int m_GizmoMode = 0;
+    bool m_GameView=false,m_ProjectAssets=true,m_PlaneScaleCaptured=false;
+    float m_AssetCardSize=180;
     bool m_ShowHierarchy = true;
     bool m_ShowInspector = true;
     bool m_ShowStatistics = true;
@@ -181,11 +221,11 @@ private:
     Statistics m_Statistics;
     AssetCatalog m_AssetCatalog;
     bool m_AssetGrid=false,m_AssetActionRequested=false;
-    int m_AssetAction=0;
+    int m_AssetAction=0,m_ModelImportMode=0;
     std::string m_AssetActionSource,m_AssetActionKey="materials/new.material.json";
     std::string m_AssetDirectory;
     bool AssetReferenced(Application&,const std::string&)const;
-    std::string m_HierarchyFilter,m_AssetFilter,m_ConsoleFilter,m_RenameBuffer,m_SceneDialogKey="scenes/new_scene.json";
+    std::string m_HierarchyFilter,m_AssetFilter,m_ConsoleFilter,m_RenameBuffer,m_SceneDialogKey="scenes/new_scene.json",m_UnsavedSaveKey="scenes/untitled.json";
     int m_AssetKindFilter=0,m_SceneDialogAction=0;
     ecs::Entity m_RenameTarget{};
     bool m_SceneDialogRequested=false,m_RenameRequested=false,m_ConsoleInfo=true,m_ConsoleWarning=true,m_ConsoleError=true;

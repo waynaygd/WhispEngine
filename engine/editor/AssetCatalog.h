@@ -18,6 +18,7 @@ class AssetCatalog {
     std::set<std::string> folders,created;
     std::uint64_t revision=0;
 public:
+    static std::string DirectoryKey(const std::filesystem::path& p){auto text=p.generic_u8string();return {text.begin(),text.end()};}
     AssetCatalog();
     void Register(AssetType);
     void Refresh();

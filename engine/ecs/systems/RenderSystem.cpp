@@ -241,7 +241,7 @@ namespace ecs {
             }
         }
 
-        m_MeshResources.clear();
+        m_MeshResources.clear();m_ShadowLocalBounds.clear();m_ShadowWorldBounds.clear();
         m_TextureResources.clear();
         m_ShaderResources.clear();
         m_EnvironmentAsset.reset();m_RequestedEnvironment.clear();m_EnvironmentKey.clear();m_EnvironmentVersion=0;m_FailedEnvironmentKey.clear();m_FailedEnvironmentVersion=0;
@@ -265,7 +265,7 @@ namespace ecs {
         ZoneScopedN("RenderSystem");
 
         (void)dt;
-        m_Statistics = {};
+        m_Statistics = {};m_MaterialDiagnostics.clear();
         LightCamera lightCamera;
         BuildViewMatrix(lightCamera.view.data(),m_CameraPosition,m_CameraYaw,m_CameraPitch);
         BuildPerspectiveMatrix(lightCamera.projection.data(),m_CameraVerticalFovRadians,m_CameraAspectRatio,m_CameraNearPlane,m_CameraFarPlane);
@@ -295,6 +295,19 @@ namespace ecs {
         constexpr std::size_t
             maxGpuFinalizationsPerFrame = 1;
 
+        if(m_ResourceManager&&m_ResourceCacheEpoch!=m_ResourceManager->GetCacheEpoch()){
+            m_ResourceCacheEpoch=m_ResourceManager->GetCacheEpoch();
+            auto refresh=[&](auto& cache,auto release,auto& failedVersions){for(auto it=cache.begin();it!=cache.end();){
+                using T=std::remove_cvref_t<decltype(it->second->GetData())>;
+                auto current=m_ResourceManager->Get<T>(it->first);
+                if constexpr(std::is_same_v<T,TextureResource>)if(it->first=="defaults/texture")current=m_ResourceManager->GetDefault<T>();
+                if(current!=it->second){auto& data=it->second->GetData();if(data.gpuHandle.IsValid()){release(data.gpuHandle);data.gpuHandle={};data.gpuHandleVersion=0;}failedVersions.erase(it->first);it=cache.erase(it);}else ++it;
+            }};
+            refresh(m_TextureResources,[&](auto handle){m_Renderer->DestroyTexture(handle);},m_FailedTextureGpuVersions);
+            refresh(m_MeshResources,[&](auto handle){m_Renderer->DestroyMesh(handle);},m_FailedMeshGpuVersions);
+            refresh(m_ShaderResources,[&](auto handle){m_Renderer->DestroyShader(handle);},m_FailedShaderGpuVersions);
+            for(auto it=m_MaterialResources.begin();it!=m_MaterialResources.end();)if(m_ResourceManager->Get<MaterialResource>(it->first)!=it->second)it=m_MaterialResources.erase(it);else ++it;
+        }
         PumpGpuFinalization(
             maxGpuFinalizationsPerFrame);
 
@@ -303,7 +316,7 @@ namespace ecs {
         {
             ZoneScopedN("RenderEntities");
 
-            m_RenderSnapshots.clear();
+            m_RenderSnapshots.clear();m_ShadowWorldBounds.clear();
             m_RenderSnapshots.reserve(world.GetAliveCount());
 
             {
@@ -325,14 +338,19 @@ namespace ecs {
                         const auto& mesh=resource->second->GetData().meshData;
                         const auto count=std::max(std::size_t(1),mesh.submeshes.size());
                         const auto pose=m_Interpolation?m_Interpolation->Resolve(entity,transform):RenderPose::From(transform);
-                        bool visible=false;
+                        bool visible=false,casts=false;
                         for(std::size_t slot=0;slot<count;++slot) {
                             RenderSnapshot snapshot{};
                             if(TryBuildRenderSnapshot(meshRenderer,world.GetComponent<MaterialComponent>(entity),snapshot,mesh,meshHandle,slot)) {
-                                snapshot.pose=pose;m_RenderSnapshots.push_back(std::move(snapshot));visible=true;
+                                casts|=snapshot.castShadows;snapshot.pose=pose;if(m_TraceMaterials&&!m_MaterialDiagnostics.empty()){m_MaterialDiagnostics.back()["entity"]=entity.index;m_MaterialDiagnostics.back()["generation"]=entity.generation;}m_RenderSnapshots.push_back(std::move(snapshot));visible=true;
                             }
                         }
                         if(visible)++m_Statistics.visibleObjects;
+                        if(casts){auto it=m_ShadowLocalBounds.find(meshHandle.value);
+                            if(it==m_ShadowLocalBounds.end()){ShadowCasterBounds b{{INFINITY,INFINITY,INFINITY},{-INFINITY,-INFINITY,-INFINITY}};for(auto& v:mesh.vertices)for(int k=0;k<3;++k){b.minimum[k]=std::min(b.minimum[k],v.position[k]);b.maximum[k]=std::max(b.maximum[k],v.position[k]);}it=m_ShadowLocalBounds.emplace(meshHandle.value,b).first;}
+                            ShadowCasterBounds b{{INFINITY,INFINITY,INFINITY},{-INFINITY,-INFINITY,-INFINITY}};float model[16];BuildRenderModelMatrix(model,pose);
+                            for(int c=0;c<8;++c)for(int row=0;row<3;++row){float value=model[12+row];for(int k=0;k<3;++k)value+=model[k*4+row]*(c&(1<<k)?it->second.maximum[k]:it->second.minimum[k]);b.minimum[row]=std::min(b.minimum[row],value);b.maximum[row]=std::max(b.maximum[row],value);}m_ShadowWorldBounds.push_back(b);
+                        }
                     });
                 m_Statistics.gatherMs = elapsed(start);
                 m_Statistics.visibleSubmeshes = m_RenderSnapshots.size();
@@ -394,9 +412,10 @@ namespace ecs {
                 auto settings=SanitizeShadowSettings(m_ShadowSettings?*m_ShadowSettings:m_DefaultShadows);
                 settings.enabled=settings.enabled&&lights.primaryCastShadows;
                 const auto light=BuildLightingConstants(lights.lighting);
-                const auto frame=BuildCameraDirectionalShadowFrame(light,settings,
+                auto frame=BuildCameraDirectionalShadowFrame(light,settings,
                     {m_CameraPosition.x,m_CameraPosition.y,m_CameraPosition.z},m_CameraYaw,m_CameraPitch,
                     m_CameraVerticalFovRadians,m_CameraAspectRatio,m_CameraNearPlane,m_CameraFarPlane);
+                ExtendDirectionalCasterDepth(frame,m_ShadowWorldBounds);
                 if(m_Renderer->BeginShadowPass(frame)) {
                     for(const auto& batch:m_ShadowBatches) {
                         const auto& packet=m_RenderPackets[batch.begin];
@@ -548,6 +567,9 @@ namespace ecs {
         }
         snapshot.surface={material.metallic,material.roughness,float(m_ShadingModelOverride>=0?m_ShadingModelOverride:int(material.shadingModel)),0};
         snapshot.materialState={material.doubleSided,material.receiveShadows};snapshot.castShadows=material.castShadows;
+        if(m_TraceMaterials){nlohmann::json record={{"mesh",meshRenderer.meshPath},{"submesh",submeshIndex},{"slot",slot},{"materialAsset",asset},{"resolvedSource",material.sourcePath},{"baseTexture",material.texturePath},{"gpuTexture",snapshot.texture.value},{"shader",snapshot.shader.value},{"surface",snapshot.surface},{"tint",snapshot.tint},{"baseColor",snapshot.baseColor}};
+            record["maps"]={snapshot.maps[0].value,snapshot.maps[1].value,snapshot.maps[2].value};
+            auto key=AssetPaths::NormalizeAssetKey(material.texturePath);auto r=m_ResourceManager->Get<TextureResource>(key);if(r){record["textureIdentity"]=std::uint64_t(reinterpret_cast<std::uintptr_t>(r.get()));record["textureVersion"]=r->GetVersion();record["loadState"]=int(r->GetLoadState());}m_MaterialDiagnostics.push_back(std::move(record));}
         return finish(snapshot.texture.IsValid()&&snapshot.shader.IsValid());
     }
 

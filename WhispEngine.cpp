@@ -1,4 +1,5 @@
 ﻿#include "core/Application.h"
+#include "editor/SunSynchronization.h"
 #include <cstring>
 #include <cstdlib>
 #include <algorithm>
@@ -20,6 +21,10 @@ int main(int argc, char** argv)
             int index=0;for(const char* type:{"cube","sphere","cylinder","cone","plane"}){auto e=editor.CreatePrimitive(app,type);auto& t=*app.GetWorld().GetComponent<ecs::TransformComponent>(e);t.position={float(index-2)*1.4f,0,4};if(index==4){t.position={0,-.51f,4};t.scale={12,1,12};}++index;}
             auto settings=app.GetSceneSettings();settings.background.sunSync=SunSyncMode::LightDrivesSky;settings.background.sunRadius=2;settings.background.sunIntensity=4;app.SetSceneSettings(settings);editor.ClearSelection();
         }
+        else if(std::strcmp(argv[i],"--aa-quality")==0&&i+1<argc){auto s=app.GetSceneSettings();s.antiAliasing=AntiAliasingMode(std::clamp(std::atoi(argv[++i]),0,2));app.SetSceneSettings(s);}
+        else if(std::strcmp(argv[i],"--game-view")==0)app.GetEditorLayer().SetGameView(true);
+        else if(std::strcmp(argv[i],"--known-sun-demo")==0){auto sun=editor::PrimarySun(app.GetWorld());if(!sun.IsValid())sun=app.GetEditorLayer().CreateLight(app,LightType::Directional);app.GetWorld().GetComponent<ecs::DirectionalLightComponent>(sun)->primary=true;auto s=app.GetSceneSettings();s.background.background=EditorBackground::Cubemap;s.background.cubemap="environments/editor24_known_sun.hdr";s.background.sunMetadata=true;s.background.sunDirection={0,.34202014f,.93969262f};s.background.sunSync=SunSyncMode::SkyDrivesLight;s.background.visibleSunDisc=false;s.environment.enabled=true;s.environment.assetPath=s.background.cubemap;app.SetSceneSettings(s);}
+        else if(std::strcmp(argv[i],"--daynight-demo")==0&&i+1<argc){float elevation=std::clamp(float(std::atof(argv[++i])),-85.f,85.f)*.01745329252f;auto sun=editor::PrimarySun(app.GetWorld());if(!sun.IsValid())sun=app.GetEditorLayer().CreateLight(app,LightType::Directional);app.GetWorld().GetComponent<ecs::DirectionalLightComponent>(sun)->primary=true;app.GetWorld().GetComponent<ecs::TransformComponent>(sun)->rotation={elevation,3.14159265f,0};auto s=app.GetSceneSettings();s.background.background=EditorBackground::DayNight;s.background.driveLightProperties=true;s.background.sunSync=SunSyncMode::Independent;s.background.sunRadius=2;s.background.sunIntensity=4;app.SetSceneSettings(s);}
         else if(std::strcmp(argv[i],"--sky-off")==0)app.GetEditorLayer().SetSkyDiagnosticEnabled(false);
         else if(std::strcmp(argv[i],"--asset-grid")==0)app.GetEditorLayer().SetAssetGrid(true);
         else if(std::strcmp(argv[i],"--diagnostic-viewport")==0&&i+2<argc){int w=std::atoi(argv[++i]);int h=std::atoi(argv[++i]);app.GetEditorLayer().SetDiagnosticViewport(w,h);}
@@ -92,6 +97,7 @@ int main(int argc, char** argv)
             app.SetShadowBenchmarkOutput(argv[++i]);
         } else if (std::strcmp(argv[i], "--no-lighting") == 0) {
             app.GetLightingSettings().enabled=false;
+        } else if (std::strcmp(argv[i], "--physics-stress-demo") == 0) {app.GetEditorLayer().SetPhysicsPanelVisible(true);app.SetupPhysicsStressScene(500);
         } else if (std::strcmp(argv[i], "--stress") == 0 && i + 1 < argc) {
             app.SetupPhysicsStressScene(std::atoi(argv[++i]));
             app.SetEditorPlayMode(true);

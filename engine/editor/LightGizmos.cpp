@@ -8,6 +8,7 @@
 #include <imgui.h>
 #include <ImGuizmo.h>
 #include <cmath>
+#include <chrono>
 namespace editor
 {
 ecs::Entity EditorLayer::CreateLight(Application& app,LightType type)
@@ -51,40 +52,56 @@ bool Occluded(V eye,V target,const std::vector<Occluder>& objects){
 }
 Occluder Bounds(ResourceHandle<MeshResource> mesh,const ecs::RenderPose& pose){
     std::array<float,16> model;ecs::BuildRenderModelMatrix(model.data(),pose);auto inv=BuildNormalMatrix(model);
-    V lo{INFINITY,INFINITY,INFINITY},hi{-INFINITY,-INFINITY,-INFINITY};
-    for(const auto& v:mesh->GetData().meshData.vertices){lo.x=std::min(lo.x,v.position[0]);lo.y=std::min(lo.y,v.position[1]);lo.z=std::min(lo.z,v.position[2]);hi.x=std::max(hi.x,v.position[0]);hi.y=std::max(hi.y,v.position[1]);hi.z=std::max(hi.z,v.position[2]);}
+    struct CachedBounds {std::weak_ptr<Resource<MeshResource>> owner;std::uint64_t version=0;V lo,hi;};
+    static thread_local std::unordered_map<const void*,CachedBounds> cache;
+    if(cache.size()>4096)cache.clear();auto& c=cache[mesh.get()];
+    if(c.owner.lock()!=mesh||c.version!=mesh->GetVersion()){
+        c.owner=mesh;c.version=mesh->GetVersion();c.lo={INFINITY,INFINITY,INFINITY};c.hi={-INFINITY,-INFINITY,-INFINITY};
+        for(const auto& v:mesh->GetData().meshData.vertices){c.lo.x=std::min(c.lo.x,v.position[0]);c.lo.y=std::min(c.lo.y,v.position[1]);c.lo.z=std::min(c.lo.z,v.position[2]);c.hi.x=std::max(c.hi.x,v.position[0]);c.hi.y=std::max(c.hi.y,v.position[1]);c.hi.z=std::max(c.hi.z,v.position[2]);}
+    }V lo=c.lo,hi=c.hi;
     return {mesh,inv,pose.position,lo,hi};
 }
 
 }
 void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2& origin,const ImVec2& size)
 {
+    const auto begin=std::chrono::steady_clock::now();
+    struct Timing {double& result;std::chrono::steady_clock::time_point start;~Timing(){result=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}} timing{m_Statistics.lightGizmoMs,begin};
     if(m_LightPointerCaptured&&!ImGui::IsMouseDown(0)){FinishTransaction(app);m_LightPointerCaptured=false;}
-    if(app.IsEditorPlayMode())return;
+    if(app.IsEditorPlayMode()||m_GameView)return;
     if(m_ModalActive){if(m_LightPointerCaptured){CancelTransaction(app);m_LightPointerCaptured=false;}return;}
     if(!m_ShowLightGizmos||size.x<=1||size.y<=1)return;
     auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),size.x/size.y,app.GetCameraNearPlane(),app.GetCameraFarPlane());
     auto& world=app.GetWorld();std::vector<Occluder> occluders;
-    if(!m_LightXray&&app.GetResourceManager())world.ForEach<ecs::TransformComponent,ecs::MeshRendererComponent>([&](ecs::Entity e,auto& t,auto& m){
+    if(app.GetResourceManager())world.ForEach<ecs::TransformComponent,ecs::MeshRendererComponent>([&](ecs::Entity e,auto& t,auto& m){
         if(!m.visible)return;auto mesh=app.GetResourceManager()->Get<MeshResource>(m.meshPath);if(!mesh||!mesh->IsLoaded()||mesh->GetData().meshData.vertices.empty())return;
         auto pose=app.GetRenderInterpolation().Resolve(e,t);auto bounds=Bounds(mesh,pose);
         if(bounds.inverse!=std::array<float,12>{})occluders.push_back(std::move(bounds));
     });
     auto* draw=ImGui::GetWindowDrawList();draw->PushClipRect(origin,ImVec2(origin.x+size.x,origin.y+size.y),true);
     auto project=[&](V p)->std::optional<ImVec2>{auto q=ProjectGizmo(p,camera);if(!q)return {};return ImVec2(origin.x+(*q)[0]*size.x,origin.y+(*q)[1]*size.y);};
-    auto line=[&](V a,V b,ImU32 color){auto q=ProjectEditorLine(a,b,camera);if(q)draw->AddLine(ImVec2(origin.x+(*q)[0]*size.x,origin.y+(*q)[1]*size.y),ImVec2(origin.x+(*q)[2]*size.x,origin.y+(*q)[3]*size.y),color,1.5f);};
+    bool xraySegments=false;
+    auto line=[&](V a,V b,ImU32 color){
+        for(int part=0;part<4;++part){V from=Add(a,Scale(Sub(b,a),part*.25f)),to=Add(a,Scale(Sub(b,a),(part+1)*.25f));
+            bool hidden=Occluded(app.GetCameraPosition(),Add(from,Scale(Sub(to,from),.5f)),occluders);if(hidden&&!xraySegments)continue;
+            if(hidden)to=Add(from,Scale(Sub(to,from),.55f));auto q=ProjectEditorLine(from,to,camera);if(!q)continue;
+            auto tint=hidden?(color&0x00ffffffu)|(110u<<24):color;
+            draw->AddLine(ImVec2(origin.x+(*q)[0]*size.x,origin.y+(*q)[1]*size.y),ImVec2(origin.x+(*q)[2]*size.x,origin.y+(*q)[3]*size.y),tint,hidden?1.f:1.5f);
+        }
+    };
     ecs::Entity hit;float hitZ=INFINITY;
     world.ForEach<ecs::TransformComponent>([&](ecs::Entity entity,auto& transform){
         LightType type;auto* light=ecs::GetLightParameters(world,entity,&type);if(!light)return;
         auto pose=app.GetRenderInterpolation().Resolve(entity,transform);auto q=ProjectGizmo(pose.position,camera);const bool selected=entity==m_SelectedEntity;if(!q&&!selected)return;
-        if(!m_LightXray&&Occluded(app.GetCameraPosition(),pose.position,occluders))return;
+        xraySegments=m_LightXrayMode==2||(m_LightXrayMode==1&&selected);
+        bool iconHidden=Occluded(app.GetCameraPosition(),pose.position,occluders);if(iconHidden&&!xraySegments&&!selected)return;
         auto p=SanitizeLight(*light);ImVec2 icon=q?*project(pose.position):ImVec2{};
         ImU32 color=selected?IM_COL32(255,240,80,255):ImGui::ColorConvertFloat4ToU32(ImVec4(LinearToSrgb(p.color[0]),LinearToSrgb(p.color[1]),LinearToSrgb(p.color[2]),p.enabled?1.f:.4f));
-        if(q){draw->AddCircle(icon,7,color,16,2);if(selected)draw->AddCircle(icon,11,color,20,1);
+        if(q&&(!iconHidden||xraySegments)){if(iconHidden)color=(color&0x00ffffffu)|(160u<<24);draw->AddCircle(icon,7,color,16,2);if(selected)draw->AddCircle(icon,11,color,20,1);
         if(type==LightType::Directional){for(int j=0;j<8;++j){float a=j*.785398f;draw->AddLine(ImVec2(icon.x+9*std::cos(a),icon.y+9*std::sin(a)),ImVec2(icon.x+13*std::cos(a),icon.y+13*std::sin(a)),color,1.5f);}}
         else if(type==LightType::Point){draw->AddLine(ImVec2(icon.x-4,icon.y+8),ImVec2(icon.x+4,icon.y+8),color,2);}
         else {draw->AddTriangle(ImVec2(icon.x-6,icon.y-5),ImVec2(icon.x+6,icon.y-5),ImVec2(icon.x,icon.y+6),color,1.5f);}
-        auto mouse=ImGui::GetMousePos();if(HitLightIcon(mouse.x-origin.x,mouse.y-origin.y,(*q)[0],(*q)[1],size.x,size.y)&&(*q)[2]<hitZ){hit=entity;hitZ=(*q)[2];}
+        auto mouse=ImGui::GetMousePos();if((!iconHidden||selected&&xraySegments)&&HitLightIcon(mouse.x-origin.x,mouse.y-origin.y,(*q)[0],(*q)[1],size.x,size.y)&&(*q)[2]<hitZ){hit=entity;hitZ=(*q)[2];}
         }
         if(!selected)return;
         auto d=ecs::LightDirection(pose);V right=std::abs(d.y)<.95f?Cross({0,1,0},d):Cross({1,0,0},d);right=Scale(right,1/std::sqrt(Dot(right,right)));V up=Cross(d,right);
@@ -96,6 +113,8 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
         auto handle=[&](V base,V axis,float value,int which){
             if(ImGuizmo::IsUsing()||(!m_LightPointerCaptured&&(app.IsCameraControlActive()||ImGui::IsMouseDown(1))))return;
             auto start=project(base),end=project(Add(base,Scale(axis,value)));if(!start||!end)return;
+            if(end->x<origin.x||end->y<origin.y||end->x>=origin.x+size.x||end->y>=origin.y+size.y)return;
+            bool hidden=Occluded(app.GetCameraPosition(),Add(base,Scale(axis,value)),occluders);if(hidden&&!xraySegments)return;
             float dx=end->x-start->x,dy=end->y-start->y,length=std::sqrt(dx*dx+dy*dy);if(length<8||value<.001f)return;
             const float dpi=ImGui::GetStyle().FontScaleDpi;draw->AddRectFilled(ImVec2(end->x-4*dpi,end->y-4*dpi),ImVec2(end->x+4*dpi,end->y+4*dpi),color);
             ImGui::PushID(int(entity.index));ImGui::PushID(which);ImGui::SetCursorScreenPos(ImVec2(end->x-6*dpi,end->y-6*dpi));ImGui::InvisibleButton("LightHandle",ImVec2(12*dpi,12*dpi));
@@ -122,13 +141,13 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
 namespace editor {
 void EditorLayer::DrawViewportOverlays(Application& app,const ImVec2& origin,const ImVec2& size){
     if(m_LightPointerCaptured&&!ImGui::IsMouseDown(0)){FinishTransaction(app);m_LightPointerCaptured=false;}
-    if(app.IsEditorPlayMode())return;
+    if(app.IsEditorPlayMode()||m_GameView)return;
     if(size.x<=1||size.y<=1)return;const auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),size.x/size.y,app.GetCameraNearPlane(),app.GetCameraFarPlane());
     auto* draw=ImGui::GetWindowDrawList();draw->PushClipRect(origin,ImVec2(origin.x+size.x,origin.y+size.y),true);
     auto project=[&](V p)->std::optional<ImVec2>{auto v=ProjectGizmo(p,camera);if(!v)return {};return ImVec2(origin.x+(*v)[0]*size.x,origin.y+(*v)[1]*size.y);};
     auto line=[&](V a,V b,ImU32 color){auto q=ProjectEditorLine(a,b,camera);if(q)draw->AddLine(ImVec2(origin.x+(*q)[0]*size.x,origin.y+(*q)[1]*size.y),ImVec2(origin.x+(*q)[2]*size.x,origin.y+(*q)[3]*size.y),color);};
     auto& world=app.GetWorld();auto* resources=app.GetResourceManager();
-    if(resources&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&!m_LightHandleHovered&&!m_LightPointerCaptured&&!m_LightIconClicked&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&!ImGuizmo::IsOver()&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
+    if(resources&&!m_PlaneScaleCaptured&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&!m_LightHandleHovered&&!m_LightPointerCaptured&&!m_LightIconClicked&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&!ImGuizmo::IsOver()&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
         auto mouse=ImGui::GetMousePos();float x=((mouse.x-origin.x)/size.x*2-1)/camera.projection[0],y=(1-(mouse.y-origin.y)/size.y*2)/camera.projection[5];
         V ray{camera.view[0]*x+camera.view[1]*y+camera.view[2],camera.view[4]*x+camera.view[5]*y+camera.view[6],camera.view[8]*x+camera.view[9]*y+camera.view[10]};ray=Scale(ray,1/std::sqrt(Dot(ray,ray)));
         float nearest=app.GetCameraFarPlane();ecs::Entity hit;
@@ -147,5 +166,29 @@ void EditorLayer::DrawViewportOverlays(Application& app,const ImVec2& origin,con
         }
     }
     draw->PopClipRect();
+}
+}
+
+namespace editor {
+ecs::Vec3 EditorLayer::PlacementPoint(Application& app,float u,float v)const{
+    auto eye=app.GetCameraPosition();if(!std::isfinite(u)||!std::isfinite(v))return eye;
+    u=std::clamp(u,0.f,1.f);v=std::clamp(v,0.f,1.f);
+    const auto camera=GizmoCamera(eye,app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),float(std::max(1,m_ViewportPixelWidth))/std::max(1,m_ViewportPixelHeight),app.GetCameraNearPlane(),app.GetCameraFarPlane());
+    float x=(u*2-1)/camera.projection[0],y=(1-v*2)/camera.projection[5];
+    V ray{camera.view[0]*x+camera.view[1]*y+camera.view[2],camera.view[4]*x+camera.view[5]*y+camera.view[6],camera.view[8]*x+camera.view[9]*y+camera.view[10]};ray=Scale(ray,1/std::sqrt(Dot(ray,ray)));
+    float nearest=app.GetCameraFarPlane();bool hit=false;
+    if(auto* resources=app.GetResourceManager())app.GetWorld().ForEach<ecs::TransformComponent,ecs::MeshRendererComponent>([&](ecs::Entity e,auto& t,auto& m){
+        if(!m.visible)return;auto mesh=resources->Get<MeshResource>(m.meshPath);if(!mesh||!mesh->IsLoaded()||mesh->GetData().meshData.vertices.empty())return;
+        auto bounds=Bounds(mesh,app.GetRenderInterpolation().Resolve(e,t));if(bounds.inverse==std::array<float,12>{})return;
+        float distance=HitDistance(eye,ray,bounds,nearest);if(distance>app.GetCameraNearPlane()&&distance<nearest){nearest=distance;hit=true;}
+    });
+    if(!hit){float plane=std::abs(ray.y)>1e-6f?-eye.y/ray.y:-1;nearest=plane>app.GetCameraNearPlane()&&plane<nearest?plane:std::min(10.f,nearest*.5f);}
+    return Add(eye,Scale(ray,nearest));
+}
+ecs::Entity EditorLayer::PlaceModel(Application& app,const std::string& key,ecs::Vec3 point){
+    if(!std::isfinite(point.x)||!std::isfinite(point.y)||!std::isfinite(point.z)){m_EditorError="Invalid placement position";return {};}
+    auto entity=CreateModelEntity(app,key,std::filesystem::u8path(key).stem().string());if(!entity.IsValid())return {};
+    app.GetWorld().GetComponent<ecs::TransformComponent>(entity)->position=point;app.NotifyEditorMutation(entity);
+    if(auto* resources=app.GetResourceManager())resources->LoadAsync<MeshResource>(key);return entity;
 }
 }

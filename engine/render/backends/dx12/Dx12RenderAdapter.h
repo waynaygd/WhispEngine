@@ -22,6 +22,7 @@ public:
 	bool BeginViewportRender(int width, int height, const float* clearColor) override;
 	void EndViewportRender() override;
 	std::uint64_t GetViewportTextureId() const override;
+    std::uint64_t GetTexturePreviewId(RenderTextureHandle h)const override {auto it=m_UploadedTextures.find(h.value);return it==m_UploadedTextures.end()?0:it->second.gpuSrvHandle.ptr;}
 	void BeginFrame() override;
 	void Clear(float r, float g, float b, float a) override;
 	void DrawTestTriangle() override;
@@ -44,6 +45,8 @@ public:
 	void BindShader(RenderShaderHandle handle) override;
 	void BindTexture(std::uint32_t slot, RenderTextureHandle handle) override;
 	void DrawMesh(RenderMeshHandle handle) override;
+    void SetAntiAliasing(AntiAliasingMode mode) override {m_AntiAliasing=AntiAliasingMode(std::clamp(int(mode),0,2));}
+    AntiAliasingDiagnostics GetAntiAliasingDiagnostics()const override {AntiAliasingDiagnostics d;d.mode=m_AntiAliasing;for(const auto& t:m_HdrTargets)if(t.color)d.intermediateBytes+=t.allocationBytes;return d;}
     void SetEnvironmentSettings(const EnvironmentSettings& s) override {m_EnvironmentSettings=SanitizeEnvironment(s);}
     void SetSceneLights(std::span<const GpuSceneLight>,LightRenderingMode,const SceneLightDiagnostics& = {}) override;
     SceneLightDiagnostics GetSceneLightDiagnostics() const override {return m_SceneLightDiagnostics;}
@@ -80,9 +83,14 @@ public:
     void BeginMainPass() override;
     void EndMainPass() override;
     std::uint64_t GetShadowPreviewTextureId() const override;
+    std::array<unsigned,2> ProbeMsaaSupport(unsigned samples)const {std::array<unsigned,2> result{};int index=0;for(auto format:{DXGI_FORMAT_R32G32B32A32_FLOAT,DXGI_FORMAT_D32_FLOAT}){D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS data{format,samples,D3D12_MULTISAMPLE_QUALITY_LEVELS_FLAG_NONE,0};if(m_Device&&SUCCEEDED(m_Device->CheckFeatureSupport(D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS,&data,sizeof(data))))result[index]=data.NumQualityLevels;++index;}return result;}
     RenderGpuTimings GetGpuTimings() const override { return m_GpuTimings; }
     std::vector<float> ReadBackShadowDepth();
     unsigned GetValidationErrorCount() const;
+    struct MaterialBindingRecord {unsigned frameSlot=0;std::array<std::uint64_t,5> textures{};std::uint64_t descriptor=0;unsigned availableMaps=0;};
+    void SetMaterialBindingTrace(bool enabled){m_TraceMaterialBindings=enabled;}
+    const auto& GetMaterialBindingTrace()const{return m_MaterialBindingTrace;}
+
     void ReleaseShadowResources();
     bool SaveFrameImage(const std::string&) override;
 
@@ -185,7 +193,7 @@ private:
     std::array<float,16> m_Model{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
     struct CachedInstances { const RenderInstanceData* data; std::size_t count; D3D12_VERTEX_BUFFER_VIEW view; };
     std::vector<CachedInstances> m_CachedInstances;
-    static constexpr UINT TimingQueries=66;
+    static constexpr UINT TimingQueries=98;
     Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_TimeHeap;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_TimeReadback[FrameCount];
     UINT64 m_TimeFrequency=0;
@@ -319,9 +327,11 @@ private:
         Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptors,rtvs;
         D3D12_CPU_DESCRIPTOR_HANDLE rtv{};
         UINT width=0,height=0;
+        UINT64 allocationBytes=0;
     };
     HdrTarget m_HdrTargets[FrameCount];
-    bool m_HdrActive=false;
+    bool m_HdrActive=false,m_HdrNative=false;
+    AntiAliasingMode m_AntiAliasing=AntiAliasingMode::Off;
     float m_SceneClear[4]={.08f,.08f,.12f,1};
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_OutputRoot;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_OutputPso;
@@ -342,6 +352,9 @@ private:
     std::array<RenderTextureHandle,3> m_BoundMaps{};
     std::array<float,4> m_TextureParameters{1,1,0,1};
     bool BindMaterialTextures(bool srgb);
+    bool m_TraceMaterialBindings=false;
+    std::vector<MaterialBindingRecord> m_MaterialBindingTrace;
+
 	std::unordered_map<std::uint64_t, UploadedMesh> m_UploadedMeshes;
 	std::uint64_t m_NextMeshHandle = 1;
 	std::unordered_map<std::uint64_t, UploadedTexture> m_UploadedTextures;

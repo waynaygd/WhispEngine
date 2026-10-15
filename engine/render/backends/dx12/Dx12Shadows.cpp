@@ -198,7 +198,7 @@ void Dx12RenderAdapter::EndShadowPass() {
     ShadowTimestamp(1);
 }
 void Dx12RenderAdapter::BeginMainPass() {BeginHdrScene();PrepareSceneLights();ShadowTimestamp(2);DrawEditorVisual(false);}
-void Dx12RenderAdapter::EndMainPass() {DrawEditorVisual(true);ShadowTimestamp(3);EndHdrScene();m_PreparedScene=false;m_CachedInstances.clear();}
+void Dx12RenderAdapter::EndMainPass() {DrawEditorVisual(true);ShadowTimestamp(3);ShadowTimestamp(4);EndHdrScene();ShadowTimestamp(5);m_PreparedScene=false;m_CachedInstances.clear();}
 std::uint64_t Dx12RenderAdapter::GetShadowPreviewTextureId() const {return m_ShadowTargets[m_LastShadowSlot].srv.ptr;}
 void Dx12RenderAdapter::ReleaseShadowResources() {
     if(m_ShadowActive&&m_FrameRecording)EndShadowPass();
@@ -223,7 +223,7 @@ void Dx12RenderAdapter::InitializeGpuTiming() {
     }
 }
 void Dx12RenderAdapter::ShadowTimestamp(UINT phase) {
-    if(m_TimeCurrentPass!=UINT_MAX)m_CmdList->EndQuery(m_TimeHeap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_FrameIndex*TimingQueries+2+4*m_TimeCurrentPass+phase);
+    if(m_TimeCurrentPass!=UINT_MAX)m_CmdList->EndQuery(m_TimeHeap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_FrameIndex*TimingQueries+2+6*m_TimeCurrentPass+phase);
 }
 void Dx12RenderAdapter::CollectGpuTiming(UINT slot) {
     ZoneScopedN("ShadowResolve");
@@ -232,7 +232,7 @@ void Dx12RenderAdapter::CollectGpuTiming(UINT slot) {
     if(FAILED(m_TimeReadback[slot]->Map(0,&range,&mapped)))return;
     auto* ticks=static_cast<UINT64*>(mapped);RenderGpuTimings result{};result.valid=m_TimeComplete[slot];
     const double milliseconds=1000.0/m_TimeFrequency;result.frameMs=(ticks[1]-ticks[0])*milliseconds;
-    for(UINT q=2;q<m_TimePending[slot];q+=4) {result.shadowMs+=(ticks[q+1]-ticks[q])*milliseconds;result.mainMs+=(ticks[q+3]-ticks[q+2])*milliseconds;}
+    for(UINT q=2;q<m_TimePending[slot];q+=6) {result.shadowMs+=(ticks[q+1]-ticks[q])*milliseconds;result.mainMs+=(ticks[q+3]-ticks[q+2])*milliseconds;result.outputMs+=(ticks[q+5]-ticks[q+4])*milliseconds;}
     D3D12_RANGE noWrites{0,0};m_TimeReadback[slot]->Unmap(0,&noWrites);m_GpuTimings=result;m_TimePending[slot]=0;
 }
 unsigned Dx12RenderAdapter::GetValidationErrorCount() const {

@@ -19,7 +19,7 @@ bool Dx12RenderAdapter::EnsureEditorVisualPipeline(){
         auto compile=[&](const char* entry,const char* target){ComPtr<ID3DBlob> code,error;HRESULT result=D3DCompileFromFile(path.c_str(),nullptr,nullptr,entry,target,D3DCOMPILE_ENABLE_STRICTNESS|D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&code,&error);if(FAILED(result))throw std::runtime_error(error?std::string(static_cast<const char*>(error->GetBufferPointer()),error->GetBufferSize()):"Editor visual shader unavailable");return code;};
         auto vs=compile("VS","vs_5_1"),sky=compile("SkyPS","ps_5_1"),grid=compile("GridPS","ps_5_1");
         CD3DX12_DESCRIPTOR_RANGE range;range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV,1,0);
-        CD3DX12_ROOT_PARAMETER roots[2];roots[0].InitAsConstants(52,0);roots[1].InitAsDescriptorTable(1,&range,D3D12_SHADER_VISIBILITY_PIXEL);
+        CD3DX12_ROOT_PARAMETER roots[2];roots[0].InitAsConstants(60,0);roots[1].InitAsDescriptorTable(1,&range,D3D12_SHADER_VISIBILITY_PIXEL);
         CD3DX12_STATIC_SAMPLER_DESC sampler(0,D3D12_FILTER_MIN_MAG_MIP_LINEAR,D3D12_TEXTURE_ADDRESS_MODE_CLAMP,D3D12_TEXTURE_ADDRESS_MODE_CLAMP,D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
         CD3DX12_ROOT_SIGNATURE_DESC root(2,roots,1,&sampler);ComPtr<ID3DBlob> serialized,error;
         Check(D3D12SerializeRootSignature(&root,D3D_ROOT_SIGNATURE_VERSION_1,&serialized,&error),"Editor visual root serialization failed");
@@ -73,14 +73,14 @@ void Dx12RenderAdapter::DrawEditorVisual(bool grid){
     bool skyReady=m_EditorSky&&m_EditorSkyKey==s.cubemap;
     if(skyReady)m_Device->CopyDescriptorsSimple(1,cpu,m_EditorSkySrv->GetCPUDescriptorHandleForHeapStart(),D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     else {D3D12_SHADER_RESOURCE_VIEW_DESC null{};null.Format=DXGI_FORMAT_R32G32B32A32_FLOAT;null.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;null.ViewDimension=D3D12_SRV_DIMENSION_TEXTURECUBE;null.TextureCube.MipLevels=1;m_Device->CreateShaderResourceView(nullptr,&null,cpu);}
-    std::array<float,52> constants{};auto put=[&](int slot,const auto& v,float w){for(int i=0;i<3;++i)constants[slot*4+i]=v[i];constants[slot*4+3]=w;};
+    std::array<float,60> constants{};auto put=[&](int slot,const auto& v,float w){for(int i=0;i<3;++i)constants[slot*4+i]=v[i];constants[slot*4+3]=w;};
     put(0,f.camera,0);put(1,f.right,f.tanHalfFov*f.aspect);put(2,f.up,f.tanHalfFov);put(3,f.forward,f.nearPlane);
     constants[16]=f.farPlane;constants[17]=float(m_ViewportTarget.rendering?m_ViewportTarget.width:m_Width);constants[18]=float(m_ViewportTarget.rendering?m_ViewportTarget.height:m_Height);constants[19]=m_HdrActive?1.f:0.f;
     constants[20]=s.minorSpacing;constants[21]=s.majorSpacing;constants[22]=s.gridOpacity;constants[23]=s.fadeDistance;
-    put(6,s.top,0);put(7,s.horizon,0);put(8,s.bottom,0);
-    constants[36]=s.background==EditorBackground::Cubemap&&!skyReady?1.f:float(s.background);constants[37]=s.skyIntensity;constants[38]=s.gradientBlend;constants[39]=s.skyRotation*.01745329252f;put(10,s.solid,0);put(11,f.sunDirection,f.sunVisible?std::cos(s.sunRadius*.5f*.01745329252f):2.f);put(12,f.sunColor,s.sunIntensity);
+    put(6,s.top,m_HdrNative?1.f:0.f);put(7,s.horizon,0);put(8,s.bottom,0);
+    constants[36]=s.background==EditorBackground::Cubemap&&!skyReady?1.f:float(s.background);constants[37]=s.skyIntensity;constants[38]=s.gradientBlend;constants[39]=s.skyRotation*.01745329252f;put(10,s.solid,0);put(11,f.sunDirection,f.sunVisible?std::cos(s.sunRadius*.5f*.01745329252f):2.f);put(12,f.sunColor,s.sunIntensity);put(13,s.nightColor,s.nightIntensity);constants[56]=s.horizonGlow;constants[57]=s.sunsetWarmth;constants[58]=s.sunGlowRadius*.01745329252f;constants[59]=s.sunGlowIntensity;
     m_CmdList->SetGraphicsRootSignature(m_EditorVisualRoot.Get());m_CmdList->SetPipelineState(m_EditorVisualPso[m_HdrActive?1:0][grid?1:0].Get());
-    ID3D12DescriptorHeap* heaps[]{m_SrvHeap.Get()};m_CmdList->SetDescriptorHeaps(1,heaps);m_CmdList->SetGraphicsRoot32BitConstants(0,52,constants.data(),0);
+    ID3D12DescriptorHeap* heaps[]{m_SrvHeap.Get()};m_CmdList->SetDescriptorHeaps(1,heaps);m_CmdList->SetGraphicsRoot32BitConstants(0,60,constants.data(),0);
     auto gpu=m_SrvHeap->GetGPUDescriptorHandleForHeapStart();gpu.ptr+=UINT64(first)*m_SrvDescriptorSize;m_CmdList->SetGraphicsRootDescriptorTable(1,gpu);
     m_CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);m_CmdList->DrawInstanced(3,1,0,0);
     if(grid)++m_EditorVisualDiagnostics.gridDraws;else ++m_EditorVisualDiagnostics.backgroundDraws;m_EditorVisualDiagnostics.skyReady=skyReady;

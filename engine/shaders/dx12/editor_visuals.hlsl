@@ -1,4 +1,4 @@
-// Editor-only helpers. World ray is unnormalized, so intersection t is view-space Z.
+// Scene background plus editor-only grid. Unnormalized world ray: plane t is view-space Z.
 cbuffer Editor : register(b0) {
     float4 camera;
     float4 rightTan;
@@ -13,6 +13,8 @@ cbuffer Editor : register(b0) {
     float4 solid;
     float4 sunDirection; // xyz observer-to-sun, w cos angular radius (2 = hidden)
     float4 sunColor; // rgb linear, w independent visible disc intensity
+    float4 night; // linear RGB, night intensity
+    float4 weather; // horizon glow, sunset warmth
 };
 TextureCube<float4> sky : register(t0);
 SamplerState skySampler : register(s0);
@@ -28,7 +30,14 @@ float3 Output(float3 c){
 }
 float4 SkyPS(Vertex v):SV_TARGET {
     float3 d=normalize(Ray(v.ndc)),worldRay=d,c;
-    if(background.x>1.5){
+    if(background.x>2.5){
+        float elevation=sunDirection.y,day=smoothstep(-.08,.18,elevation);
+        float twilight=smoothstep(-.22,-.02,elevation)*(1-smoothstep(.05,.35,elevation));
+        float3 zenith=lerp(night.rgb*night.w,top.rgb,day),edge=lerp(night.rgb*night.w*.6,horizon.rgb,day);
+        c=lerp(edge,d.y>=0?zenith:lerp(night.rgb*night.w*.3,bottom.rgb,day),pow(saturate(abs(d.y)),background.z));
+        float2 toward=normalize(sunDirection.xz+float2(1e-6,0));float azimuth=pow(saturate(dot(normalize(d.xz+float2(1e-6,0)),toward)),12);
+        c+=float3(1,.25,.055)*weather.y*twilight*exp(-abs(d.y)*8)*(.15+weather.x*azimuth);
+    }else if(background.x>1.5){
         float sn=sin(background.w),cs=cos(background.w);
         d.xz=float2(cs*d.x+sn*d.z,-sn*d.x+cs*d.z);
         c=sky.SampleLevel(skySampler,d,0).rgb;
@@ -38,10 +47,21 @@ float4 SkyPS(Vertex v):SV_TARGET {
     }else c=solid.rgb;
     c*=background.y;
     [branch] if(sunDirection.w<1.5){
-        float alignment=dot(worldRay,sunDirection.xyz),width=max(fwidth(alignment),1e-7);
+        float alignment=clamp(dot(worldRay,sunDirection.xyz),-1,1),width=max(fwidth(alignment),1e-7);
+        float radial2=saturate((1-alignment)/max(1-sunDirection.w,1e-7));
+        float limb=.35+.65*sqrt(saturate(1-radial2));
         float disc=smoothstep(sunDirection.w-width,sunDirection.w+width,alignment);
-        // Visible helper replaces background radiance; it does not add a direct light or alter IBL.
-        c=lerp(c,sunColor.rgb*sunColor.w,disc);
+        float elevation=sunDirection.y,visible=smoothstep(-.05,.02,elevation);
+        float warmth=1-smoothstep(0,.4,elevation);
+        float3 temperature=lerp(float3(1,.95,.82),float3(1,.38,.09),warmth);
+        float attenuation=lerp(.35,1,smoothstep(0,.3,elevation))*visible;
+        float glow=exp(-max(0,2*(1-alignment))/max(weather.z*weather.z*.25,1e-8))*weather.w;
+        float3 radiance=sunColor.rgb*temperature*sunColor.w*attenuation;
+        // HDR uses the existing scene output tone mapper. SDR helper luminance is bounded.
+        float3 displaySun=top.w>.5?radiance:radiance/(1+radiance);
+        c=lerp(c,displaySun*limb,disc*visible);
+        float3 halo=displaySun*glow*attenuation*(1-disc);
+        c=top.w>.5?c+halo:1-(1-saturate(c))*(1-saturate(halo));
     }
     return float4(Output(c),1);
 }

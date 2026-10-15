@@ -433,13 +433,15 @@ void Dx12RenderAdapter::BindTexture(std::uint32_t slot, RenderTextureHandle hand
 {
     if(slot>3)return;
     if(slot>0){m_BoundMaps[slot-1]=handle;return;}
-    if(m_UploadedTextures.count(handle.value))m_BoundTextureHandle=handle;
+    m_BoundTextureHandle=m_UploadedTextures.count(handle.value)?handle:RenderTextureHandle{};
 }
 // Descriptor tables are immutable for every recorded command, and are reset
 // only after the owning frame slot fence. Persistent UI/shadow SRVs are separate.
 bool Dx12RenderAdapter::BindMaterialTextures(bool srgb)
 {
     const std::array<std::uint64_t,5> key{m_BoundTextureHandle.value,m_BoundMaps[0].value,m_BoundMaps[1].value,m_BoundMaps[2].value,std::uint64_t(srgb)};
+    m_MaterialAvailableMaps=0;for(unsigned i=0;i<3;++i)if(m_UploadedTextures.count(m_BoundMaps[i].value))m_MaterialAvailableMaps|=1u<<i;
+    if(m_TraceMaterialBindings&&m_LastMaterialTable.ptr&&key==m_LastMaterialTableKey)m_MaterialBindingTrace.push_back({m_FrameIndex,key,m_LastMaterialTable.ptr,m_MaterialAvailableMaps});
     if(m_LastMaterialTable.ptr && key==m_LastMaterialTableKey) {
         m_CmdList->SetGraphicsRootDescriptorTable(1,m_LastMaterialTable);return true;
     }
@@ -459,6 +461,7 @@ bool Dx12RenderAdapter::BindMaterialTextures(bool srgb)
         ++m_MaterialTableCount;found=m_MaterialTables.emplace(key,gpu).first;
     }
     m_LastMaterialTableKey=key;m_LastMaterialTable=found->second;
+    if(m_TraceMaterialBindings)m_MaterialBindingTrace.push_back({m_FrameIndex,key,found->second.ptr,m_MaterialAvailableMaps});
     m_MaterialAvailableMaps=0;for(unsigned i=0;i<3;++i)if(m_UploadedTextures.count(m_BoundMaps[i].value))m_MaterialAvailableMaps|=1u<<i;
     m_CmdList->SetGraphicsRootDescriptorTable(1,found->second);return true;
 }
@@ -1694,7 +1697,7 @@ void Dx12RenderAdapter::BeginFrame()
     for(auto descriptor:m_RetiredTextureDescriptors[m_FrameIndex])m_FreeTextureDescriptorIndices.push_back(descriptor);
     m_RetiredTextureDescriptors[m_FrameIndex].clear();
     m_SubmissionStatistics={}; m_InstancePageIndex=0;
-    m_MaterialTables.clear();m_MaterialTableCount=0;m_EnvironmentTable={};m_LastMaterialTable={};m_FrameConstantsDirty=true;
+    m_MaterialBindingTrace.clear();m_MaterialTables.clear();m_MaterialTableCount=0;m_EnvironmentTable={};m_LastMaterialTable={};m_FrameConstantsDirty=true;
     for(auto& page:m_InstancePages[m_FrameIndex])page.used=0;
     m_FrameConstantPageIndex=0;m_FrameConstantAddress=0;
     for(auto& page:m_FrameConstantPages[m_FrameIndex])page.used=0;
@@ -1850,7 +1853,7 @@ void Dx12RenderAdapter::EndFrame()
 {
     if(m_TimeHeap) {
         m_CmdList->EndQuery(m_TimeHeap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_FrameIndex*TimingQueries+1);
-        m_TimePending[m_FrameIndex]=2+4*m_TimePassCount;
+        m_TimePending[m_FrameIndex]=2+6*m_TimePassCount;
         m_TimeComplete[m_FrameIndex]=!m_TimeOverflow;
         m_CmdList->ResolveQueryData(m_TimeHeap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_FrameIndex*TimingQueries,
             m_TimePending[m_FrameIndex],m_TimeReadback[m_FrameIndex].Get(),0);

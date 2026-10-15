@@ -1,4 +1,7 @@
 #include "PrecisionInputs.h"
+#include <cstring>
+#include "TransformMath.h"
+#include "SunSynchronization.h"
 #include "EditorWidgets.h"
 #include "EditorLayer.h"
 #include "../scene/SceneSerializer.h"
@@ -309,7 +312,7 @@ bool EditorLayer::IsPointInsideViewport(double x, double y) const
 void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
 {
     ZoneScopedN("EditorLayer");
-    m_Statistics.hierarchyMs=m_Statistics.inspectorMs=m_Statistics.assetBrowserMs=0;
+    m_Statistics.hierarchyMs=m_Statistics.inspectorMs=m_Statistics.assetBrowserMs=m_Statistics.lightGizmoMs=0;
     const auto uiStart=std::chrono::steady_clock::now();
     struct FinishUi {Statistics& stats;std::chrono::steady_clock::time_point start;~FinishUi(){stats.uiMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}} finish{m_Statistics,uiStart};
     RefreshAssetLists(dt);
@@ -332,7 +335,8 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     PrepareEditorSky(app,renderer);
     if(m_ShowConsole)DrawConsole(app,renderer);
     ImGui::SetNextWindowSize(ImVec2(340, 330), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Physics Stress Test")) {
+    if(m_ShowPhysicsStress){
+    if (ImGui::Begin("Physics Stress Test",&m_ShowPhysicsStress)) {
         static int selection = 2;
         constexpr int counts[] = {100, 250, 500, 1000};
         ImGui::Combo("Cubes", &selection, "100\0" "250\0" "500\0" "1000\0");
@@ -382,6 +386,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
         ImGui::TextWrapped("Create/Restart replace the active scene. Pause freezes Runtime; Stop restores Editor World. Pair/contact counts are peak per substep.");
     }
     ImGui::End();
+    }
 
     if (m_ShowHierarchy)
         DrawSceneHierarchy(app);
@@ -423,6 +428,7 @@ void EditorLayer::HandleEditorShortcuts(Application& app){
         if(ImGui::IsKeyPressed(ImGuiKey_D,false))DuplicateEntity(app,m_SelectedEntity);
     }
     if(!EditorHotkeysAllowed(app.IsEditorPlayMode(),OwnsViewportKeyboard(),io.WantCaptureKeyboard,app.IsCameraControlActive()))return;
+    if(!io.KeyCtrl&&!io.KeyAlt&&!m_InputTextActive&&ImGui::IsKeyPressed(ImGuiKey_G,false))m_GameView=!m_GameView;
     if(ImGui::IsKeyPressed(ImGuiKey_F,false))app.FocusEntity(m_SelectedEntity);
     if(ImGui::IsKeyPressed(ImGuiKey_W,false))m_GizmoOperation=0;
     if(ImGui::IsKeyPressed(ImGuiKey_E,false))m_GizmoOperation=1;
@@ -508,6 +514,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
         app.SetEditorPlayMode(!playMode);
     ImGui::SameLine();
     ImGui::TextUnformatted(playMode ? "Play" : "Edit");
+    if(!playMode){ImGui::SameLine();ImGui::Checkbox("Game View (G)",&m_GameView);}
 
     ImGui::Separator();
 
@@ -551,6 +558,14 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
             "Viewport render target will appear here");
     }
 
+    if(!playMode&&!m_ModalActive&&!m_ToolActive&&!m_LightPointerCaptured&&!m_PlaneScaleCaptured&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&ImGui::BeginDragDropTarget()){
+        if(const auto* payload=ImGui::AcceptDragDropPayload("WHISP_ASSET"))if(payload->DataSize==sizeof(AssetPayload)){
+            const auto& asset=*static_cast<const AssetPayload*>(payload->Data);
+            if((asset.kind==ecs::AssetKind::Mesh||asset.kind==ecs::AssetKind::None)&&std::memchr(asset.key,0,sizeof(asset.key))){
+                auto mouse=ImGui::GetMousePos();auto point=PlacementPoint(app,(mouse.x-contentMin.x)/viewportSize.x,(mouse.y-contentMin.y)/viewportSize.y);if(asset.kind==ecs::AssetKind::Mesh)PlaceModel(app,asset.key,point);else if(std::string(asset.key).ends_with(".wscene"))PlaceImportedScene(app,asset.key,point);
+            }
+        }ImGui::EndDragDropTarget();
+    }
     m_ViewportHovered=ImGui::IsItemHovered();
     if(m_ViewportHovered&&ImGui::IsMouseClicked(1))ImGui::SetWindowFocus();
     if(m_ViewportHovered&&ImGui::IsMouseClicked(0))ImGui::SetWindowFocus();
@@ -663,7 +678,7 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
 {
     if(m_ModalActive){if(m_GizmoUndoCaptured)CancelTransaction(app);m_GizmoUndoCaptured=false;m_CancelGizmoUntilRelease=true;ImGuizmo::Enable(false);return;}
     if((app.IsCameraControlActive()||ImGui::IsMouseDown(1))&&!ImGuizmo::IsUsing())return;
-    if (app.IsEditorPlayMode() || viewportSize.x <= 1.0f || viewportSize.y <= 1.0f)
+    if (app.IsEditorPlayMode() || m_GameView || viewportSize.x <= 1.0f || viewportSize.y <= 1.0f)
         return;
 
     if(m_CancelGizmoUntilRelease){ImGuizmo::Enable(false);if(ImGui::IsMouseDown(0))return;m_CancelGizmoUntilRelease=false;}ImGuizmo::Enable(true);
@@ -700,14 +715,16 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
     ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
     ImGuizmo::SetRect(viewportMin.x, viewportMin.y, viewportSize.x, viewportSize.y);
 
+    if(!ImGuizmo::IsUsing()&&DrawScalePlanes(app,viewportMin,viewportSize))return;
     const ImGuizmo::MODE mode = m_GizmoMode == 0 ? ImGuizmo::LOCAL : ImGuizmo::WORLD;
     float snapValue=m_GizmoOperation==0?m_SnapTranslation:m_GizmoOperation==1?m_SnapRotation:m_SnapScale;float snap[3]={snapValue,snapValue,snapValue};
     float originalMatrix[16];std::copy(matrix,matrix+16,originalMatrix);
-    const bool manipulated=ImGuizmo::Manipulate(view, projection, ToGizmoOperation(m_GizmoOperation), mode, matrix,nullptr,m_Snapping?snap:nullptr);
+    const bool manipulated=ImGuizmo::Manipulate(view, projection, ToGizmoOperation(m_GizmoOperation), mode, matrix,nullptr,(m_GizmoOperation==1?m_RotationSnapping:m_Snapping)?snap:nullptr);
     bool matrixChanged=false;for(int i=0;i<16;++i)matrixChanged|=std::abs(matrix[i]-originalMatrix[i])>1e-6f;
     // ImGuizmo's previous delta may report "modified" on a later stationary drag.
     // Duplicate only when the target matrix actually changes (including snapped movement).
-    if (manipulated&&matrixChanged)
+    const bool gestureMoved=ImGuizmo::IsUsing()&&ImGui::IsMouseDragging(0,.5f*ImGui::GetStyle().FontScaleDpi);
+    if (manipulated&&matrixChanged&&gestureMoved)
     {
         if (!m_GizmoUndoCaptured)
         {
@@ -716,18 +733,8 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
             m_GizmoUndoCaptured = true;
         }
 
-        ImGuizmo::DecomposeMatrixToComponents(matrix, translation, rotation, scale);
-        transform->position = ecs::Vec3{ translation[0], translation[1], translation[2] };
-        transform->rotation = ecs::Vec3{
-            DegreesToRadians(rotation[0]),
-            DegreesToRadians(rotation[1]),
-            DegreesToRadians(rotation[2])
-        };
-        transform->scale = ecs::Vec3{
-            std::max(scale[0], 0.001f),
-            std::max(scale[1], 0.001f),
-            std::max(scale[2], 0.001f)
-        };
+        ImportMatrix result;std::copy(matrix,matrix+16,result.begin());
+        if(auto decomposed=DecomposeTransform(result,transform->scale)){*transform=*decomposed;app.NotifyEditorMutation(m_SelectedEntity);}else m_EditorError="Transform requires shear/singular scale; use Local scale handles";
     }
     else if (!ImGuizmo::IsUsing())
     {
@@ -743,18 +750,21 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
     ImGui::SetNextWindowSizeConstraints(ImVec2(270,180),ImVec2(FLT_MAX,FLT_MAX));
     if(!ImGui::Begin("Scene Settings",&m_ShowSceneSettings)){ImGui::End();return;}
     auto beforeSettings=app.GetSceneSettings();
+    {auto settings=beforeSettings;int aa=int(settings.antiAliasing);if(ImGui::Combo("Anti-Aliasing",&aa,"OFF\0FXAA Low\0FXAA High\0")){BeginSceneTransaction(app,"Anti-aliasing");settings.antiAliasing=AntiAliasingMode(aa);app.SetSceneSettings(settings);FinishTransaction(app);beforeSettings=app.GetSceneSettings();}
+    if(renderer){auto d=renderer->GetAntiAliasingDiagnostics();ImGui::Text("Effective samples: %u (post-process AA), intermediate %.2f MiB",d.effectiveSamples,d.intermediateBytes/1048576.);ImGui::Text("HDR/output GPU %.3f ms",renderer->GetGpuTimings().outputMs);}}
+
     {
         ImGui::PushItemWidth(std::max(90.f,ImGui::GetContentRegionAvail().x*.43f));
         if(ImGui::CollapsingHeader("Scene Background",ImGuiTreeNodeFlags_DefaultOpen)){
-            auto settings=app.GetSceneSettings();auto& b=settings.background;bool changed=false;int mode=int(b.background);
+            auto settings=app.GetSceneSettings();auto& b=settings.background;const auto previousHdr=b.useIblEnvironment?settings.environment.assetPath:b.cubemap;bool changed=false;int mode=int(b.background);
             if(ImGui::BeginTable("BackgroundProperties",2,ImGuiTableFlags_SizingStretchProp)){
                 ImGui::TableSetupColumn("Property",ImGuiTableColumnFlags_WidthFixed,90*ImGui::GetStyle().FontScaleDpi);ImGui::TableSetupColumn("Value",ImGuiTableColumnFlags_WidthStretch);
                 auto row=[&](const char* label,auto control){ImGui::TableNextRow();ImGui::TableSetColumnIndex(0);ImGui::AlignTextToFramePadding();ImGui::TextUnformatted(label);ImGui::TableSetColumnIndex(1);ImGui::SetNextItemWidth(-1);control();};
-                row("Mode",[&]{changed|=ImGui::Combo("##bgMode",&mode,"Solid\0Gradient\0HDR sky\0");});b.background=EditorBackground(mode);
+                row("Mode",[&]{changed|=ImGui::Combo("##bgMode",&mode,"Solid\0Gradient\0HDR sky\0Procedural Day/Night\0");});if(b.background!=EditorBackground(mode)&&mode==3&&b.sunSync==SunSyncMode::SkyDrivesLight)b.sunSync=SunSyncMode::LightDrivesSky;b.background=EditorBackground(mode);
                 row("Intensity",[&]{changed|=PrecisionSliderFloat("##skyIntensity",&b.skyIntensity,0,8);});
                 if(b.background==EditorBackground::Solid)row("Color",[&]{changed|=LinearColorEdit("##bgSolid",b.solid.data(),3,ImGuiColorEditFlags_NoInputs);});
                 else if(b.background==EditorBackground::Gradient){row("Top",[&]{changed|=LinearColorEdit("##bgTop",b.top.data(),3,ImGuiColorEditFlags_NoInputs);});row("Horizon",[&]{changed|=LinearColorEdit("##bgHorizon",b.horizon.data(),3,ImGuiColorEditFlags_NoInputs);});row("Ground",[&]{changed|=LinearColorEdit("##bgBottom",b.bottom.data(),3,ImGuiColorEditFlags_NoInputs);});row("Blend",[&]{changed|=PrecisionSliderFloat("##bgBlend",&b.gradientBlend,.1f,4);});}
-                else{row("Use IBL",[&]{changed|=ImGui::Checkbox("##bgUseIbl",&b.useIblEnvironment);if(ImGui::IsItemHovered())ImGui::SetTooltip("Share the IBL HDR asset and rotation. Visible sky intensity stays independent.");});ImGui::BeginDisabled(b.useIblEnvironment);row("HDR asset",[&]{
+                else if(b.background==EditorBackground::Cubemap){row("Use IBL",[&]{changed|=ImGui::Checkbox("##bgUseIbl",&b.useIblEnvironment);if(ImGui::IsItemHovered())ImGui::SetTooltip("Share the IBL HDR asset and rotation. Visible sky intensity stays independent.");});ImGui::BeginDisabled(b.useIblEnvironment);row("HDR asset",[&]{
                     const auto world=app.GetWorld().GetIdentity();if(!m_BackgroundAssetEditing||m_BackgroundDraftWorld!=world){m_BackgroundAssetDraft=b.cubemap;m_BackgroundDraftWorld=world;}
                     bool edited=ImGui::InputText("##bgAsset",&m_BackgroundAssetDraft);m_BackgroundAssetEditing=ImGui::IsItemActive();edited|=AcceptAssetDrop(ecs::AssetKind::Environment,m_BackgroundAssetDraft);
                     std::string error;const bool valid=ecs::ComponentRegistry::ValidateAssetKey(m_BackgroundAssetDraft,ecs::AssetKind::Environment,&error);
@@ -762,10 +772,16 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
                 });row("Rotation",[&]{changed|=PrecisionSliderFloat("##bgRotation",&b.skyRotation,-180,180,"%.1f deg");});ImGui::EndDisabled();}
                 ImGui::EndTable();
             }
-            int sync=int(b.sunSync);changed|=ImGui::Combo("Sun Sync",&sync,"Independent\0Light Drives Sky (disc)\0Sky Drives Light (metadata)\0");b.sunSync=SunSyncMode(sync);
-            changed|=ImGui::Checkbox("Explicit HDR sun metadata",&b.sunMetadata);
-            if(b.sunMetadata)changed|=PrecisionDragFloat3("Sun direction (sky space)",b.sunDirection.data(),.01f,-1,1,"%.6g",ImGuiSliderFlags_NoRoundToFormat);
-            if(b.sunSync==SunSyncMode::LightDrivesSky){changed|=PrecisionDragFloat("Sun diameter (deg)",&b.sunRadius,.01f,.01f,10,"%.6g",ImGuiSliderFlags_NoRoundToFormat);changed|=PrecisionDragFloat("Visible sun intensity",&b.sunIntensity,.01f,0,32,"%.6g",ImGuiSliderFlags_NoRoundToFormat);ImGui::TextWrapped("Disc follows primary light at any elevation. HDR rotation and precomputed IBL stay unchanged. Use an HDR without an existing sun to avoid two visible discs.");}
+            if(b.background==EditorBackground::DayNight){changed|=LinearColorEdit("Zenith color",b.top.data(),3);changed|=LinearColorEdit("Horizon tint",b.horizon.data(),3);changed|=LinearColorEdit("Ground tint",b.bottom.data(),3);changed|=LinearColorEdit("Night color",b.nightColor.data(),3);changed|=PrecisionSliderFloat("Horizon glow",&b.horizonGlow,0,8);changed|=PrecisionSliderFloat("Sunset warmth",&b.sunsetWarmth,0,4);changed|=PrecisionSliderFloat("Night intensity",&b.nightIntensity,0,4);changed|=ImGui::Checkbox("Drive Light Properties",&b.driveLightProperties);if(b.driveLightProperties)changed|=PrecisionSliderFloat("Daylight intensity",&b.dayLightIntensity,0,8);ImGui::TextWrapped("Artist-friendly sky follows Primary Directional elevation/azimuth. No physical atmosphere or dynamic IBL convolution.");if(settings.environment.enabled)ImGui::TextWrapped("Warning: IBL uses a static HDRI and may not match time of day.");}
+            ImGui::Text("Sun Source: %s",b.background==EditorBackground::Cubemap?"HDRI radiance / optional procedural disc":"Primary Directional / procedural disc");
+            auto primarySun=PrimarySun(app.GetWorld());if(primarySun.IsValid()){auto* tag=app.GetWorld().GetComponent<ecs::TagComponent>(primarySun);auto rays=ecs::LightDirection(ecs::RenderPose::From(*app.GetWorld().GetComponent<ecs::TransformComponent>(primarySun)));ImGui::TextWrapped("Primary Directional Light: %s",tag?tag->name.c_str():"Directional");ImGui::Text("Outgoing rays %.3f %.3f %.3f",rays.x,rays.y,rays.z);ImGui::Text("Sun elevation %.1f / azimuth %.1f deg",std::asin(std::clamp(-rays.y,-1.f,1.f))*57.2957795f,std::atan2(-rays.x,-rays.z)*57.2957795f);}else ImGui::TextWrapped("No enabled Primary Directional; Day/Night preview uses default midday.");
+            if(previousHdr!=(b.useIblEnvironment?settings.environment.assetPath:b.cubemap)){b.sunMetadata=false;if(b.sunSync==SunSyncMode::SkyDrivesLight)b.sunSync=SunSyncMode::Independent;ImGui::TextWrapped("HDR selection changed: confirm explicit Sun Direction for this asset.");}
+            int sync=int(b.sunSync);changed|=ImGui::Combo("Sync Mode",&sync,"Independent\0Light Drives Sky (disc)\0Sky Drives Light (metadata)\0");b.sunSync=SunSyncMode(sync);
+            changed|=ImGui::Checkbox("Use Explicit Sun Direction",&b.sunMetadata);
+            if(b.sunMetadata)changed|=PrecisionDragFloat3("HDR Sun Direction (sky local)",b.sunDirection.data(),.01f,-1,1,"%.6g",ImGuiSliderFlags_NoRoundToFormat);
+            changed|=ImGui::Checkbox("Visible Sun Disc",&b.visibleSunDisc);
+            if(b.background==EditorBackground::Cubemap){if(!b.sunMetadata)ImGui::TextWrapped("Warning: HDRI has no confirmed sun metadata. Set HDR Sun Direction explicitly; no brightest-pixel detection is performed.");ImGui::TextWrapped("HDRI may already contain a sun. Light Drives Sky moves only the procedural disc, not pixels inside the HDR map; enabling both can show two suns.");}
+            if(b.sunSync==SunSyncMode::LightDrivesSky||b.background==EditorBackground::DayNight){changed|=PrecisionDragFloat("Sun diameter (deg)",&b.sunRadius,.01f,.01f,10,"%.6g",ImGuiSliderFlags_NoRoundToFormat);changed|=PrecisionDragFloat("Visible sun intensity",&b.sunIntensity,.01f,0,32,"%.6g",ImGuiSliderFlags_NoRoundToFormat);changed|=PrecisionDragFloat("Glow radius (deg)",&b.sunGlowRadius,.1f,.01f,60);changed|=PrecisionSliderFloat("Glow intensity",&b.sunGlowIntensity,0,4);ImGui::TextWrapped("Disc follows primary light at any elevation. HDR rotation and precomputed IBL stay unchanged. Use an HDR without an existing sun to avoid two visible discs.");}
             if(changed){BeginSceneTransaction(app,"Sky / Sun settings");std::string error;if(!app.SetSceneSettings(settings,&error))m_EditorError=error;else m_EditorError.clear();}
             if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());
             ImGui::TextDisabled("Shared by Edit / Play");
@@ -778,7 +794,7 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
         ImGui::Text("D/P/S %u/%u/%u",sceneLights.directional,sceneLights.point,sceneLights.spot);
         bool tiled=app.GetLightRenderingMode()==LightRenderingMode::Tiled;
         if(ImGui::Checkbox("Tiled Forward+",&tiled))app.SetLightRenderingMode(tiled?LightRenderingMode::Tiled:LightRenderingMode::Forward);
-        ImGui::Checkbox("Show Light Gizmos",&m_ShowLightGizmos);ImGui::SameLine();ImGui::Checkbox("X-ray",&m_LightXray);
+        ImGui::Checkbox("Show Light Gizmos",&m_ShowLightGizmos);ImGui::SameLine();ImGui::Combo("Occlusion",&m_LightXrayMode,"Visible Only\0Selected X-Ray\0Always X-Ray\0");
         ImGui::Text("Tiles %u / indices %u",sceneLights.tiles,sceneLights.indices);
         ImGui::Text("Avg %.1f / max %u / overflow %u",sceneLights.averagePerTile,sceneLights.maxPerTile,sceneLights.overflow);
         ImGui::Text("Gather %.3f / cull CPU %.3f / GPU %.3f ms",sceneLights.gatherMs,sceneLights.cullingCpuMs,sceneLights.cullingGpuMs);

@@ -1,4 +1,5 @@
 #pragma once
+#include <nlohmann/json.hpp>
 #include "../../render/Environment.h"
 #include "../../render/SceneLights.h"
 #include "../../resources/EnvironmentResource.h"
@@ -58,6 +59,8 @@ public:
     void SetShadingModelOverride(int mode) { m_ShadingModelOverride=mode; }
     void SetInstancingEnabled(bool enabled) { m_InstancingEnabled = enabled; }
     bool IsInstancingEnabled() const { return m_InstancingEnabled; }
+    void SetMaterialDiagnostics(bool enabled){m_TraceMaterials=enabled;}
+    const auto& GetMaterialDiagnostics()const{return m_MaterialDiagnostics;}
     struct Statistics {
         std::size_t visibleObjects=0;
         std::size_t materialCacheHits=0,materialCacheMisses=0,visibleSubmeshes=0;
@@ -69,6 +72,10 @@ public:
     void ReleaseGpuResources();
 
 private:
+    bool m_TraceMaterials=false;
+    std::uint64_t m_ResourceCacheEpoch=0;
+    std::vector<nlohmann::json> m_MaterialDiagnostics;
+
     struct RenderSnapshot
     {
         RenderPose pose{};
@@ -130,6 +137,8 @@ private:
     std::unordered_map<std::string, ResourceHandle<TextureResource>> m_TextureResources;
     std::unordered_map<std::string, ResourceHandle<ShaderResource>> m_ShaderResources;
     std::unordered_map<std::string, ResourceHandle<MaterialResource>> m_MaterialResources;
+    std::unordered_map<std::uint64_t,ShadowCasterBounds> m_ShadowLocalBounds;
+    std::vector<ShadowCasterBounds> m_ShadowWorldBounds;
     std::unordered_set<std::string> m_FailedMeshKeys;
     std::unordered_set<std::string> m_FailedTextureKeys;
     std::unordered_set<std::string> m_FailedShaderKeys;
