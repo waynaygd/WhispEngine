@@ -18,6 +18,21 @@ bool Application::CloseProject(ProjectDecision decision,std::string* error){
     if(decision==ProjectDecision::Cancel)return false;
     ecs::World empty;return CommitProject({},empty,SceneSettings{},decision,error);
 }
+bool Application::OpenLegacyWorkspace(std::string* error){
+    if(!IsProjectBrowserActive()){
+        if(error)*error="Choose Legacy Workspace from the startup screen";
+        return false;
+    }
+    // OpenScene stages disk data before replacing the current (empty) workspace.
+    if(!m_LegacyStartupScene.empty()){
+        if(!OpenScene(m_LegacyStartupScene,error))return false;
+    }else SetupEcsRuntimeDemo();
+    m_ProjectBrowserActive=false;
+    InitializeConfigHotReload();
+    m_EditorLayer.ProjectOpened(*this);
+    if(error)error->clear();
+    return true;
+}
 bool Application::CommitProject(std::shared_ptr<const ProjectContext> next,ecs::World& staged,const SceneSettings& settings,ProjectDecision decision,std::string* error){
     // Descriptor and startup scene are staged before changing the current state.
     m_World.AssertOwnerThread();GetWorld().AssertOwnerThread();
@@ -40,6 +55,7 @@ bool Application::CommitProject(std::shared_ptr<const ProjectContext> next,ecs::
     m_World.ReplaceData(staged);m_EcsDebugEntities=m_World.Entities();m_StressEntities.clear();
     m_EditDebugEntities.clear();m_EditStressEntities.clear();
     SetSceneSettings(settings);auto project=GetProject();
+    m_ProjectBrowserActive=!project;
     m_SceneKey=project?project->startupScene:std::string();m_Config.ecsDemo.sceneFile=m_SceneKey;
     m_HasConfigWatch=m_HasSceneWatch=false;m_SceneWatchPath.clear();
     m_EditorLayer.ProjectOpened(*this);

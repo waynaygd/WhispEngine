@@ -82,7 +82,7 @@ public:
     void ResetProjectState(IRenderAdapter*);
     void ProjectOpened(Application&);
     bool HasProjectEdits()const{return m_MaterialDirty||(m_EditHistory?(m_EditHistory->external||m_EditHistory->revision!=m_EditHistory->saved):IsSceneDirty());}
-    void ShowProjectBrowser(){m_ShowProjectBrowser=true;}
+    void ShowProjectBrowser(const std::string& error={}){m_ShowProjectBrowser=true;if(!error.empty())m_ProjectError=error;}
     void RequestProjectOpen(Application&,const std::string& descriptor,bool close=false);
     void RequestProjectExit(){m_ProjectExit=true;m_ProjectConfirm=true;}
     bool ProjectExitConfirmed()const{return m_ProjectExitConfirmed;}

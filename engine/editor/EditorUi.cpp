@@ -80,7 +80,7 @@ void EditorLayer::DrawMainMenu(Application& app){
             const auto recent=m_RecentProjects;for(const auto& entry:recent)if(ImGui::MenuItem(entry.name.c_str()))RequestProjectOpen(app,entry.descriptor);ImGui::EndMenu();
         }
         if(ImGui::MenuItem("Project Settings...",nullptr,false,bool(app.GetProject())))m_ShowProjectBrowser=true;
-        if(ImGui::MenuItem("Close Project",nullptr,false,bool(app.GetProject())))RequestProjectOpen(app,{},true);
+        if(ImGui::MenuItem("Close Project",nullptr,false,!app.IsProjectBrowserActive()))RequestProjectOpen(app,{},true);
         ImGui::Separator();
         if(ImGui::MenuItem("New Scene"))action(1);
         if(ImGui::MenuItem("Open Scene"))action(2);

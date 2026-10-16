@@ -43,7 +43,10 @@ public:
     Application();
     ~Application();       
 
-    bool Initialize();  
+    enum class StartupMode { LegacyWorkspace, ProjectBrowser };
+    bool Initialize(StartupMode mode=StartupMode::LegacyWorkspace);
+    bool IsProjectBrowserActive()const{return m_ProjectBrowserActive;}
+    bool OpenLegacyWorkspace(std::string* error=nullptr);
     int Run();
     void Shutdown();
     void SetUpdateMode(UpdateMode m) {
@@ -167,6 +170,8 @@ public:
 
 
 private:
+    bool m_ProjectBrowserActive=false;
+    std::string m_LegacyStartupScene;
     friend struct ApplicationTestAccess;
     bool CommitProject(std::shared_ptr<const ProjectContext>,ecs::World&,const SceneSettings&,ProjectDecision,std::string*);
     void ResetPhysicsClock() {
@@ -178,7 +183,7 @@ private:
     void RunEcsBootstrapCheck();
     void RunResourceBootstrapCheck();
     void PreloadSceneResourcesAsync(const std::vector<EcsDemoEntityConfig>& entities);
-    void SetupEcsRuntimeDemo();
+    void SetupEcsRuntimeDemo(bool populate=true);
     void InitializeConfigHotReload();
     void PollConfigHotReload();
     bool ReloadSceneFromCurrentConfig(const char* reason);

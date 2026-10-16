@@ -126,7 +126,7 @@ int main(int argc,char** argv){try{
     resources.DrainProjectLoads();resources.ClearAll();Check(app.OpenProject(b->descriptorPath,D::Discard,&error),error);
     auto tb=resources.Load<TextureResource>("textures/wall.bmp");Check(tb!=ta&&tb->GetData().textureData.pixels!=pixels,"same key uses B texture");
     Check(!resources.Load<TextureResource>("textures/missing.png")->IsLoaded(),"missing texture reports failure");
-    Check(app.CloseProject(D::Discard,&error),error);Check(!app.GetProject(),"legacy mode after close");
+    Check(app.CloseProject(D::Discard,&error),error);Check(!app.GetProject()&&app.IsProjectBrowserActive(),"close returns to browser without selecting Legacy Workspace");
     Check(!AssetPaths::ResolveAssetPath("scripts/FirstPersonController.lua").empty(),"legacy resolution restored");
     // Recent descriptors/names persist in editor preferences, outside each game.
     Check(ui.RecentProjects().size()==3,"recent projects includes moved descriptor");
@@ -135,18 +135,41 @@ int main(int argc,char** argv){try{
     editor::EditorPreferences loaded;Check(editor::LoadPreferences(fixture.root/"preferences.json",loaded,&error)&&loaded.recentProjects==prefs.recentProjects,"recent projects disk roundtrip");
 #ifdef ENABLE_DX12
     if(argc>1&&std::string(argv[1])=="--dx12"){
-        Check(app.Initialize(),"DX12 application initialize");
+        Check(app.Initialize(Application::StartupMode::ProjectBrowser),"DX12 startup application initialize");
         auto* window=dynamic_cast<GlfwWindow*>(app.GetWindow());glfwHideWindow(window->GetGlfwHandle());
         auto* dx=dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter());Check(dx!=nullptr,"DX12 adapter");
         SyntheticEditorInput input;ui.SetFixedDiagnosticLayout(true);app.SetFrameLimit(2);
-        ui.ShowProjectBrowser();Check(app.Run()==0,"Project Browser ImGui frames");
-        Check(ImGui::FindWindowByName("Project Browser")!=nullptr,"Project Browser rendered");
+        Check(app.GetWorld().GetAliveCount()==0&&app.GetSceneKey().empty(),"startup does not load legacy scene");
+        auto browserOnly=[&]{
+            Check(app.Run()==0,"Project Browser ImGui frames");
+            auto* browser=ImGui::FindWindowByName("Project Browser");Check(browser&&browser->Active,"Project Browser rendered");
+            Check(!browser->HasCloseButton,"startup browser cannot close into legacy editor");
+            for(const char* name:{"Viewport","Scene Hierarchy","Asset Browser","Scene Settings","Inspector","Main Toolbar"}){
+                auto* panel=ImGui::FindWindowByName(name);Check(!panel||!panel->Active,"startup has no editor panels behind browser");
+            }
+            Check(ui.GetViewportPixelWidth()==0&&!ui.OwnsViewportKeyboard(),"startup owns input without a viewport");
+        };
+        browserOnly();
+        const auto startupFrame=ImGui::GetFrameCount();
+        glfwSetWindowShouldClose(window->GetGlfwHandle(),GLFW_TRUE);Check(app.Run()==0,"startup window close exits normally");
+        Check(ImGui::GetFrameCount()==startupFrame&&window->ShouldClose(),"startup window close needs no workspace confirmation");
+        glfwSetWindowShouldClose(window->GetGlfwHandle(),GLFW_FALSE);browserOnly();
+        app.SetEditorPlayMode(true);Check(!app.IsEditorPlayMode(),"startup does not accept Play");
+        SyntheticEditorInput::Key(ImGuiKey_F11,true);app.Run();SyntheticEditorInput::Key(ImGuiKey_F11,false);browserOnly();
+        Check(!app.OpenProject(fixture.root/"broken.whispproject",D::Discard,&error)&&app.IsProjectBrowserActive()&&app.GetWorld().GetAliveCount()==0,"failed startup open preserves browser");
+        auto* chooser=ImGui::FindWindowByName("Project Browser")->DC.ChildWindows.front();
+        ImGui::ActivateItemByID(chooser->GetID("Legacy Workspace"));app.Run();
+        Check(!app.IsProjectBrowserActive()&&!app.GetProject()&&app.GetWorld().GetAliveCount()>0,"explicit Legacy Workspace loads existing scene");
+        Check(app.CloseProject(D::Discard,&error),error);browserOnly();
         Check(app.OpenProject(moved/"HospitalDemo.whispproject",D::Discard,&error),error);
+        Check(!app.IsProjectBrowserActive(),"explicit project open bypasses startup screen");
         auto* rm=app.GetResourceManager();auto realA=rm->Load<TextureResource>("textures/wall.bmp");
         auto primitive=ui.CreatePrimitive(app,"cube");Check(primitive.IsValid(),"project built-in cube creation");
         app.GetWorld().GetComponent<ecs::TransformComponent>(primitive)->position={0,0,4};
         app.GetWorld().GetComponent<ecs::MaterialComponent>(primitive)->texturePath="textures/wall.bmp";
         Check(app.SaveCurrentScene(&error),error);app.SetFrameLimit(30);app.Run();
+        Check(ImGui::FindWindowByName("Viewport")&&ImGui::FindWindowByName("Viewport")->Active,"project opens full editor viewport");
+        Check(!ImGui::FindWindowByName("Project Browser")->Active,"successful project open dismisses startup browser");
         Check(rm->Load<MeshResource>("@engine/models/primitives/cube.obj")->IsLoaded(),"built-in engine mesh stays available");
         Check(app.GetRenderStatistics().submitted.drawCalls>0,"project scene DX12 draw calls");
         Check(realA->GetData().gpuHandle.IsValid(),"A wall texture uploaded to GPU");

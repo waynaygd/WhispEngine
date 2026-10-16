@@ -2,8 +2,13 @@
 
 ## Создание и открытие
 
-При обычном запуске `WhispEngine.exe` появляется **Project Browser**. Он также
-доступен через **File → New Project / Open Project / Project Settings**.
+При обычном запуске `WhispEngine.exe` появляется отдельный стартовый **Project
+Browser**, без сцены и панелей редактора позади. Редактор становится доступен
+после открытия проекта или явного выбора **Legacy Workspace**. Project Browser
+также доступен через **File → New Project / Open Project / Project Settings**.
+`WhispEngine.exe --project <descriptor.whispproject>` сразу открывает проект;
+при ошибке остаётся стартовый экран с сообщением. **Close Project** возвращает
+на стартовый экран, не включая Legacy Workspace автоматически.
 
 На вкладке **New Project** задайте Project Name, Location — существующую родительскую
 папку — и шаблон Empty Project. **Create** создаёт новую папку и открывает проект.
@@ -109,8 +114,12 @@ Editor preferences и ImGui layout хранятся рядом с EXE, вне п
 
 ## Legacy Workspace и ограничения
 
-Закройте Project Browser при запуске или выполните Close Project, чтобы работать
-в Legacy Workspace. Старые `scenes/*.json`, staged/source `engine/assets` и
+Выберите **Legacy Workspace** на стартовом экране или запустите
+`WhispEngine.exe --legacy`, чтобы работать в старом режиме. При использовании
+прежних demo/benchmark CLI-параметров также укажите `--legacy`.
+Стартовый Browser закрывается кнопкой **Exit** или закрытием окна приложения;
+закрытие Browser не служит неявным выбором Legacy Workspace.
+Старые `scenes/*.json`, staged/source `engine/assets` и
 regression tests продолжают использовать прежнее разрешение путей. Автоматической
 миграции, удаления и массового перемещения legacy-ресурсов нет.
 

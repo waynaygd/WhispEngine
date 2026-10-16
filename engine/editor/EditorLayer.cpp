@@ -317,6 +317,14 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     m_Statistics.hierarchyMs=m_Statistics.inspectorMs=m_Statistics.assetBrowserMs=m_Statistics.lightGizmoMs=0;
     const auto uiStart=std::chrono::steady_clock::now();
     struct FinishUi {Statistics& stats;std::chrono::steady_clock::time_point start;~FinishUi(){stats.uiMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}} finish{m_Statistics,uiStart};
+    if(app.IsProjectBrowserActive()){
+        m_ViewportPixelWidth=m_ViewportPixelHeight=0;
+        m_ViewportHovered=m_ViewportHasBounds=m_ViewportFocused=m_HierarchyFocused=false;
+        m_ToolActive=m_LightPointerCaptured=m_LightHandleHovered=false;
+        m_InputTextActive=ImGui::GetIO().WantTextInput;m_ModalActive=true;
+        DrawProjectBrowser(app);
+        return;
+    }
     RefreshAssetLists(dt);
     PruneSelection(app);
     if(m_Transaction&&!m_Transaction->before.settings&&m_Transaction->before.entity.IsValid()&&m_Transaction->before.entity!=m_Selection.active)FinishTransaction(app);
@@ -345,6 +353,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     m_ViewportHasBounds = false;
     m_ViewportFocused=false;m_HierarchyFocused=false;
     DrawMainMenu(app);DrawSceneDialogs(app);DrawProjectBrowser(app);
+    if(app.IsProjectBrowserActive())return;
     if(m_ShowSceneSettings)DrawSceneSettings(app,renderer,dt);
     if(m_ShowVisualSettings)DrawEditorVisualSettings(app,renderer);
     PrepareEditorSky(app,renderer);

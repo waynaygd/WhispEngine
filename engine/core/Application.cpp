@@ -427,7 +427,7 @@ void Application::RunEcsBootstrapCheck()
     Logger::Get().Info("ECS bootstrap: world reset after self-check");
 }
 
-void Application::SetupEcsRuntimeDemo()
+void Application::SetupEcsRuntimeDemo(bool populate)
 {
     ClearPhysicsStressScene();
     GetWorld().Clear();
@@ -459,6 +459,7 @@ void Application::SetupEcsRuntimeDemo()
     m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled);
 
     m_EcsDebugEntities.clear();
+    if(!populate)return;
     const std::vector<EcsDemoEntityConfig> entities =
         m_Config.ecsDemo.initialEntities.empty() ? BuildDefaultEcsDemoEntities() : m_Config.ecsDemo.initialEntities;
     PreloadSceneResourcesAsync(entities);
@@ -572,7 +573,7 @@ void Application::InitializeConfigHotReload()
     }
 
     m_SceneWatchPath.clear();
-    if (!m_Config.ecsDemo.sceneFile.empty())
+    if (!m_ProjectBrowserActive && !m_Config.ecsDemo.sceneFile.empty())
     {
         m_SceneWatchPath = AssetPaths::ResolveAssetPath(m_Config.ecsDemo.sceneFile);
         if (!m_SceneWatchPath.empty() && std::filesystem::exists(m_SceneWatchPath, ec))
@@ -621,7 +622,7 @@ void Application::ConfigureInputBindings()
 
 void Application::PollConfigHotReload()
 {
-    if(ProjectManager::Active())return;
+    if(m_ProjectBrowserActive||ProjectManager::Active())return;
     std::error_code ec;
 
     if (m_HasConfigWatch && std::filesystem::exists(m_ConfigWatchPath, ec))
@@ -834,6 +835,7 @@ void Application::ExitGameplayScene()
 
 void Application::UpdateCameraController(float dt)
 {
+    if(m_ProjectBrowserActive)return;
     auto* primary = dynamic_cast<GlfwWindow*>(GetWindow());
     if (primary == nullptr)
         return;
@@ -1083,6 +1085,7 @@ bool Application::IsInputActionActive(const std::string& action) const
 
 void Application::SetEditorPlayMode(bool enabled)
 {
+    if(enabled&&m_ProjectBrowserActive)return;
     if(m_EditorPlayMode==enabled)return;
     // A Play/Stop transition must release editor free-fly capture as well.
     // Keep previousRightMouseDown until release, so a held RMB cannot recapture
@@ -1182,7 +1185,7 @@ void Application::UpdateEcs(float dt)
     Logger::Get().Info(ss.str());
 }
 
-bool Application::Initialize()
+bool Application::Initialize(StartupMode mode)
 {
     Logger::Get().Initialize("engine.log");
     Logger::Get().Info("Application Initialize");
@@ -1200,7 +1203,8 @@ bool Application::Initialize()
 
     m_ResourceManager =
         std::make_unique<ResourceManager>(m_JobSystem.get());
-    RunResourceBootstrapCheck();
+    m_ProjectBrowserActive=mode==StartupMode::ProjectBrowser;
+    if(!m_ProjectBrowserActive)RunResourceBootstrapCheck();
 
     RunEcsBootstrapCheck();
 
@@ -1213,7 +1217,7 @@ bool Application::Initialize()
     m_Config.ecsDemo.initialEntities = BuildDefaultEcsDemoEntities();
 
     const bool configLoaded = ConfigLoader::Load(m_ConfigWatchPath.string(), m_Config);
-    if (!m_Config.ecsDemo.sceneFile.empty())
+    if (!m_ProjectBrowserActive && !m_Config.ecsDemo.sceneFile.empty())
     {
         std::string sceneError;
         std::vector<EcsDemoEntityConfig> sceneEntities;
@@ -1288,17 +1292,21 @@ bool Application::Initialize()
 
         if(m_RuntimeWorld){ecs::GroundCharacter(*m_RuntimeWorld,e.a,e);ecs::GroundCharacter(*m_RuntimeWorld,e.b,e);}
     });
-    SetupEcsRuntimeDemo();
-    if(!m_Config.ecsDemo.sceneFile.empty()){std::string error;if(!OpenScene(m_Config.ecsDemo.sceneFile,&error))Logger::Get().Error(error);}
+    m_LegacyStartupScene=m_Config.ecsDemo.sceneFile;
+    SetupEcsRuntimeDemo(!m_ProjectBrowserActive);
+    if(!m_ProjectBrowserActive&&!m_Config.ecsDemo.sceneFile.empty()){std::string error;if(!OpenScene(m_Config.ecsDemo.sceneFile,&error))Logger::Get().Error(error);}
     m_EditorLayer.InitializePreferences(*this);
+    if(m_ProjectBrowserActive)m_EditorLayer.ShowProjectBrowser();
     // SetupRenderStressScene();
     // Stress scene is created explicitly from the editor panel.
     InitializeConfigHotReload();
 
     m_IsRunning = true;
 
-    RequestStateChange(std::make_unique<LoadingState>());
-    m_StateMachine.ApplyPending(*this);
+    if(!m_ProjectBrowserActive){
+        RequestStateChange(std::make_unique<LoadingState>());
+        m_StateMachine.ApplyPending(*this);
+    }
 
     return true;
 }
@@ -1381,7 +1389,7 @@ int Application::Run()
             m_Windows[0].window->PollEvents();
 
         auto* primary = dynamic_cast<GlfwWindow*>(GetWindow());
-        if (primary)
+        if (primary&&!m_ProjectBrowserActive)
         {
             GLFWwindow* w = primary->GetGlfwHandle();
             static bool prevF5 = false;
@@ -1614,7 +1622,7 @@ int Application::Run()
                 const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
                 const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();
                 const bool renderSceneToViewport =
-                    wc.editorUiAvailable &&
+                    !m_ProjectBrowserActive && wc.editorUiAvailable &&
                     viewportWidth > 1 &&
                     viewportHeight > 1 &&
                     wc.renderer->BeginViewportRender(viewportWidth, viewportHeight, wc.clear);
@@ -1640,7 +1648,7 @@ int Application::Run()
 
                 wc.renderer->Clear(wc.clear[0], wc.clear[1], wc.clear[2], wc.clear[3]);
 
-                if (!renderSceneToViewport)
+                if (!renderSceneToViewport&&!m_ProjectBrowserActive)
                 {
                     if (m_RenderSystem != nullptr)
                     {
