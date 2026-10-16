@@ -1281,6 +1281,7 @@ bool Application::Initialize()
     m_Windows.push_back(std::move(ctx));
     ConfigureInputBindings();
     m_EventBus.SubscribeCollision([this](const ecs::CollisionEvent& e){
+        if(e.kind!=ecs::CollisionKind::Contact){m_LuaRuntime.QueueCollision(e);return;}
         m_LuaRuntime.QueueCollision(e);
         m_ActiveCollisionPairs.insert(BuildCollisionPairKey(e.a.index, e.b.index));
 

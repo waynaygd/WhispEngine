@@ -11,5 +11,6 @@ struct ColliderComponent {
     float restitution = 0.05f;
     float friction = 0.85f;
     bool autoFitFromMesh = true;
+    bool isTrigger = false;
 };
 }
