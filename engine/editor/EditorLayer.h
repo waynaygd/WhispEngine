@@ -231,6 +231,8 @@ private:
     void DrawImportDialogs(Application& app);
     void DrawMaterialEditor(Application& app);
     void DrawLightGizmos(Application&,IRenderAdapter*,const ImVec2&,const ImVec2&);
+    bool DrawViewportCreateMenu(Application&);
+    void DrawFogGizmos(Application&,const ImVec2&,const ImVec2&);
     void DrawPlayerStartGizmos(Application&,const ImVec2&,const ImVec2&);
     bool m_ShowLightGizmos=true,m_LightXray=false;
     int m_LightXrayMode=1,m_TransformPrecision=1,m_RotateAxis=1;

@@ -57,6 +57,8 @@ add_library(Engine
   editor/EditorInspector.cpp
   editor/EditorPreferences.cpp
   editor/EditorUi.cpp
+  editor/EditorViewportCreate.cpp
+  editor/EditorFogGizmos.cpp
   editor/EditorVisualSettings.cpp
   editor/AssetCatalog.cpp
   editor/EditorAssetPreview.cpp

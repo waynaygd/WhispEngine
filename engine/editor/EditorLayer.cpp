@@ -581,9 +581,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
 
     const bool playMode = app.IsEditorPlayMode();
     if(!maximized){
-    ImGui::BeginDisabled(playMode);if(ImGui::Button("Create"))ImGui::OpenPopup("CreateEntity");ImGui::EndDisabled();
-    if(playMode&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Stop Play before creating editor entities.");
-    if(ImGui::BeginPopup("CreateEntity")){if(ImGui::BeginMenu("3D Object")){for(const char* type:{"cube","sphere","cylinder","cone","plane"}){std::string label=type;label[0]=char(std::toupper(label[0]));if(ImGui::MenuItem(label.c_str()))CreatePrimitive(app,type);}ImGui::EndMenu();}if(ImGui::MenuItem("Empty Entity"))CreateEntity(app);if(ImGui::BeginMenu("Player")){if(ImGui::MenuItem("Player Start"))CreatePlayerStart(app);ImGui::EndMenu();}if(ImGui::BeginMenu("Light")){if(ImGui::MenuItem("Directional"))CreateLight(app,LightType::Directional);if(ImGui::MenuItem("Point"))CreateLight(app,LightType::Point);if(ImGui::MenuItem("Spot"))CreateLight(app,LightType::Spot);ImGui::EndMenu();}ImGui::EndPopup();}
+    DrawViewportCreateMenu(app);
     ImGui::SameLine();
     if (ImGui::Button(playMode ? "Stop" : "Play"))
         app.SetEditorPlayMode(!playMode);
@@ -649,13 +647,19 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
         }ImGui::EndDragDropTarget();
     }
     m_ViewportHovered=ImGui::IsItemHovered();
+    if(maximized){
+        const auto cursor=ImGui::GetCursorScreenPos();ImGui::SetCursorScreenPos(ImVec2(contentMin.x+8,contentMin.y+8));
+        if(DrawViewportCreateMenu(app))m_ViewportHovered=false;
+        ImGui::SetCursorScreenPos(cursor);
+    }
     if(m_ViewportHovered&&ImGui::IsMouseClicked(1))ImGui::SetWindowFocus();
     if(m_ViewportHovered&&ImGui::IsMouseClicked(0))ImGui::SetWindowFocus();
     m_LightHandleHovered=m_LightIconClicked=false;
     DrawLightGizmos(app,renderer,contentMin,viewportSize);
     DrawPlayerStartGizmos(app,contentMin,viewportSize);
+    DrawFogGizmos(app,contentMin,viewportSize);
     ImGui::GetWindowDrawList()->PushClipRect(contentMin,ImVec2(contentMin.x+viewportSize.x,contentMin.y+viewportSize.y),true);
-    if(!m_LightPointerCaptured&&!m_LightHandleHovered)DrawGizmo(app, contentMin, viewportSize);
+    if(!m_LightIconClicked&&!m_LightPointerCaptured&&!m_LightHandleHovered)DrawGizmo(app, contentMin, viewportSize);
     ImGui::GetWindowDrawList()->PopClipRect();
     DrawViewportOverlays(app,contentMin,viewportSize);
     m_ToolActive=ImGuizmo::IsUsing()||(m_Transaction&&!m_Transaction->before.settings);

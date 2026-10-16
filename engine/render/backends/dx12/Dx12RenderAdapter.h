@@ -332,15 +332,16 @@ private:
         UINT64 allocationBytes=0;
     };
     HdrTarget m_HdrTargets[FrameCount];
-    struct FogPassResources {HdrTarget target;Microsoft::WRL::ComPtr<ID3D12Resource> constants,readback;bool pending=false;};
+    struct FogPassResources {HdrTarget target,volume;Microsoft::WRL::ComPtr<ID3D12Resource> constants,readback;bool pending=false;};
     std::vector<FogPassResources> m_FogPasses[FrameCount];
     FogFrame m_Fog;
     FogDiagnostics m_FogDiagnostics{true};
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_FogRoot;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_FogPso;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_FogPso,m_FogVolumePso,m_FogCompositePso;
     Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_FogTime;
     UINT m_FogPassCursor=0;
     double m_FogGpuMs=0;
+    void EnsureFogTarget(HdrTarget&,UINT,UINT);
     bool EnsureFogPipeline();
     void ApplyFog();
     void CollectFogTiming(UINT);

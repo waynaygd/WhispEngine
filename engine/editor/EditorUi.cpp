@@ -97,10 +97,7 @@ void EditorLayer::DrawMainMenu(Application& app){
         ImGui::Separator();if(ImGui::MenuItem("Reset Layout")){m_ResetLayout=true;m_ShowHierarchy=m_ShowInspector=m_ShowViewport=m_ShowAssetBrowser=m_ShowConsole=true;}
         if(ImGui::MenuItem("Navigation and snapping"))preferencesRequested=true;ImGui::MenuItem("ImGui Demo",nullptr,&m_ShowDemoWindow);ImGui::EndMenu();
     }
-    if(ImGui::BeginMenu("Create")){if(ImGui::BeginMenu("Environment")){if(ImGui::MenuItem("Fog"))CreateFog(app);ImGui::EndMenu();}ImGui::EndMenu();}
     if(ImGui::BeginMenu("Scene")){
-        if(ImGui::MenuItem("Create Entity"))CreateEntity(app);
-        if(ImGui::BeginMenu("Create Light")){if(ImGui::MenuItem("Directional"))CreateLight(app,LightType::Directional);if(ImGui::MenuItem("Point"))CreateLight(app,LightType::Point);if(ImGui::MenuItem("Spot"))CreateLight(app,LightType::Spot);ImGui::EndMenu();}
         if(ImGui::MenuItem("Focus Selected","F"))app.FocusEntity(m_Selection.active);
         ImGui::Separator();if(ImGui::MenuItem("Play",nullptr,false,!app.IsEditorPlayMode()))app.SetEditorPlayMode(true);if(ImGui::MenuItem("Pause / Resume",nullptr,false,app.IsEditorPlayMode()))app.SetEditorPaused(!app.IsEditorPaused());if(ImGui::MenuItem("Stop",nullptr,false,app.IsEditorPlayMode()))app.SetEditorPlayMode(false);ImGui::EndMenu();
     }
