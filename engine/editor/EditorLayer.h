@@ -139,8 +139,8 @@ public:
     std::string CreatePrefabAsset(Application&,const std::string& directory);
     bool RenameMaterialAsset(Application&,const std::string&,const std::string&,bool confirmed,std::string* error=nullptr);
     bool DeleteMaterialAsset(Application&,const std::string&,bool confirmed,std::string* error=nullptr);
-    bool RenameAssetFile(Application&,const std::string&,const std::string& name,bool confirmed,std::string* error=nullptr);
-    bool DeleteAssetFile(Application&,const std::string&,bool confirmed,std::string* error=nullptr);
+    bool RenameAssetFile(Application&,const std::string&,const std::string& name,bool confirmed,std::string* error=nullptr,bool acceptDynamicRisk=false);
+    bool DeleteAssetFile(Application&,const std::string&,bool confirmed,std::string* error=nullptr,bool acceptDynamicRisk=false);
     std::vector<std::string> AssetFileBlockers(Application&,const std::string&)const;
     const std::string& SelectedAsset()const{return m_SelectedAsset;}
     void SelectAsset(const std::string& key,const std::string& kind){m_SelectedAsset=key;m_SelectedAssetKind=kind;}
@@ -285,6 +285,8 @@ private:
     std::filesystem::file_time_type m_AssetActionTime{};
     std::uintmax_t m_AssetActionSize=0;
     std::vector<std::string> m_AssetActionBlockers;
+    std::vector<std::string> m_AssetActionWarnings;
+    bool m_AssetDynamicRiskAccepted=false;
     std::string m_AssetDirectory;
     bool AssetReferenced(Application&,const std::string&)const;
     std::string m_HierarchyFilter,m_AssetFilter,m_ConsoleFilter,m_RenameBuffer,m_SceneDialogKey="scenes/new_scene.json",m_UnsavedSaveKey="scenes/untitled.json";

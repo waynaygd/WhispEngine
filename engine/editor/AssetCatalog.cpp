@@ -1,5 +1,6 @@
 #include "AssetCatalog.h"
 #include "AssetImport.h"
+#include "LuaAssetDependencies.h"
 #include "../core/AssetPaths.h"
 #include "../resources/loaders/MaterialLoader.h"
 #include <fstream>
@@ -129,8 +130,8 @@ std::string AssetCatalog::RenameDestination(const std::string& key,const std::st
     auto parent=std::filesystem::u8path(key).parent_path();auto destination=DirectoryKey(parent/std::filesystem::u8path(stem+suffix));
     (void)AssetImport::SafeTarget(AssetPaths::ResolveAssetRoot(),destination);return destination;
 }
-std::vector<std::string> AssetCatalog::Dependencies(const std::string& key){
-    std::vector<std::string> found;
+AssetDependencyAudit AssetCatalog::AuditDependencies(const std::string& key){
+    AssetDependencyAudit found;
     const std::set<std::filesystem::path> roots={std::filesystem::weakly_canonical(AssetPaths::ResolveAssetRoot()),std::filesystem::weakly_canonical(AssetImport::ProjectRoot())};
     const auto filename=AssetPaths::ToUtf8String(std::filesystem::u8path(key).filename());
     for(const auto& root:roots)try{
@@ -143,7 +144,7 @@ std::vector<std::string> AssetCatalog::Dependencies(const std::string& key){
             for(auto& c:ext)c=char(std::tolower(static_cast<unsigned char>(c)));
             const bool json=ext==".json"||ext==".material"||ext==".wscene"||ext==".gltf";
             const bool text=ext==".lua"||ext==".obj"||ext==".mtl";
-            if((ext==".fbx"||ext==".glb")&&key.starts_with("textures/")){found.push_back(AssetPaths::ToUtf8String(item.path())+": opaque model dependencies cannot be audited safely");continue;}
+            if((ext==".fbx"||ext==".glb")&&key.starts_with("textures/")){found.incomplete.push_back(AssetPaths::ToUtf8String(item.path())+": opaque model dependencies cannot be audited safely");continue;}
             if(!json&&!text)continue;
             if(item.file_size()>16*1024*1024)throw std::runtime_error("Dependency file exceeds audit limit: "+relative);
             std::ifstream in(item.path(),std::ios::binary);if(!in)throw std::runtime_error("Cannot read dependency file: "+relative);
@@ -162,32 +163,41 @@ std::vector<std::string> AssetCatalog::Dependencies(const std::string& key){
                     }
                     if(value.is_structured())for(const auto& child:value)if(self(self,child))return true;return false;
                 };referenced=references(references,document);
+            }else if(ext==".lua"){
+                detail::LuaDependencies lua;
+                try{lua=detail::AnalyzeLuaDependencies(data);}catch(const std::exception& failure){throw std::runtime_error("Lua dependency audit failed: "+relative+": "+failure.what());}
+                for(const auto& value:lua.values)if(ContainsReference(value,key)){referenced=true;break;}
+                if(key.starts_with("prefabs/"))for(const auto& warning:lua.dynamic)found.dynamic.push_back(AssetPaths::ToUtf8String(item.path())+": "+warning);
             }else{
                 // Conservative text audit, never execute Lua or rewrite source.
                 std::string lower=data,target=key,base=filename;for(auto* s:{&lower,&target,&base})for(auto& c:*s)c=char(std::tolower(static_cast<unsigned char>(c)));
                 referenced=lower.find(target)!=std::string::npos||lower.find(base)!=std::string::npos;
-                if(ext==".lua"&&key.starts_with("prefabs/")&&data.find("spawn_prefab")!=std::string::npos&&!referenced){
-                    found.push_back(AssetPaths::ToUtf8String(item.path())+": dynamic Lua prefab dependency cannot be proven safe");
-                }
             }
-            if(referenced)found.push_back(AssetPaths::ToUtf8String(item.path()));
+            if(referenced)found.confirmed.push_back(AssetPaths::ToUtf8String(item.path()));
         }
-    }catch(const std::exception& e){found.push_back("Dependency audit incomplete: "+std::string(e.what()));}
+    }catch(const std::exception& e){found.incomplete.push_back("Dependency audit incomplete: "+std::string(e.what()));}
     return found;
 }
+std::vector<std::string> AssetCatalog::Dependencies(const std::string& key){
+    auto audit=AuditDependencies(key);auto blockers=std::move(audit.confirmed);blockers.insert(blockers.end(),audit.incomplete.begin(),audit.incomplete.end());return blockers;
+}
 namespace {
-void RequireNoDependencies(const std::string& key){
-    auto dependencies=AssetCatalog::Dependencies(key);if(dependencies.empty())return;
+void RequireNoDependencies(const std::string& key,bool acceptDynamicRisk){
+    auto audit=AssetCatalog::AuditDependencies(key);auto dependencies=std::move(audit.confirmed);dependencies.insert(dependencies.end(),audit.incomplete.begin(),audit.incomplete.end());
+    if(dependencies.empty()){
+        if(audit.dynamic.empty()||acceptDynamicRisk)return;
+        std::string message="Dynamic Lua dependency risk requires separate explicit confirmation:";for(auto& warning:audit.dynamic)message+="\n- "+warning;throw std::runtime_error(message);
+    }
     std::string message="Asset operation blocked. Dependencies / incomplete checks:";for(auto& source:dependencies)message+="\n- "+source;throw std::runtime_error(message);
 }
 }
-bool AssetCatalog::RenameAssetFile(const std::string& from,const std::string& to,std::string* error){return Guard([&]{
+bool AssetCatalog::RenameAssetFile(const std::string& from,const std::string& to,std::string* error,bool acceptDynamicRisk){return Guard([&]{
     auto source=EditablePath(from);
     if(RenameDestination(from,AssetPaths::ToUtf8String(std::filesystem::u8path(to).filename()))!=to)throw std::runtime_error("Invalid destination filename");
     if(std::filesystem::u8path(from).parent_path()!=std::filesystem::u8path(to).parent_path()||FileSuffix(from)!=FileSuffix(to))throw std::runtime_error("Rename must preserve folder and complete extension");
     auto destination=AssetImport::SafeTarget(AssetPaths::ResolveAssetRoot(),to);
     if(std::filesystem::exists(destination))throw std::runtime_error("Destination already exists; nothing was overwritten");
-    RequireNoDependencies(from);source=EditablePath(from); // recheck immediately before mutation
+    RequireNoDependencies(from,acceptDynamicRisk);source=EditablePath(from); // recheck immediately before mutation
 #ifdef _WIN32
     if(!MoveFileExW(source.c_str(),destination.c_str(),MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Rename failed (Windows error "+std::to_string(GetLastError())+")");
 #else
@@ -195,8 +205,8 @@ bool AssetCatalog::RenameAssetFile(const std::string& from,const std::string& to
 #endif
     created.erase(from);hiddenFallbacks.insert(from);++revision;
 },error);}
-bool AssetCatalog::DeleteAssetFile(const std::string& key,std::string* error){return Guard([&]{
-    auto path=EditablePath(key);RequireNoDependencies(key);path=EditablePath(key);
+bool AssetCatalog::DeleteAssetFile(const std::string& key,std::string* error,bool acceptDynamicRisk){return Guard([&]{
+    auto path=EditablePath(key);RequireNoDependencies(key,acceptDynamicRisk);path=EditablePath(key);
 #ifdef _WIN32
     if(!DeleteFileW(path.c_str()))throw std::runtime_error("Delete failed (Windows error "+std::to_string(GetLastError())+")");
 #else

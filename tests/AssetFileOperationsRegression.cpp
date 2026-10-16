@@ -84,6 +84,40 @@ static void Cpu(){
     Check(ui.DeleteAssetFile(app,"scripts/final.lua",true,&error)&&ui.SelectedAsset().empty(),"delete clears selection");
     Check(fs::exists(source/old)&&!fs::exists(active/"scripts/final.lua"),"authoring source never deleted");app.Shutdown();
 }
+static void PrefabDependencies(){
+    const auto wave=Read(AssetPaths::ResolveAssetRoot()/"scripts/wave_controller.lua");Check(wave.find("self.enemy_prefab")!=std::string::npos,"real Wave controller fixture");
+    Fixture fixture;const auto active=AssetPaths::ResolveAssetRoot(),source=fixture.base/"engine/assets";AssetCatalog catalog;auto& error=lastError;
+    const std::string key="prefabs/entity_entity-123.prefab.json",renamed="prefabs/renamed.prefab.json",enemy="prefabs/wave_enemy.prefab.json";
+    Write(active/key,"{\"version\":1,\"components\":{}}");Write(source/key,"{\"authoring\":true}");Write(active/enemy,"{\"version\":1,\"components\":{}}");
+    Write(active/"scripts/wave_controller.lua",wave);Write(source/"scripts/wave_controller.lua",wave);
+    auto audit=AssetCatalog::AuditDependencies(key);Check(audit.confirmed.empty()&&audit.incomplete.empty()&&!audit.dynamic.empty()&&AssetCatalog::Dependencies(key).empty(),"unrelated prefab has warnings, not hard dependencies");
+    Check(!catalog.RenameAssetFile(key,renamed,&error)&&error.find("explicit confirmation")!=std::string::npos,"normal Rename confirmation does not imply dynamic consent");
+    Check(catalog.RenameAssetFile(key,renamed,&error,true)&&Read(source/key)=="{\"authoring\":true}","explicit dynamic Rename changes only active root");
+    Check(!catalog.DeleteAssetFile(renamed,&error)&&fs::exists(active/renamed),"Delete dynamic risk requires separate consent");
+    Check(catalog.DeleteAssetFile(renamed,&error,true),"explicit dynamic Delete permitted for unrelated prefab");
+    audit=AssetCatalog::AuditDependencies(enemy);Check(!audit.confirmed.empty()&&!catalog.DeleteAssetFile(enemy,&error,true)&&!catalog.RenameAssetFile(enemy,"prefabs/broken.prefab.json",&error,true),"actual Lua default remains protected even with dynamic consent");
+    Check(Read(active/"scripts/wave_controller.lua")==wave&&Read(source/"scripts/wave_controller.lua")==wave,"dependency audit never edits Lua source");
+    Write(active/key,"{\"version\":1,\"components\":{}}");
+    for(const auto& path:{active/"scenes/override.json",active/"prefabs/override.prefab.json",source/"scenes/override.json"}){
+        Write(path,nlohmann::json{{"components",{{"LuaScript",{{"scriptPath","scripts/wave_controller.lua"},{"properties",{{"enemy_prefab",key}}}}}}}}.dump());
+        Check(!AssetCatalog::AuditDependencies(key).confirmed.empty()&&!catalog.DeleteAssetFile(key,&error,true)&&!catalog.RenameAssetFile(key,renamed,&error,true),"saved scene/prefab/source overrides remain hard blockers");fs::remove(path);
+    }
+    Application app;app.NewScene();auto& ui=app.GetEditorLayer();auto e=ui.CreateEntity(app,"Spawner");Check(ui.AssignAsset(app,e,ecs::AssetKind::LuaScript,"scripts/wave_controller.lua"),"assign Wave controller");
+    ui.RecordEdit(app,"Prefab override");app.GetWorld().GetComponent<ecs::LuaScriptComponent>(e)->properties["enemy_prefab"]=key;ui.FinishTransaction(app);
+    Check(!ui.DeleteAssetFile(app,key,true,&error,true),"unsaved Inspector override protected");ui.UndoEdit(app);Check(!ui.DeleteAssetFile(app,key,true,&error,true),"Redo prefab override protected");app.NewScene();
+    Check(!ui.RenameAssetFile(app,key,"final",true,&error),"editor command requires separate dynamic consent");Check(ui.RenameAssetFile(app,key,"final",true,&error,true),"editor command forwards explicit risk consent");Check(ui.DeleteAssetFile(app,"prefabs/final.prefab.json",true,&error,true),"editor Delete forwards explicit risk consent");
+    Write(active/key,"{}");
+    for(const auto& root:{active,source})Write(root/"scripts/wave_controller.lua","--[[ World.spawn_prefab(unknown); '"+key+"' ]]\nreturn { on_start=function(self) World.spawn_prefab('prefabs/' .. 'wave_enemy.prefab.json', Vec3.new(0,0,0)) end }");
+    audit=AssetCatalog::AuditDependencies(key);Check(audit.confirmed.empty()&&audit.dynamic.empty()&&audit.incomplete.empty(),"static unrelated spawn and comments do not create dynamic blockers");Check(catalog.DeleteAssetFile(key,&error),"unrelated static-spawn prefab needs no override");
+    Check(!AssetCatalog::AuditDependencies(enemy).confirmed.empty()&&!catalog.DeleteAssetFile(enemy,&error,true),"constant Lua concatenation resolves actual asset");
+    Write(active/key,"{}");Write(active/"scripts/computed.lua","local spawn = World.spawn_prefab; return {on_start=function(self) spawn(self.custom_name, Vec3.new(0,0,0)) end}");Check(!AssetCatalog::AuditDependencies(key).dynamic.empty(),"aliased dynamic spawn remains visible as risk");
+    Write(active/"scripts/computed.lua","return {on_start=function(self) World['spawn_prefab'](self.custom_name, Vec3.new(0,0,0)) end}");Check(!AssetCatalog::AuditDependencies(key).dynamic.empty(),"table-index dynamic spawn remains visible as risk");
+    Write(active/"scripts/direct.lua","return {fields={asset={type='asset', default=[=["+key+"]=]}}}");Check(!catalog.DeleteAssetFile(key,&error,true),"long Lua literal/default is a confirmed dependency");fs::remove(active/"scripts/direct.lua");
+    Write(active/"scripts/escaped.lua","return {asset=\"prefabs\\x2fentity_entity-123.prefab.json\"}");Check(!catalog.RenameAssetFile(key,renamed,&error,true),"escaped Lua path remains protected");fs::remove(active/"scripts/escaped.lua");
+    Write(active/"scenes/invalid.json","{");Check(!catalog.DeleteAssetFile(key,&error,true),"dynamic consent cannot bypass incomplete JSON audit");fs::remove(active/"scenes/invalid.json");
+    Write(active/"scripts/broken.lua","return {bad='unterminated");Check(!catalog.DeleteAssetFile(key,&error,true)&&error.find("broken.lua")!=std::string::npos,"incomplete Lua audit stays protected and names its source");fs::remove(active/"scripts/broken.lua");
+    Check(catalog.DeleteAssetFile(key,&error,true)&&Read(source/key)=="{\"authoring\":true}","explicit risk leaves source and unrelated files intact");
+}
 static void Gpu(){
     Application app;Check(app.Initialize(),"DX12 initialize");auto* window=dynamic_cast<GlfwWindow*>(app.GetWindow());glfwHideWindow(window->GetGlfwHandle());SyntheticEditorInput synthetic;
     auto& ui=app.GetEditorLayer();auto* gpu=dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter());app.NewScene();auto entity=ui.CreateEntity(app,"Do not delete from Assets");
@@ -117,6 +151,14 @@ static void Gpu(){
     Cleanup lateReference{AssetPaths::ResolveAssetRoot()/("scenes/asset-file-late-"+Id()+".json")};Write(lateReference.path,nlohmann::json{{"script",renamed}}.dump());
     confirmDelete();Check(fs::exists(editor::ResolveEditableLuaScript(renamed))&&ui.GetError().find("asset-file-late-")!=std::string::npos,"new dependency appearing after dialog blocks Delete");keypress(ImGuiKey_Escape);fs::remove(lateReference.path);
     ImGui::SetWindowFocus("Asset Browser");app.Run();keypress(ImGuiKey_Delete);gpu->SaveFrameImage("../../diagnostics/asset-files/delete-confirm.ppm");auto entityCount=app.GetWorld().GetAliveCount();confirmDelete();
-    Check(!fs::exists(AssetPaths::ResolveAssetRoot()/fs::u8path(renamed))&&ui.SelectedAsset().empty()&&app.GetWorld().GetAliveCount()==entityCount,"Delete confirmation removes file, clears UI and preserves entities");Check(gpu->GetValidationErrorCount()==0,"DX12 validation clean");app.Shutdown();
+    Check(!fs::exists(AssetPaths::ResolveAssetRoot()/fs::u8path(renamed))&&ui.SelectedAsset().empty()&&app.GetWorld().GetAliveCount()==entityCount,"Delete confirmation removes file, clears UI and preserves entities");
+    const auto prefab="prefabs/asset-file-risk-"+Id()+".prefab.json";Cleanup prefabCleanup{AssetPaths::ResolveAssetRoot()/prefab};Write(prefabCleanup.path,"{}");
+    Check(AssetCatalog::AuditDependencies(prefab).confirmed.empty()&&!AssetCatalog::AuditDependencies(prefab).dynamic.empty(),"real Wave controller produces dynamic warning for unrelated prefab");
+    ui.SelectAsset(prefab,"Prefab");ImGui::SetWindowFocus("Asset Browser");app.Run();keypress(ImGuiKey_Delete);
+    confirmDelete();Check(fs::exists(prefabCleanup.path)&&ImGui::FindWindowByName("Delete Asset?")->Active,"ordinary Delete button cannot bypass dynamic checkbox");
+    auto* risk=ImGui::FindWindowByName("Delete Asset?");click(risk->WorkRect.Min.x+8,risk->DC.CursorPosPrevLine.y-ImGui::GetStyle().ItemSpacing.y-ImGui::GetFrameHeight()*.5f);confirmDelete();
+    Check(!fs::exists(prefabCleanup.path),"dynamic checkbox enables explicit Delete in real modal");
+    const auto again="prefabs/asset-file-risk-again-"+Id()+".prefab.json";Cleanup againCleanup{AssetPaths::ResolveAssetRoot()/again};Write(againCleanup.path,"{}");ui.SelectAsset(again,"Prefab");ImGui::SetWindowFocus("Asset Browser");app.Run();keypress(ImGuiKey_Delete);confirmDelete();Check(fs::exists(againCleanup.path),"dynamic consent resets for each operation");keypress(ImGuiKey_Escape);
+    Check(gpu->GetValidationErrorCount()==0,"DX12 validation clean");app.Shutdown();
 }
-int main(int argc,char**){try{ScopedEditorPreferenceRestore preserve;Cpu();if(argc>1)Gpu();std::cout<<"AssetFileOperationsRegression: "<<checks<<" checks PASS\n";return 0;}catch(const std::exception& e){std::cerr<<"ASSET FILE FAILED: "<<e.what()<<'\n';return 1;}}
+int main(int argc,char**){try{ScopedEditorPreferenceRestore preserve;Cpu();PrefabDependencies();if(argc>1)Gpu();std::cout<<"AssetFileOperationsRegression: "<<checks<<" checks PASS\n";return 0;}catch(const std::exception& e){std::cerr<<"ASSET FILE FAILED: "<<e.what()<<'\n';return 1;}}

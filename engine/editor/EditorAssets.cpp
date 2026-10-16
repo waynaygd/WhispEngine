@@ -93,25 +93,27 @@ void EditorLayer::InvalidateAssetFileUi(Application& app,const std::string& old,
     if(editing&&!replacement.empty())OpenMaterial(app,replacement);
     m_AssetListsDirty=true;
 }
-bool EditorLayer::RenameAssetFile(Application& app,const std::string& key,const std::string& name,bool confirmed,std::string* error){
+bool EditorLayer::RenameAssetFile(Application& app,const std::string& key,const std::string& name,bool confirmed,std::string* error,bool acceptDynamicRisk){
     try{
         if(!confirmed)throw std::runtime_error("Confirm Rename first");
         const auto reasons=AssetFileBlockers(app,key);if(!reasons.empty()){std::string message="Rename blocked:";for(auto& s:reasons)message+="\n- "+s;throw std::runtime_error(message);}
         auto to=AssetCatalog::RenameDestination(key,name);std::string message;
-        if(!m_AssetCatalog.RenameAssetFile(key,to,&message))throw std::runtime_error(message);
+        if(!m_AssetCatalog.RenameAssetFile(key,to,&message,acceptDynamicRisk))throw std::runtime_error(message);
         InvalidateAssetFileUi(app,key,to);if(error)error->clear();return true;
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }
-bool EditorLayer::DeleteAssetFile(Application& app,const std::string& key,bool confirmed,std::string* error){
+bool EditorLayer::DeleteAssetFile(Application& app,const std::string& key,bool confirmed,std::string* error,bool acceptDynamicRisk){
     try{
         if(!confirmed)throw std::runtime_error("Confirm Delete first");
         const auto reasons=AssetFileBlockers(app,key);if(!reasons.empty()){std::string message="Delete blocked:";for(auto& s:reasons)message+="\n- "+s;throw std::runtime_error(message);}
-        std::string message;if(!m_AssetCatalog.DeleteAssetFile(key,&message))throw std::runtime_error(message);
+        std::string message;if(!m_AssetCatalog.DeleteAssetFile(key,&message,acceptDynamicRisk))throw std::runtime_error(message);
         InvalidateAssetFileUi(app,key,{});if(error)error->clear();return true;
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }
 void EditorLayer::BeginAssetFileAction(Application& app,int action,const std::string& key){
     m_AssetAction=action;m_AssetActionSource=key;m_AssetActionRequested=true;m_AssetActionFocus=true;m_EditorError.clear();
+    m_AssetDynamicRiskAccepted=false;m_AssetActionWarnings.clear();
+    try{m_AssetActionWarnings=AssetCatalog::AuditDependencies(key).dynamic;}catch(const std::exception& e){m_EditorError=e.what();}
     auto filename=AssetPaths::ToUtf8String(std::filesystem::u8path(key).filename());m_AssetActionKey=filename.substr(0,filename.size()-AssetCatalog::FileSuffix(key).size());
     m_AssetActionBlockers=AssetFileBlockers(app,key);m_AssetActionPath.clear();
     try{m_AssetActionPath=AssetImport::SafeTarget(AssetPaths::ResolveAssetRoot(),key);const auto checked=AssetCatalog::EditablePath(key);m_AssetActionTime=std::filesystem::last_write_time(checked);m_AssetActionSize=std::filesystem::file_size(checked);}catch(const std::exception& e){m_EditorError=e.what();}
@@ -299,6 +301,13 @@ void EditorLayer::DrawAssetBrowser(Application& app){
             for(const auto& reason:m_AssetActionBlockers)ImGui::TextWrapped("Blocked: %s",reason.c_str());
             ImGui::EndChild();
         }
+        if(!m_AssetActionWarnings.empty()){
+            ImGui::TextWrapped("Potential dynamic Lua dependencies (not confirmed references to this asset):");
+            ImGui::BeginChild("Dynamic Lua risk",ImVec2(520*ImGui::GetStyle().FontScaleDpi,120*ImGui::GetStyle().FontScaleDpi),ImGuiChildFlags_Borders);
+            for(const auto& warning:m_AssetActionWarnings)ImGui::TextWrapped("Warning: %s",warning.c_str());ImGui::EndChild();
+            ImGui::TextWrapped("Computed paths may break. Unknown Lua paths are NOT automatically updated. Known references remain protected.");
+            ImGui::Checkbox("I accept the risk of unknown dynamic Lua paths",&m_AssetDynamicRiskAccepted);
+        }
         bool enter=false;
         if(rename){
             if(m_AssetActionFocus)ImGui::SetKeyboardFocusHere();
@@ -307,17 +316,23 @@ void EditorLayer::DrawAssetBrowser(Application& app){
             ImGui::SameLine();ImGui::TextUnformatted(AssetCatalog::FileSuffix(m_AssetActionSource).c_str());
         }
         m_AssetActionFocus=false;
-        ImGui::BeginDisabled(app.IsEditorPlayMode()||!m_AssetActionBlockers.empty());
+        const bool dynamicAllowed=m_AssetActionWarnings.empty()||m_AssetDynamicRiskAccepted;
+        ImGui::BeginDisabled(app.IsEditorPlayMode()||!m_AssetActionBlockers.empty()||!dynamicAllowed);
         const bool clicked=ImGui::Button(rename?"Rename":"Delete");
-        if((clicked||enter)&&!app.IsEditorPlayMode()&&m_AssetActionBlockers.empty()){
+        if((clicked||enter)&&!app.IsEditorPlayMode()&&m_AssetActionBlockers.empty()&&dynamicAllowed){
             bool ok=false;
             try{
                 const auto path=AssetCatalog::EditablePath(m_AssetActionSource);
                 if(path!=m_AssetActionPath||std::filesystem::last_write_time(path)!=m_AssetActionTime||std::filesystem::file_size(path)!=m_AssetActionSize)
                     throw std::runtime_error("File changed since this dialog opened. Cancel and review it again.");
-                ok=rename?RenameAssetFile(app,m_AssetActionSource,m_AssetActionKey,true,&m_EditorError):DeleteAssetFile(app,m_AssetActionSource,true,&m_EditorError);
+                ok=rename?RenameAssetFile(app,m_AssetActionSource,m_AssetActionKey,true,&m_EditorError,m_AssetDynamicRiskAccepted):DeleteAssetFile(app,m_AssetActionSource,true,&m_EditorError,m_AssetDynamicRiskAccepted);
             }catch(const std::exception& e){m_EditorError=e.what();}
             if(ok)ImGui::CloseCurrentPopup();
+            else {
+                // A dependency may have appeared while the modal was open.
+                // Refresh only on failure, not by scanning the project each frame.
+                try{auto warnings=AssetCatalog::AuditDependencies(m_AssetActionSource).dynamic;if(warnings!=m_AssetActionWarnings)m_AssetDynamicRiskAccepted=false;m_AssetActionWarnings=std::move(warnings);m_AssetActionBlockers=AssetFileBlockers(app,m_AssetActionSource);}catch(const std::exception& failure){m_AssetActionBlockers.push_back(failure.what());}
+            }
         }
         ImGui::EndDisabled();ImGui::SameLine();
         if(ImGui::Button("Cancel")||ImGui::IsKeyPressed(ImGuiKey_Escape,false))ImGui::CloseCurrentPopup();

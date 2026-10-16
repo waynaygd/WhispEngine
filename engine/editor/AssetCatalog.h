@@ -10,6 +10,7 @@ struct AssetType {
     bool shaderRoot=false;
 };
 struct AssetEntry {std::string key;std::size_t type=0;};
+struct AssetDependencyAudit {std::vector<std::string> confirmed,dynamic,incomplete;};
 // Register additional types at startup, then Refresh. Script/Prefab can provide
 // their own activation/creation handlers later without changing browser layout.
 class AssetCatalog {
@@ -38,7 +39,8 @@ public:
     static std::string RenameDestination(const std::string& key,const std::string& name);
     static std::string FileSuffix(const std::string& key);
     static std::vector<std::string> Dependencies(const std::string& key);
-    bool RenameAssetFile(const std::string& from,const std::string& to,std::string* error=nullptr);
-    bool DeleteAssetFile(const std::string& key,std::string* error=nullptr);
+    static AssetDependencyAudit AuditDependencies(const std::string& key);
+    bool RenameAssetFile(const std::string& from,const std::string& to,std::string* error=nullptr,bool acceptDynamicRisk=false);
+    bool DeleteAssetFile(const std::string& key,std::string* error=nullptr,bool acceptDynamicRisk=false);
 };
 }
