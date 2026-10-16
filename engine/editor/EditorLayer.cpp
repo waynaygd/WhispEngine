@@ -658,9 +658,18 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     if(m_ViewportHovered&&ImGui::IsMouseClicked(1))ImGui::SetWindowFocus();
     if(m_ViewportHovered&&ImGui::IsMouseClicked(0))ImGui::SetWindowFocus();
     m_LightHandleHovered=m_LightIconClicked=false;
+    m_SpecialIconHovered=false;
+    // Specialized markers retain visual and picking priority over fallback icons.
+    ImDrawListSplitter iconLayers;
+    auto* iconDraw=ImGui::GetWindowDrawList();
+    iconLayers.Split(iconDraw,2);
+    iconLayers.SetCurrentChannel(iconDraw,1);
     DrawLightGizmos(app,renderer,contentMin,viewportSize);
     DrawPlayerStartGizmos(app,contentMin,viewportSize);
     DrawFogGizmos(app,contentMin,viewportSize);
+    iconLayers.SetCurrentChannel(iconDraw,0);
+    DrawEntityIcons(app,contentMin,viewportSize);
+    iconLayers.Merge(iconDraw);
     ImGui::GetWindowDrawList()->PushClipRect(contentMin,ImVec2(contentMin.x+viewportSize.x,contentMin.y+viewportSize.y),true);
     if(!m_LightIconClicked&&!m_LightPointerCaptured&&!m_LightHandleHovered)DrawGizmo(app, contentMin, viewportSize);
     ImGui::GetWindowDrawList()->PopClipRect();

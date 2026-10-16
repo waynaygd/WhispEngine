@@ -25,6 +25,7 @@ void EditorLayer::DrawFogGizmos(Application& app,const ImVec2& origin,const ImVe
         if(IsSelected(e)){draw->AddRect(ImVec2(p.x-20*dpi,p.y-18*dpi),ImVec2(p.x+21*dpi,p.y+20*dpi),IM_COL32(255,225,80,255),5*dpi,0,1.5f*dpi);draw->AddText(ImVec2(p.x+25*dpi,p.y-7*dpi),ink,"Fog (global)");}
         if(std::abs(mouse.x-p.x)<=20*dpi&&mouse.y>=p.y-18*dpi&&mouse.y<=p.y+20*dpi&&(*projected)[2]<nearest){hit=e;nearest=(*projected)[2];}
     });
+    m_SpecialIconHovered |= hit.IsValid();
     if(hit.IsValid()&&!m_LightIconClicked&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&!m_LightPointerCaptured&&!m_PlaneScaleCaptured&&ImGui::IsMouseClicked(0)&&(!m_Selection.active.IsValid()||!ImGuizmo::IsOver()||ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
         SelectViewportEntity(app,hit,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift);m_LightIconClicked=true;
     }

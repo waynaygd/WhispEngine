@@ -135,6 +135,7 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
         handle(pose.position,type==LightType::Point?cameraRight:d,p.range,0);
         if(type==LightType::Spot){for(int which=1;which<=2;++which){float a=(which==1?p.innerAngle:p.outerAngle)*.0174532925f;V tip=Add(pose.position,Scale(d,p.range*std::cos(a)));handle(tip,right,p.range*std::sin(a),which);}}
     });
+    m_SpecialIconHovered |= hit.IsValid();
     if(hit.IsValid()&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&(!ImGuizmo::IsOver()||ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){FinishTransaction(app);SelectViewportEntity(app,hit,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift);m_LightIconClicked=true;}
     draw->PopClipRect();
 }
@@ -173,6 +174,7 @@ void EditorLayer::DrawPlayerStartGizmos(Application& app,const ImVec2& origin,co
         line(Add(t.position,V{-.2f,0,0}),Add(t.position,V{.2f,0,0}),color);line(Add(t.position,V{0,0,-.2f}),Add(t.position,V{0,0,.2f}),color);
         if(auto eyes=project(eye)){draw->AddCircleFilled(*eyes,5,IM_COL32(10,15,20,240));draw->AddCircleFilled(*eyes,3,IM_COL32(255,220,90,255));draw->AddText(ImVec2(eyes->x+7,eyes->y),IM_COL32(255,220,90,255),"Eyes");}
     });
+    m_SpecialIconHovered |= hit.IsValid();
     if(hit.IsValid()&&!m_LightIconClicked&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&!m_LightPointerCaptured&&ImGui::IsMouseClicked(0)&&(!ImGuizmo::IsOver()||ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
         FinishTransaction(app);SelectViewportEntity(app,hit,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift);m_LightIconClicked=true;
     }
