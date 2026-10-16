@@ -11,7 +11,7 @@ std::vector<ecs::Entity> EditorLayer::PlaceImportedScene(Application& app,const 
 }
 std::vector<ecs::Entity> EditorLayer::InstantiateImportedScene(Application& app,const std::string& key,ecs::Vec3 offset){
  std::vector<ecs::Entity> created;if(app.IsEditorPlayMode())return created;
- const auto previous=m_SelectedEntity;
+ const auto previous=m_Selection.active;
  try{
   if(!key.ends_with(".wscene")||!std::isfinite(offset.x)||!std::isfinite(offset.y)||!std::isfinite(offset.z))throw std::runtime_error("Invalid imported scene/placement");
   auto resolve=[&](const std::string& asset){for(const auto& root:{AssetPaths::ResolveAssetRoot(),AssetImport::ProjectRoot()}){auto p=AssetImport::SafeTarget(root,asset);if(std::filesystem::is_regular_file(p))return p;}throw std::runtime_error("Missing imported asset: "+asset);};
@@ -33,9 +33,9 @@ std::vector<ecs::Entity> EditorLayer::InstantiateImportedScene(Application& app,
   }
   FinishTransaction(app);EntitySnapshot before;before.world=app.GetWorld().GetIdentity();before.previousSelection=previous;
   for(const auto& item:items){auto e=app.CreateEmptyEntity(item.name);created.push_back(e);auto& world=app.GetWorld();*world.GetComponent<ecs::TransformComponent>(e)=item.transform;world.AddComponent<ecs::MeshRendererComponent>(e).meshPath=item.mesh;world.AddComponent<ecs::MaterialComponent>(e);EntitySnapshot dead;dead.entity=e;dead.world=e.world;before.related.push_back(dead);app.NotifyEditorMutation(e);}
-  m_SelectedEntity=created.back();CommitUndo(app,"Instantiate imported scene",std::move(before));
+  SelectEntityFromUser(app,created.back());CommitUndo(app,"Instantiate imported scene",std::move(before));
   if(auto* resources=app.GetResourceManager())for(const auto& mesh:checked)resources->LoadAsync<MeshResource>(mesh);
   m_EditorError.clear();return created;
- }catch(const std::exception& error){for(auto e:created)if(app.GetWorld().IsAlive(e))app.DestroySceneEntity(e);m_SelectedEntity=app.GetWorld().IsAlive(previous)?previous:ecs::Entity{};m_EditorError=error.what();return {};}
+ }catch(const std::exception& error){for(auto e:created)if(app.GetWorld().IsAlive(e))app.DestroySceneEntity(e);SelectEntity(app.GetWorld().IsAlive(previous)?previous:ecs::Entity{});m_EditorError=error.what();return {};}
 }
 }

@@ -1,3 +1,4 @@
+#include "../FogGather.h"
 #include "RenderSystem.h"
 #include "../LightGather.h"
 
@@ -271,6 +272,15 @@ namespace ecs {
         BuildPerspectiveMatrix(lightCamera.projection.data(),m_CameraVerticalFovRadians,m_CameraAspectRatio,m_CameraNearPlane,m_CameraFarPlane);
         lightCamera.nearPlane=m_CameraNearPlane;lightCamera.farPlane=m_CameraFarPlane;
         auto lights=GatherSceneLights(world,m_LightingSettings?*m_LightingSettings:m_DefaultLighting,lightCamera,m_Interpolation);
+        if(m_ViewportUnlit)lights.lighting.enabled=false;
+        if(m_Renderer){
+            auto fog=GatherFog(world,lightCamera);std::string warning;
+            if(fog.activeCount>1)warning="Multiple enabled global Fog components: lowest Entity index wins";
+            if(fog.invalidCount)warning="Invalid Fog component ignored at render boundary";
+            if(fog.active&&!m_Renderer->GetFogDiagnostics().supported)warning="Fog is not supported by this render backend";
+            if(warning!=m_FogWarning){m_FogWarning=warning;if(!warning.empty())Logger::Get().Warn(warning);}
+            m_Renderer->SetFog(fog);
+        }
         if(m_Renderer){m_Renderer->SetCameraPosition({m_CameraPosition.x,m_CameraPosition.y,m_CameraPosition.z,0});
             m_Renderer->SetLighting(BuildLightingConstants(lights.lighting));
             m_Renderer->SetSceneLights(lights.lights,m_LightRenderingMode,lights.diagnostics);}
@@ -278,7 +288,8 @@ namespace ecs {
         if (m_Renderer == nullptr)
             return;
         if(m_EnvironmentSettings){
-            m_Renderer->SetEnvironmentSettings(*m_EnvironmentSettings);
+            auto environment=*m_EnvironmentSettings;if(m_ViewportUnlit)environment.diffuse=environment.specular=false;
+            m_Renderer->SetEnvironmentSettings(environment);
             if(m_ResourceManager&&m_EnvironmentSettings->enabled){
                 const auto& key=m_EnvironmentSettings->assetPath;
                 if(!m_EnvironmentAsset||m_RequestedEnvironment!=key){
@@ -410,7 +421,7 @@ namespace ecs {
                 ZoneScopedN("ShadowPass");
                 const auto start=std::chrono::steady_clock::now();
                 auto settings=SanitizeShadowSettings(m_ShadowSettings?*m_ShadowSettings:m_DefaultShadows);
-                settings.enabled=settings.enabled&&lights.primaryCastShadows;
+                settings.enabled=settings.enabled&&lights.primaryCastShadows&&!m_ViewportUnlit;
                 const auto light=BuildLightingConstants(lights.lighting);
                 auto frame=BuildCameraDirectionalShadowFrame(light,settings,
                     {m_CameraPosition.x,m_CameraPosition.y,m_CameraPosition.z},m_CameraYaw,m_CameraPitch,
@@ -611,7 +622,8 @@ namespace ecs {
         if (m_Renderer == nullptr)
             return;
         if(m_EnvironmentSettings){
-            m_Renderer->SetEnvironmentSettings(*m_EnvironmentSettings);
+            auto environment=*m_EnvironmentSettings;if(m_ViewportUnlit)environment.diffuse=environment.specular=false;
+            m_Renderer->SetEnvironmentSettings(environment);
             if(m_ResourceManager&&m_EnvironmentSettings->enabled){
                 const auto& key=m_EnvironmentSettings->assetPath;
                 if(!m_EnvironmentAsset||m_RequestedEnvironment!=key){
@@ -904,7 +916,7 @@ namespace ecs {
         const std::uint64_t currentVersion =
             resource->GetVersion();
 
-        // Пока запрос ждал в очереди, CPU resource мог обновиться.
+        // пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ, CPU resource пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ.
         if (currentVersion != requestedVersion)
         {
             QueueGpuFinalization(

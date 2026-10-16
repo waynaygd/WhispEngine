@@ -3,6 +3,7 @@
 #include "LightGizmoMath.h"
 #include "../core/Application.h"
 #include "../ecs/LightGather.h"
+#include "../ecs/PlayerSpawn.h"
 #include "../render/ColorPipeline.h"
 #include "../resources/ResourceManager.h"
 #include <imgui.h>
@@ -13,14 +14,15 @@ namespace editor
 {
 ecs::Entity EditorLayer::CreateLight(Application& app,LightType type)
 {
-    auto e=app.CreateLightEntity(type);m_SelectedEntity=e;
+    if(app.IsEditorPlayMode())return {};
+    auto e=app.CreateLightEntity(type);SelectEntityFromUser(app,e);
     EntitySnapshot before;before.entity=e;before.alive=false;CommitUndo(app,"Create Light",before);return e;
 }
 void EditorLayer::DeleteSelectedLight(Application& app)
 {
-    if(!ecs::GetLightParameters(app.GetWorld(),m_SelectedEntity))return;
-    auto before=CaptureSelectedEntity(app);app.DestroySceneEntity(m_SelectedEntity);
-    CommitUndo(app,"Delete Light",before);m_SelectedEntity={};
+    if(!ecs::GetLightParameters(app.GetWorld(),m_Selection.active))return;
+    auto before=CaptureSelectedEntity(app);app.DestroySceneEntity(m_Selection.active);
+    CommitUndo(app,"Delete Light",before);PruneSelection(app);
 }
 namespace
 {
@@ -92,7 +94,7 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
     ecs::Entity hit;float hitZ=INFINITY;
     world.ForEach<ecs::TransformComponent>([&](ecs::Entity entity,auto& transform){
         LightType type;auto* light=ecs::GetLightParameters(world,entity,&type);if(!light)return;
-        auto pose=app.GetRenderInterpolation().Resolve(entity,transform);auto q=ProjectGizmo(pose.position,camera);const bool selected=entity==m_SelectedEntity;if(!q&&!selected)return;
+        auto pose=app.GetRenderInterpolation().Resolve(entity,transform);auto q=ProjectGizmo(pose.position,camera);const bool selected=IsSelected(entity);if(!q&&!selected)return;
         xraySegments=m_LightXrayMode==2||(m_LightXrayMode==1&&selected);
         bool iconHidden=Occluded(app.GetCameraPosition(),pose.position,occluders);if(iconHidden&&!xraySegments&&!selected)return;
         auto p=SanitizeLight(*light);ImVec2 icon=q?*project(pose.position):ImVec2{};
@@ -111,7 +113,7 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
             for(int j=0;j<48;++j){auto ring=[&](int k){float a=k*6.2831853f/48;return Add(tip,Add(Scale(right,radius*std::cos(a)),Scale(up,radius*std::sin(a))));};line(ring(j),ring(j+1),color);if(j%12==0)line(pose.position,ring(j),color);}}}
         // Range and cone handles edit the component, never Transform or physics.
         auto handle=[&](V base,V axis,float value,int which){
-            if(ImGuizmo::IsUsing()||(!m_LightPointerCaptured&&(app.IsCameraControlActive()||ImGui::IsMouseDown(1))))return;
+            if(m_Selection.items.size()>1||((ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&ImGui::IsMouseClicked(0))||ImGuizmo::IsUsing()||(!m_LightPointerCaptured&&(app.IsCameraControlActive()||ImGui::IsMouseDown(1))))return;
             auto start=project(base),end=project(Add(base,Scale(axis,value)));if(!start||!end)return;
             if(end->x<origin.x||end->y<origin.y||end->x>=origin.x+size.x||end->y>=origin.y+size.y)return;
             bool hidden=Occluded(app.GetCameraPosition(),Add(base,Scale(axis,value)),occluders);if(hidden&&!xraySegments)return;
@@ -133,21 +135,60 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
         handle(pose.position,type==LightType::Point?cameraRight:d,p.range,0);
         if(type==LightType::Spot){for(int which=1;which<=2;++which){float a=(which==1?p.innerAngle:p.outerAngle)*.0174532925f;V tip=Add(pose.position,Scale(d,p.range*std::cos(a)));handle(tip,right,p.range*std::sin(a),which);}}
     });
-    if(hit.IsValid()&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&!ImGuizmo::IsOver()&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){FinishTransaction(app);m_PropertyDrafts.clear();m_SelectedEntity=hit;m_LightIconClicked=true;}
+    m_SpecialIconHovered |= hit.IsValid();
+    if(hit.IsValid()&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&(!ImGuizmo::IsOver()||ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){FinishTransaction(app);SelectViewportEntity(app,hit,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift);m_LightIconClicked=true;}
     draw->PopClipRect();
 }
 }
 
 namespace editor {
+void EditorLayer::DrawPlayerStartGizmos(Application& app,const ImVec2& origin,const ImVec2& size){
+    if(app.IsEditorPlayMode()||m_GameView||size.x<=1||size.y<=1)return;
+    const auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),size.x/size.y,app.GetCameraNearPlane(),app.GetCameraFarPlane());
+    auto* draw=ImGui::GetWindowDrawList();draw->PushClipRect(origin,ImVec2(origin.x+size.x,origin.y+size.y),true);
+    auto project=[&](V p)->std::optional<ImVec2>{auto q=ProjectGizmo(p,camera);if(!q)return {};return ImVec2(origin.x+(*q)[0]*size.x,origin.y+(*q)[1]*size.y);};
+    auto line=[&](V a,V b,ImU32 color){auto q=ProjectEditorLine(a,b,camera);if(!q)return;ImVec2 x(origin.x+(*q)[0]*size.x,origin.y+(*q)[1]*size.y),y(origin.x+(*q)[2]*size.x,origin.y+(*q)[3]*size.y);draw->AddLine(x,y,IM_COL32(10,15,20,230),4);draw->AddLine(x,y,color,2);};
+    ecs::Entity hit;float nearest=INFINITY;const auto mouse=ImGui::GetMousePos();
+    app.GetWorld().ForEach<ecs::PlayerStartComponent,ecs::TransformComponent>([&](ecs::Entity e,auto& start,auto& t){
+        const bool selected=IsSelected(e);const ImU32 color=start.enabled?IM_COL32(80,235,255,255):IM_COL32(155,160,165,255);
+        const auto half=ecs::PlayerBodyHalfExtents(start);
+        const auto center=ecs::PlayerBodyCenter(t.position,half.y),eye=ecs::PlayerEyePosition(center,ecs::PlayerEyeHeight(start),half.y);
+        V forward=ecs::PlayerLookDirection(t);
+        V tip=Add(eye,Scale(forward,1.1f));line(eye,tip,color);
+        V right{std::cos(t.rotation.y),0,-std::sin(t.rotation.y)};
+        line(tip,Add(Sub(tip,Scale(forward,.2f)),Scale(right,.12f)),color);line(tip,Sub(Sub(tip,Scale(forward,.2f)),Scale(right,.12f)),color);
+        auto p=project(t.position);
+        if(p){
+            // Constant screen-size person silhouette with a contrasting outline.
+            draw->AddCircleFilled(ImVec2(p->x,p->y-24),6,IM_COL32(10,15,20,240));draw->AddCircleFilled(ImVec2(p->x,p->y-24),4,color);
+            auto stroke=[&](ImVec2 a,ImVec2 b){draw->AddLine(a,b,IM_COL32(10,15,20,240),6);draw->AddLine(a,b,color,3);};
+            stroke(ImVec2(p->x,p->y-18),ImVec2(p->x,p->y-9));stroke(ImVec2(p->x-8,p->y-15),ImVec2(p->x+8,p->y-15));stroke(ImVec2(p->x,p->y-9),ImVec2(p->x-6,p->y));stroke(ImVec2(p->x,p->y-9),ImVec2(p->x+6,p->y));
+            if(selected)draw->AddText(ImVec2(p->x+12,p->y-28),color,"PlayerStart (feet)");
+            auto depth=ProjectGizmo(t.position,camera);
+            if(mouse.x>=p->x-12&&mouse.x<=p->x+12&&mouse.y>=p->y-32&&mouse.y<=p->y+5&&(*depth)[2]<nearest){hit=e;nearest=(*depth)[2];}
+        }
+        if(!selected)return;
+        std::array<V,8> corners;auto h=half;
+        for(int i=0;i<8;++i)corners[i]=ecs::PlayerBoxPoint(t,{i&1?h.x:-h.x,i&2?h.y:-h.y,i&4?h.z:-h.z},h.y);
+        for(int i=0;i<8;++i)for(int bit:{1,2,4})if(!(i&bit))line(corners[i],corners[i|bit],color);
+        line(Add(t.position,V{-.2f,0,0}),Add(t.position,V{.2f,0,0}),color);line(Add(t.position,V{0,0,-.2f}),Add(t.position,V{0,0,.2f}),color);
+        if(auto eyes=project(eye)){draw->AddCircleFilled(*eyes,5,IM_COL32(10,15,20,240));draw->AddCircleFilled(*eyes,3,IM_COL32(255,220,90,255));draw->AddText(ImVec2(eyes->x+7,eyes->y),IM_COL32(255,220,90,255),"Eyes");}
+    });
+    m_SpecialIconHovered |= hit.IsValid();
+    if(hit.IsValid()&&!m_LightIconClicked&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&!m_LightPointerCaptured&&ImGui::IsMouseClicked(0)&&(!ImGuizmo::IsOver()||ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
+        FinishTransaction(app);SelectViewportEntity(app,hit,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift);m_LightIconClicked=true;
+    }
+    draw->PopClipRect();
+}
 void EditorLayer::DrawViewportOverlays(Application& app,const ImVec2& origin,const ImVec2& size){
     if(m_LightPointerCaptured&&!ImGui::IsMouseDown(0)){FinishTransaction(app);m_LightPointerCaptured=false;}
-    if(app.IsEditorPlayMode()||m_GameView)return;
+    if(app.IsEditorPlayMode())return;
     if(size.x<=1||size.y<=1)return;const auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),size.x/size.y,app.GetCameraNearPlane(),app.GetCameraFarPlane());
     auto* draw=ImGui::GetWindowDrawList();draw->PushClipRect(origin,ImVec2(origin.x+size.x,origin.y+size.y),true);
     auto project=[&](V p)->std::optional<ImVec2>{auto v=ProjectGizmo(p,camera);if(!v)return {};return ImVec2(origin.x+(*v)[0]*size.x,origin.y+(*v)[1]*size.y);};
     auto line=[&](V a,V b,ImU32 color){auto q=ProjectEditorLine(a,b,camera);if(q)draw->AddLine(ImVec2(origin.x+(*q)[0]*size.x,origin.y+(*q)[1]*size.y),ImVec2(origin.x+(*q)[2]*size.x,origin.y+(*q)[3]*size.y),color);};
     auto& world=app.GetWorld();auto* resources=app.GetResourceManager();
-    if(resources&&!m_PlaneScaleCaptured&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&!m_LightHandleHovered&&!m_LightPointerCaptured&&!m_LightIconClicked&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&!ImGuizmo::IsOver()&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
+    if(resources&&!m_PlaneScaleCaptured&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&!m_LightHandleHovered&&!m_LightPointerCaptured&&!m_LightIconClicked&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&(!ImGuizmo::IsOver()||ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
         auto mouse=ImGui::GetMousePos();float x=((mouse.x-origin.x)/size.x*2-1)/camera.projection[0],y=(1-(mouse.y-origin.y)/size.y*2)/camera.projection[5];
         V ray{camera.view[0]*x+camera.view[1]*y+camera.view[2],camera.view[4]*x+camera.view[5]*y+camera.view[6],camera.view[8]*x+camera.view[9]*y+camera.view[10]};ray=Scale(ray,1/std::sqrt(Dot(ray,ray)));
         float nearest=app.GetCameraFarPlane();ecs::Entity hit;
@@ -156,11 +197,12 @@ void EditorLayer::DrawViewportOverlays(Application& app,const ImVec2& origin,con
             auto bounds=Bounds(mesh,app.GetRenderInterpolation().Resolve(e,t));if(bounds.inverse==std::array<float,12>{})return;
             float distance=HitDistance(app.GetCameraPosition(),ray,bounds,nearest);if(distance<nearest){nearest=distance;hit=e;}
         });
-        FinishTransaction(app);m_PropertyDrafts.clear();m_SelectedEntity=hit;
+        FinishTransaction(app);SelectViewportEntity(app,hit,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift);
     }
-    if(resources&&world.IsAlive(m_SelectedEntity))if(auto* m=world.GetComponent<ecs::MeshRendererComponent>(m_SelectedEntity))if(auto* t=world.GetComponent<ecs::TransformComponent>(m_SelectedEntity)){
+    if(m_GameView){draw->PopClipRect();return;}
+    for(auto selected:m_Selection.items)if(resources&&world.IsAlive(selected))if(auto* m=world.GetComponent<ecs::MeshRendererComponent>(selected))if(auto* t=world.GetComponent<ecs::TransformComponent>(selected)){
         auto mesh=resources->Get<MeshResource>(m->meshPath);if(mesh&&mesh->IsLoaded()&&!mesh->GetData().meshData.vertices.empty()){
-            auto pose=app.GetRenderInterpolation().Resolve(m_SelectedEntity,*t);auto bounds=Bounds(mesh,pose);std::array<float,16> model;ecs::BuildRenderModelMatrix(model.data(),pose);V corners[8];
+            auto pose=app.GetRenderInterpolation().Resolve(selected,*t);auto bounds=Bounds(mesh,pose);std::array<float,16> model;ecs::BuildRenderModelMatrix(model.data(),pose);V corners[8];
             for(int i=0;i<8;++i){V p{i&1?bounds.max.x:bounds.min.x,i&2?bounds.max.y:bounds.min.y,i&4?bounds.max.z:bounds.min.z};corners[i]={model[0]*p.x+model[4]*p.y+model[8]*p.z+model[12],model[1]*p.x+model[5]*p.y+model[9]*p.z+model[13],model[2]*p.x+model[6]*p.y+model[10]*p.z+model[14]};}
             for(int i=0;i<8;++i)for(int bit:{1,2,4})if(!(i&bit))line(corners[i],corners[i|bit],IM_COL32(255,225,80,255));
         }

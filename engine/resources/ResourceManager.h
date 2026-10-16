@@ -372,11 +372,11 @@ private:
     std::filesystem::path ResolvePathFromKey(const std::string& key) const
     {
         if constexpr (std::is_same_v<T, ShaderResource>)
-            return AssetPaths::ResolveShaderPath(key);
+            return AssetPaths::ResolveShaderPath(std::filesystem::u8path(key));
         else if constexpr (std::is_same_v<T, TextureResource>)
-            return AssetPaths::ResolveAssetPath(key.substr(0,key.find("#embedded/")));
+            return AssetPaths::ResolveAssetPath(std::filesystem::u8path(key.substr(0,key.find("#embedded/"))));
         else if constexpr (std::is_same_v<T, MeshResource> || std::is_same_v<T, MaterialResource> || std::is_same_v<T, EnvironmentResource>)
-            return AssetPaths::ResolveAssetPath(key);
+            return AssetPaths::ResolveAssetPath(std::filesystem::u8path(key));
         else
             static_assert(kUnsupportedResourceType<T>, "Unsupported resource type");
     }

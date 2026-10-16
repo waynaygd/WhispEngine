@@ -1,0 +1,22 @@
+{
+  "point": {
+    "before": {
+      "mean_linear_rgb": 0.5932115316390991,
+      "laplacian_rms": 0.5308238863945007
+    },
+    "after": {
+      "mean_linear_rgb": 0.5930743217468262,
+      "laplacian_rms": 0.009858762845396996
+    }
+  },
+  "spot": {
+    "before": {
+      "mean_linear_rgb": 0.4418487548828125,
+      "laplacian_rms": 0.41831520199775696
+    },
+    "after": {
+      "mean_linear_rgb": 0.4463421106338501,
+      "laplacian_rms": 0.00858236476778984
+    }
+  }
+}

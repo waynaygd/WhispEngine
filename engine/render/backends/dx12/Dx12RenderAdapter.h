@@ -45,6 +45,8 @@ public:
 	void BindShader(RenderShaderHandle handle) override;
 	void BindTexture(std::uint32_t slot, RenderTextureHandle handle) override;
 	void DrawMesh(RenderMeshHandle handle) override;
+    void SetFog(const FogFrame& frame)override{m_Fog=frame;}
+    FogDiagnostics GetFogDiagnostics()const override{return m_FogDiagnostics;}
     void SetAntiAliasing(AntiAliasingMode mode) override {m_AntiAliasing=AntiAliasingMode(std::clamp(int(mode),0,2));}
     AntiAliasingDiagnostics GetAntiAliasingDiagnostics()const override {AntiAliasingDiagnostics d;d.mode=m_AntiAliasing;for(const auto& t:m_HdrTargets)if(t.color)d.intermediateBytes+=t.allocationBytes;return d;}
     void SetEnvironmentSettings(const EnvironmentSettings& s) override {m_EnvironmentSettings=SanitizeEnvironment(s);}
@@ -330,6 +332,20 @@ private:
         UINT64 allocationBytes=0;
     };
     HdrTarget m_HdrTargets[FrameCount];
+    struct FogPassResources {HdrTarget target,volume;Microsoft::WRL::ComPtr<ID3D12Resource> constants,readback;bool pending=false;};
+    std::vector<FogPassResources> m_FogPasses[FrameCount];
+    FogFrame m_Fog;
+    FogDiagnostics m_FogDiagnostics{true};
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_FogRoot;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_FogPso,m_FogVolumePso,m_FogCompositePso;
+    Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_FogTime;
+    UINT m_FogPassCursor=0;
+    double m_FogGpuMs=0;
+    void EnsureFogTarget(HdrTarget&,UINT,UINT);
+    bool EnsureFogPipeline();
+    void ApplyFog();
+    void CollectFogTiming(UINT);
+    void ReleaseFog();
     bool m_HdrActive=false,m_HdrNative=false;
     AntiAliasingMode m_AntiAliasing=AntiAliasingMode::Off;
     float m_SceneClear[4]={.08f,.08f,.12f,1};

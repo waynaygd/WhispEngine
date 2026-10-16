@@ -15,6 +15,8 @@ namespace ecs {
         bool useGravity = true;
         bool isStatic = false;
         bool simulatePhysics = true;
+        // Zero inverse inertia in the solver, including contact correction.
+        bool lockRotation = false;
 
         float linearDampingMultiplier = 1.0f;
         float angularDampingMultiplier = 1.0f;

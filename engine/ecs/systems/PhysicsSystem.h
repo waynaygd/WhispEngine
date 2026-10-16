@@ -4,6 +4,7 @@
 #include "../MathTypes.h"
 #include <array>
 #include <unordered_map>
+#include <map>
 #include "PhysicsBroadphaseStorage.h"
 
 class JobSystem;
@@ -22,7 +23,7 @@ public:
         std::size_t broadphaseBufferGrowths = 0, aabbComputations = 0;
     };
     const Statistics& GetStatistics() const { return m_Statistics; }
-    void ResetState() { m_ContactCache.clear(); m_Broadphase = {}; m_Statistics = {}; }
+    void ResetState() { m_ContactCache.clear();m_TriggerPairs.clear();m_TriggerWorld=0; m_Broadphase = {}; m_Statistics = {}; }
     void SetParallel(bool enabled) { m_Parallel = enabled; }
     bool IsParallel() const { return m_Parallel; }
     // Opt-in quadratic test oracle; keep disabled for performance measurements.
@@ -53,6 +54,7 @@ public:
     bool IsFixedUpdate() const override { return true; }
     void Update(World& world, float dt) override;
     void SetEnabled(bool enabled) {
+        // Pause suspends pair tracking; Stop/world replacement uses ResetState.
         if (m_Enabled != enabled) m_ContactCache.clear();
         m_Enabled = enabled;
     }
@@ -63,6 +65,9 @@ public:
     }
     bool IsEnabled() const { return m_Enabled; }
 private:
+    void UpdateTriggers(World&);
+    std::uint64_t m_TriggerWorld=0;
+    std::map<std::array<std::uint32_t,4>,std::pair<Entity,Entity>> m_TriggerPairs;
     Statistics m_Statistics;
     PhysicsBroadphaseStorage m_Broadphase;
     bool m_ValidateBroadphase = false;

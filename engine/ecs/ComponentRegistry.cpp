@@ -7,10 +7,16 @@
 #include "components/RigidbodyComponent.h"
 #include "components/SceneIdentityComponent.h"
 #include "components/TagComponent.h"
+#include "components/CharacterMovementComponent.h"
+#include "components/PlayerStartComponent.h"
+#include "components/FogComponent.h"
 #include "components/TransformComponent.h"
 #include "components/VelocityComponent.h"
+#include "components/PlayerComponent.h"
+#include "components/LuaScriptComponent.h"
 #include "../resources/MaterialSerialization.h"
 #include "../scene/LightSerialization.h"
+#include "../scripting/EntityReference.h"
 #include <cmath>
 #include <filesystem>
 namespace ecs {
@@ -113,6 +119,18 @@ template<class C>ComponentDescriptor Light(const char* key,const char* label){
 }
 ComponentRegistry Build(){
     ComponentRegistry r;
+    auto script=Descriptor<LuaScriptComponent>("LuaScript","Lua Script");
+    Field<LuaScriptComponent>(script,"scriptPath","Script asset",&LuaScriptComponent::scriptPath,PropertyKind::Asset,0,0,AssetKind::LuaScript);
+    Field<LuaScriptComponent>(script,"enabled","Enabled",&LuaScriptComponent::enabled,PropertyKind::Boolean);
+    Field<LuaScriptComponent>(script,"inputEnabled","Allow gameplay input",&LuaScriptComponent::inputEnabled,PropertyKind::Boolean);
+    Field<LuaScriptComponent>(script,"cameraEnabled","Allow gameplay camera",&LuaScriptComponent::cameraEnabled,PropertyKind::Boolean);Complete(script);
+    auto scriptSave=script.serialize;auto scriptLoad=script.deserialize;
+    script.serialize=[scriptSave](const World& w,Entity e){auto j=scriptSave(w,e);j["properties"]=w.GetComponent<LuaScriptComponent>(e)->properties;return j;};
+    script.deserialize=[scriptLoad](World& w,Entity e,const Json& j){
+        auto values=j.value("properties",Json::object());if(!values.is_object()||values.size()>128)Fail("Lua properties must be a bounded object");
+        for(auto i=values.begin();i!=values.end();++i){const auto& v=i.value();if(i.key().size()>128||!(v.is_boolean()||v.is_number()||v.is_string()||(v.is_array()&&v.size()==3)||scripting::ValidEntityReference(v)))Fail("Invalid Lua property: "+i.key());if(v.is_string()&&v.get_ref<const std::string&>().size()>1024)Fail("Lua string too long");if(v.is_array())for(const auto& x:v)if(!x.is_number()||!std::isfinite(x.get<double>()))Fail("Invalid Lua vector");if(v.is_number()&&!std::isfinite(v.get<double>()))Fail("Nonfinite Lua property");}
+        scriptLoad(w,e,j);w.GetComponent<LuaScriptComponent>(e)->properties=std::move(values);
+    };r.Register(script);
     auto tag=Descriptor<TagComponent>("Tag","Name");Field<TagComponent>(tag,"name","Name",&TagComponent::name,PropertyKind::String);Complete(tag);r.Register(tag);
     auto identity=Descriptor<SceneIdentityComponent>("SceneIdentity","Scene identity");identity.addable=identity.removable=false;Field<SceneIdentityComponent>(identity,"value","Persistent ID",&SceneIdentityComponent::value,PropertyKind::String).readOnly=true;Complete(identity);r.Register(identity);
     auto t=Descriptor<TransformComponent>("Transform","Transform");Field<TransformComponent>(t,"position","Position",&TransformComponent::position,PropertyKind::Vector);Field<TransformComponent>(t,"rotation","Rotation (rad)",&TransformComponent::rotation,PropertyKind::Vector);Field<TransformComponent>(t,"scale","Scale",&TransformComponent::scale,PropertyKind::Vector);Complete(t);r.Register(t);
@@ -127,11 +145,100 @@ ComponentRegistry Build(){
     material.serialize=[materialSave](const World& w,Entity e){auto j=materialSave(w,e);for(auto i=j.begin();i!=j.end();)if(i.key().starts_with("override."))i=j.erase(i);else ++i;j["overrides"]=MaterialOverridesToJson(w.GetComponent<MaterialComponent>(e)->overrides);return j;};
     material.deserialize=[materialLoad,materialProperties](World& w,Entity e,const Json& j){materialLoad(w,e,j);if(j.contains("overrides"))w.GetComponent<MaterialComponent>(e)->overrides=MaterialOverridesFromJson(j.at("overrides"));for(const auto& p:materialProperties)Validate(p,p.get(w,e));};r.Register(material);
     auto body=Descriptor<RigidbodyComponent>("Rigidbody","Rigidbody");
-    Field<RigidbodyComponent>(body,"velocity","Velocity",&RigidbodyComponent::velocity,PropertyKind::Vector);Field<RigidbodyComponent>(body,"acceleration","Acceleration",&RigidbodyComponent::acceleration,PropertyKind::Vector);Field<RigidbodyComponent>(body,"angularVelocity","Angular velocity",&RigidbodyComponent::angularVelocity,PropertyKind::Vector);Field<RigidbodyComponent>(body,"torque","Torque",&RigidbodyComponent::torque,PropertyKind::Vector);Field<RigidbodyComponent>(body,"mass","Mass",&RigidbodyComponent::mass,PropertyKind::Number,.00001f,1e9f);Field<RigidbodyComponent>(body,"useGravity","Gravity",&RigidbodyComponent::useGravity,PropertyKind::Boolean);Field<RigidbodyComponent>(body,"isStatic","Static",&RigidbodyComponent::isStatic,PropertyKind::Boolean);Field<RigidbodyComponent>(body,"simulatePhysics","Simulate",&RigidbodyComponent::simulatePhysics,PropertyKind::Boolean);Field<RigidbodyComponent>(body,"linearDampingMultiplier","Linear damping",&RigidbodyComponent::linearDampingMultiplier,PropertyKind::Number,0,100);Field<RigidbodyComponent>(body,"angularDampingMultiplier","Angular damping",&RigidbodyComponent::angularDampingMultiplier,PropertyKind::Number,0,100);Field<RigidbodyComponent>(body,"sleeping","Sleeping",&RigidbodyComponent::sleeping,PropertyKind::Boolean).readOnly=true;Field<RigidbodyComponent>(body,"sleepTimer","Sleep timer",&RigidbodyComponent::sleepTimer,PropertyKind::Number,0,1e9f).readOnly=true;Field<RigidbodyComponent>(body,"useAdvancedSphereStabilization","Sphere stabilization",&RigidbodyComponent::useAdvancedSphereStabilization,PropertyKind::Boolean);Complete(body);r.Register(body);
-    auto collider=Descriptor<ColliderComponent>("Collider","Collider");Field<ColliderComponent>(collider,"type","Shape",&ColliderComponent::type,PropertyKind::Integer,0,1).choices={"Box","Sphere"};Field<ColliderComponent>(collider,"halfExtents","Half extents",&ColliderComponent::halfExtents,PropertyKind::Vector,0,1e6f);Field<ColliderComponent>(collider,"offset","Offset",&ColliderComponent::offset,PropertyKind::Vector);Field<ColliderComponent>(collider,"restitution","Restitution",&ColliderComponent::restitution,PropertyKind::Number,-1,1);Field<ColliderComponent>(collider,"friction","Friction",&ColliderComponent::friction,PropertyKind::Number,-1,100);Field<ColliderComponent>(collider,"autoFitFromMesh","Fit from mesh",&ColliderComponent::autoFitFromMesh,PropertyKind::Boolean);Complete(collider);r.Register(collider);
+    Field<RigidbodyComponent>(body,"velocity","Velocity",&RigidbodyComponent::velocity,PropertyKind::Vector);Field<RigidbodyComponent>(body,"acceleration","Acceleration",&RigidbodyComponent::acceleration,PropertyKind::Vector);Field<RigidbodyComponent>(body,"angularVelocity","Angular velocity",&RigidbodyComponent::angularVelocity,PropertyKind::Vector);Field<RigidbodyComponent>(body,"torque","Torque",&RigidbodyComponent::torque,PropertyKind::Vector);Field<RigidbodyComponent>(body,"mass","Mass",&RigidbodyComponent::mass,PropertyKind::Number,.00001f,1e9f);Field<RigidbodyComponent>(body,"useGravity","Gravity",&RigidbodyComponent::useGravity,PropertyKind::Boolean);Field<RigidbodyComponent>(body,"isStatic","Static",&RigidbodyComponent::isStatic,PropertyKind::Boolean);Field<RigidbodyComponent>(body,"simulatePhysics","Simulate",&RigidbodyComponent::simulatePhysics,PropertyKind::Boolean);Field<RigidbodyComponent>(body,"linearDampingMultiplier","Linear damping",&RigidbodyComponent::linearDampingMultiplier,PropertyKind::Number,0,100);Field<RigidbodyComponent>(body,"angularDampingMultiplier","Angular damping",&RigidbodyComponent::angularDampingMultiplier,PropertyKind::Number,0,100);Field<RigidbodyComponent>(body,"sleeping","Sleeping",&RigidbodyComponent::sleeping,PropertyKind::Boolean).readOnly=true;Field<RigidbodyComponent>(body,"sleepTimer","Sleep timer",&RigidbodyComponent::sleepTimer,PropertyKind::Number,0,1e9f).readOnly=true;Field<RigidbodyComponent>(body,"useAdvancedSphereStabilization","Sphere stabilization",&RigidbodyComponent::useAdvancedSphereStabilization,PropertyKind::Boolean);Field<RigidbodyComponent>(body,"lockRotation","Lock rotation",&RigidbodyComponent::lockRotation,PropertyKind::Boolean);Complete(body);r.Register(body);
+    auto collider=Descriptor<ColliderComponent>("Collider","Collider");Field<ColliderComponent>(collider,"type","Shape",&ColliderComponent::type,PropertyKind::Integer,0,1).choices={"Box","Sphere"};Field<ColliderComponent>(collider,"halfExtents","Half extents",&ColliderComponent::halfExtents,PropertyKind::Vector,0,1e6f);Field<ColliderComponent>(collider,"offset","Offset",&ColliderComponent::offset,PropertyKind::Vector);Field<ColliderComponent>(collider,"restitution","Restitution",&ColliderComponent::restitution,PropertyKind::Number,-1,1);Field<ColliderComponent>(collider,"friction","Friction",&ColliderComponent::friction,PropertyKind::Number,-1,100);Field<ColliderComponent>(collider,"autoFitFromMesh","Fit from mesh",&ColliderComponent::autoFitFromMesh,PropertyKind::Boolean);Field<ColliderComponent>(collider,"isTrigger","Is trigger",&ColliderComponent::isTrigger,PropertyKind::Boolean);Complete(collider);r.Register(collider);
     auto velocity=Descriptor<VelocityComponent>("Velocity","Velocity");Field<VelocityComponent>(velocity,"linear","Linear",&VelocityComponent::linear,PropertyKind::Vector);Field<VelocityComponent>(velocity,"angular","Angular",&VelocityComponent::angular,PropertyKind::Vector);Complete(velocity);r.Register(velocity);
     auto bounds=Descriptor<BoundsBounceComponent>("BoundsBounce","Bounds bounce");Field<BoundsBounceComponent>(bounds,"minX","Min X",&BoundsBounceComponent::minX,PropertyKind::Number);Field<BoundsBounceComponent>(bounds,"maxX","Max X",&BoundsBounceComponent::maxX,PropertyKind::Number);Field<BoundsBounceComponent>(bounds,"minY","Min Y",&BoundsBounceComponent::minY,PropertyKind::Number);Field<BoundsBounceComponent>(bounds,"maxY","Max Y",&BoundsBounceComponent::maxY,PropertyKind::Number);Complete(bounds);r.Register(bounds);
-    r.Register(Light<DirectionalLightComponent>("DirectionalLight","Directional light"));r.Register(Light<PointLightComponent>("PointLight","Point light"));r.Register(Light<SpotLightComponent>("SpotLight","Spot light"));return r;
+    r.Register(Light<DirectionalLightComponent>("DirectionalLight","Directional light"));r.Register(Light<PointLightComponent>("PointLight","Point light"));r.Register(Light<SpotLightComponent>("SpotLight","Spot light"));
+    auto fog=Descriptor<FogComponent>("Fog","Fog");
+    Field<FogComponent>(fog,"enabled","Enabled",&FogComponent::enabled,PropertyKind::Boolean);
+    Field<FogComponent>(fog,"mode","Mode",&FogComponent::mode,PropertyKind::Integer,0,2).choices={"Distance","Height","Volumetric"};
+    Field<FogComponent>(fog,"color","Fog Color",&FogComponent::color,PropertyKind::Color,0,1).colorComponents=3;
+    Field<FogComponent>(fog,"density","Intensity",&FogComponent::density,PropertyKind::Number,0,1).tooltip="Distance blend intensity; Height/Volumetric density multiplier";
+    Field<FogComponent>(fog,"startDistance","Start Distance",&FogComponent::startDistance,PropertyKind::Number,0,10000).section="Distance";
+    Field<FogComponent>(fog,"endDistance","End Distance",&FogComponent::endDistance,PropertyKind::Number,.001f,10000).section="Distance";
+    Field<FogComponent>(fog,"baseHeight","Base Height",&FogComponent::baseHeight,PropertyKind::Number,-10000,10000).section="Medium";
+    Field<FogComponent>(fog,"heightDensity","Height Density",&FogComponent::heightDensity,PropertyKind::Number,0,10).section="Height";
+    Field<FogComponent>(fog,"heightFalloff","Height Falloff",&FogComponent::heightFalloff,PropertyKind::Number,0,10).section="Medium";
+    Field<FogComponent>(fog,"scatteringColor","Scattering Color",&FogComponent::scatteringColor,PropertyKind::Color,0,1).section="Volumetric";fog.properties.back().colorComponents=3;
+    Field<FogComponent>(fog,"extinction","Extinction",&FogComponent::extinction,PropertyKind::Number,0,10).section="Volumetric";
+    Field<FogComponent>(fog,"anisotropy","Anisotropy",&FogComponent::anisotropy,PropertyKind::Number,-.95f,.95f).section="Volumetric";
+    Field<FogComponent>(fog,"maxDistance","Max Distance / Sky",&FogComponent::maxDistance,PropertyKind::Number,.01f,10000);
+    Field<FogComponent>(fog,"quality","Quality",&FogComponent::quality,PropertyKind::Integer,0,2).choices={"Low (16 steps)","Medium (32 steps)","High (64 steps)"};fog.properties.back().section="Volumetric";
+    Field<FogComponent>(fog,"sceneLighting","Scene Lighting",&FogComponent::sceneLighting,PropertyKind::Boolean).section="Volumetric";
+    Complete(fog);auto loadFog=fog.deserialize;
+    fog.deserialize=[loadFog](World& w,Entity e,const Json& j){loadFog(w,e,j);if(!ValidFog(*w.GetComponent<FogComponent>(e)))Fail("Fog: invalid parameters (End Distance must exceed Start Distance)");};
+    for(auto& property:fog.properties){auto set=property.set;property.set=[set](World& w,Entity e,const PropertyValue& v){auto& c=*w.GetComponent<FogComponent>(e);auto before=c;set(w,e,v);if(!ValidFog(c)){c=before;Fail("Fog: End Distance must exceed Start Distance; all parameters must be finite and within range");}};}
+    r.Register(fog);
+    auto playerStart = Descriptor<PlayerStartComponent>(
+        "PlayerStart", "Player Start"
+    );
+
+    Field<PlayerStartComponent>(
+        playerStart,
+        "enabled",
+        "Enabled",
+        &PlayerStartComponent::enabled,
+        PropertyKind::Boolean
+    );
+
+    Field<PlayerStartComponent>(playerStart,"controllerScript","Controller script",&PlayerStartComponent::controllerScript,PropertyKind::Asset,0,0,AssetKind::LuaScript);
+    Field<PlayerStartComponent>(playerStart,"characterHeight","Character Height",&PlayerStartComponent::characterHeight,PropertyKind::Number,.2f,10.f).set=[](World& w,Entity e,const PropertyValue& v){
+        auto& c=*w.GetComponent<PlayerStartComponent>(e);c.characterHeight=std::get<float>(v);c.eyeHeight=std::min(c.eyeHeight,c.characterHeight);
+    };
+    Field<PlayerStartComponent>(playerStart,"eyeHeight","Eye Height",&PlayerStartComponent::eyeHeight,PropertyKind::Number,0.f,10.f).set=[](World& w,Entity e,const PropertyValue& v){
+        auto& c=*w.GetComponent<PlayerStartComponent>(e);const auto height=std::get<float>(v);if(height>c.characterHeight)Fail("Eye Height must not exceed Character Height");c.eyeHeight=height;
+    };
+    Complete(playerStart);
+    r.Register(playerStart);
+
+    auto player = Descriptor<PlayerComponent>(
+        "Player", "Player"
+    );
+
+    Field<PlayerComponent>(
+        player,
+        "eyeHeight",
+        "Eye Height",
+        &PlayerComponent::eyeHeight,
+        PropertyKind::Number,
+        0.0f,
+        10.0f
+    );
+
+    Complete(player);
+    r.Register(player);
+
+    auto movement =
+        Descriptor<CharacterMovementComponent>(
+            "CharacterMovement",
+            "Character Movement"
+        );
+
+    Field<CharacterMovementComponent>(
+        movement,
+        "moveSpeed",
+        "Move Speed",
+        &CharacterMovementComponent::moveSpeed,
+        PropertyKind::Number,
+        0.0f,
+        30.0f
+    );
+
+    Field<CharacterMovementComponent>(
+        movement,
+        "jumpSpeed",
+        "Jump Speed",
+        &CharacterMovementComponent::jumpSpeed,
+        PropertyKind::Number,
+        0.0f,
+        20.0f
+    );
+
+    Complete(movement);
+    r.Register(movement);
+
+    return r;
 }
 }
 ComponentRegistry& ComponentRegistry::Builtins(){static auto registry=Build();return registry;}
@@ -158,12 +265,19 @@ nlohmann::json ComponentRegistry::Capture(const World& w,Entity e)const{if(!w.Is
 void ComponentRegistry::Restore(World& w,Entity e,const nlohmann::json& j)const{
     if(!w.IsAlive(e)||!j.is_object())Fail("Invalid entity snapshot");for(auto i=j.begin();i!=j.end();++i)if(!Find(i.key()))Fail("Unknown component: "+i.key());
     for(const auto& d:components){if(j.contains(d.key))d.deserialize(w,e,j.at(d.key));else if(d.has(w,e))d.remove(w,e);}
+    // Old Player-only scenes stored speed here. Explicit CharacterMovement wins.
+    if(j.contains("Player")&&j["Player"].contains("moveSpeed")&&(!j.contains("CharacterMovement")||!j["CharacterMovement"].contains("moveSpeed"))){
+        auto legacy=j["Player"]["moveSpeed"].get<float>();if(!std::isfinite(legacy)||legacy<0||legacy>30)Fail("Invalid legacy player speed");
+        if(!w.HasComponent<CharacterMovementComponent>(e))w.AddComponent<CharacterMovementComponent>(e);
+        w.GetComponent<CharacterMovementComponent>(e)->moveSpeed=legacy;
+    }
     if(w.HasComponent<TransformComponent>(e)==false&&(GetLightParameters(w,e)||w.HasComponent<MeshRendererComponent>(e)||w.HasComponent<RigidbodyComponent>(e)||w.HasComponent<ColliderComponent>(e)))Fail("Render/light/physics entity requires Transform");
     int lights=int(w.HasComponent<DirectionalLightComponent>(e))+int(w.HasComponent<PointLightComponent>(e))+int(w.HasComponent<SpotLightComponent>(e));if(lights>1)Fail("Multiple light component types on one entity");
 }
 bool ComponentRegistry::ValidateAssetKey(const std::string& key,AssetKind kind,std::string* error){return Checked([&]{if(key.empty())return;
     const auto path=std::filesystem::u8path(key);if(key.size()>1024||path.is_absolute()||path.has_root_name()||key.find(':')!=std::string::npos||key.find('\\')!=std::string::npos)Fail("Use a portable relative resource key");for(auto& part:path)if(part=="..")Fail("Resource key cannot escape project root");
     std::string ext=path.extension().string();std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});
-    bool valid=kind==AssetKind::None||(kind==AssetKind::Mesh&&(ext==".obj"||ext==".gltf"||ext==".glb"||ext==".fbx"))||(kind==AssetKind::Texture&&(ext==".png"||ext==".dds"||ext==".jpg"||ext==".jpeg"||ext==".bmp"||ext==".tga"))||(kind==AssetKind::Material&&(ext==".json"||ext==".material"))||(kind==AssetKind::Shader&&ext==".hlsl")||(kind==AssetKind::Environment&&ext==".hdr")||key.starts_with("defaults/");if(!valid)Fail("Resource type does not match property");
+    bool valid=kind==AssetKind::None||(kind==AssetKind::LuaScript&&ext==".lua")||(kind==AssetKind::Prefab&&key.ends_with(".prefab.json"))||(kind==AssetKind::Mesh&&(ext==".obj"||ext==".gltf"||ext==".glb"||ext==".fbx"))||(kind==AssetKind::Texture&&(ext==".png"||ext==".dds"||ext==".jpg"||ext==".jpeg"||ext==".bmp"||ext==".tga"))||(kind==AssetKind::Material&&(ext==".json"||ext==".material"))||(kind==AssetKind::Shader&&ext==".hlsl")||(kind==AssetKind::Environment&&ext==".hdr")||key.starts_with("defaults/");if(!valid)Fail("Resource type does not match property");
 },error);}
 }
+

@@ -47,10 +47,7 @@ float4 SkyPS(Vertex v):SV_TARGET {
     }else c=solid.rgb;
     c*=background.y;
     [branch] if(sunDirection.w<1.5){
-        float alignment=clamp(dot(worldRay,sunDirection.xyz),-1,1),width=max(fwidth(alignment),1e-7);
-        float radial2=saturate((1-alignment)/max(1-sunDirection.w,1e-7));
-        float limb=.35+.65*sqrt(saturate(1-radial2));
-        float disc=smoothstep(sunDirection.w-width,sunDirection.w+width,alignment);
+        float alignment=clamp(dot(worldRay,sunDirection.xyz),-1,1);
         float elevation=sunDirection.y,visible=smoothstep(-.05,.02,elevation);
         float warmth=1-smoothstep(0,.4,elevation);
         float3 temperature=lerp(float3(1,.95,.82),float3(1,.38,.09),warmth);
@@ -59,8 +56,9 @@ float4 SkyPS(Vertex v):SV_TARGET {
         float3 radiance=sunColor.rgb*temperature*sunColor.w*attenuation;
         // HDR uses the existing scene output tone mapper. SDR helper luminance is bounded.
         float3 displaySun=top.w>.5?radiance:radiance/(1+radiance);
-        c=lerp(c,displaySun*limb,disc*visible);
-        float3 halo=displaySun*glow*attenuation*(1-disc);
+        // Continuous scattering over the background: no opaque legacy disc or
+        // hole in the halo. Legacy diameter/visibility fields remain loadable.
+        float3 halo=displaySun*glow*attenuation;
         c=top.w>.5?c+halo:1-(1-saturate(c))*(1-saturate(halo));
     }
     return float4(Output(c),1);

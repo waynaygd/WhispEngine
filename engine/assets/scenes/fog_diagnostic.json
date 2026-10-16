@@ -1,0 +1,461 @@
+{
+  "entities": [
+    {
+      "components": {
+        "Fog": {
+          "anisotropy": 0.30000001192092896,
+          "baseHeight": 2.0,
+          "color": [
+            0.20000000298023224,
+            0.4000000059604645,
+            0.6000000238418579,
+            1.0
+          ],
+          "density": 1.0,
+          "enabled": true,
+          "endDistance": 50.0,
+          "extinction": 0.03999999910593033,
+          "heightDensity": 0.10000000149011612,
+          "heightFalloff": 0.25,
+          "maxDistance": 70.0,
+          "mode": 2,
+          "quality": 1,
+          "scatteringColor": [
+            0.800000011920929,
+            0.8500000238418579,
+            0.8999999761581421,
+            1.0
+          ],
+          "sceneLighting": true,
+          "startDistance": 10.0
+        },
+        "Tag": {
+          "name": "Fog"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": "entity-91466284676000-35"
+    },
+    {
+      "components": {
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "overrides": {},
+          "shaderPath": "",
+          "slotMaterials": [],
+          "texturePath": "",
+          "tint": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/plane.obj",
+          "shaderPath": "",
+          "texturePath": "",
+          "visible": true
+        },
+        "Tag": {
+          "name": "plane"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            100.0,
+            1.0,
+            100.0
+          ]
+        }
+      },
+      "id": "entity-91466284676000-34"
+    },
+    {
+      "components": {
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "overrides": {},
+          "shaderPath": "",
+          "slotMaterials": [],
+          "texturePath": "",
+          "tint": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "shaderPath": "",
+          "texturePath": "",
+          "visible": true
+        },
+        "Tag": {
+          "name": "cube"
+        },
+        "Transform": {
+          "position": [
+            4.0,
+            6.0,
+            32.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            2.0,
+            2.0,
+            2.0
+          ]
+        }
+      },
+      "id": "entity-91466284676000-33"
+    },
+    {
+      "components": {
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "overrides": {},
+          "shaderPath": "",
+          "slotMaterials": [],
+          "texturePath": "",
+          "tint": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "shaderPath": "",
+          "texturePath": "",
+          "visible": true
+        },
+        "Tag": {
+          "name": "cube"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            3.0,
+            18.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            2.0,
+            2.0,
+            2.0
+          ]
+        }
+      },
+      "id": "entity-91466284676000-32"
+    },
+    {
+      "components": {
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "overrides": {},
+          "shaderPath": "",
+          "slotMaterials": [],
+          "texturePath": "",
+          "tint": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "shaderPath": "",
+          "texturePath": "",
+          "visible": true
+        },
+        "Tag": {
+          "name": "cube"
+        },
+        "Transform": {
+          "position": [
+            -3.0,
+            1.0,
+            6.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            2.0,
+            2.0,
+            2.0
+          ]
+        }
+      },
+      "id": "entity-91466284676000-31"
+    },
+    {
+      "components": {
+        "DirectionalLight": {
+          "attenuation": 0.10000000149011612,
+          "castShadows": true,
+          "color": [
+            1.0,
+            0.800000011920929,
+            0.6000000238418579
+          ],
+          "enabled": true,
+          "innerAngle": 20.0,
+          "intensity": 5.0,
+          "outerAngle": 30.0,
+          "primary": true,
+          "range": 5.0,
+          "type": "directional"
+        },
+        "Tag": {
+          "name": "Directional Light"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.75
+          ],
+          "rotation": [
+            0.0,
+            3.1415927410125732,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": "entity-91466284676000-30"
+    },
+    {
+      "components": {
+        "PointLight": {
+          "attenuation": 0.10000000149011612,
+          "castShadows": false,
+          "color": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "enabled": true,
+          "innerAngle": 20.0,
+          "intensity": 80.0,
+          "outerAngle": 30.0,
+          "primary": false,
+          "range": 25.0,
+          "type": "point"
+        },
+        "Tag": {
+          "name": "Point Light"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            6.0,
+            2.0
+          ],
+          "rotation": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": "entity-91466284676000-36"
+    },
+    {
+      "components": {
+        "SpotLight": {
+          "attenuation": 0.10000000149011612,
+          "castShadows": false,
+          "color": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "enabled": true,
+          "innerAngle": 25.0,
+          "intensity": 100.0,
+          "outerAngle": 55.0,
+          "primary": false,
+          "range": 40.0,
+          "type": "spot"
+        },
+        "Tag": {
+          "name": "Spot Light"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            5.0,
+            -2.0
+          ],
+          "rotation": [
+            -0.5,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": "entity-91466284676000-37"
+    }
+  ],
+  "settings": {
+    "ambient": {
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "intensity": 0.019999999552965164
+    },
+    "antiAliasing": 2,
+    "background": {
+      "asset": "environments/studio.hdr",
+      "blend": 0.6499999761581421,
+      "bottom": [
+        0.054999999701976776,
+        0.06499999761581421,
+        0.08500000089406967
+      ],
+      "dayLightIntensity": 3.0,
+      "driveLightProperties": false,
+      "horizon": [
+        0.3400000035762787,
+        0.4300000071525574,
+        0.550000011920929
+      ],
+      "horizonGlow": 1.0,
+      "intensity": 1.0,
+      "mode": 1,
+      "nightColor": [
+        0.0020000000949949026,
+        0.004000000189989805,
+        0.012000000104308128
+      ],
+      "nightIntensity": 0.25,
+      "rotation": 0.0,
+      "solid": [
+        0.00800000037997961,
+        0.012000000104308128,
+        0.019999999552965164
+      ],
+      "sunDirection": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "sunGlowIntensity": 0.15000000596046448,
+      "sunGlowRadius": 3.0,
+      "sunIntensity": 1.0,
+      "sunMetadata": false,
+      "sunRadius": 0.5299999713897705,
+      "sunSync": 0,
+      "sunsetWarmth": 0.8500000238418579,
+      "top": [
+        0.04500000178813934,
+        0.11999999731779099,
+        0.25
+      ],
+      "useIbl": false,
+      "version": 1,
+      "visibleSunDisc": true
+    },
+    "environment": {
+      "asset": "environments/studio.hdr",
+      "diffuse": true,
+      "enabled": false,
+      "exposure": 0.0,
+      "intensity": 1.0,
+      "rotationDegrees": 0.0,
+      "specular": true,
+      "toneMapping": true
+    },
+    "legacyDirectional": {
+      "color": [
+        1.0,
+        0.949999988079071,
+        0.8500000238418579
+      ],
+      "direction": [
+        -0.4000000059604645,
+        -1.0,
+        0.30000001192092896
+      ],
+      "enabled": true,
+      "intensity": 0.8500000238418579
+    },
+    "primaryDirectional": "entity-91466284676000-30",
+    "shadows": {
+      "cameraFitted": true,
+      "coverage": 100.0,
+      "depthBias": 100,
+      "depthRange": 200.0,
+      "edgeFade": 0.05000000074505806,
+      "enabled": true,
+      "filterRadius": 1.5,
+      "filterTaps": 5,
+      "focusDistance": 32.0,
+      "normalBias": 0.25,
+      "pcf": true,
+      "receiverBias": 1.9999999494757503e-05,
+      "receiverPlaneBias": true,
+      "resolution": 2048,
+      "slopeBias": 1.0,
+      "strength": 1.0
+    }
+  },
+  "version": 4
+}

@@ -1,6 +1,7 @@
 #include "PrecisionInputs.h"
 #include <cstring>
 #include "TransformMath.h"
+#include "ScalePlaneGeometry.h"
 #include "SunSynchronization.h"
 #include "EditorWidgets.h"
 #include "EditorLayer.h"
@@ -20,6 +21,7 @@
 #include "../core/AssetPaths.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <ImGuizmo.h>
 #include <misc/cpp/imgui_stdlib.h>
 
@@ -316,11 +318,24 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     const auto uiStart=std::chrono::steady_clock::now();
     struct FinishUi {Statistics& stats;std::chrono::steady_clock::time_point start;~FinishUi(){stats.uiMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}} finish{m_Statistics,uiStart};
     RefreshAssetLists(dt);
-    if(m_Transaction&&!m_Transaction->before.settings&&m_Transaction->before.entity!=m_SelectedEntity)FinishTransaction(app);
+    PruneSelection(app);
+    if(m_Transaction&&!m_Transaction->before.settings&&m_Transaction->before.entity.IsValid()&&m_Transaction->before.entity!=m_Selection.active)FinishTransaction(app);
     m_InputTextActive=ImGui::GetIO().WantTextInput;m_ModalActive=ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel);
     if(m_LightPointerCaptured&&!ImGui::IsMouseDown(0)){FinishTransaction(app);m_LightPointerCaptured=false;}
     m_EscapeConsumed=false;
     if((ImGui::GetIO().AppFocusLost||ImGui::IsKeyPressed(ImGuiKey_Escape,false))&&m_Transaction){CancelTransaction(app);m_PropertyDrafts.clear();m_CancelGizmoUntilRelease=true;m_LightPointerCaptured=false;m_EscapeConsumed=true;}
+    // F11 changes only transient presentation. Keep the authored dock tree alive.
+    if(!ImGui::GetIO().WantTextInput&&!m_ModalActive&&!ImGui::GetIO().AppFocusLost&&ImGui::IsKeyPressed(ImGuiKey_F11,false)){
+        if(HasPendingTransaction())CancelTransaction(app);
+        m_LightPointerCaptured=m_PlaneScaleCaptured=m_ToolActive=false;m_CancelGizmoUntilRelease=true;
+        ImGuizmo::Enable(false);ImGuizmo::Enable(true);ImGui::ClearActiveID();
+        m_ViewportMaximized=!m_ViewportMaximized;m_FocusViewportWindow=true;
+    }
+    if(m_ViewportMaximized){
+        m_HierarchyFocused=false;
+        ImGui::DockSpace(ImHashStr("WhispEngine.Editor.Dockspace"),ImVec2(0,0),ImGuiDockNodeFlags_KeepAliveOnly);
+        DrawViewport(app,renderer);HandleEditorShortcuts(app);return;
+    }
     ConfigureDocking();DrawToolbar(app);
 
 
@@ -414,22 +429,70 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
         ImGui::ShowDemoWindow(&m_ShowDemoWindow);
 }
 
+EditorLayer::CameraMouseFrame::CameraMouseFrame(bool suppress){
+    if(!suppress||!ImGui::GetCurrentContext())return;
+    context=ImGui::GetCurrentContext();auto& io=ImGui::GetIO();
+    restoreMouse=(io.ConfigFlags&ImGuiConfigFlags_NoMouse)==0;
+    // GLFW cursor-disabled coordinates are virtual camera deltas, not UI input.
+    // Remove queued mouse events before NewFrame, preserving keyboard/focus events.
+    for(int i=context->InputEventsQueue.Size-1;i>=0;--i){
+        auto type=context->InputEventsQueue[i].Type;
+        if(type>=ImGuiInputEventType_MousePos&&type<=ImGuiInputEventType_MouseViewport)context->InputEventsQueue.erase(context->InputEventsQueue.Data+i);
+    }
+    io.ClearInputMouse();
+    if(context->ActiveIdSource==ImGuiInputSource_Mouse)ImGui::ClearActiveID();
+    context->MovingWindow=nullptr;
+    // Scoped to this camera-owned frame; suppress backend fallback hover too.
+    io.ConfigFlags|=ImGuiConfigFlags_NoMouse;
+}
+EditorLayer::CameraMouseFrame::~CameraMouseFrame(){
+    if(restoreMouse&&context==ImGui::GetCurrentContext())ImGui::GetIO().ConfigFlags&=~ImGuiConfigFlags_NoMouse;
+}
+EditorLayer::CameraMouseFrame EditorLayer::RouteCameraMouse(bool captured,bool buttonsDown,const ImVec2& pointer){
+    const bool suppress=captured||m_CameraMouseDrain;
+    // Swallow the release frame and any secondary button held across release.
+    m_CameraMouseDrain=captured||(m_CameraMouseDrain&&buttonsDown);
+    if(!suppress&&m_CameraMouseWasSuppressed&&ImGui::GetCurrentContext())ImGui::GetIO().AddMousePosEvent(pointer.x,pointer.y);
+    m_CameraMouseWasSuppressed=suppress;
+    return CameraMouseFrame(suppress);
+}
+
+bool EditorLayer::BlocksGameplayInput()const{
+    if(m_ToolActive||m_ModalActive)return true;
+    if(!ImGui::GetCurrentContext())return false;
+    if(ImGui::GetIO().WantTextInput||ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel))return true;
+    const auto& g=*ImGui::GetCurrentContext();
+    if(!g.ActiveId)return false;
+    // Clicking an Image activates the window's background MoveId. It is the
+    // viewport requesting gameplay focus, not an Inspector/text widget.
+    auto* viewport=ImGui::FindWindowByName(ViewportWindowName());
+    return !viewport||g.ActiveIdWindow!=viewport||
+        (g.ActiveId!=viewport->MoveId&&g.ActiveId!=viewport->GetID("ViewportCanvas"));
+}
+
 void EditorLayer::HandleEditorShortcuts(Application& app){
     const auto& io=ImGui::GetIO();if(io.WantTextInput||m_ModalActive||m_EscapeConsumed)return;
+    // Asset file shortcuts are handled by the browser after its widgets. Never
+    // let a Delete intended for that window reach the entity command path.
+    if(AssetBrowserOwnsKeyboard()&&(ImGui::IsKeyPressed(ImGuiKey_Delete,false)||ImGui::IsKeyPressed(ImGuiKey_F2,false)))return;
     if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)&&!app.IsEditorPlayMode()){
         if(HasPendingTransaction()){CancelTransaction(app);m_LightPointerCaptured=false;m_CancelGizmoUntilRelease=true;}else if((m_ViewportFocused||m_HierarchyFocused)&&!m_InputTextActive&&!app.IsCameraControlActive())ClearSelection();return;
     }
     const bool entityKeys=!app.IsEditorPlayMode()&&(m_ViewportFocused||m_HierarchyFocused)&&!m_InputTextActive&&!m_ToolActive&&!app.IsCameraControlActive();
-    if(entityKeys){if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_C,false))CopyEntity(app,m_SelectedEntity);if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_V,false))PasteEntity(app);if(ImGui::IsKeyPressed(ImGuiKey_Delete,false))DeleteEntity(app,m_SelectedEntity);}
+    if(entityKeys){if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_C,false))CopyEntity(app,m_Selection.active);if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_V,false))PasteEntity(app);if(ImGui::IsKeyPressed(ImGuiKey_Delete,false))DeleteSelection(app);if(m_HierarchyFocused&&io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_A,false))SelectAllEntities(app,m_HierarchyVisible);}
     if(io.KeyCtrl){
         if(ImGui::IsKeyPressed(ImGuiKey_Z,false))Undo(app);
         if(ImGui::IsKeyPressed(ImGuiKey_Y,false))Redo(app);
         if(ImGui::IsKeyPressed(ImGuiKey_S,false)){if(io.KeyShift){m_SceneDialogAction=3;m_SceneDialogRequested=true;}else{std::string error;if(!app.SaveCurrentScene(&error)){m_EditorError=error;Logger::Get().Error(error);}}}
-        if(ImGui::IsKeyPressed(ImGuiKey_D,false))DuplicateEntity(app,m_SelectedEntity);
+        if(ImGui::IsKeyPressed(ImGuiKey_D,false))DuplicateEntity(app,m_Selection.active);
+    }
+    if(io.KeyAlt&&!io.KeyCtrl&&!io.KeyShift&&(m_ViewportFocused||app.IsViewportMouseCaptured())&&!BlocksGameplayInput()&&!ImGuizmo::IsUsing()&&!ImGui::IsMouseDown(0)&&!ImGui::IsMouseDown(1)){
+        if(ImGui::IsKeyPressed(ImGuiKey_3,false))app.SetViewportUnlit(false);
+        if(ImGui::IsKeyPressed(ImGuiKey_4,false))app.SetViewportUnlit(true);
     }
     if(!EditorHotkeysAllowed(app.IsEditorPlayMode(),OwnsViewportKeyboard(),io.WantCaptureKeyboard,app.IsCameraControlActive()))return;
     if(!io.KeyCtrl&&!io.KeyAlt&&!m_InputTextActive&&ImGui::IsKeyPressed(ImGuiKey_G,false))m_GameView=!m_GameView;
-    if(ImGui::IsKeyPressed(ImGuiKey_F,false))app.FocusEntity(m_SelectedEntity);
+    if(ImGui::IsKeyPressed(ImGuiKey_F,false))app.FocusEntity(m_Selection.active);
     if(ImGui::IsKeyPressed(ImGuiKey_W,false))m_GizmoOperation=0;
     if(ImGui::IsKeyPressed(ImGuiKey_E,false))m_GizmoOperation=1;
     if(ImGui::IsKeyPressed(ImGuiKey_R,false))m_GizmoOperation=2;
@@ -505,20 +568,37 @@ void EditorLayer::DrawStatistics(Application& app, float dt)
 
 void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
 {
-    ImGui::SetNextWindowSize(ImVec2(760.0f, 520.0f), ImGuiCond_Appearing);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(420.0f, 280.0f), ImVec2(FLT_MAX, FLT_MAX));
-    ImGui::Begin("Viewport", &m_ShowViewport,ImGuiWindowFlags_NoNavInputs);
+    const bool maximized=m_ViewportMaximized;
+    if(maximized){
+        auto* viewport=ImGui::GetMainViewport();ImGui::SetNextWindowPos(viewport->Pos);ImGui::SetNextWindowSize(viewport->Size);
+        ImGui::SetNextWindowViewport(viewport->ID);ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(0,0));ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize,0.f);
+    }else{
+        ImGui::SetNextWindowSize(ImVec2(760.0f, 520.0f), ImGuiCond_Appearing);
+        ImGui::SetNextWindowSizeConstraints(ImVec2(420.0f, 280.0f), ImVec2(FLT_MAX, FLT_MAX));
+    }
+    if(m_FocusViewportWindow){ImGui::SetNextWindowFocus();m_FocusViewportWindow=false;}
+    ImGui::Begin(ViewportWindowName(),maximized?nullptr:&m_ShowViewport,ImGuiWindowFlags_NoNavInputs|(maximized?(ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoBringToFrontOnFocus):0));
 
     const bool playMode = app.IsEditorPlayMode();
+    if(!maximized){
+    DrawViewportCreateMenu(app);
+    ImGui::SameLine();
     if (ImGui::Button(playMode ? "Stop" : "Play"))
         app.SetEditorPlayMode(!playMode);
     ImGui::SameLine();
     ImGui::TextUnformatted(playMode ? "Play" : "Edit");
-    if(!playMode){ImGui::SameLine();ImGui::Checkbox("Game View (G)",&m_GameView);}
+    ImGui::SameLine();ImGui::SetNextItemWidth(85*ImGui::GetStyle().FontScaleDpi);
+    int shading=app.IsViewportUnlit()?1:0;
+    if(ImGui::Combo("##ViewportShading",&shading,"Lit\0Unlit\0"))app.SetViewportUnlit(shading==1);
+    if(!playMode){
+        if(ImGui::GetWindowWidth()>520*ImGui::GetStyle().FontScaleDpi)ImGui::SameLine();
+        ImGui::Checkbox("Game View (G)",&m_GameView);
+    }
 
     ImGui::Separator();
+    }
 
-    if(m_FixedDiagnosticLayout)ImGui::Dummy(ImVec2(1,ImGui::GetFrameHeightWithSpacing()*2-ImGui::GetStyle().ItemSpacing.y));
+    if(m_FixedDiagnosticLayout&&!maximized)ImGui::Dummy(ImVec2(1,ImGui::GetFrameHeightWithSpacing()*2-ImGui::GetStyle().ItemSpacing.y));
     const ImVec2 contentMin = ImGui::GetCursorScreenPos();
     const ImVec2 available = ImGui::GetContentRegionAvail();
     const ImVec2 viewportSize(std::max(available.x, 1.0f), std::max(available.y, 1.0f));
@@ -567,16 +647,36 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
         }ImGui::EndDragDropTarget();
     }
     m_ViewportHovered=ImGui::IsItemHovered();
+    if(maximized){
+        // The image already registered the full content bounds. Create is the
+        // final layout item; the remaining helpers only submit draw-list data.
+        // Do not restore the post-image cursor (it includes ItemSpacing below
+        // CursorMaxPos and would extend the window without submitting an item).
+        ImGui::SetCursorScreenPos(ImVec2(contentMin.x+8,contentMin.y+8));
+        if(DrawViewportCreateMenu(app))m_ViewportHovered=false;
+    }
     if(m_ViewportHovered&&ImGui::IsMouseClicked(1))ImGui::SetWindowFocus();
     if(m_ViewportHovered&&ImGui::IsMouseClicked(0))ImGui::SetWindowFocus();
     m_LightHandleHovered=m_LightIconClicked=false;
+    m_SpecialIconHovered=false;
+    // Specialized markers retain visual and picking priority over fallback icons.
+    ImDrawListSplitter iconLayers;
+    auto* iconDraw=ImGui::GetWindowDrawList();
+    iconLayers.Split(iconDraw,2);
+    iconLayers.SetCurrentChannel(iconDraw,1);
     DrawLightGizmos(app,renderer,contentMin,viewportSize);
+    DrawPlayerStartGizmos(app,contentMin,viewportSize);
+    DrawFogGizmos(app,contentMin,viewportSize);
+    iconLayers.SetCurrentChannel(iconDraw,0);
+    DrawEntityIcons(app,contentMin,viewportSize);
+    iconLayers.Merge(iconDraw);
     ImGui::GetWindowDrawList()->PushClipRect(contentMin,ImVec2(contentMin.x+viewportSize.x,contentMin.y+viewportSize.y),true);
-    if(!m_LightPointerCaptured&&!m_LightHandleHovered)DrawGizmo(app, contentMin, viewportSize);
+    if(!m_LightIconClicked&&!m_LightPointerCaptured&&!m_LightHandleHovered)DrawGizmo(app, contentMin, viewportSize);
     ImGui::GetWindowDrawList()->PopClipRect();
     DrawViewportOverlays(app,contentMin,viewportSize);
     m_ToolActive=ImGuizmo::IsUsing()||(m_Transaction&&!m_Transaction->before.settings);
     ImGui::End();
+    if(maximized)ImGui::PopStyleVar(2);
 }
 
 void EditorLayer::DrawMaterialEditor(Application& app)
@@ -587,11 +687,11 @@ void EditorLayer::DrawMaterialEditor(Application& app)
     if(app.IsEditorPlayMode())ImGui::TextWrapped("Stop Play before modifying shared material assets.");
     ImGui::BeginDisabled(app.IsEditorPlayMode());
     auto* resources=app.GetResourceManager();auto& world=app.GetWorld();
-    auto* component=world.GetComponent<ecs::MaterialComponent>(m_SelectedEntity);
+    auto* component=world.GetComponent<ecs::MaterialComponent>(m_Selection.active);
     const auto open=[&](const std::string& key) {
         if(m_MaterialDirty&&key!=m_EditingMaterial){m_MaterialError="Unsaved changes: Save or Revert before opening another asset.";return;}
         m_EditingMaterial=key;m_MaterialError.clear();
-        if(resources&&!key.empty()) {resources->Load<MaterialResource>(key);resources->WatchForHotReload<MaterialResource>(key);}
+        if(resources&&!key.empty()) {resources->Load<MaterialResource>(std::filesystem::u8path(key));resources->WatchForHotReload<MaterialResource>(std::filesystem::u8path(key));}
     };
     if(m_SelectedAssetKind=="Material"&&ImGui::Button("Open selected asset"))open(m_SelectedAsset);
     if(component&&!component->materialPath.empty()) {ImGui::SameLine();if(ImGui::Button("Open entity material"))open(component->materialPath);}
@@ -610,7 +710,7 @@ void EditorLayer::DrawMaterialEditor(Application& app)
             if(CreateMaterialAsset(app,m_NewMaterialKey,&m_MaterialError)){open(AssetPaths::NormalizeAssetKey(m_NewMaterialKey));m_AssetListsDirty=true;}}
     }
     ImGui::Separator();ImGui::Text("Asset: %s%s",m_EditingMaterial.c_str(),m_MaterialDirty?" *":"");
-    auto resource=resources?resources->Get<MaterialResource>(m_EditingMaterial):nullptr;
+    auto resource=resources?resources->Get<MaterialResource>(std::filesystem::u8path(m_EditingMaterial)):nullptr;
     if(resource&&resource->IsLoaded()) {
         auto data=resource->GetData();bool changed=false;
         changed|=ImGui::InputText("Name",&data.name);
@@ -652,12 +752,12 @@ void EditorLayer::DrawMaterialEditor(Application& app)
             resources->SetMaterialDirty(m_EditingMaterial,true);
         }
         if(ImGui::Button("Save")) {
-            if(MaterialLoader::Save(m_EditingMaterial,resource->GetData(),&m_MaterialError)){m_MaterialDirty=false;resources->SetMaterialDirty(m_EditingMaterial,false);resources->Reload<MaterialResource>(m_EditingMaterial);}
+            if(MaterialLoader::Save(m_EditingMaterial,resource->GetData(),&m_MaterialError)){m_MaterialDirty=false;resources->SetMaterialDirty(m_EditingMaterial,false);resources->Reload<MaterialResource>(std::filesystem::u8path(m_EditingMaterial));}
         }
         ImGui::SameLine();if(ImGui::Button("Revert"))ImGui::OpenPopup("Discard unsaved material edits?");
         if(ImGui::BeginPopupModal("Discard unsaved material edits?",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
             ImGui::TextUnformatted("Revert this shared asset to its saved file?");
-            if(ImGui::Button("Revert to file")) {resources->SetMaterialDirty(m_EditingMaterial,false);auto reloaded=resources->Reload<MaterialResource>(m_EditingMaterial);
+            if(ImGui::Button("Revert to file")) {resources->SetMaterialDirty(m_EditingMaterial,false);auto reloaded=resources->Reload<MaterialResource>(std::filesystem::u8path(m_EditingMaterial));
                 if(reloaded&&reloaded->IsLoaded()){m_MaterialDirty=false;m_MaterialError.clear();}else {m_MaterialError=reloaded?reloaded->GetErrorMessage():"Reload failed";resources->SetMaterialDirty(m_EditingMaterial,m_MaterialDirty);}
                 ImGui::CloseCurrentPopup();}
             ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();ImGui::EndPopup();
@@ -676,6 +776,9 @@ void EditorLayer::DrawMaterialEditor(Application& app)
 
 void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const ImVec2& viewportSize)
 {
+    // Ctrl/Shift clicks belong to selection, even when an object lies under a
+    // shared handle. Snap remains controlled by the existing toolbar settings.
+    if((ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&ImGui::IsMouseClicked(0)&&!ImGuizmo::IsUsing())return;
     if(m_ModalActive){if(m_GizmoUndoCaptured)CancelTransaction(app);m_GizmoUndoCaptured=false;m_CancelGizmoUntilRelease=true;ImGuizmo::Enable(false);return;}
     if((app.IsCameraControlActive()||ImGui::IsMouseDown(1))&&!ImGuizmo::IsUsing())return;
     if (app.IsEditorPlayMode() || m_GameView || viewportSize.x <= 1.0f || viewportSize.y <= 1.0f)
@@ -683,10 +786,10 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
 
     if(m_CancelGizmoUntilRelease){ImGuizmo::Enable(false);if(ImGui::IsMouseDown(0))return;m_CancelGizmoUntilRelease=false;}ImGuizmo::Enable(true);
     auto& world = app.GetWorld();
-    if (!m_SelectedEntity.IsValid() || !world.IsAlive(m_SelectedEntity))
+    if (!m_Selection.active.IsValid() || !world.IsAlive(m_Selection.active))
         return;
 
-    auto* transform = world.GetComponent<ecs::TransformComponent>(m_SelectedEntity);
+    auto* transform = world.GetComponent<ecs::TransformComponent>(m_Selection.active);
     if (transform == nullptr)
         return;
 
@@ -715,11 +818,20 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
     ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
     ImGuizmo::SetRect(viewportMin.x, viewportMin.y, viewportSize.x, viewportSize.y);
 
-    if(!ImGuizmo::IsUsing()&&DrawScalePlanes(app,viewportMin,viewportSize))return;
+    ImGuizmo::SetGizmoSizeClipSpace(ScaleGizmoClipSize);
+    if(m_Selection.items.size()>1){DrawGroupGizmo(app,view,projection);return;}
+    const bool planeOwnsPointer=!ImGuizmo::IsUsing()&&DrawScalePlanes(app,viewportMin,viewportSize,matrix);
     const ImGuizmo::MODE mode = m_GizmoMode == 0 ? ImGuizmo::LOCAL : ImGuizmo::WORLD;
     float snapValue=m_GizmoOperation==0?m_SnapTranslation:m_GizmoOperation==1?m_SnapRotation:m_SnapScale;float snap[3]={snapValue,snapValue,snapValue};
     float originalMatrix[16];std::copy(matrix,matrix+16,originalMatrix);
+    // Manipulate combines drawing and input. Its IsHoveringWindow gate must be
+    // false while a custom plane owns the pointer; moving MousePos alone is not
+    // enough (a nearly parallel ray can still select an axis). BeginFrame's
+    // NoInputs helper window is distinct from our viewport draw-list owner.
+    auto& context=*ImGui::GetCurrentContext();auto* hoveredWindow=context.HoveredWindow;
+    if(planeOwnsPointer)context.HoveredWindow=ImGui::FindWindowByName("gizmo");
     const bool manipulated=ImGuizmo::Manipulate(view, projection, ToGizmoOperation(m_GizmoOperation), mode, matrix,nullptr,(m_GizmoOperation==1?m_RotationSnapping:m_Snapping)?snap:nullptr);
+    context.HoveredWindow=hoveredWindow;
     bool matrixChanged=false;for(int i=0;i<16;++i)matrixChanged|=std::abs(matrix[i]-originalMatrix[i])>1e-6f;
     // ImGuizmo's previous delta may report "modified" on a later stationary drag.
     // Duplicate only when the target matrix actually changes (including snapped movement).
@@ -734,7 +846,7 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
         }
 
         ImportMatrix result;std::copy(matrix,matrix+16,result.begin());
-        if(auto decomposed=DecomposeTransform(result,transform->scale)){*transform=*decomposed;app.NotifyEditorMutation(m_SelectedEntity);}else m_EditorError="Transform requires shear/singular scale; use Local scale handles";
+        if(auto decomposed=DecomposeTransform(result,transform->scale)){*transform=*decomposed;app.NotifyEditorMutation(m_Selection.active);}else m_EditorError="Transform requires shear/singular scale; use Local scale handles";
     }
     else if (!ImGuizmo::IsUsing())
     {
@@ -773,15 +885,15 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
                 ImGui::EndTable();
             }
             if(b.background==EditorBackground::DayNight){changed|=LinearColorEdit("Zenith color",b.top.data(),3);changed|=LinearColorEdit("Horizon tint",b.horizon.data(),3);changed|=LinearColorEdit("Ground tint",b.bottom.data(),3);changed|=LinearColorEdit("Night color",b.nightColor.data(),3);changed|=PrecisionSliderFloat("Horizon glow",&b.horizonGlow,0,8);changed|=PrecisionSliderFloat("Sunset warmth",&b.sunsetWarmth,0,4);changed|=PrecisionSliderFloat("Night intensity",&b.nightIntensity,0,4);changed|=ImGui::Checkbox("Drive Light Properties",&b.driveLightProperties);if(b.driveLightProperties)changed|=PrecisionSliderFloat("Daylight intensity",&b.dayLightIntensity,0,8);ImGui::TextWrapped("Artist-friendly sky follows Primary Directional elevation/azimuth. No physical atmosphere or dynamic IBL convolution.");if(settings.environment.enabled)ImGui::TextWrapped("Warning: IBL uses a static HDRI and may not match time of day.");}
-            ImGui::Text("Sun Source: %s",b.background==EditorBackground::Cubemap?"HDRI radiance / optional procedural disc":"Primary Directional / procedural disc");
+            ImGui::Text("Sun Source: %s",b.background==EditorBackground::Cubemap?"HDRI radiance / optional sun glow":"Primary Directional / sun glow");
             auto primarySun=PrimarySun(app.GetWorld());if(primarySun.IsValid()){auto* tag=app.GetWorld().GetComponent<ecs::TagComponent>(primarySun);auto rays=ecs::LightDirection(ecs::RenderPose::From(*app.GetWorld().GetComponent<ecs::TransformComponent>(primarySun)));ImGui::TextWrapped("Primary Directional Light: %s",tag?tag->name.c_str():"Directional");ImGui::Text("Outgoing rays %.3f %.3f %.3f",rays.x,rays.y,rays.z);ImGui::Text("Sun elevation %.1f / azimuth %.1f deg",std::asin(std::clamp(-rays.y,-1.f,1.f))*57.2957795f,std::atan2(-rays.x,-rays.z)*57.2957795f);}else ImGui::TextWrapped("No enabled Primary Directional; Day/Night preview uses default midday.");
             if(previousHdr!=(b.useIblEnvironment?settings.environment.assetPath:b.cubemap)){b.sunMetadata=false;if(b.sunSync==SunSyncMode::SkyDrivesLight)b.sunSync=SunSyncMode::Independent;ImGui::TextWrapped("HDR selection changed: confirm explicit Sun Direction for this asset.");}
-            int sync=int(b.sunSync);changed|=ImGui::Combo("Sync Mode",&sync,"Independent\0Light Drives Sky (disc)\0Sky Drives Light (metadata)\0");b.sunSync=SunSyncMode(sync);
+            int sync=int(b.sunSync);changed|=ImGui::Combo("Sync Mode",&sync,"Independent\0Light Drives Sky (glow)\0Sky Drives Light (metadata)\0");b.sunSync=SunSyncMode(sync);
             changed|=ImGui::Checkbox("Use Explicit Sun Direction",&b.sunMetadata);
             if(b.sunMetadata)changed|=PrecisionDragFloat3("HDR Sun Direction (sky local)",b.sunDirection.data(),.01f,-1,1,"%.6g",ImGuiSliderFlags_NoRoundToFormat);
-            changed|=ImGui::Checkbox("Visible Sun Disc",&b.visibleSunDisc);
+            changed|=ImGui::Checkbox("Sun glow visible",&b.visibleSunDisc);
             if(b.background==EditorBackground::Cubemap){if(!b.sunMetadata)ImGui::TextWrapped("Warning: HDRI has no confirmed sun metadata. Set HDR Sun Direction explicitly; no brightest-pixel detection is performed.");ImGui::TextWrapped("HDRI may already contain a sun. Light Drives Sky moves only the procedural disc, not pixels inside the HDR map; enabling both can show two suns.");}
-            if(b.sunSync==SunSyncMode::LightDrivesSky||b.background==EditorBackground::DayNight){changed|=PrecisionDragFloat("Sun diameter (deg)",&b.sunRadius,.01f,.01f,10,"%.6g",ImGuiSliderFlags_NoRoundToFormat);changed|=PrecisionDragFloat("Visible sun intensity",&b.sunIntensity,.01f,0,32,"%.6g",ImGuiSliderFlags_NoRoundToFormat);changed|=PrecisionDragFloat("Glow radius (deg)",&b.sunGlowRadius,.1f,.01f,60);changed|=PrecisionSliderFloat("Glow intensity",&b.sunGlowIntensity,0,4);ImGui::TextWrapped("Disc follows primary light at any elevation. HDR rotation and precomputed IBL stay unchanged. Use an HDR without an existing sun to avoid two visible discs.");}
+            if(b.sunSync==SunSyncMode::LightDrivesSky||b.background==EditorBackground::DayNight){changed|=PrecisionDragFloat("Sun radiance",&b.sunIntensity,.01f,0,32,"%.6g",ImGuiSliderFlags_NoRoundToFormat);changed|=PrecisionDragFloat("Glow radius (deg)",&b.sunGlowRadius,.1f,.01f,60);changed|=PrecisionSliderFloat("Glow intensity",&b.sunGlowIntensity,0,4);ImGui::TextWrapped("Glow follows the primary light. Use an HDR without a baked sun to avoid duplicate suns. Legacy disc diameter remains readable in saved scenes.");}
             if(changed){BeginSceneTransaction(app,"Sky / Sun settings");std::string error;if(!app.SetSceneSettings(settings,&error))m_EditorError=error;else m_EditorError.clear();}
             if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());
             ImGui::TextDisabled("Shared by Edit / Play");

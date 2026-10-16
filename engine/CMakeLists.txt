@@ -10,7 +10,7 @@ add_library(DearImGui STATIC
   ${CMAKE_SOURCE_DIR}/external/imgui/misc/cpp/imgui_stdlib.cpp
   ${CMAKE_SOURCE_DIR}/external/imgui/backends/imgui_impl_glfw.cpp
   ${CMAKE_SOURCE_DIR}/external/imgui/backends/imgui_impl_dx12.cpp
-)
+ "ecs/components/PlayerStartComponent.h" "ecs/components/PlayerComponent.h")
 target_include_directories(DearImGui PUBLIC
   ${CMAKE_SOURCE_DIR}/external/imgui
   ${CMAKE_SOURCE_DIR}/external/imgui/backends
@@ -18,13 +18,15 @@ target_include_directories(DearImGui PUBLIC
 target_link_libraries(DearImGui PUBLIC glfw d3d12)
 
 add_library(ImGuizmo STATIC
-  ${CMAKE_SOURCE_DIR}/external/imguizmo/src/ImGuizmo.cpp)
+  ${CMAKE_SOURCE_DIR}/external/imguizmo/src/ImGuizmo.cpp "ecs/components/PlayerStartComponent.h" "ecs/components/PlayerComponent.h")
 target_include_directories(ImGuizmo PUBLIC
   ${CMAKE_SOURCE_DIR}/external/imguizmo/src
 )
 target_link_libraries(ImGuizmo PUBLIC DearImGui)
 
 add_library(Engine
+  scripting/LuaRuntime.cpp
+  scripting/Prefab.cpp
   core/Application.cpp
   core/AssetDependencyValidation.cpp
   core/AssetPaths.cpp
@@ -50,13 +52,19 @@ add_library(Engine
   scene/SceneSettings.cpp
   editor/EditorLayer.cpp
   editor/EditorTransactions.cpp
+  editor/EditorSelection.cpp
+  editor/EditorGroupTransform.cpp
   editor/EditorInspector.cpp
   editor/EditorPreferences.cpp
   editor/EditorUi.cpp
+  editor/EditorViewportCreate.cpp
+  editor/EditorFogGizmos.cpp
+  editor/EditorEntityIcons.cpp
   editor/EditorVisualSettings.cpp
   editor/AssetCatalog.cpp
   editor/EditorAssetPreview.cpp
   editor/EditorAssets.cpp
+  editor/ScriptEditor.cpp
   editor/GltfSceneImport.cpp
   editor/EditorLevelWorkflow.cpp
   editor/EditorScalePlanes.cpp
@@ -66,7 +74,7 @@ add_library(Engine
   render/RenderFactory.cpp
   platform/GlfwWindow.cpp
   platform/InputManager.cpp
-)
+ "ecs/components/PlayerStartComponent.h" "ecs/components/PlayerComponent.h")
 
 target_sources(Engine PRIVATE
     game/states/LoadingState.cpp
@@ -75,7 +83,7 @@ target_sources(Engine PRIVATE
 )
 
 target_include_directories(Engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(Engine PUBLIC glfw WhispEngineJson)
+target_link_libraries(Engine PUBLIC glfw WhispEngineJson PRIVATE WhispLua sol2::sol2)
 target_link_libraries(
     Engine
     PRIVATE
@@ -103,6 +111,7 @@ if (WIN32 AND ENABLE_DX12)
     render/backends/dx12/Dx12RenderAdapter.cpp
     render/backends/dx12/Dx12Shadows.cpp
     render/backends/dx12/Dx12EditorVisuals.cpp
+    render/backends/dx12/Dx12Fog.cpp
     render/backends/dx12/Dx12Environment.cpp
     render/backends/dx12/Dx12SceneLights.cpp
   )
@@ -121,5 +130,6 @@ if (ENABLE_VULKAN)
 endif()
 
 if(WIN32)
+  target_link_libraries(Engine PRIVATE shell32 version)
   target_link_libraries(Engine PRIVATE comdlg32)
 endif()

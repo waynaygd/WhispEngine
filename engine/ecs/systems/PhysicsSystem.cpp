@@ -1,8 +1,10 @@
 #include "PhysicsSystem.h"
+#include "../PhysicsQueries.h"
 #include "../World.h"
 #include "../components/ColliderComponent.h"
 #include "../components/RigidbodyComponent.h"
 #include "../components/TransformComponent.h"
+#include "../components/PlayerStartComponent.h"
 #include <algorithm>
 #include <cmath>
 #include <chrono>
@@ -138,7 +140,7 @@ static Vec3 InverseInertiaLocal(
     const ecs::RigidbodyComponent& rb,
     const ecs::ColliderComponent& collider)
 {
-    if (rb.isStatic || rb.mass <= 0.0001f)
+    if (rb.isStatic || rb.lockRotation || rb.mass <= 0.0001f)
         return Vec3{};
 
     if (collider.type == ecs::ColliderType::Sphere)
@@ -656,6 +658,64 @@ static const std::vector<std::pair<std::size_t, std::size_t>>& Broadphase(
 
 
 namespace ecs {
+namespace {
+bool QueryVector(Vec3 v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z)&&std::max({std::abs(v.x),std::abs(v.y),std::abs(v.z)})<=1e6f;}
+bool QueryShape(const TransformComponent& t,const ColliderComponent& c){return QueryVector(t.position)&&QueryVector(t.rotation)&&QueryVector(c.offset)&&QueryVector(c.halfExtents)&&std::min({c.halfExtents.x,c.halfExtents.y,c.halfExtents.z})>=0&&(c.type==ColliderType::Box||c.type==ColliderType::Sphere);}
+void QueryDistance(Vec3 v,float distance){if(!QueryVector(v)||!std::isfinite(distance)||distance<0||distance>1e6f)throw std::runtime_error("Physics query requires finite bounded coordinates/distance [0, 1000000]");}
+}
+std::optional<RaycastHit> Raycast(const World& world,Vec3 origin,Vec3 direction,float distance,Entity ignore,const std::function<bool(Entity)>& include){
+    world.AssertOwnerThread();QueryDistance(origin,distance);
+    if(!QueryVector(direction)||LengthSq(direction)<1e-12f)throw std::runtime_error("Raycast direction must be finite and nonzero");
+    if(ignore.IsValid()&&!world.IsAlive(ignore))throw std::runtime_error("Raycast ignore is dead/stale/foreign");
+    direction=Scale(direction,1/Length(direction));std::optional<RaycastHit> hit;
+    for(auto e:world.Entities()){
+        if(e==ignore||(include&&!include(e))||world.HasComponent<PlayerStartComponent>(e))continue;
+        auto* t=world.GetComponent<TransformComponent>(e);auto* c=world.GetComponent<ColliderComponent>(e);if(!t||!c||!QueryShape(*t,*c))continue;
+        const Vec3 center=Add(t->position,c->offset);float near=0,far=hit?hit->distance:distance;Vec3 normal=Scale(direction,-1);bool valid=true;
+        if(c->type==ColliderType::Sphere){
+            auto offset=Sub(origin,center);double x=offset.x,y=offset.y,z=offset.z,r=SphereRadius(*c);
+            double a=double(direction.x)*direction.x+double(direction.y)*direction.y+double(direction.z)*direction.z,b=x*direction.x+y*direction.y+z*direction.z,q=x*x+y*y+z*z-r*r;
+            if(q>0){double discriminant=b*b-a*q;if(discriminant<0)continue;near=float((-b-std::sqrt(discriminant))/a);if(near<0||near>far)continue;normal=NormalizeSafe(Sub(Add(origin,Scale(direction,near)),center));}
+        }else{
+            auto axes=BuildBoxAxes(t->rotation);auto local=Sub(origin,center);
+            const Vec3 basis[]={axes.xAxis,axes.yAxis,axes.zAxis};const float half[]={c->halfExtents.x,c->halfExtents.y,c->halfExtents.z};
+            for(int axis=0;axis<3;++axis){float o=Dot(local,basis[axis]),d=Dot(direction,basis[axis]);if(std::abs(d)<1e-12f){if(std::abs(o)>half[axis]){valid=false;break;}continue;}
+                float a=(-half[axis]-o)/d,b=(half[axis]-o)/d;Vec3 n=Scale(basis[axis],-1);if(a>b){std::swap(a,b);n=basis[axis];}if(a>near){near=a;normal=n;}far=std::min(far,b);if(near>far){valid=false;break;}
+            }
+            if(!valid)continue;
+        }
+        if(hit&&near>=hit->distance)continue; // Equal distance: lowest Entity index wins.
+        hit=RaycastHit{e,Add(origin,Scale(direction,near)),normal,near};
+    }
+    return hit;
+}
+std::vector<Entity> FindInRadius(const World& world,Vec3 center,float radius){
+    world.AssertOwnerThread();QueryDistance(center,radius);std::vector<Entity> result;
+    for(auto e:world.Entities())if(auto* t=world.GetComponent<TransformComponent>(e);t&&QueryVector(t->position)){
+        double x=double(t->position.x)-center.x,y=double(t->position.y)-center.y,z=double(t->position.z)-center.z;
+        if(x*x+y*y+z*z<=double(radius)*radius)result.push_back(e);
+    }return result;
+}
+void PhysicsSystem::UpdateTriggers(World& world){
+    if(m_TriggerWorld!=world.GetIdentity()){m_TriggerPairs.clear();m_TriggerWorld=world.GetIdentity();}
+    bool hasTriggers=false;world.ForEach<ColliderComponent>([&](Entity,const auto& c){hasTriggers|=c.isTrigger;});
+    if(!hasTriggers&&m_TriggerPairs.empty())return;
+    std::vector<BodyRef> shapes;if(hasTriggers)world.ForEach<TransformComponent,ColliderComponent>([&](Entity e,auto& t,auto& c){if(!world.HasComponent<PlayerStartComponent>(e)&&QueryShape(t,c))shapes.push_back({e,&t,&c,nullptr,BuildBoxAxes(t.rotation)});});
+    std::sort(shapes.begin(),shapes.end(),[](const auto& a,const auto& b){return a.entity.index<b.entity.index;});
+    decltype(m_TriggerPairs) current;
+    for(std::size_t i=0;i<shapes.size();++i){if(!shapes[i].collider->isTrigger)continue;for(std::size_t j=0;j<shapes.size();++j){
+        if(i==j||(shapes[j].collider->isTrigger&&j<i))continue;
+        const auto& a=shapes[std::min(i,j)];const auto& b=shapes[std::max(i,j)];
+        float radius=BoundingRadius(*a.collider)+BoundingRadius(*b.collider);if(LengthSq(Sub(Center(a),Center(b)))>radius*radius)continue;
+        Manifold m;if(!Collide(a,b,m))continue;bool overlapping=false;for(int k=0;k<m.count;++k)overlapping|=m.points[k].separation<=0;if(!overlapping)continue;
+        current.emplace(std::array<std::uint32_t,4>{a.entity.index,a.entity.generation,b.entity.index,b.entity.generation},std::pair{a.entity,b.entity});
+    }}
+    std::vector<CollisionEvent> events;
+    for(auto& [key,pair]:m_TriggerPairs)if(!current.contains(key))events.push_back({pair.first,pair.second,{},CollisionKind::TriggerExit});
+    for(auto& [key,pair]:current)if(!m_TriggerPairs.contains(key))events.push_back({pair.first,pair.second,{},CollisionKind::TriggerEnter});
+    m_TriggerPairs=std::move(current);
+    if(m_EventBus)for(const auto& event:events)if(world.IsAlive(event.a)||world.IsAlive(event.b))m_EventBus->PublishCollision(event);
+}
 void PhysicsSystem::Update(World& world, float dt)
 {
     ZoneScopedN("PhysicsSystem");
@@ -678,10 +738,11 @@ void PhysicsSystem::Update(World& world, float dt)
     world.ForEach<ColliderComponent, TransformComponent, RigidbodyComponent>(
         [&](Entity e, ColliderComponent& c, TransformComponent& t, RigidbodyComponent& rb)
         {
-            if (rb.simulatePhysics || rb.isStatic) bodies.push_back({e, &t, &c, &rb});
+            if (!world.HasComponent<PlayerStartComponent>(e) && (rb.simulatePhysics || rb.isStatic)) bodies.push_back({e, &t, &c, &rb});
         });
     std::sort(bodies.begin(), bodies.end(), [](const BodyRef& a, const BodyRef& b) { return a.entity.index < b.entity.index; });
     for (auto& b : bodies) {
+        if(b.rigidbody->lockRotation)b.rigidbody->angularVelocity={};
         b.axes = BuildBoxAxes(b.transform->rotation);
         b.inverseInertia = InverseInertiaLocal(*b.rigidbody, *b.collider);
     }
@@ -750,6 +811,7 @@ void PhysicsSystem::Update(World& world, float dt)
                     {
                         const auto [i, j] =
                             pairs[pairIndex];
+                        if(bodies[i].collider->isTrigger||bodies[j].collider->isTrigger)continue;
 
                         Manifold manifold;
 
@@ -1148,6 +1210,7 @@ void PhysicsSystem::Update(World& world, float dt)
             for (auto [i,j] : positionPairs)
             {
                 auto& a = bodies[i]; auto& b = bodies[j];
+                if(a.collider->isTrigger||b.collider->isTrigger)continue;
                 if ((InvMass(a) == 0 || a.rigidbody->sleeping) && (InvMass(b) == 0 || b.rigidbody->sleeping)) continue;
                 Manifold m;
                 if (!Collide(a,b,m)) continue;
@@ -1216,8 +1279,13 @@ void PhysicsSystem::Update(World& world, float dt)
         m_ContactCache = std::move(nextCache);
         // Defer callbacks until all substeps finish: listeners can mutate World.
         if (m_EventBus) for (const auto& m : contacts)
-            events.push_back({bodies[m.a].entity,bodies[m.b].entity});
+            events.push_back({
+    bodies[m.a].entity,
+    bodies[m.b].entity,
+    m.normal
+                });
     }
+    UpdateTriggers(world);
     if (m_EventBus) for (const auto& event : events)
         if (world.IsAlive(event.a) && world.IsAlive(event.b)) m_EventBus->PublishCollision(event);
 }

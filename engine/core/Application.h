@@ -22,6 +22,7 @@
 #include "../ecs/events/EventBus.h"
 #include "../platform/InputManager.h"
 #include "../editor/EditorLayer.h"
+#include "../scripting/LuaRuntime.h"
 
 class IWindow;
 class IRenderAdapter;
@@ -52,8 +53,12 @@ public:
     const IWindow* GetWindow()const { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
     IRenderAdapter* GetRenderAdapter(){return m_Windows.empty()?nullptr:m_Windows.front().renderer.get();}
     editor::EditorLayer& GetEditorLayer(){return m_EditorLayer;}
+    void SetViewportUnlit(bool value){if(m_RenderSystem)m_RenderSystem->SetViewportUnlit(value);}
+    bool IsViewportUnlit()const{return m_RenderSystem&&m_RenderSystem->IsViewportUnlit();}
+    bool IsViewportMouseCaptured()const{return m_Camera.controlsActive||m_PlayerMouseCaptured;}
     ecs::World& GetWorld() { return m_RuntimeWorld?*m_RuntimeWorld:m_World; }
     ecs::World& GetEditorWorld(){return m_World;}
+    scripting::LuaRuntime& GetLuaRuntime(){return m_LuaRuntime;}
     ecs::MutationQueue& GetMutationQueue(){return m_Mutations;}
     void ApplyStructuralCommands(){if(m_Mutations.Apply(GetWorld())&&m_PhysicsSystem)m_PhysicsSystem->ResetState();}
     const ecs::World& GetWorld() const { return m_RuntimeWorld?*m_RuntimeWorld:m_World; }
@@ -171,6 +176,11 @@ private:
     ecs::Entity SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg);
     void UpdateEcs(float dt);
     void UpdateCameraController(float dt);
+    void UpdateGameplayInput();
+    bool GameplayInputAllowed() const;
+    bool CaptureGameplayCursor(bool);
+    scripting::GameplayServices GameplayCapabilities();
+    void ReleasePlayerMouse();
     void UpdateRenderSystemCamera(IWindow* window);
     void UpdateRenderSystemCameraAspect(float aspectRatio);
     void SetupRenderStressScene();
@@ -219,6 +229,8 @@ private:
 
     ecs::World m_World; // Editor data and shared system/GPU-cache owner.
     std::unique_ptr<ecs::World> m_RuntimeWorld;
+    scripting::GameplayCamera m_GameplayCamera;
+    scripting::LuaRuntime m_LuaRuntime;
     ecs::World::CloneMap m_CloneMapping;
     ecs::MutationQueue m_Mutations;
     std::vector<ecs::Entity> m_EditDebugEntities,m_EditStressEntities;
@@ -249,7 +261,20 @@ private:
     double m_FixedSimulationSeconds = 0;
     bool m_ResetPhysicsDelta = true;
     StateMachine m_StateMachine;
+
+    struct CameraPose
+    {
+        ecs::Vec3 position{};
+        float yaw = 0.0f;
+        float pitch = 0.0f;
+    };
+
+    CameraPose m_SavedEditorCamera{};
+
     CameraControllerState m_Camera;
+    ecs::Entity m_PlayerEntity{};
+    bool m_PlayerMouseCaptured = false;
+    bool m_PlayerAltWasDown = false;
     bool m_DebugCollidersEnabled = false;
     bool m_PhysicsDebugPose = false;
     bool m_GpuInstancing = true;
@@ -263,6 +288,7 @@ private:
     bool m_EditorPlayMode = false;
     ecs::EventBus m_EventBus;
     InputManager m_InputManager;
+    InputManager::Bindings m_EditInputBindings;
     editor::EditorLayer m_EditorLayer;
     std::unordered_set<std::uint64_t> m_ActiveCollisionPairs;
 

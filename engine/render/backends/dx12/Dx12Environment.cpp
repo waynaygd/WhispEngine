@@ -279,7 +279,7 @@ void Dx12RenderAdapter::BeginHdrScene()
 {
     const bool hdrSky=m_EditorVisualFrame.active&&m_EditorVisualFrame.backgroundEnabled&&m_EditorVisualFrame.settings.background==EditorBackground::Cubemap;
     m_HdrNative=m_EnvironmentSettings.enabled||hdrSky;
-    if (!m_HdrNative&&m_AntiAliasing==AntiAliasingMode::Off)
+    if (!m_HdrNative&&m_AntiAliasing==AntiAliasingMode::Off&&!m_Fog.active)
         return;
     ZoneScopedN("HdrSceneBegin");
     UINT w = m_ViewportTarget.rendering ? m_ViewportTarget.width : m_Width,

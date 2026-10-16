@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "name": "Wave Enemy",
+  "components": {
+    "Tag": {"name": "Enemy"},
+    "Transform": {"position": [0,0,0], "rotation": [0,0,0], "scale": [0.65,0.65,0.65]},
+    "MeshRenderer": {"meshPath": "models/validation_cube.obj", "visible": true},
+    "Material": {"materialPath": "materials/material_red.material.json", "tint": [1,0.06,0.06,1]},
+    "LuaScript": {"scriptPath": "scripts/enemy_chase.lua", "enabled": true, "properties": {"speed": 1.0}}
+  }
+}

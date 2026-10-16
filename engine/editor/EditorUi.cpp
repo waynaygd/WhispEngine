@@ -4,6 +4,8 @@
 #include "../core/Application.h"
 #include "../core/AssetPaths.h"
 #include "../resources/ResourceManager.h"
+#include "../ecs/components/PlayerStartComponent.h"
+#include "../ecs/components/FogComponent.h"
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <ImGuizmo.h>
@@ -17,7 +19,8 @@ bool Matches(const std::string& text,const std::string& filter){
     return std::search(text.begin(),text.end(),filter.begin(),filter.end(),[](unsigned char a,unsigned char b){return std::tolower(a)==std::tolower(b);})!=text.end();
 }
 const char* EntityKind(const ecs::World& w,ecs::Entity e){
-    if(w.HasComponent<ecs::DirectionalLightComponent>(e))return "[D]";if(w.HasComponent<ecs::PointLightComponent>(e))return "[P]";if(w.HasComponent<ecs::SpotLightComponent>(e))return "[S]";if(w.HasComponent<ecs::MeshRendererComponent>(e))return "[Mesh]";return "[Entity]";
+    if(w.HasComponent<ecs::PlayerStartComponent>(e))return "[PlayerStart]";
+    if(w.HasComponent<ecs::DirectionalLightComponent>(e))return "[D]";if(w.HasComponent<ecs::PointLightComponent>(e))return "[P]";if(w.HasComponent<ecs::SpotLightComponent>(e))return "[S]";if(w.HasComponent<ecs::FogComponent>(e))return "[Fog]";if(w.HasComponent<ecs::MeshRendererComponent>(e))return "[Mesh]";return "[Entity]";
 }
 }
 void EditorLayer::InitializePreferences(Application& app){
@@ -61,8 +64,8 @@ void EditorLayer::DrawToolbar(Application& app){
     }
     ImGui::SameLine();ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);ImGui::SameLine();
     ImGui::RadioButton("Move",&m_GizmoOperation,0);ImGui::SameLine();ImGui::RadioButton("Rotate",&m_GizmoOperation,1);ImGui::SameLine();ImGui::RadioButton("Scale",&m_GizmoOperation,2);ImGui::SameLine();
-    ImGui::RadioButton("Local",&m_GizmoMode,0);ImGui::SameLine();auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(m_SelectedEntity);const bool localScale=m_GizmoOperation==2&&t&&(std::abs(t->rotation.x)+std::abs(t->rotation.y)+std::abs(t->rotation.z)>1e-6f);if(localScale)m_GizmoMode=0;ImGui::BeginDisabled(localScale);ImGui::RadioButton("World",&m_GizmoMode,1);ImGui::EndDisabled();if(m_GizmoOperation==2&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Scale axes/planes use local TRS axes. Rotated world non-uniform scale requires shear and is not represented by Transform.");ImGui::SameLine();ImGui::Checkbox(m_GizmoOperation==1?"Rotation Snap":"Snap",m_GizmoOperation==1?&m_RotationSnapping:&m_Snapping);ImGui::SameLine();ImGui::Checkbox("Grid",&m_ShowGrid);ImGui::SameLine();
-    if(ImGui::Button("Focus"))app.FocusEntity(m_SelectedEntity);ImGui::SameLine();
+    ImGui::RadioButton("Local",&m_GizmoMode,0);ImGui::SameLine();auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(m_Selection.active);const bool localScale=m_Selection.items.size()==1&&m_GizmoOperation==2&&t&&(std::abs(t->rotation.x)+std::abs(t->rotation.y)+std::abs(t->rotation.z)>1e-6f);if(localScale)m_GizmoMode=0;ImGui::BeginDisabled(localScale);ImGui::RadioButton("World",&m_GizmoMode,1);ImGui::EndDisabled();if(m_GizmoOperation==2&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Scale axes/planes use local TRS axes. Rotated world non-uniform scale requires shear and is not represented by Transform.");ImGui::SameLine();ImGui::Checkbox(m_GizmoOperation==1?"Rotation Snap":"Snap",m_GizmoOperation==1?&m_RotationSnapping:&m_Snapping);ImGui::SameLine();ImGui::Checkbox("Grid",&m_ShowGrid);ImGui::SameLine();
+    if(ImGui::Button("Focus"))app.FocusEntity(m_Selection.active);ImGui::SameLine();
     ImGui::Text("%s%s",app.GetSceneKey().empty()?"Untitled":app.GetSceneKey().c_str(),IsSceneDirty()?" *":"");ImGui::End();
 }
 void EditorLayer::DrawMainMenu(Application& app){
@@ -81,11 +84,11 @@ void EditorLayer::DrawMainMenu(Application& app){
     if(ImGui::BeginMenu("Edit")){
         if(ImGui::MenuItem("Undo","Ctrl+Z",false,CanUndo()||HasPendingTransaction()))Undo(app);
         if(ImGui::MenuItem("Redo","Ctrl+Y",false,CanRedo()))Redo(app);
-        if(ImGui::MenuItem("Copy","Ctrl+C",false,!app.IsEditorPlayMode()))CopyEntity(app,m_SelectedEntity);
+        if(ImGui::MenuItem("Copy","Ctrl+C",false,!app.IsEditorPlayMode()))CopyEntity(app,m_Selection.active);
         if(ImGui::MenuItem("Paste","Ctrl+V",false,!app.IsEditorPlayMode()&&m_Clipboard.is_object()))PasteEntity(app);
         if(ImGui::MenuItem("Clear Selection")){FinishTransaction(app);ClearSelection();}
-        if(ImGui::MenuItem("Duplicate","Ctrl+D",false,app.GetWorld().IsAlive(m_SelectedEntity)))DuplicateEntity(app,m_SelectedEntity);
-        if(ImGui::MenuItem("Delete","Delete",false,app.GetWorld().IsAlive(m_SelectedEntity)))DeleteEntity(app,m_SelectedEntity);ImGui::EndMenu();
+        if(ImGui::MenuItem("Duplicate","Ctrl+D",false,app.GetWorld().IsAlive(m_Selection.active)))DuplicateEntity(app,m_Selection.active);
+        if(ImGui::MenuItem("Delete selection","Delete",false,!m_Selection.items.empty()))DeleteSelection(app);ImGui::EndMenu();
     }
     if(ImGui::BeginMenu("View")){
         ImGui::MenuItem("Editor Visuals",nullptr,&m_ShowVisualSettings);
@@ -95,12 +98,10 @@ void EditorLayer::DrawMainMenu(Application& app){
         if(ImGui::MenuItem("Navigation and snapping"))preferencesRequested=true;ImGui::MenuItem("ImGui Demo",nullptr,&m_ShowDemoWindow);ImGui::EndMenu();
     }
     if(ImGui::BeginMenu("Scene")){
-        if(ImGui::MenuItem("Create Entity"))CreateEntity(app);
-        if(ImGui::BeginMenu("Create Light")){if(ImGui::MenuItem("Directional"))CreateLight(app,LightType::Directional);if(ImGui::MenuItem("Point"))CreateLight(app,LightType::Point);if(ImGui::MenuItem("Spot"))CreateLight(app,LightType::Spot);ImGui::EndMenu();}
-        if(ImGui::MenuItem("Focus Selected","F"))app.FocusEntity(m_SelectedEntity);
+        if(ImGui::MenuItem("Focus Selected","F"))app.FocusEntity(m_Selection.active);
         ImGui::Separator();if(ImGui::MenuItem("Play",nullptr,false,!app.IsEditorPlayMode()))app.SetEditorPlayMode(true);if(ImGui::MenuItem("Pause / Resume",nullptr,false,app.IsEditorPlayMode()))app.SetEditorPaused(!app.IsEditorPaused());if(ImGui::MenuItem("Stop",nullptr,false,app.IsEditorPlayMode()))app.SetEditorPlayMode(false);ImGui::EndMenu();
     }
-    if(ImGui::BeginMenu("Help")){ImGui::TextUnformatted("WhispEngine Editor 2.5");ImGui::TextUnformatted("RMB + WASD: camera, F: focus, W/E/R: gizmo");ImGui::TextUnformatted("Play clones scene data; Stop discards Runtime edits.");ImGui::TextUnformatted("Hierarchy is flat; parent transforms are not implemented.");ImGui::EndMenu();}
+    if(ImGui::BeginMenu("Help")){ImGui::TextUnformatted("WhispEngine Editor 2.5");ImGui::TextUnformatted("RMB + WASD: camera, F: focus, W/E/R: gizmo");ImGui::TextUnformatted("Play clones scene data; Stop discards Runtime edits.");ImGui::TextUnformatted("Ctrl-click: toggle selection; Shift-click: Hierarchy range / Viewport add.");ImGui::TextUnformatted("Multiple selection: shared W/E/R gizmo; Inspector edits Active Entity only.");ImGui::TextUnformatted("Hierarchy is flat; parent transforms are not implemented.");ImGui::EndMenu();}
     if(preferencesRequested)ImGui::OpenPopup("EditorPreferences");
     if(ImGui::BeginPopup("EditorPreferences")){
         ImGui::Checkbox("Enable Projectile Test Input (Play / R)",&m_ProjectileTestInput);
@@ -151,21 +152,21 @@ void EditorLayer::DrawSceneHierarchy(Application& app){
     const auto start=std::chrono::steady_clock::now();ImGui::SetNextWindowSizeConstraints(ImVec2(180,150),ImVec2(FLT_MAX,FLT_MAX));
     if(!ImGui::Begin("Scene Hierarchy",&m_ShowHierarchy)){ImGui::End();return;}
     m_HierarchyFocused=ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-    auto& world=app.GetWorld();if(ImGui::Button("Create"))ImGui::OpenPopup("CreateEntity");
-    if(ImGui::BeginPopup("CreateEntity")){if(ImGui::BeginMenu("3D Object")){for(const char* type:{"cube","sphere","cylinder","cone","plane"}){std::string label=type;label[0]=char(std::toupper(label[0]));if(ImGui::MenuItem(label.c_str()))CreatePrimitive(app,type);}ImGui::EndMenu();}if(ImGui::MenuItem("Empty Entity"))CreateEntity(app);if(ImGui::BeginMenu("Light")){if(ImGui::MenuItem("Directional"))CreateLight(app,LightType::Directional);if(ImGui::MenuItem("Point"))CreateLight(app,LightType::Point);if(ImGui::MenuItem("Spot"))CreateLight(app,LightType::Spot);ImGui::EndMenu();}ImGui::EndPopup();}
+    auto& world=app.GetWorld();
     ImGui::InputTextWithHint("##filter","Search entities",&m_HierarchyFilter);
     auto entities=world.Entities();std::erase_if(entities,[&](auto e){auto* tag=world.GetComponent<ecs::TagComponent>(e);return !Matches(tag?tag->name:std::string(),m_HierarchyFilter);});
-    if(!world.IsAlive(m_SelectedEntity)&&m_SelectedEntity.IsValid())m_SelectedEntity={};
+    PruneSelection(app);m_HierarchyVisible=entities;
     ImGuiListClipper clipper;clipper.Begin(int(entities.size()));while(clipper.Step())for(int row=clipper.DisplayStart;row<clipper.DisplayEnd;++row){
-        const auto e=entities[row];const auto* tag=world.GetComponent<ecs::TagComponent>(e);ImGui::PushID(int(e.index));
+        const auto e=entities[row];const auto* tag=world.GetComponent<ecs::TagComponent>(e);ImGui::PushID(int(e.index));ImGui::PushID(int(e.generation));
         const std::string label=std::string(EntityKind(world,e))+" "+(tag&&!tag->name.empty()?tag->name:"Entity "+std::to_string(e.index));
-        if(ImGui::Selectable(label.c_str(),e==m_SelectedEntity)){FinishTransaction(app);m_PropertyDrafts.clear();m_SelectedEntity=e;}
+        const std::string rowLabel=label+(e==m_Selection.active?" [Active]":"")+"###EntityRow";
+        if(ImGui::Selectable(rowLabel.c_str(),IsSelected(e)))SelectHierarchyEntity(app,e,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift,entities);
         if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0))app.FocusEntity(e);
         if(ImGui::BeginDragDropSource()){ImGui::SetDragDropPayload("WHISP_ENTITY",&e,sizeof(e));ImGui::TextUnformatted(label.c_str());ImGui::EndDragDropSource();}
         if(ImGui::BeginPopupContextItem("EntityActions")){
             if(ImGui::MenuItem("Focus"))app.FocusEntity(e);if(ImGui::MenuItem("Rename")){m_RenameTarget=e;m_RenameBuffer=tag?tag->name:"Entity";m_RenameRequested=true;}
-            if(ImGui::MenuItem("Duplicate"))DuplicateEntity(app,e);if(ImGui::MenuItem("Delete"))DeleteEntity(app,e);ImGui::EndPopup();
-        }ImGui::PopID();
+            if(ImGui::MenuItem("Duplicate entity"))DuplicateEntity(app,e);if(ImGui::MenuItem("Delete selection")){if(!IsSelected(e))SelectEntity(e);DeleteSelection(app);}ImGui::EndPopup();
+        }ImGui::PopID();ImGui::PopID();
     }
     if(ImGui::IsWindowHovered()&&ImGui::IsMouseClicked(0)&&!ImGui::IsAnyItemHovered()&&!m_LightPointerCaptured&&!ImGuizmo::IsUsing()&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)){FinishTransaction(app);ClearSelection();ImGui::ClearActiveID();}
     if(m_RenameRequested){ImGui::OpenPopup("Rename entity");m_RenameRequested=false;}

@@ -1,13 +1,37 @@
+#include "../ecs/FogGather.h"
+#include "../render/IRenderAdapter.h"
 #include "PrecisionInputs.h"
 #include "SunSynchronization.h"
 #include "EditorLayer.h"
+#include "ScriptEditor.h"
+#include "../core/AssetPaths.h"
 #include "EditorWidgets.h"
 #include "../core/Application.h"
+#include "../ecs/components/LuaScriptComponent.h"
+#include "../scripting/EntityReference.h"
+#include "../ecs/PlayerSpawn.h"
 #include "../resources/ResourceManager.h"
 #include <imgui.h>
 #include <chrono>
 #include <misc/cpp/imgui_stdlib.h>
 namespace editor {
+bool EditorLayer::SetLuaEntityReference(Application& app,ecs::Entity owner,const std::string& field,ecs::Entity target){
+    auto& world=app.GetWorld();auto* script=world.GetComponent<ecs::LuaScriptComponent>(owner);
+    if(!script||(target.IsValid()&&!world.IsAlive(target)))return false;
+    auto schema=app.GetLuaRuntime().Fields(script->scriptPath);
+    if(!schema.contains(field)||schema[field].value("type","")!="entity")return false;
+    FinishTransaction(app);auto before=CaptureSelectedEntity(app,owner);
+    nlohmann::json value=nullptr;
+    if(target.IsValid()){
+        // Legacy/programmatic objects acquire a persistent identity only when
+        // referenced; include that metadata in the same Undo transaction.
+        auto* id=world.GetComponent<ecs::SceneIdentityComponent>(target);
+        if(!id){if(target!=owner)before.related.push_back(CaptureSelectedEntity(app,target));id=&world.AddComponent<ecs::SceneIdentityComponent>(target);}
+        value={{"$entity",id->value}};
+        if(scripting::ResolveEntityReference(world,value)!=target)return false;
+    }
+    script->properties[field]=value;app.NotifyEditorMutation(owner);CommitUndo(app,"Edit Lua entity reference",std::move(before));return true;
+}
 namespace {
 ecs::PropertyValue Initial(const ecs::PropertyDescriptor& p){
     using K=ecs::PropertyKind;
@@ -45,9 +69,10 @@ void EditorLayer::DrawInspector(Application& app){
     struct Finish {double& value;std::chrono::steady_clock::time_point start;~Finish(){value=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}} finish{m_Statistics.inspectorMs,start};
     ImGui::SetNextWindowSizeConstraints(ImVec2(270,180),ImVec2(FLT_MAX,FLT_MAX));
     if(!ImGui::Begin("Inspector",&m_ShowInspector)){ImGui::End();return;}
-    auto& world=app.GetWorld();auto e=m_SelectedEntity;
+    auto& world=app.GetWorld();auto e=m_Selection.active;
     if(!world.IsAlive(e)){ImGui::TextUnformatted("No entity selected");ImGui::End();return;}
-    const auto* tag=world.GetComponent<ecs::TagComponent>(e);ImGui::SeparatorText(tag?tag->name.c_str():"Entity");
+    if(m_Selection.items.size()>1){ImGui::Text("%zu entities selected",m_Selection.items.size());ImGui::TextWrapped("Properties below affect only the Active Entity. Use the shared viewport gizmo to transform the group.");}
+    const auto* tag=world.GetComponent<ecs::TagComponent>(e);if(m_Selection.items.size()>1)ImGui::TextUnformatted("Active Entity:");ImGui::SeparatorText(tag?tag->name.c_str():"Entity");
     if(app.IsEditorPlayMode())ImGui::TextWrapped("Runtime edits are discarded on Stop.");
     ImGui::Combo("Transform precision",&m_TransformPrecision,"Compact\0Precise\0Full Precision (9 significant digits)\0");
     const auto& registry=ecs::ComponentRegistry::Builtins();ImGui::PushID(int(e.index));ImGui::PushID(int(e.generation));
@@ -89,7 +114,78 @@ void EditorLayer::DrawInspector(Application& app){
                 bool primary=std::string(section)=="Surface"||std::string(section)=="Base Color"||std::string(section)=="Metallic / Roughness";
                 if(ImGui::TreeNodeEx(section,primary?ImGuiTreeNodeFlags_DefaultOpen:0)){drawSection(section,false);ImGui::TreePop();}
             }
+        }else if(d.key=="Fog"){
+            drawSection("",false);auto mode=world.GetComponent<ecs::FogComponent>(e)->mode;
+            if(mode!=FogMode::Distance){ImGui::SeparatorText("Height profile (world space)");drawSection("Medium",false);}
+            ImGui::SeparatorText(mode==FogMode::Distance?"Distance":mode==FogMode::Height?"Height":"Volumetric");
+            drawSection(mode==FogMode::Distance?"Distance":mode==FogMode::Height?"Height":"Volumetric",false);
+            const auto fog=ecs::GatherFog(world);if(fog.activeCount>1)ImGui::TextWrapped("Conflict: %u enabled Fog components. Lowest Entity index wins.",fog.activeCount);
+            if(fog.invalidCount)ImGui::TextWrapped("Invalid Fog components ignored: %u",fog.invalidCount);
+            ImGui::TextWrapped("Global environment; Transform is ignored. Colors are linear. Height density is constant below Base Height and decreases above it.");
+            if(auto* renderer=app.GetRenderAdapter()){auto stats=renderer->GetFogDiagnostics();if(!stats.error.empty())ImGui::TextWrapped("%s",stats.error.c_str());ImGui::Text("Fog: %u steps, CPU %.3f / GPU %.3f ms, %.2f MiB",stats.samples,stats.cpuMs,stats.gpuMs,double(stats.gpuBytes)/(1024*1024));}
         }else{drawSection("",false);bool hasAdvanced=std::any_of(d.properties.begin(),d.properties.end(),[](const auto& p){return p.advanced&&!p.internal;});if(hasAdvanced&&ImGui::TreeNode("Advanced")){drawSection("",true);ImGui::TreePop();}}
+        if(d.key=="LuaScript"){
+            auto* script=world.GetComponent<ecs::LuaScriptComponent>(e);
+            if(ImGui::BeginCombo("Choose Script",script->scriptPath.c_str())){
+                for(const auto& asset:m_AssetCatalog.Entries())if(m_AssetCatalog.Types()[asset.type].kind==ecs::AssetKind::LuaScript)
+                    if(ImGui::Selectable(asset.key.c_str(),script->scriptPath==asset.key))SetProperty(app,e,d.id,"scriptPath",asset.key);
+                ImGui::EndCombo();
+            }
+            auto& runtime=app.GetLuaRuntime();
+            if(ImGui::Button("Reload Script"))runtime.ReloadScript(script->scriptPath);
+            ImGui::SameLine();ImGui::BeginDisabled(script->scriptPath.empty());
+            if(ImGui::Button("Open Script"))OpenLuaScriptInVisualStudio(script->scriptPath,&m_EditorError);
+            ImGui::EndDisabled();
+            if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)){
+                try{const auto path=AssetPaths::ToUtf8String(ResolveEditableLuaScript(script->scriptPath));ImGui::SetTooltip("Open in Visual Studio 2022:\n%s",path.c_str());}
+                catch(const std::exception& failure){ImGui::SetTooltip("%s",script->scriptPath.empty()?"Assign a Lua script first":failure.what());}
+            }
+            auto schema=runtime.Fields(script->scriptPath);
+            auto error=runtime.Error(script->scriptPath);
+            if(error.empty())ImGui::TextDisabled("Loaded: %zu fields",schema.size());else ImGui::TextWrapped("%s",error.c_str());
+            for(auto field=schema.begin();field!=schema.end();++field){
+                ImGui::PushID(field.key().c_str());
+                try{
+                    const auto& metadata=field.value();const auto type=metadata.at("type").get<std::string>();
+                    auto value=script->properties.contains(field.key())?script->properties.at(field.key()):metadata.at("default");
+                    if(type=="entity"){
+                        if(!scripting::ValidEntityReference(value))throw std::runtime_error("Malformed entity reference");
+                        auto target=scripting::ResolveEntityReference(world,value);std::string label=value.is_null()?"None":"Missing entity";
+                        if(target.IsValid()){auto* tag=world.GetComponent<ecs::TagComponent>(target);label=tag?tag->name:"Unnamed entity";}
+                        ImGui::TextUnformatted(metadata.value("label",field.key()).c_str());
+                        if(ImGui::BeginCombo("##entity",label.c_str())){
+                            if(ImGui::Selectable("None",value.is_null()))SetLuaEntityReference(app,e,field.key());
+                            for(auto candidate:world.Entities()){
+                                auto* tag=world.GetComponent<ecs::TagComponent>(candidate);ImGui::PushID(int(candidate.index));
+                                if(ImGui::Selectable(tag?tag->name.c_str():"Unnamed entity",candidate==target))SetLuaEntityReference(app,e,field.key(),candidate);
+                                ImGui::PopID();
+                            }ImGui::EndCombo();
+                        }
+                        if(ImGui::BeginDragDropTarget()){
+                            if(auto* payload=ImGui::AcceptDragDropPayload("WHISP_ENTITY"))if(payload->DataSize==sizeof(ecs::Entity))SetLuaEntityReference(app,e,field.key(),*static_cast<const ecs::Entity*>(payload->Data));
+                            ImGui::EndDragDropTarget();
+                        }
+                        if(!value.is_null()){ImGui::SameLine();if(ImGui::SmallButton("X"))SetLuaEntityReference(app,e,field.key());}
+                        ImGui::PopID();continue;
+                    }
+                    ecs::PropertyDescriptor p;p.key=field.key();p.label=metadata.value("label",field.key());p.minimum=metadata.value("min",-1e6f);p.maximum=metadata.value("max",1e6f);
+                    ecs::PropertyValue v;
+                    if(type=="bool"){p.kind=ecs::PropertyKind::Boolean;v=value.get<bool>();}
+                    else if(type=="integer"){p.kind=ecs::PropertyKind::Integer;v=value.get<int>();}
+                    else if(type=="number"){p.kind=ecs::PropertyKind::Number;v=value.get<float>();}
+                    else if(type=="vec3"){p.kind=ecs::PropertyKind::Vector;v=ecs::Vec3{value.at(0).get<float>(),value.at(1).get<float>(),value.at(2).get<float>()};}
+                    else {p.kind=type=="asset"?ecs::PropertyKind::Asset:ecs::PropertyKind::String;v=value.get<std::string>();if(type=="asset")p.asset=metadata.at("default").get<std::string>().ends_with(".prefab.json")?ecs::AssetKind::Prefab:ecs::AssetKind::None;}
+                    ImGui::TextUnformatted(p.label.c_str());bool changed=Drawer(p,v);
+                    if(changed){
+                        PushUndoBeforeChange(app,"Edit Lua / "+p.label);
+                        if(type=="bool")value=std::get<bool>(v);else if(type=="integer")value=std::get<int>(v);else if(type=="number")value=std::get<float>(v);else if(type=="vec3"){auto x=std::get<ecs::Vec3>(v);value=nlohmann::json::array({x.x,x.y,x.z});}else value=std::get<std::string>(v);
+                        script->properties[field.key()]=value;app.NotifyEditorMutation(e);
+                    }
+                    if(ImGui::IsItemDeactivatedAfterEdit()||(changed&&!ImGui::IsAnyItemActive()))FinishTransaction(app);
+                }catch(const std::exception&){ImGui::TextWrapped("Override incompatible with schema: %s",field.key().c_str());if(ImGui::SmallButton("Use default")){PushUndoBeforeChange(app,"Reset Lua field");script->properties.erase(field.key());app.NotifyEditorMutation(e);FinishTransaction(app);}}
+                ImGui::PopID();
+            }
+        }
         if(d.key=="Transform"){
             ImGui::Checkbox("Rotation Snap",&m_RotationSnapping);ImGui::SameLine();
             if(ImGui::BeginCombo("Step",std::to_string(m_SnapRotation).c_str())){for(float step:{15.f,30.f,45.f,90.f})if(ImGui::Selectable((std::to_string(int(step))+" deg").c_str(),m_SnapRotation==step))m_SnapRotation=step;ImGui::EndCombo();}
@@ -98,6 +194,10 @@ void EditorLayer::DrawInspector(Application& app){
             ImGui::BeginDisabled(app.IsEditorPlayMode()||app.GetSceneBackground().sunSync==SunSyncMode::SkyDrivesLight&&PrimarySun(world)==e);
             if(ImGui::Button("-90 deg"))RotateSelectedQuarter(app,m_RotateAxis,-1,m_GizmoMode==1);ImGui::SameLine();if(ImGui::Button("+90 deg"))RotateSelectedQuarter(app,m_RotateAxis,1,m_GizmoMode==1);ImGui::EndDisabled();
             ImGui::TextDisabled("Rz*Ry*Rx; Local: R*Q, World: Q*R. Euler gimbal lock remains.");
+        }
+        if(d.key=="PlayerStart"){
+            auto half=ecs::PlayerBodyHalfExtents(*world.GetComponent<ecs::PlayerStartComponent>(e));
+            ImGui::TextWrapped("Position marks the feet. Player size: %.2f x %.2f x %.2f. Scale is ignored. Y rotation sets facing; X sets camera pitch. The body stays upright.",half.x*2,half.y*2,half.z*2);
         }
         if(d.key=="PointLight"||d.key=="SpotLight")ImGui::TextWrapped("Point/Spot shadows are a reserved flag. Range is in world units; Transform scale is ignored.");
         if(d.key=="DirectionalLight"||d.key=="SpotLight")ImGui::TextWrapped("Outgoing rays follow Transform local +Z; Inspector rotation is in degrees (stored radians).");

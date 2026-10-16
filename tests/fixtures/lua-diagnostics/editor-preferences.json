@@ -1,0 +1,59 @@
+{
+  "backgroundOverride": false,
+  "cameraSensitivity": 0.0024999999441206455,
+  "cameraSpeed": 1.7999999523162842,
+  "grid": true,
+  "lightGizmos": false,
+  "operation": 0,
+  "panels": {
+    "assets": true,
+    "console": true,
+    "diagnostics": false,
+    "hierarchy": true,
+    "inspector": true,
+    "material": false,
+    "settings": true,
+    "viewport": true,
+    "visuals": true
+  },
+  "projectileTestInput": false,
+  "rotationSnap": 15.0,
+  "scaleSnap": 0.10000000149011612,
+  "snapping": false,
+  "space": 0,
+  "translationSnap": 1.0,
+  "version": 1,
+  "visuals": {
+    "background": 2,
+    "bottom": [
+      0.054999999701976776,
+      0.06499999761581421,
+      0.08500000089406967
+    ],
+    "cubemap": "environments/uniform.hdr",
+    "enabled": true,
+    "fadeDistance": 180.0,
+    "gradientBlend": 0.6499999761581421,
+    "gridOpacity": 0.4000000059604645,
+    "horizon": [
+      0.3400000035762787,
+      0.4300000071525574,
+      0.550000011920929
+    ],
+    "majorSpacing": 10.0,
+    "minorSpacing": 1.0,
+    "skyIntensity": 1.0,
+    "skyRotation": 0.0,
+    "solid": [
+      0.00800000037997961,
+      0.012000000104308128,
+      0.019999999552965164
+    ],
+    "top": [
+      0.04500000178813934,
+      0.11999999731779099,
+      0.25
+    ]
+  },
+  "xray": false
+}
