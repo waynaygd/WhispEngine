@@ -16,6 +16,7 @@
 #include "components/LuaScriptComponent.h"
 #include "../resources/MaterialSerialization.h"
 #include "../scene/LightSerialization.h"
+#include "../scripting/EntityReference.h"
 #include <cmath>
 #include <filesystem>
 namespace ecs {
@@ -127,7 +128,7 @@ ComponentRegistry Build(){
     script.serialize=[scriptSave](const World& w,Entity e){auto j=scriptSave(w,e);j["properties"]=w.GetComponent<LuaScriptComponent>(e)->properties;return j;};
     script.deserialize=[scriptLoad](World& w,Entity e,const Json& j){
         auto values=j.value("properties",Json::object());if(!values.is_object()||values.size()>128)Fail("Lua properties must be a bounded object");
-        for(auto i=values.begin();i!=values.end();++i){const auto& v=i.value();if(i.key().size()>128||!(v.is_boolean()||v.is_number()||v.is_string()||(v.is_array()&&v.size()==3)))Fail("Invalid Lua property: "+i.key());if(v.is_string()&&v.get_ref<const std::string&>().size()>1024)Fail("Lua string too long");if(v.is_array())for(const auto& x:v)if(!x.is_number()||!std::isfinite(x.get<double>()))Fail("Invalid Lua vector");if(v.is_number()&&!std::isfinite(v.get<double>()))Fail("Nonfinite Lua property");}
+        for(auto i=values.begin();i!=values.end();++i){const auto& v=i.value();if(i.key().size()>128||!(v.is_boolean()||v.is_number()||v.is_string()||(v.is_array()&&v.size()==3)||scripting::ValidEntityReference(v)))Fail("Invalid Lua property: "+i.key());if(v.is_string()&&v.get_ref<const std::string&>().size()>1024)Fail("Lua string too long");if(v.is_array())for(const auto& x:v)if(!x.is_number()||!std::isfinite(x.get<double>()))Fail("Invalid Lua vector");if(v.is_number()&&!std::isfinite(v.get<double>()))Fail("Nonfinite Lua property");}
         scriptLoad(w,e,j);w.GetComponent<LuaScriptComponent>(e)->properties=std::move(values);
     };r.Register(script);
     auto tag=Descriptor<TagComponent>("Tag","Name");Field<TagComponent>(tag,"name","Name",&TagComponent::name,PropertyKind::String);Complete(tag);r.Register(tag);

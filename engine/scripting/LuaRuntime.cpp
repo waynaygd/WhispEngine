@@ -1,10 +1,13 @@
 #include "LuaRuntime.h"
 #include "Prefab.h"
+#include "EntityReference.h"
+#include "../ecs/ComponentRegistry.h"
 #include "../core/Logger.h"
 #include "../ecs/MutationQueue.h"
 #include "../ecs/components/LuaScriptComponent.h"
 #include "../ecs/components/TagComponent.h"
 #include "../ecs/components/TransformComponent.h"
+#include "../ecs/components/LightComponent.h"
 #include "../ecs/PlayerSpawn.h"
 #include <sol/sol.hpp>
 #include <fstream>
@@ -35,6 +38,7 @@ sol::object ToLua(sol::state& lua,const Json& value){
 }
 bool ValidValue(const Json& field,const Json& value){
     const auto type=field.at("type").get<std::string>();
+    if(type=="entity")return ValidEntityReference(value);
     if(type=="bool")return value.is_boolean();
     if(type=="string"||type=="asset")return value.is_string()&&value.get_ref<const std::string&>().size()<=1024;
     auto number=[&](const Json& v){return v.is_number()&&std::isfinite(v.get<double>())&&v.get<double>()>=field.value("min",-1e6)&&v.get<double>()<=field.value("max",1e6);};
@@ -56,7 +60,8 @@ Json Schema(sol::table definition){
         sol::object label=f["label"];if(label.valid()&&label!=sol::nil){if(label.get_type()!=sol::type::string)throw std::runtime_error("Field label must be a string");field["label"]=label.as<std::string>();}
         for(const char* bound:{"min","max"}){sol::object b=f[bound];if(b.valid()&&b!=sol::nil){if(b.get_type()!=sol::type::number)throw std::runtime_error("Field bounds must be numeric");auto value=b.as<double>();if(!std::isfinite(value))throw std::runtime_error("Nonfinite field bound");field[bound]=value;}}
         sol::object d=f["default"];const auto type=field["type"].get<std::string>();
-        if(type=="bool"){if(d.get_type()!=sol::type::boolean)throw std::runtime_error("Boolean default required");field["default"]=d.as<bool>();}
+        if(type=="entity"){if(d.valid()&&d!=sol::nil)throw std::runtime_error("Entity default must be nil; assign a scene object in Inspector");field["default"]=nullptr;}
+        else if(type=="bool"){if(d.get_type()!=sol::type::boolean)throw std::runtime_error("Boolean default required");field["default"]=d.as<bool>();}
         else if(type=="integer") {if(!d.is<lua_Integer>())throw std::runtime_error("Integer default required");field["default"]=d.as<lua_Integer>();}
         else if(type=="number"){if(d.get_type()!=sol::type::number)throw std::runtime_error("Numeric default required");field["default"]=d.as<double>();}
         else if(type=="string"||type=="asset"){if(d.get_type()!=sol::type::string)throw std::runtime_error("String default required");field["default"]=d.as<std::string>();}
@@ -134,6 +139,17 @@ struct LuaRuntime::Impl {
     }
     bool Alive(ecs::Entity e)const{return world&&world->IsAlive(e)&&!destroying.contains(e);}
     ecs::TransformComponent& Transform(ecs::Entity e){if(!Alive(e))throw std::runtime_error("Dead/stale/foreign entity");auto* t=world->GetComponent<ecs::TransformComponent>(e);if(!t)throw std::runtime_error("Entity has no Transform");return *t;}
+    void SetTransform(ecs::Entity e,const char* field,ecs::Vec3 value){
+        Transform(e);std::string error;
+        if(!ecs::ComponentRegistry::Builtins().Set(*world,e,ecs::ComponentId("Transform"),field,value,&error))throw std::runtime_error("World.set_"+std::string(field)+": "+error);
+    }
+    std::string LightComponent(ecs::Entity e){
+        if(!Alive(e))throw std::runtime_error("Light: dead/stale/foreign entity");
+        if(world->HasComponent<ecs::DirectionalLightComponent>(e))return "DirectionalLight";
+        if(world->HasComponent<ecs::PointLightComponent>(e))return "PointLight";
+        if(world->HasComponent<ecs::SpotLightComponent>(e))return "SpotLight";
+        throw std::runtime_error("Light: entity has no Directional/Point/Spot Light component");
+    }
     bool InputAllowed(ecs::Entity owner)const{auto* c=Alive(owner)?world->GetComponent<ecs::LuaScriptComponent>(owner):nullptr;return !stopping&&c&&c->enabled&&c->inputEnabled&&(!services.inputAllowed||services.inputAllowed());}
     bool MotionAllowed(ecs::Entity owner)const{auto* c=Alive(owner)?world->GetComponent<ecs::LuaScriptComponent>(owner):nullptr;return !stopping&&c&&c->enabled&&(!c->inputEnabled||!services.inputAllowed||services.inputAllowed());}
     ecs::CharacterMovementComponent& Movement(ecs::Entity owner,ecs::Entity e){
@@ -171,10 +187,16 @@ struct LuaRuntime::Impl {
         api.set_function("get_rotation",[this](ecs::Entity e){return Transform(e).rotation;});
         api.set_function("get_scale",[this](ecs::Entity e){return Transform(e).scale;});
         api.set_function("set_position",[this](ecs::Entity e,ecs::Vec3 p){if(!std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.z))throw std::runtime_error("Nonfinite position");Transform(e).position=p;});
+        api.set_function("set_rotation",[this](ecs::Entity e,ecs::Vec3 v){SetTransform(e,"rotation",v);});
+        api.set_function("set_scale",[this](ecs::Entity e,ecs::Vec3 v){SetTransform(e,"scale",v);});
         api.set_function("spawn_prefab",[this](const std::string& key,ecs::Vec3 p){if(stopping)throw std::runtime_error("Spawn during Stop");if(world->GetAliveCount()>10000)throw std::runtime_error("Lua entity budget exceeded");return SpawnPrefab(*world,key,p);});
         api.set_function("destroy",[this](ecs::Entity e){if(Alive(e)){destroying.insert(e);mutations.Destroy(e);}});
         api.set_function("send_event",[this](ecs::Entity e,const std::string& type,float amount){if(Alive(e)&&events.size()<1024&&type.size()<128&&std::isfinite(amount))events.push_back({e,{},type,amount});});
         env["World"]=api;
+        auto light=lua.create_table();
+        light.set_function("get_intensity",[this](ecs::Entity e){ecs::PropertyValue value;std::string error;auto key=LightComponent(e);if(!ecs::ComponentRegistry::Builtins().Get(*world,e,ecs::ComponentId(key.c_str()),"intensity",value,&error))throw std::runtime_error(error);return std::get<float>(value);});
+        light.set_function("set_intensity",[this](ecs::Entity e,float value){std::string error;auto key=LightComponent(e);if(!ecs::ComponentRegistry::Builtins().Set(*world,e,ecs::ComponentId(key.c_str()),"intensity",value,&error))throw std::runtime_error("Light.set_intensity: "+error);});
+        env["Light"]=light;
         auto log=lua.create_table();log.set_function("info",[](const std::string& s){Logger::Get().Info("Lua: "+s);});log.set_function("warning",[](const std::string& s){Logger::Get().Warn("Lua: "+s);});log.set_function("error",[](const std::string& s){Logger::Get().Error("Lua: "+s);});env["Log"]=log;
         auto controls=lua.create_table();
         controls.set_function("is_down",[this,owner](const std::string& s){if(!InputAllowed(owner))return false;DiscoverInput(s);return held[s];});
@@ -241,7 +263,10 @@ struct LuaRuntime::Impl {
             try{
                 auto& program=programs.at(path);auto env=Environment();auto definition=Evaluate(program.source,path,env);Bind(env,e);
                 auto self=lua.create_table();self["entity"]=e;
-                for(auto it=program.fields.begin();it!=program.fields.end();++it){auto value=overrides.contains(it.key())?overrides.at(it.key()):it.value().at("default");if(!ValidValue(it.value(),value))throw std::runtime_error("Invalid override: "+it.key());self[it.key()]=ToLua(lua,value);}
+                for(auto it=program.fields.begin();it!=program.fields.end();++it){auto value=overrides.contains(it.key())?overrides.at(it.key()):it.value().at("default");if(!ValidValue(it.value(),value))throw std::runtime_error("Invalid override: "+it.key());
+                    if(it.value().at("type")=="entity"){auto target=ResolveEntityReference(*world,value);self[it.key()]=Alive(target)?sol::make_object(lua,target):sol::make_object(lua,sol::nil);}
+                    else self[it.key()]=ToLua(lua,value);
+                }
                 auto [it,ok]=instances.emplace(e,Instance{path,program.revision,std::move(env),definition,self,overrides,false,e});Call(it->second,"on_start");
                 rejected.erase(e);
             }catch(const std::exception& error){rejected[e]=fingerprint;Fail(path,"instance",error.what());}

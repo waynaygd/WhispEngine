@@ -145,6 +145,7 @@ public:
     const std::string& SelectedAsset()const{return m_SelectedAsset;}
     void SelectAsset(const std::string& key,const std::string& kind){m_SelectedAsset=key;m_SelectedAssetKind=kind;}
     bool SetProperty(Application&,ecs::Entity,ecs::ComponentTypeId,const std::string&,const ecs::PropertyValue&,bool transactional=true);
+    bool SetLuaEntityReference(Application&,ecs::Entity,const std::string& field,ecs::Entity target={});
     void BeginSceneTransaction(Application&,const std::string& label="Scene settings");
     std::size_t UndoCount()const{return m_UndoStack.size();}
     const std::string& GetError()const{return m_EditorError;}

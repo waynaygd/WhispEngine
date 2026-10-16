@@ -8,12 +8,30 @@
 #include "EditorWidgets.h"
 #include "../core/Application.h"
 #include "../ecs/components/LuaScriptComponent.h"
+#include "../scripting/EntityReference.h"
 #include "../ecs/PlayerSpawn.h"
 #include "../resources/ResourceManager.h"
 #include <imgui.h>
 #include <chrono>
 #include <misc/cpp/imgui_stdlib.h>
 namespace editor {
+bool EditorLayer::SetLuaEntityReference(Application& app,ecs::Entity owner,const std::string& field,ecs::Entity target){
+    auto& world=app.GetWorld();auto* script=world.GetComponent<ecs::LuaScriptComponent>(owner);
+    if(!script||(target.IsValid()&&!world.IsAlive(target)))return false;
+    auto schema=app.GetLuaRuntime().Fields(script->scriptPath);
+    if(!schema.contains(field)||schema[field].value("type","")!="entity")return false;
+    FinishTransaction(app);auto before=CaptureSelectedEntity(app,owner);
+    nlohmann::json value=nullptr;
+    if(target.IsValid()){
+        // Legacy/programmatic objects acquire a persistent identity only when
+        // referenced; include that metadata in the same Undo transaction.
+        auto* id=world.GetComponent<ecs::SceneIdentityComponent>(target);
+        if(!id){if(target!=owner)before.related.push_back(CaptureSelectedEntity(app,target));id=&world.AddComponent<ecs::SceneIdentityComponent>(target);}
+        value={{"$entity",id->value}};
+        if(scripting::ResolveEntityReference(world,value)!=target)return false;
+    }
+    script->properties[field]=value;app.NotifyEditorMutation(owner);CommitUndo(app,"Edit Lua entity reference",std::move(before));return true;
+}
 namespace {
 ecs::PropertyValue Initial(const ecs::PropertyDescriptor& p){
     using K=ecs::PropertyKind;
@@ -130,6 +148,26 @@ void EditorLayer::DrawInspector(Application& app){
                 try{
                     const auto& metadata=field.value();const auto type=metadata.at("type").get<std::string>();
                     auto value=script->properties.contains(field.key())?script->properties.at(field.key()):metadata.at("default");
+                    if(type=="entity"){
+                        if(!scripting::ValidEntityReference(value))throw std::runtime_error("Malformed entity reference");
+                        auto target=scripting::ResolveEntityReference(world,value);std::string label=value.is_null()?"None":"Missing entity";
+                        if(target.IsValid()){auto* tag=world.GetComponent<ecs::TagComponent>(target);label=tag?tag->name:"Unnamed entity";}
+                        ImGui::TextUnformatted(metadata.value("label",field.key()).c_str());
+                        if(ImGui::BeginCombo("##entity",label.c_str())){
+                            if(ImGui::Selectable("None",value.is_null()))SetLuaEntityReference(app,e,field.key());
+                            for(auto candidate:world.Entities()){
+                                auto* tag=world.GetComponent<ecs::TagComponent>(candidate);ImGui::PushID(int(candidate.index));
+                                if(ImGui::Selectable(tag?tag->name.c_str():"Unnamed entity",candidate==target))SetLuaEntityReference(app,e,field.key(),candidate);
+                                ImGui::PopID();
+                            }ImGui::EndCombo();
+                        }
+                        if(ImGui::BeginDragDropTarget()){
+                            if(auto* payload=ImGui::AcceptDragDropPayload("WHISP_ENTITY"))if(payload->DataSize==sizeof(ecs::Entity))SetLuaEntityReference(app,e,field.key(),*static_cast<const ecs::Entity*>(payload->Data));
+                            ImGui::EndDragDropTarget();
+                        }
+                        if(!value.is_null()){ImGui::SameLine();if(ImGui::SmallButton("X"))SetLuaEntityReference(app,e,field.key());}
+                        ImGui::PopID();continue;
+                    }
                     ecs::PropertyDescriptor p;p.key=field.key();p.label=metadata.value("label",field.key());p.minimum=metadata.value("min",-1e6f);p.maximum=metadata.value("max",1e6f);
                     ecs::PropertyValue v;
                     if(type=="bool"){p.kind=ecs::PropertyKind::Boolean;v=value.get<bool>();}
