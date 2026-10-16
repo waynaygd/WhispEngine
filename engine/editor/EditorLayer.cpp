@@ -648,9 +648,12 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     }
     m_ViewportHovered=ImGui::IsItemHovered();
     if(maximized){
-        const auto cursor=ImGui::GetCursorScreenPos();ImGui::SetCursorScreenPos(ImVec2(contentMin.x+8,contentMin.y+8));
+        // The image already registered the full content bounds. Create is the
+        // final layout item; the remaining helpers only submit draw-list data.
+        // Do not restore the post-image cursor (it includes ItemSpacing below
+        // CursorMaxPos and would extend the window without submitting an item).
+        ImGui::SetCursorScreenPos(ImVec2(contentMin.x+8,contentMin.y+8));
         if(DrawViewportCreateMenu(app))m_ViewportHovered=false;
-        ImGui::SetCursorScreenPos(cursor);
     }
     if(m_ViewportHovered&&ImGui::IsMouseClicked(1))ImGui::SetWindowFocus();
     if(m_ViewportHovered&&ImGui::IsMouseClicked(0))ImGui::SetWindowFocus();
