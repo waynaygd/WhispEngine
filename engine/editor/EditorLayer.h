@@ -78,6 +78,15 @@ public:
     void Render(Application& app, IRenderAdapter* renderer, float dt);
     void InitializePreferences(Application&);
     void PersistPreferences(Application&);
+    bool ResolveProjectEdits(Application&,int decision,std::string* error);
+    void ResetProjectState(IRenderAdapter*);
+    void ProjectOpened(Application&);
+    bool HasProjectEdits()const{return m_MaterialDirty||(m_EditHistory?(m_EditHistory->external||m_EditHistory->revision!=m_EditHistory->saved):IsSceneDirty());}
+    void ShowProjectBrowser(){m_ShowProjectBrowser=true;}
+    void RequestProjectOpen(Application&,const std::string& descriptor,bool close=false);
+    void RequestProjectExit(){m_ProjectExit=true;m_ProjectConfirm=true;}
+    bool ProjectExitConfirmed()const{return m_ProjectExitConfirmed;}
+    const auto& RecentProjects()const{return m_RecentProjects;}
     void ResetLayout(){m_ResetLayout=true;}
     void SetFixedDiagnosticLayout(bool fixed){m_FixedDiagnosticLayout=fixed;if(fixed){m_ShowStatistics=m_ShowMaterialEditor=true;}}
     InputOwner InputOwnership(bool right,bool left,bool camera,bool play)const{return RouteInput({m_ViewportFocused,m_ViewportHovered,m_InputTextActive,m_ModalActive,m_ToolActive&&!m_LightPointerCaptured,m_LightPointerCaptured||m_LightHandleHovered,camera,right,left,play});}
@@ -141,6 +150,7 @@ public:
     bool DeleteMaterialAsset(Application&,const std::string&,bool confirmed,std::string* error=nullptr);
     bool RenameAssetFile(Application&,const std::string&,const std::string& name,bool confirmed,std::string* error=nullptr,bool acceptDynamicRisk=false);
     bool DeleteAssetFile(Application&,const std::string&,bool confirmed,std::string* error=nullptr,bool acceptDynamicRisk=false);
+    bool MoveAssetFile(Application&,const std::string&,const std::string& destination,bool confirmed,std::string* error=nullptr,bool acceptDynamicRisk=false);
     std::vector<std::string> AssetFileBlockers(Application&,const std::string&)const;
     const std::string& SelectedAsset()const{return m_SelectedAsset;}
     void SelectAsset(const std::string& key,const std::string& kind){m_SelectedAsset=key;m_SelectedAssetKind=kind;}
@@ -200,6 +210,12 @@ private:
     void RefreshAssetLists(float dt);
     void HandleEditorShortcuts(Application& app);
     void DrawMainMenu(Application& app);
+    void DrawProjectBrowser(Application&);
+    bool ExecuteProjectAction(Application&,int decision);
+    bool m_ShowProjectBrowser=false,m_ProjectConfirm=false,m_ProjectClose=false,m_ProjectExit=false,m_ProjectExitConfirmed=false;
+    int m_ProjectTab=-1;
+    std::string m_ProjectName="MyGame",m_ProjectLocation,m_ProjectDescriptor,m_PendingProject,m_ProjectError;
+    std::vector<RecentProject> m_RecentProjects;
     void DrawToolbar(Application&);
     void DrawEditorVisualSettings(Application&,IRenderAdapter*);
     void PrepareEditorSky(Application&,IRenderAdapter*);

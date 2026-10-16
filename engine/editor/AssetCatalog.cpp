@@ -2,6 +2,7 @@
 #include "AssetImport.h"
 #include "LuaAssetDependencies.h"
 #include "../core/AssetPaths.h"
+#include "../core/ProjectContext.h"
 #include "../resources/loaders/MaterialLoader.h"
 #include <fstream>
 #include <algorithm>
@@ -35,7 +36,7 @@ void AssetCatalog::Register(AssetType type){
 void AssetCatalog::Refresh(){
     std::vector<AssetEntry> ready;std::set<std::string> dirs;
     const auto active=std::filesystem::weakly_canonical(AssetPaths::ResolveAssetRoot());
-    for(std::size_t i=0;i<types.size();++i){auto& type=types[i];const std::set<std::filesystem::path> roots=type.shaderRoot?std::set<std::filesystem::path>{AssetPaths::ResolveShaderRoot()}:std::set<std::filesystem::path>{AssetPaths::ResolveAssetRoot(),AssetImport::ProjectRoot()};for(const auto& root:roots){const auto directory=root/type.folder;
+    for(std::size_t i=0;i<types.size();++i){auto& type=types[i];if(type.shaderRoot&&ProjectManager::Active())continue;const std::set<std::filesystem::path> roots=type.shaderRoot?std::set<std::filesystem::path>{AssetPaths::ResolveShaderRoot()}:std::set<std::filesystem::path>{AssetPaths::ResolveAssetRoot(),AssetImport::ProjectRoot()};for(const auto& root:roots){const auto directory=root/type.folder;
         if(!std::filesystem::exists(directory))continue;
         if(!type.folder.empty())dirs.insert(type.folder);
         for(std::filesystem::recursive_directory_iterator walk(directory,std::filesystem::directory_options::skip_permission_denied),end;walk!=end;++walk){const auto& item=*walk;
@@ -132,7 +133,8 @@ std::string AssetCatalog::RenameDestination(const std::string& key,const std::st
 }
 AssetDependencyAudit AssetCatalog::AuditDependencies(const std::string& key){
     AssetDependencyAudit found;
-    const std::set<std::filesystem::path> roots={std::filesystem::weakly_canonical(AssetPaths::ResolveAssetRoot()),std::filesystem::weakly_canonical(AssetImport::ProjectRoot())};
+    std::set<std::filesystem::path> roots={std::filesystem::weakly_canonical(AssetPaths::ResolveAssetRoot()),std::filesystem::weakly_canonical(AssetImport::ProjectRoot())};
+    if(auto project=ProjectManager::Active())roots.insert(project->SceneRoot());
     const auto filename=AssetPaths::ToUtf8String(std::filesystem::u8path(key).filename());
     for(const auto& root:roots)try{
         for(const auto& item:std::filesystem::recursive_directory_iterator(root)){
@@ -213,5 +215,19 @@ bool AssetCatalog::DeleteAssetFile(const std::string& key,std::string* error,boo
     if(!std::filesystem::remove(path))throw std::runtime_error("File no longer exists");
 #endif
     created.erase(key);hiddenFallbacks.insert(key);++revision;
+},error);}
+bool AssetCatalog::MoveAssetFile(const std::string& from,const std::string& to,std::string* error,bool acceptDynamicRisk){return Guard([&]{
+    auto source=EditablePath(from);
+    const auto slash=from.find('/');
+    if(slash==std::string::npos||!to.starts_with(from.substr(0,slash+1))||FileSuffix(from)!=FileSuffix(to))throw std::runtime_error("Move must preserve asset category and complete extension");
+    auto destination=AssetImport::SafeTarget(AssetPaths::ResolveAssetRoot(),to);
+    if(!std::filesystem::is_directory(destination.parent_path())||std::filesystem::exists(destination))throw std::runtime_error("Choose an existing folder and a fresh filename");
+    RequireNoDependencies(from,acceptDynamicRisk);source=EditablePath(from);
+#ifdef _WIN32
+    if(!MoveFileExW(source.c_str(),destination.c_str(),MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Move failed (Windows error "+std::to_string(GetLastError())+")");
+#else
+    std::filesystem::create_hard_link(source,destination);std::filesystem::remove(source);
+#endif
+    created.erase(from);hiddenFallbacks.insert(from);++revision;
 },error);}
 }

@@ -13,6 +13,7 @@
 #include "../resources/loaders/MeshLoader.h"
 #include "../resources/loaders/TextureLoader.h"
 #include "../core/AssetPaths.h"
+#include "../core/ProjectContext.h"
 #include <stb_image.h>
 #ifdef _WIN32
 #include <Windows.h>
@@ -46,6 +47,7 @@ std::string Uri(std::string s){
 }
 }
 std::filesystem::path AssetImport::ProjectRoot(){
+ if(auto project=ProjectManager::Active())return project->AssetRoot();
  for(auto start:{fs::current_path(),AssetPaths::GetExecutableDirectory()})for(auto p=start;!p.empty();p=p.parent_path()){
   auto candidate=p/"engine"/"assets";if(fs::is_directory(candidate)){CheckLinks(candidate);return candidate;}if(p==p.parent_path())break;
  }

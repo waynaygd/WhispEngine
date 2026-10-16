@@ -28,8 +28,10 @@ add_library(Engine
   scripting/LuaRuntime.cpp
   scripting/Prefab.cpp
   core/Application.cpp
+  core/ApplicationProject.cpp
   core/AssetDependencyValidation.cpp
   core/AssetPaths.cpp
+  core/ProjectContext.cpp
   core/Time.cpp
   core/Logger.cpp
   ecs/World.cpp
@@ -51,6 +53,7 @@ add_library(Engine
   scene/SceneSerializer.cpp
   scene/SceneSettings.cpp
   editor/EditorLayer.cpp
+  editor/EditorProject.cpp
   editor/EditorTransactions.cpp
   editor/EditorSelection.cpp
   editor/EditorGroupTransform.cpp

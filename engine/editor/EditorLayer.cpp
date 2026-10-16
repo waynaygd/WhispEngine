@@ -334,7 +334,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     if(m_ViewportMaximized){
         m_HierarchyFocused=false;
         ImGui::DockSpace(ImHashStr("WhispEngine.Editor.Dockspace"),ImVec2(0,0),ImGuiDockNodeFlags_KeepAliveOnly);
-        DrawViewport(app,renderer);HandleEditorShortcuts(app);return;
+        DrawProjectBrowser(app);DrawViewport(app,renderer);HandleEditorShortcuts(app);return;
     }
     ConfigureDocking();DrawToolbar(app);
 
@@ -344,7 +344,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     m_ViewportHovered = false;
     m_ViewportHasBounds = false;
     m_ViewportFocused=false;m_HierarchyFocused=false;
-    DrawMainMenu(app);DrawSceneDialogs(app);
+    DrawMainMenu(app);DrawSceneDialogs(app);DrawProjectBrowser(app);
     if(m_ShowSceneSettings)DrawSceneSettings(app,renderer,dt);
     if(m_ShowVisualSettings)DrawEditorVisualSettings(app,renderer);
     PrepareEditorSky(app,renderer);
@@ -689,6 +689,7 @@ void EditorLayer::DrawMaterialEditor(Application& app)
     auto* resources=app.GetResourceManager();auto& world=app.GetWorld();
     auto* component=world.GetComponent<ecs::MaterialComponent>(m_Selection.active);
     const auto open=[&](const std::string& key) {
+        if(key.starts_with("@engine/")){m_MaterialError="Built-in material is read-only. Create a project material to customize it.";return;}
         if(m_MaterialDirty&&key!=m_EditingMaterial){m_MaterialError="Unsaved changes: Save or Revert before opening another asset.";return;}
         m_EditingMaterial=key;m_MaterialError.clear();
         if(resources&&!key.empty()) {resources->Load<MaterialResource>(std::filesystem::u8path(key));resources->WatchForHotReload<MaterialResource>(std::filesystem::u8path(key));}

@@ -12,10 +12,17 @@ int main(int argc, char** argv)
     if (!app.Initialize())
         return -1;
 
+    if(argc==1)app.GetEditorLayer().ShowProjectBrowser();
+
     bool overlap=false;int lightObjects=100;
     for(int i=1;i<argc;++i){if(std::strcmp(argv[i],"--light-overlap")==0)overlap=true;if(std::strcmp(argv[i],"--light-objects")==0&&i+1<argc)lightObjects=std::atoi(argv[++i]);}
     // Optional repeatable visual smoke/benchmark run. Normal startup is unchanged.
     for (int i = 1; i < argc; ++i) {
+        if(std::strcmp(argv[i],"--project")==0&&i+1<argc){
+            std::string error;if(!app.OpenProject(std::filesystem::u8path(argv[++i]),Application::ProjectDecision::Discard,&error)){
+                Logger::Get().Error(error);app.GetEditorLayer().ShowProjectBrowser();
+            }continue;
+        }
         if(std::strcmp(argv[i],"--lua-demo")==0){
             std::string error;if(!app.OpenScene("scenes/lua_wave_demo.json",&error)){Logger::Get().Error(error);app.Shutdown();return 1;}
             app.SetEditorCameraPose({0,10,-14},0,-.55f);

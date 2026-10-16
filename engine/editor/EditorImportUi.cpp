@@ -23,7 +23,8 @@ bool EditorLayer::RequestRecentScene(Application& app,const std::string& key){
  const bool ok=OpenSceneGuarded(app,key,OpenDecision::Discard,&m_EditorError);if(ok)m_EditorError.clear();else {m_SceneDialogAction=5;m_SceneDialogRequested=true;Logger::Get().Error(m_EditorError);}return ok;
 }
 void EditorLayer::RememberScene(const std::string& key){
- if(!key.starts_with("scenes/")||!ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::None)||std::filesystem::u8path(key).extension()!=".json")return;
+ const auto project=ProjectManager::Active();const auto prefix=project?project->sceneDirectory+"/":"scenes/";
+ if(!key.starts_with(prefix)||!ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::None)||std::filesystem::u8path(key).extension()!=".json")return;
  std::erase(m_RecentScenes,key);m_RecentScenes.insert(m_RecentScenes.begin(),key);if(m_RecentScenes.size()>12)m_RecentScenes.resize(12);
 }
 void EditorLayer::DrawImportDialogs(Application& app){

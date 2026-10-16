@@ -19,6 +19,7 @@
 #include "../scene/SceneSerializer.h"
 namespace editor {
 bool EditorLayer::OpenMaterial(Application& app,const std::string& key){
+    if(key.starts_with("@engine/")){m_MaterialError="Built-in material is read-only. Create a project material to customize it.";return false;}
     m_ShowMaterialEditor=m_FocusMaterial=true;
     if(m_MaterialDirty&&key!=m_EditingMaterial){m_MaterialError="Save or Revert the current material before switching assets";return false;}
     m_EditingMaterial=key;m_SelectedAsset=key;m_SelectedAssetKind="Material";if(auto* r=app.GetResourceManager())r->LoadAsync<MaterialResource>(std::filesystem::u8path(key));return true;
@@ -102,6 +103,14 @@ bool EditorLayer::RenameAssetFile(Application& app,const std::string& key,const 
         InvalidateAssetFileUi(app,key,to);if(error)error->clear();return true;
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }
+bool EditorLayer::MoveAssetFile(Application& app,const std::string& key,const std::string& destination,bool confirmed,std::string* error,bool acceptDynamicRisk){
+    try{
+        if(app.IsEditorPlayMode()||!confirmed)throw std::runtime_error("Stop Play and confirm Move first");
+        if(!AssetFileBlockers(app,key).empty())throw std::runtime_error("Move blocked by scene/history or disk dependencies");
+        if(!m_AssetCatalog.MoveAssetFile(key,destination,error,acceptDynamicRisk))return false;
+        InvalidateAssetFileUi(app,key,destination);return true;
+    }catch(const std::exception& e){if(error)*error=e.what();return false;}
+}
 bool EditorLayer::DeleteAssetFile(Application& app,const std::string& key,bool confirmed,std::string* error,bool acceptDynamicRisk){
     try{
         if(!confirmed)throw std::runtime_error("Confirm Delete first");
@@ -115,6 +124,7 @@ void EditorLayer::BeginAssetFileAction(Application& app,int action,const std::st
     m_AssetDynamicRiskAccepted=false;m_AssetActionWarnings.clear();
     try{m_AssetActionWarnings=AssetCatalog::AuditDependencies(key).dynamic;}catch(const std::exception& e){m_EditorError=e.what();}
     auto filename=AssetPaths::ToUtf8String(std::filesystem::u8path(key).filename());m_AssetActionKey=filename.substr(0,filename.size()-AssetCatalog::FileSuffix(key).size());
+    if(action==4)m_AssetActionKey=key;
     m_AssetActionBlockers=AssetFileBlockers(app,key);m_AssetActionPath.clear();
     try{m_AssetActionPath=AssetImport::SafeTarget(AssetPaths::ResolveAssetRoot(),key);const auto checked=AssetCatalog::EditablePath(key);m_AssetActionTime=std::filesystem::last_write_time(checked);m_AssetActionSize=std::filesystem::file_size(checked);}catch(const std::exception& e){m_EditorError=e.what();}
 }
@@ -249,6 +259,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
                 if(ImGui::MenuItem("Rename...","F2",false,blocked.empty())){SelectAsset(key,type.name);BeginAssetFileAction(app,2,key);}
                 if(!blocked.empty()&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("%s",blocked.c_str());
                 if(ImGui::MenuItem("Delete...","Delete",false,blocked.empty())){SelectAsset(key,type.name);BeginAssetFileAction(app,3,key);}
+                if(ImGui::MenuItem("Move...",nullptr,false,blocked.empty())){SelectAsset(key,type.name);BeginAssetFileAction(app,4,key);}
                 if(!blocked.empty()&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("%s",blocked.c_str());
                 ImGui::EndPopup();
             }ImGui::PopID();
@@ -277,7 +288,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
         if(ImGui::IsKeyPressed(ImGuiKey_F2,false))BeginAssetFileAction(app,2,m_SelectedAsset);
         else if(ImGui::IsKeyPressed(ImGuiKey_Delete,false))BeginAssetFileAction(app,3,m_SelectedAsset);
     }
-    if(m_AssetActionRequested){ImGui::OpenPopup(m_AssetAction==1?"Material Asset Action":m_AssetAction==2?"Rename Asset":"Delete Asset?");m_AssetActionRequested=false;}
+    if(m_AssetActionRequested){ImGui::OpenPopup(m_AssetAction==1?"Material Asset Action":m_AssetAction==2?"Rename Asset":m_AssetAction==4?"Move Asset":"Delete Asset?");m_AssetActionRequested=false;}
     if(ImGui::BeginPopupModal("Material Asset Action",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
         ImGui::TextUnformatted("Create a PBR material (schema v4)");
         ImGui::InputText("Asset key / directory",&m_AssetActionKey);
@@ -286,9 +297,9 @@ void EditorLayer::DrawAssetBrowser(Application& app){
             if(CreateMaterialAsset(app,m_AssetActionKey,&m_EditorError)){openMaterial(m_AssetActionKey);m_AssetListsDirty=true;ImGui::CloseCurrentPopup();}
         }ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::EndPopup();
     }
-    const char* fileDialog=m_AssetAction==2?"Rename Asset":"Delete Asset?";
+    const char* fileDialog=m_AssetAction==2?"Rename Asset":m_AssetAction==4?"Move Asset":"Delete Asset?";
     if(ImGui::BeginPopupModal(fileDialog,nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
-        const bool rename=m_AssetAction==2;
+        const bool rename=m_AssetAction==2||m_AssetAction==4;
         const auto filename=AssetPaths::ToUtf8String(std::filesystem::u8path(m_AssetActionSource).filename());
         if(!rename)ImGui::TextWrapped("Are you sure you want to delete \"%s\"?",filename.c_str());
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX()+520*ImGui::GetStyle().FontScaleDpi);
@@ -312,7 +323,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
         if(rename){
             if(m_AssetActionFocus)ImGui::SetKeyboardFocusHere();
             ImGui::SetNextItemWidth(300*ImGui::GetStyle().FontScaleDpi);
-            enter=ImGui::InputText("Name",&m_AssetActionKey,ImGuiInputTextFlags_AutoSelectAll|ImGuiInputTextFlags_EnterReturnsTrue);
+            enter=ImGui::InputText(m_AssetAction==4?"Destination asset key":"Name",&m_AssetActionKey,ImGuiInputTextFlags_AutoSelectAll|ImGuiInputTextFlags_EnterReturnsTrue);
             ImGui::SameLine();ImGui::TextUnformatted(AssetCatalog::FileSuffix(m_AssetActionSource).c_str());
         }
         m_AssetActionFocus=false;
@@ -325,7 +336,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
                 const auto path=AssetCatalog::EditablePath(m_AssetActionSource);
                 if(path!=m_AssetActionPath||std::filesystem::last_write_time(path)!=m_AssetActionTime||std::filesystem::file_size(path)!=m_AssetActionSize)
                     throw std::runtime_error("File changed since this dialog opened. Cancel and review it again.");
-                ok=rename?RenameAssetFile(app,m_AssetActionSource,m_AssetActionKey,true,&m_EditorError,m_AssetDynamicRiskAccepted):DeleteAssetFile(app,m_AssetActionSource,true,&m_EditorError,m_AssetDynamicRiskAccepted);
+                ok=m_AssetAction==4?MoveAssetFile(app,m_AssetActionSource,m_AssetActionKey,true,&m_EditorError,m_AssetDynamicRiskAccepted):rename?RenameAssetFile(app,m_AssetActionSource,m_AssetActionKey,true,&m_EditorError,m_AssetDynamicRiskAccepted):DeleteAssetFile(app,m_AssetActionSource,true,&m_EditorError,m_AssetDynamicRiskAccepted);
             }catch(const std::exception& e){m_EditorError=e.what();}
             if(ok)ImGui::CloseCurrentPopup();
             else {

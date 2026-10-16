@@ -258,6 +258,8 @@ namespace ecs {
         m_LoggedMeshReuseKeys.clear();
         m_LoggedTextureReuseKeys.clear();
         m_LoggedShaderReuseKeys.clear();
+        m_GpuFinalizeQueue.clear();m_PendingGpuFinalizations.clear();
+        m_RenderSnapshots.clear();m_RenderPackets.clear();m_Batches.clear();m_ShadowBatches.clear();m_InstanceData.clear();
         m_ResourceOwnerRenderer = nullptr;
     }
 

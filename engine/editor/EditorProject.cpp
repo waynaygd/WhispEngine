@@ -1,0 +1,143 @@
+#include "EditorLayer.h"
+#include "../core/Application.h"
+#include "../core/AssetPaths.h"
+#include "../resources/ResourceManager.h"
+#include "../resources/loaders/MaterialLoader.h"
+#include <imgui.h>
+#include <imgui_internal.h>
+#include <misc/cpp/imgui_stdlib.h>
+#ifdef _WIN32
+#define NOMINMAX
+#include <Windows.h>
+#include <commdlg.h>
+#endif
+
+namespace editor {
+bool EditorLayer::ResolveProjectEdits(Application& app,int decision,std::string* error){
+    if(decision==int(Application::ProjectDecision::Cancel))return false;
+    if(decision!=int(Application::ProjectDecision::Save))return true;
+    const bool sceneDirty=m_EditHistory?(m_EditHistory->external||m_EditHistory->revision!=m_EditHistory->saved):IsSceneDirty();
+    if(sceneDirty&&!app.SaveAuthoringSceneForTransition(error))return false;
+    if(sceneDirty&&m_EditHistory){m_EditHistory->saved=m_EditHistory->revision;m_EditHistory->external=false;}
+    if(m_MaterialDirty){
+        auto* resources=app.GetResourceManager();
+        auto material=resources?resources->Get<MaterialResource>(std::filesystem::u8path(m_EditingMaterial)):nullptr;
+        if(!material){if(error)*error="Edited material is unavailable";return false;}
+        if(!MaterialLoader::Save(m_EditingMaterial,material->GetData(),error))return false;
+        resources->SetMaterialDirty(m_EditingMaterial,false);m_MaterialDirty=false;
+    }
+    return true;
+}
+void EditorLayer::ResetProjectState(IRenderAdapter* renderer){
+    if(ImGui::GetCurrentContext()){ImGui::ClearActiveID();ImGui::ClearDragDrop();}
+    if(renderer)renderer->ReleaseEditorSky();m_RequestedSky.clear();m_FailedSkyVersion=0;
+    m_BackgroundAssetDraft.clear();m_BackgroundAssetEditing=false;m_BackgroundDraftWorld=0;
+    ReleaseAssetPreview(renderer);ResetHistory();m_EditHistory.reset();m_Clipboard={};
+    m_SelectedAsset.clear();m_SelectedAssetKind.clear();m_EditingMaterial.clear();m_MaterialDirty=false;m_MaterialError.clear();
+    m_AssetDirectory.clear();m_AssetNavigation={};m_AssetCatalog=AssetCatalog{};
+    m_AssetMetadataKey.clear();m_AssetMetadata.clear();m_AssetMetadataVersion=0;
+    m_MeshAssets.clear();m_TextureAssets.clear();m_MaterialAssets.clear();m_ShaderAssets.clear();m_EnvironmentAssets.clear();
+    m_AssetListsDirty=true;m_RecentScenes.clear();m_SceneCatalog={};m_RenameTarget={};m_DragOriginal={};
+    m_HierarchyVisible.clear();m_AssetActionSource.clear();m_AssetActionPath.clear();m_AssetActionBlockers.clear();m_AssetActionWarnings.clear();
+    m_AssetActionRequested=m_FolderPopup=m_ImportPopup=m_RenameRequested=m_SceneDialogRequested=false;
+    m_ImportSource.clear();m_ImportRoot.clear();m_ImportTarget.clear();m_ImportPreview.clear();m_ImportTargetFolder.clear();m_ImportPackageName.clear();
+    m_SceneSearch.clear();m_AssetFilter.clear();m_EditorError.clear();m_BackgroundOverride=false;
+}
+void EditorLayer::ProjectOpened(Application& app){
+    m_SceneDialogKey=m_UnsavedSaveKey=app.DefaultSceneKey();
+    if(!app.GetSceneKey().empty())RememberScene(app.GetSceneKey());
+    if(auto p=app.GetProject()){
+        const auto path=AssetPaths::ToUtf8String(p->descriptorPath);
+        std::erase_if(m_RecentProjects,[&](const auto& entry){return entry.descriptor==path;});
+        m_RecentProjects.insert(m_RecentProjects.begin(),{p->name,path});if(m_RecentProjects.size()>12)m_RecentProjects.resize(12);
+    }
+    if(app.GetWindow())PersistPreferences(app);
+}
+
+void EditorLayer::RequestProjectOpen(Application& app,const std::string& path,bool close){
+    m_PendingProject=path;m_ProjectClose=close;m_ProjectExit=false;m_ProjectError.clear();
+    if(HasProjectEdits())m_ProjectConfirm=true;
+    else if(!ExecuteProjectAction(app,int(Application::ProjectDecision::Discard)))m_ShowProjectBrowser=true;
+}
+bool EditorLayer::ExecuteProjectAction(Application& app,int decision){
+    if(m_ProjectExit){
+        if(!ResolveProjectEdits(app,decision,&m_ProjectError))return false;
+        m_ProjectExitConfirmed=true;return true;
+    }
+    const auto choice=static_cast<Application::ProjectDecision>(decision);
+    bool ok=m_ProjectClose?app.CloseProject(choice,&m_ProjectError):app.OpenProject(std::filesystem::u8path(m_PendingProject),choice,&m_ProjectError);
+    if(ok){m_ShowProjectBrowser=m_ProjectClose;m_PendingProject.clear();}
+    return ok;
+}
+void EditorLayer::DrawProjectBrowser(Application& app){
+    if(m_ShowProjectBrowser){
+        ImGui::SetNextWindowSize(ImVec2(650,510),ImGuiCond_FirstUseEver);
+        if(ImGui::Begin("Project Browser",&m_ShowProjectBrowser)){
+            if(auto p=app.GetProject()){
+                ImGui::Text("Active: %s",p->name.c_str());
+                ImGui::TextWrapped("%s",AssetPaths::ToUtf8String(p->root).c_str());
+                ImGui::Text("Assets: %s | Scenes: %s",p->assetDirectory.c_str(),p->sceneDirectory.c_str());
+                ImGui::TextWrapped("Startup: %s",p->startupScene.c_str());
+                if(ImGui::Button("Use current scene as Startup"))app.SetStartupScene(app.GetSceneKey(),&m_ProjectError);
+                ImGui::SameLine();if(ImGui::Button("Copy FPS Controller")){
+                    try{auto target=p->ResolveAsset("scripts/FirstPersonController.lua");
+                        if(!std::filesystem::copy_file(AssetPaths::ResolveEngineAssetRoot()/"scripts/FirstPersonController.lua",target,std::filesystem::copy_options::none))throw std::runtime_error("Controller already exists");
+                        m_AssetListsDirty=true;m_ProjectError.clear();
+                    }catch(const std::exception& e){m_ProjectError=e.what();}
+                }
+                ImGui::Separator();
+            }else ImGui::TextWrapped("Create or open a game project. Close this window to use Legacy Workspace.");
+            if(ImGui::BeginTabBar("ProjectTabs")){
+                if(ImGui::BeginTabItem("Recent",nullptr,m_ProjectTab==0?ImGuiTabItemFlags_SetSelected:0)){
+                    if(!m_RecentProjects.empty()&&ImGui::Button("Continue last project"))RequestProjectOpen(app,m_RecentProjects.front().descriptor);
+                    const auto recent=m_RecentProjects;
+                    for(const auto& entry:recent){ImGui::PushID(entry.descriptor.c_str());std::error_code ec;
+                        const bool available=std::filesystem::is_regular_file(std::filesystem::u8path(entry.descriptor),ec);
+                        if(ImGui::Selectable((entry.name+(available?"":" (unavailable)")).c_str()))RequestProjectOpen(app,entry.descriptor);
+                        ImGui::TextDisabled("%s",entry.descriptor.c_str());
+                        if(ImGui::SmallButton("Remove from recent")){std::erase(m_RecentProjects,entry);PersistPreferences(app);}ImGui::PopID();
+                    }
+                    if(recent.empty())ImGui::TextDisabled("No recent projects yet.");
+                    ImGui::EndTabItem();
+                }
+                if(ImGui::BeginTabItem("New Project",nullptr,m_ProjectTab==1?ImGuiTabItemFlags_SetSelected:0)){
+                    ImGui::InputText("Project Name",&m_ProjectName);ImGui::InputText("Location (existing folder)",&m_ProjectLocation);
+                    int templateIndex=0;ImGui::Combo("Template",&templateIndex,"Empty Project\0");
+                    ImGui::TextWrapped("Creates a new project folder with Assets, Scenes/Main.json and Settings.");
+                    if(ImGui::Button("Create")){
+                        try{auto project=ProjectManager::Create(std::filesystem::u8path(m_ProjectLocation),m_ProjectName);
+                            RequestProjectOpen(app,AssetPaths::ToUtf8String(project->descriptorPath));
+                        }catch(const std::exception& e){m_ProjectError=e.what();}
+                    }ImGui::EndTabItem();
+                }
+                if(ImGui::BeginTabItem("Open Project",nullptr,m_ProjectTab==2?ImGuiTabItemFlags_SetSelected:0)){
+                    ImGui::InputText("Descriptor (.whispproject)",&m_ProjectDescriptor);
+#ifdef _WIN32
+                    if(ImGui::Button("Browse...")){
+                        wchar_t file[32768]{};OPENFILENAMEW dialog{};dialog.lStructSize=sizeof(dialog);dialog.lpstrFile=file;dialog.nMaxFile=32768;
+                        dialog.lpstrFilter=L"Whisp projects\0*.whispproject\0";dialog.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
+                        if(GetOpenFileNameW(&dialog))m_ProjectDescriptor=AssetPaths::ToUtf8String(std::filesystem::path(file));
+                    }ImGui::SameLine();
+#endif
+                    if(ImGui::Button("Open"))RequestProjectOpen(app,m_ProjectDescriptor);
+                    ImGui::EndTabItem();
+                }ImGui::EndTabBar();m_ProjectTab=-1;
+            }
+            if(!m_ProjectError.empty())ImGui::TextWrapped("%s",m_ProjectError.c_str());
+        }ImGui::End();
+    }
+    if(m_ProjectConfirm){ImGui::OpenPopup("Unsaved project changes");m_ProjectConfirm=false;}
+    if(ImGui::BeginPopupModal("Unsaved project changes",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
+        ImGui::TextWrapped("Save scene and material edits before continuing?");
+        if(app.GetSceneKey().empty()){ImGui::InputText("Save untitled as",&m_UnsavedSaveKey);ImGui::TextDisabled("Choose a fresh scene filename inside the current scene directory.");}
+        if(ImGui::Button("Save and continue")){
+            if(app.GetSceneKey().empty()&&!app.IsEditorPlayMode()&&IsSceneDirty()){
+                if(app.SaveSceneAs(m_UnsavedSaveKey,false,&m_ProjectError)&&ExecuteProjectAction(app,int(Application::ProjectDecision::Save)))ImGui::CloseCurrentPopup();
+            }else if(ExecuteProjectAction(app,int(Application::ProjectDecision::Save)))ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();if(ImGui::Button("Discard")){if(ExecuteProjectAction(app,int(Application::ProjectDecision::Discard)))ImGui::CloseCurrentPopup();}
+        ImGui::SameLine();if(ImGui::Button("Cancel")){m_PendingProject.clear();m_ProjectExit=false;ImGui::CloseCurrentPopup();}
+        if(!m_ProjectError.empty())ImGui::TextWrapped("%s",m_ProjectError.c_str());ImGui::EndPopup();
+    }
+}
+}

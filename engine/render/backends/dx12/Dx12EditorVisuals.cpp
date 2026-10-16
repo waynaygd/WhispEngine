@@ -36,6 +36,14 @@ bool Dx12RenderAdapter::EnsureEditorVisualPipeline(){
         m_EditorVisualRoot=std::move(readyRoot);return true;
     }catch(const std::exception& error){m_EditorVisualError=error.what();Logger::Get().Error("Editor visuals disabled: "+m_EditorVisualError);for(auto& row:m_EditorVisualPso)for(auto& p:row)p.Reset();return false;}
 }
+void Dx12RenderAdapter::ReleaseEditorSky(){
+    if(m_Device&&!m_FrameRecording)WaitForGpu();
+    if(m_FrameRecording){
+        if(m_EditorSky)m_RetiredResources[m_FrameIndex].emplace_back(m_EditorSky.Get());
+        if(m_EditorSkySrv)m_RetiredResources[m_FrameIndex].emplace_back(m_EditorSkySrv.Get());
+    }
+    m_EditorSky.Reset();m_EditorSkySrv.Reset();m_EditorSkyKey.clear();m_EditorSkyVersion=0;
+}
 bool Dx12RenderAdapter::UploadEditorSky(const EnvironmentResource& resource,std::uint64_t version){
     if(!m_FrameRecording)return false;
     if(m_EditorSky&&m_EditorSkyKey==resource.sourcePath&&m_EditorSkyVersion==version)return true;

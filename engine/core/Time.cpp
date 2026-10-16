@@ -10,7 +10,7 @@ float Time::Tick()
     auto now = Clock::now();
     std::chrono::duration<float> delta = now - m_LastTime;
 
-    m_DeltaTime = delta.count();
+    m_DeltaTime = m_TestFrameDelta.value_or(delta.count());
     m_FrameDeltaTime = m_DeltaTime;
 
     if (m_DeltaTime > 0.1f)

@@ -81,6 +81,7 @@ public:
     void EndShadowPass() override;
     void SetEditorVisuals(const EditorVisualFrame& f) override {m_EditorVisualFrame=f;m_EditorVisualDiagnostics={};}
     bool UploadEditorSky(const EnvironmentResource&,std::uint64_t) override;
+    void ReleaseEditorSky() override;
     EditorVisualDiagnostics GetEditorVisualDiagnostics()const override{return m_EditorVisualDiagnostics;}
     void BeginMainPass() override;
     void EndMainPass() override;

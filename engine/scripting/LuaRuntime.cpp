@@ -315,6 +315,7 @@ void LuaRuntime::Stop(){
     impl->Check();impl->stopping=true;
     for(auto& [e,i]:impl->instances)impl->Retire(e,i);
     impl->instances.clear();impl->rejected.clear();impl->events.clear();
+    impl->programs.clear();impl->errors.clear();
     impl->timers.clear();impl->gameTime=0;
     impl->mutations.Clear();impl->destroying.clear();impl->world=nullptr;
     impl->input={};impl->services={};impl->cameraOwner={};impl->cursorOwner={};

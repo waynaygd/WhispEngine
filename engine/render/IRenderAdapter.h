@@ -104,6 +104,7 @@ public:
     virtual void EndShadowPass() {}
     virtual void SetEditorVisuals(const EditorVisualFrame&) {}
     virtual bool UploadEditorSky(const EnvironmentResource&,std::uint64_t){return false;}
+    virtual void ReleaseEditorSky() {}
     virtual EditorVisualDiagnostics GetEditorVisualDiagnostics()const{return {};}
     virtual void BeginMainPass() {}
     virtual void EndMainPass() {}

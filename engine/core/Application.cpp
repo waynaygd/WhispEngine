@@ -590,7 +590,7 @@ bool Application::ReloadSceneFromCurrentConfig(const char* reason){
 }
 
 bool Application::SaveCurrentScene(std::string* error){
-    return SaveSceneAs(m_SceneKey.empty()?"scenes/editor_scene.json":m_SceneKey,true,error);
+    return SaveSceneAs(m_SceneKey.empty()?DefaultSceneKey():m_SceneKey,!m_SceneKey.empty(),error);
 }
 bool Application::LoadCurrentScene(std::string* error){
     auto key=m_SceneKey.empty()?m_Config.ecsDemo.sceneFile:m_SceneKey;
@@ -621,6 +621,7 @@ void Application::ConfigureInputBindings()
 
 void Application::PollConfigHotReload()
 {
+    if(ProjectManager::Active())return;
     std::error_code ec;
 
     if (m_HasConfigWatch && std::filesystem::exists(m_ConfigWatchPath, ec))
@@ -1424,11 +1425,16 @@ int Application::Run()
 
         }
 
+        if(GetProject()&&m_EditorLayer.HasProjectEdits()&&!m_EditorLayer.ProjectExitConfirmed()){
+            if(auto* native=dynamic_cast<GlfwWindow*>(GetWindow()))if(native->ShouldClose()){
+                glfwSetWindowShouldClose(native->GetGlfwHandle(),GLFW_FALSE);m_EditorLayer.RequestProjectExit();
+            }
+        }
         bool anyAlive = false;
         for (auto& wc : m_Windows)
             anyAlive |= (wc.window && !wc.window->ShouldClose());
 
-        if (!anyAlive) break;
+        if (!anyAlive || m_EditorLayer.ProjectExitConfirmed()) break;
 
         if (currentFrame == m_SlowFrame)
             std::this_thread::sleep_for(std::chrono::milliseconds(m_SlowFrameMilliseconds));
@@ -1776,6 +1782,7 @@ void Application::Shutdown()
         m_ResourceManager->Shutdown();
 
     m_ResourceManager.reset();
+    ProjectManager::Activate({});
 
 
     if (m_JobSystem != nullptr)
@@ -2131,11 +2138,13 @@ void Application::SetupLightDemoScene(){
 
 namespace {
 std::filesystem::path SafeScenePath(const std::string& key,bool output){
+    if(auto project=ProjectManager::Active())return project->ResolveScene(key);
     const auto staged=AssetPaths::ResolveAssetRoot();if(output)return editor::AssetImport::SafeTarget(staged,key);
     for(const auto& root:{staged,editor::AssetImport::ProjectRoot()}){auto candidate=editor::AssetImport::SafeTarget(root,key);if(std::filesystem::is_regular_file(candidate))return candidate;}
     return editor::AssetImport::SafeTarget(staged,key);
 }
 bool SceneKeyValid(const std::string& key){
+    if(auto project=ProjectManager::Active()){try{project->ResolveScene(key);return true;}catch(...){return false;}}
     if(!key.starts_with("scenes/")||std::filesystem::u8path(key).extension()!=".json")return false;
     return ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::None);
 }

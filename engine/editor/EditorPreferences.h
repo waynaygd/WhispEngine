@@ -5,10 +5,13 @@
 #include <vector>
 #include "../render/EditorVisuals.h"
 namespace editor {
+struct RecentProject {std::string name,descriptor;bool operator==(const RecentProject&)const=default;};
+std::filesystem::path PreferencesPath();
 struct EditorPreferences {
     bool hierarchy=true,inspector=true,viewport=true,assets=true,material=false,settings=true,console=true,diagnostics=false;
     EditorVisualSettings visuals;
     std::vector<std::string> recentScenes;
+    std::vector<RecentProject> recentProjects;
     bool assetGrid=false,projectAssets=true;
     float assetCardSize=180;
     bool visualPanel=false,backgroundOverride=false,projectileTestInput=false;

@@ -8,6 +8,7 @@
 
 #include "ConfigLoader.h"
 #include "Time.h"
+#include "ProjectContext.h"
 #include "FixedStepClock.h"
 #include "PhysicsFrameStatistics.h"
 #include "../ecs/World.h"
@@ -144,6 +145,13 @@ public:
     bool SaveSceneAs(const std::string& key,bool overwrite=false,std::string* error=nullptr);
     bool OpenScene(const std::string& key,std::string* error=nullptr);
     void NewScene();
+    enum class ProjectDecision { Cancel, Discard, Save };
+    bool OpenProject(const std::filesystem::path&,ProjectDecision=ProjectDecision::Cancel,std::string* error=nullptr);
+    bool CloseProject(ProjectDecision=ProjectDecision::Cancel,std::string* error=nullptr);
+    bool SetStartupScene(const std::string&,std::string* error=nullptr);
+    bool SaveAuthoringSceneForTransition(std::string* error=nullptr);
+    std::shared_ptr<const ProjectContext> GetProject()const{return ProjectManager::Active();}
+    std::string DefaultSceneKey()const {auto p=GetProject();return p?p->sceneDirectory+"/Untitled.json":"scenes/editor_scene.json";}
     const std::string& GetSceneKey()const{return m_SceneKey;}
     SceneSettings GetSceneSettings()const;
     bool SetSceneSettings(const SceneSettings&,std::string* error=nullptr);
@@ -159,6 +167,8 @@ public:
 
 
 private:
+    friend struct ApplicationTestAccess;
+    bool CommitProject(std::shared_ptr<const ProjectContext>,ecs::World&,const SceneSettings&,ProjectDecision,std::string*);
     void ResetPhysicsClock() {
         m_FixedClock.Reset(); m_FixedSimulationSeconds = 0;
         m_ResetPhysicsDelta = true;

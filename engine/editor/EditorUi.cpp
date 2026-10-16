@@ -24,18 +24,19 @@ const char* EntityKind(const ecs::World& w,ecs::Entity e){
 }
 }
 void EditorLayer::InitializePreferences(Application& app){
-    EditorPreferences p;std::string error;if(LoadPreferences("editor-preferences.json",p,&error))m_ResetLayout=false;else if(!error.empty())Logger::Get().Warn(error);
-    m_RecentScenes=p.recentScenes;
+    EditorPreferences p;std::string error;if(LoadPreferences(PreferencesPath(),p,&error))m_ResetLayout=false;else if(!error.empty())Logger::Get().Warn(error);
+    if(ImGui::GetCurrentContext()){static std::string layout=AssetPaths::ToUtf8String(AssetPaths::GetExecutableDirectory()/"imgui.ini");ImGui::GetIO().IniFilename=layout.c_str();}
+    m_RecentScenes=p.recentScenes;m_RecentProjects=p.recentProjects;
     m_ShowHierarchy=p.hierarchy;m_ShowInspector=p.inspector;m_ShowViewport=p.viewport;m_ShowAssetBrowser=p.assets;m_ShowMaterialEditor=p.material;m_ShowSceneSettings=p.settings;m_ShowConsole=p.console;m_ShowStatistics=p.diagnostics;
     m_AssetGrid=p.assetGrid;m_ProjectAssets=p.projectAssets;m_AssetCardSize=p.assetCardSize;m_BackgroundOverride=p.backgroundOverride;m_ProjectileTestInput=p.projectileTestInput;
     m_ShowVisualSettings=p.visualPanel;m_VisualSettings=p.visuals;m_ShowGrid=p.grid;m_ShowLightGizmos=p.lightGizmos;m_LightXray=p.xray;m_LightXrayMode=p.lightXrayMode;m_TransformPrecision=p.transformPrecision;m_RotationSnapping=p.rotationSnapping;m_ShowPhysicsStress=p.physicsStress;m_Snapping=p.snapping;m_GizmoOperation=p.operation;m_GizmoMode=p.space;
     m_SnapTranslation=p.translationSnap;m_SnapRotation=p.rotationSnap;m_SnapScale=p.scaleSnap;app.SetCameraNavigation(p.cameraSpeed,p.cameraSensitivity);
 }
 void EditorLayer::PersistPreferences(Application& app){
-    EditorPreferences p;p.recentScenes=m_RecentScenes;p.hierarchy=m_ShowHierarchy;p.inspector=m_ShowInspector;p.viewport=m_ShowViewport;p.assets=m_ShowAssetBrowser;p.material=m_ShowMaterialEditor;p.settings=m_ShowSceneSettings;p.console=m_ShowConsole;p.diagnostics=m_ShowStatistics;
+    EditorPreferences p;p.recentScenes=app.GetProject()?std::vector<std::string>{}:m_RecentScenes;p.recentProjects=m_RecentProjects;p.hierarchy=m_ShowHierarchy;p.inspector=m_ShowInspector;p.viewport=m_ShowViewport;p.assets=m_ShowAssetBrowser;p.material=m_ShowMaterialEditor;p.settings=m_ShowSceneSettings;p.console=m_ShowConsole;p.diagnostics=m_ShowStatistics;
     p.assetGrid=m_AssetGrid;p.projectAssets=m_ProjectAssets;p.assetCardSize=m_AssetCardSize;p.backgroundOverride=m_BackgroundOverride;p.projectileTestInput=m_ProjectileTestInput;
     p.visualPanel=m_ShowVisualSettings;p.visuals=m_VisualSettings;p.grid=m_ShowGrid;p.lightGizmos=m_ShowLightGizmos;p.xray=m_LightXray;p.lightXrayMode=m_LightXrayMode;p.transformPrecision=m_TransformPrecision;p.rotationSnapping=m_RotationSnapping;p.physicsStress=m_ShowPhysicsStress;p.snapping=m_Snapping;p.operation=m_GizmoOperation;p.space=m_GizmoMode;
-    p.translationSnap=m_SnapTranslation;p.rotationSnap=m_SnapRotation;p.scaleSnap=m_SnapScale;p.cameraSpeed=app.GetCameraMoveSpeed();p.cameraSensitivity=app.GetCameraSensitivity();std::string error;if(!SavePreferences("editor-preferences.json",p,&error))Logger::Get().Warn(error);
+    p.translationSnap=m_SnapTranslation;p.rotationSnap=m_SnapRotation;p.scaleSnap=m_SnapScale;p.cameraSpeed=app.GetCameraMoveSpeed();p.cameraSensitivity=app.GetCameraSensitivity();std::string error;if(!SavePreferences(PreferencesPath(),p,&error))Logger::Get().Warn(error);
 }
 void EditorLayer::ConfigureDocking(){
     auto* viewport=ImGui::GetMainViewport();ImGuiViewport dock=*viewport;const float toolbar=ImGui::GetFrameHeightWithSpacing()+8;
@@ -73,6 +74,14 @@ void EditorLayer::DrawMainMenu(Application& app){
     bool preferencesRequested=false;
     auto action=[&](int kind){m_SceneDialogAction=kind;m_SceneDialogRequested=true;};
     if(ImGui::BeginMenu("File")){
+        if(ImGui::MenuItem("New Project...")){m_ShowProjectBrowser=true;m_ProjectTab=1;}
+        if(ImGui::MenuItem("Open Project...")){m_ShowProjectBrowser=true;m_ProjectTab=2;}
+        if(ImGui::BeginMenu("Recent Projects",!m_RecentProjects.empty())){
+            const auto recent=m_RecentProjects;for(const auto& entry:recent)if(ImGui::MenuItem(entry.name.c_str()))RequestProjectOpen(app,entry.descriptor);ImGui::EndMenu();
+        }
+        if(ImGui::MenuItem("Project Settings...",nullptr,false,bool(app.GetProject())))m_ShowProjectBrowser=true;
+        if(ImGui::MenuItem("Close Project",nullptr,false,bool(app.GetProject())))RequestProjectOpen(app,{},true);
+        ImGui::Separator();
         if(ImGui::MenuItem("New Scene"))action(1);
         if(ImGui::MenuItem("Open Scene"))action(2);
         if(ImGui::BeginMenu("Recent Scenes",!m_RecentScenes.empty())){const auto recent=m_RecentScenes;for(const auto& key:recent)if(ImGui::MenuItem(key.c_str())){RequestRecentScene(app,key);}ImGui::EndMenu();}
@@ -134,9 +143,9 @@ void EditorLayer::DrawSceneDialogs(Application& app){
             }ImGui::EndChild();if(ImGui::Button("New Scene..."))m_SceneDialogAction=1;
         }
         if(m_SceneDialogAction==4)ImGui::TextWrapped("Open recent scene: %s",m_SceneDialogKey.c_str());
-        if(m_SceneDialogAction!=1&&m_SceneDialogAction!=4)ImGui::InputText("Scene key (scenes/*.json)",&m_SceneDialogKey);
+        if(m_SceneDialogAction!=1&&m_SceneDialogAction!=4)ImGui::InputText("Scene key (project-relative JSON)",&m_SceneDialogKey);
         if(IsSceneDirty()&&app.GetSceneKey().empty()&&m_SceneDialogAction!=3){ImGui::InputText("Save current as (new key)",&m_UnsavedSaveKey);ImGui::TextWrapped("Untitled: choose a fresh scene key. Existing files are protected.");}
-        const auto path=AssetPaths::ResolveAssetOutputPath(m_SceneDialogKey);
+        std::filesystem::path path;try{path=app.GetProject()?app.GetProject()->ResolveScene(m_SceneDialogKey):AssetPaths::ResolveAssetOutputPath(m_SceneDialogKey);}catch(...){}
         const bool exists=m_SceneDialogAction==3&&!path.empty()&&std::filesystem::exists(path);
         static bool confirmed=false;
         if(exists)ImGui::Checkbox("Confirm replacement of existing scene",&confirmed);

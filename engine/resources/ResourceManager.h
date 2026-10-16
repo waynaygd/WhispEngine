@@ -195,6 +195,7 @@ public:
     }
 
     void ClearAll();
+    void DrainProjectLoads();
     std::uint64_t GetCacheEpoch()const {std::lock_guard<std::recursive_mutex> lock(m_Mutex);return m_CacheEpoch;}
 
     template <typename T>

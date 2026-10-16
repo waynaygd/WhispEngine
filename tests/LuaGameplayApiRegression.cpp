@@ -1,7 +1,7 @@
 #define NOMINMAX
 #include "EditorTestPreferences.h"
 #include "SyntheticEditorInput.h"
-#include "core/Application.h"
+#include "ApplicationTestAccess.h"
 #include "scripting/LuaRuntime.h"
 #include "scripting/Prefab.h"
 #include "scripting/EntityReference.h"
@@ -28,6 +28,25 @@ struct Fixtures {
     ~Fixtures(){std::error_code ec;std::filesystem::remove_all(path.parent_path(),ec);}
     void Write(const std::string& source){std::ofstream out(path);out<<source;Check(out.good(),"fixture write");}
 };
+// A fixture actor delivers the actual gameplay event through World.send_event;
+// moving only the runtime sender is the test's explicit start signal.
+static const char* concertSignal=R"(return {
+ fields={concert={type='entity'}},
+ on_update=function(self)
+   if not self.sent and World.get_position(self.entity).x>0 then
+     World.send_event(self.concert,'start_concert',0); self.sent=true
+   end
+ end})";
+static std::string ConcertSenderScript(const Fixtures& files){
+    std::ofstream out(files.path.parent_path()/"concert-signal.lua");out<<concertSignal;
+    Check(out.good(),"write independent Concert event fixture");
+    return files.key.substr(0,files.key.find_last_of('/')+1)+"concert-signal.lua";
+}
+static void StartConcert(scripting::LuaRuntime& lua,World& world,Entity sender){
+    world.GetComponent<TransformComponent>(sender)->position.x=1;
+    lua.Update(0); // enqueue using the gameplay API; delivery is on the next Update
+    lua.Update(.1f);
+}
 static Entity Object(World& w){auto e=w.CreateEntity();w.AddComponent<TransformComponent>(e);w.AddComponent<SceneIdentityComponent>(e);return e;}
 static Json Ref(World& w,Entity e){return {{"$entity",w.GetComponent<SceneIdentityComponent>(e)->value}};}
 static Entity Actor(World& w,const std::string& path){auto e=Object(w);w.AddComponent<LuaScriptComponent>(e).scriptPath=path;return e;}
@@ -42,13 +61,18 @@ static void Cpu(){
     World foreign;Check(!ui.SetLuaEntityReference(app,actor,"globe",Object(foreign)),"foreign assignment rejected");
     Check(!ui.SetLuaEntityReference(app,actor,"rotation_speed",globe),"typed assignment validation");
     auto legacy=w.CreateEntity();Check(ui.SetLuaEntityReference(app,actor,"globe",legacy),"legacy target receives persistent identity");auto legacyId=w.GetComponent<SceneIdentityComponent>(legacy)->value;ui.UndoEdit(app);Check(!w.HasComponent<SceneIdentityComponent>(legacy)&&s.properties==saved,"assignment Undo includes identity metadata");ui.RedoEdit(app);Check(w.GetComponent<SceneIdentityComponent>(legacy)->value==legacyId,"Redo restores exact stable identity");ui.UndoEdit(app);w.DestroyEntity(legacy);
+    auto sender=Actor(w,ConcertSenderScript(files));w.GetComponent<LuaScriptComponent>(sender)->properties["concert"]=Ref(w,actor);
+    const auto senderRef=Ref(w,sender);const auto lightBefore=w.GetComponent<SpotLightComponent>(light)->intensity;
     auto scene=SceneSerializer::CaptureWorld(w,app.GetSceneSettings());World loaded;SceneSettings settings;std::string error;
     Check(SceneSerializer::RestoreWorld(scene,loaded,settings,&error),"scene roundtrip with tagged references");Check(SceneSerializer::CaptureWorld(loaded,settings)==scene,"stable identities roundtrip");
     auto sceneFile=files.path.parent_path()/"roundtrip.scene.json";Check(SceneSerializer::WriteAtomic(sceneFile,scene,&error)&&SceneSerializer::LoadWorld(sceneFile,loaded,settings,&error),"entity references disk Save/Load");Check(SceneSerializer::CaptureWorld(loaded,settings)==scene,"disk references retain exact identities");
     World::CloneMap map;auto runtime=w.CloneData(&map);scripting::LuaRuntime lua;lua.Start(*runtime);lua.Update(.1f);Check(lua.Error(s.scriptPath).empty(),"Concert starts");
-    Near(runtime->GetComponent<TransformComponent>(map.at(globe))->rotation.y,.05f,"Concert rotates runtime referenced globe");Check(runtime->GetComponent<SpotLightComponent>(map.at(light))->intensity>5,"Concert pulses referenced light");Near(w.GetComponent<TransformComponent>(globe)->rotation.y,0,"Editor world isolated");
+    Near(runtime->GetComponent<TransformComponent>(map.at(globe))->rotation.y,0,"Concert waits for start_concert");Near(runtime->GetComponent<SpotLightComponent>(map.at(light))->intensity,lightBefore,"light unchanged before event");
+    StartConcert(lua,*runtime,map.at(sender));
+    Near(runtime->GetComponent<TransformComponent>(map.at(globe))->rotation.y,.05f,"Concert rotates runtime referenced globe");Near(runtime->GetComponent<SpotLightComponent>(map.at(light))->intensity,100+std::sin(.2f)*80,"Concert event starts specified light pulse");Near(w.GetComponent<TransformComponent>(globe)->rotation.y,0,"Editor world isolated");Near(w.GetComponent<SpotLightComponent>(light)->intensity,lightBefore,"Editor light isolated");
     Check(scripting::ResolveEntityReference(*runtime,s.properties["globe"])==map.at(globe),"CloneData reference remaps by identity");lua.Stop();
-    lua.Start(loaded);lua.Update(.1f);Check(lua.Error(s.scriptPath).empty(),"loaded scene executes references");lua.Stop();
+    runtime=w.CloneData(&map);lua.Start(*runtime);lua.Update(.1f);Near(runtime->GetComponent<TransformComponent>(map.at(globe))->rotation.y,0,"Stop/repeated Play starts inactive");StartConcert(lua,*runtime,map.at(sender));Near(runtime->GetComponent<TransformComponent>(map.at(globe))->rotation.y,.05f,"repeated Play uses fresh instance and remapped references");lua.Stop();
+    lua.Start(loaded);lua.Update(.1f);Check(lua.Error(s.scriptPath).empty(),"loaded scene executes references");auto loadedGlobe=scripting::ResolveEntityReference(loaded,Ref(w,globe));Near(loaded.GetComponent<TransformComponent>(loadedGlobe)->rotation.y,0,"loaded Concert waits for event");StartConcert(lua,loaded,scripting::ResolveEntityReference(loaded,senderRef));Near(loaded.GetComponent<TransformComponent>(loadedGlobe)->rotation.y,.05f,"loaded reference receives start event");lua.Stop();
     Check(ui.DeleteEntity(app,globe),"delete target");Check(!scripting::ResolveEntityReference(w,s.properties["globe"]).IsValid(),"deleted target unresolved");ui.UndoEdit(app);Check(scripting::ResolveEntityReference(w,s.properties["globe"]).IsValid(),"Undo delete recovers persistent reference");
     // Generation reuse cannot resurrect a handle that Lua already received.
     files.Write(R"(return {fields={target={type='entity'}},on_update=function(self)
@@ -85,9 +109,9 @@ static void Cpu(){
     auto spawned=scripting::SpawnPrefab(reload,prefabKey,{2,0,0});Check(spawned!=ro&&reload.GetComponent<SceneIdentityComponent>(spawned)->value!=reload.GetComponent<SceneIdentityComponent>(ro)->value,"prefab fresh identity with reference properties");lua.Start(reload);lua.Update(.01f);Check(lua.Error(files.key).empty(),"prefab scene-local references resolve safely");lua.Stop();
 }
 #if defined(ENABLE_DX12)
-static void Native(){
+static void Native(float frameDelta){
     Fixtures files;files.Write("return {fields={target={type='entity',label='Target'}}}");
-    Application app;Check(app.Initialize(),"DX12 initialize");SyntheticEditorInput input;auto* window=dynamic_cast<GlfwWindow*>(app.GetWindow())->GetGlfwHandle();glfwHideWindow(window);app.NewScene();auto& w=app.GetWorld();auto& ui=app.GetEditorLayer();
+    Application app;Check(app.Initialize(),"DX12 initialize");ApplicationTestAccess::FrameDelta(app,frameDelta);SyntheticEditorInput input;auto* window=dynamic_cast<GlfwWindow*>(app.GetWindow())->GetGlfwHandle();glfwHideWindow(window);app.NewScene();auto& w=app.GetWorld();auto& ui=app.GetEditorLayer();ui.ResetLayout();
     auto globe=ui.CreatePrimitive(app,"cube"),light=ui.CreateLight(app,LightType::Spot),actor=ui.CreateEntity(app,"Controller");ui.AddComponent(app,actor,ComponentId("LuaScript"));w.RemoveComponent<TransformComponent>(actor);w.RemoveComponent<TagComponent>(actor);auto& script=*w.GetComponent<LuaScriptComponent>(actor);script.scriptPath=files.key;
     auto frame=[&](int n=3){app.SetFrameLimit(n);Check(app.Run()==0,"native frames");};frame(80);
     auto click=[&](float x,float y){SyntheticEditorInput::Position(x,y);frame();SyntheticEditorInput::Button(0,true);frame(1);SyntheticEditorInput::Button(0,false);frame();};
@@ -100,22 +124,23 @@ static void Native(){
     auto* panel=ImGui::FindWindowByName("Inspector");click(panel->DC.CursorPosPrevLine.x-8,panel->DC.CursorPosPrevLine.y+panel->DC.PrevLineSize.y*.5f);Check(script.properties["target"].is_null(),"Inspector X clears reference");
     ui.UndoEdit(app);Check(scripting::ResolveEntityReference(w,script.properties["target"])==globe,"Inspector assignment Undo");ui.RedoEdit(app);frame();
     auto* hierarchy=ImGui::FindWindowByName("Scene Hierarchy");auto rows=w.Entities();auto row=std::find(rows.begin(),rows.end(),globe)-rows.begin();float hx=hierarchy->WorkRect.Min.x+40,hy=hierarchy->WorkRect.Min.y+ImGui::GetFrameHeightWithSpacing()+ImGui::GetTextLineHeight()*.5f+row*ImGui::GetTextLineHeightWithSpacing();
-    p=combo();SyntheticEditorInput::Position(hx,hy);frame();SyntheticEditorInput::Button(0,true);frame(1);SyntheticEditorInput::Position(hx+12,hy+5);frame();Check(ImGui::GetCurrentContext()->DragDropActive,"Hierarchy drag starts");SyntheticEditorInput::Position(p.x,p.y);frame();SyntheticEditorInput::Button(0,false);frame();Check(scripting::ResolveEntityReference(w,script.properties["target"])==globe,"Hierarchy payload assigns Inspector reference");
+    p=combo();SyntheticEditorInput::Position(hx,hy);frame();Check(ImGui::GetCurrentContext()->HoveredWindow==hierarchy,"drag origin hits visible Hierarchy");SyntheticEditorInput::Button(0,true);frame(1);SyntheticEditorInput::Position(hx+12,hy+5);frame();if(!ImGui::GetCurrentContext()->DragDropActive){auto& g=*ImGui::GetCurrentContext();auto& io=ImGui::GetIO();std::cerr<<"DRAG expected="<<hx<<","<<hy<<" mouse="<<io.MousePos.x<<","<<io.MousePos.y<<" down="<<io.MouseDown[0]<<" clicked="<<io.MouseClickedPos[0].x<<","<<io.MouseClickedPos[0].y<<" dist="<<io.MouseDragMaxDistanceSqr[0]<<" threshold="<<io.MouseDragThreshold<<" hovered="<<(g.HoveredWindow?g.HoveredWindow->Name:"null")<<" activeWindow="<<(g.ActiveIdWindow?g.ActiveIdWindow->Name:"null")<<" hoveredId="<<g.HoveredId<<" activeId="<<g.ActiveId<<" hierarchyPos="<<hierarchy->Pos.x<<","<<hierarchy->Pos.y<<" work="<<hierarchy->WorkRect.Min.x<<","<<hierarchy->WorkRect.Min.y<<" scroll="<<hierarchy->Scroll.y<<" row="<<row<<" font="<<ImGui::GetFontSize()<<" frame="<<ImGui::GetFrameHeightWithSpacing()<<" line="<<ImGui::GetTextLineHeightWithSpacing()<<'\n';}Check(ImGui::GetCurrentContext()->DragDropActive,"Hierarchy drag starts");SyntheticEditorInput::Position(p.x,p.y);frame();SyntheticEditorInput::Button(0,false);frame();Check(scripting::ResolveEntityReference(w,script.properties["target"])==globe,"Hierarchy payload assigns Inspector reference");
     // Use existing rendering and Runtime World; hold Lua clock deterministically
     // through direct runtime updates while the editor is paused for readback.
     w.AddComponent<TransformComponent>(actor);script.scriptPath="scripts/ConcertController.lua";script.properties=Json::object();ui.SetLuaEntityReference(app,actor,"globe",globe);ui.SetLuaEntityReference(app,actor,"spotlight",light);
     w.GetComponent<TransformComponent>(globe)->position={0,1,5};w.GetComponent<TransformComponent>(globe)->scale={2,1,1};w.GetComponent<TransformComponent>(light)->position={0,3,-1};w.GetComponent<TransformComponent>(light)->rotation={.2f,0,0};auto& spot=*w.GetComponent<SpotLightComponent>(light);spot.range=30;spot.innerAngle=30;spot.outerAngle=60;
+    auto sender=Actor(w,ConcertSenderScript(files));w.GetComponent<LuaScriptComponent>(sender)->properties["concert"]=Ref(w,actor);const auto lightBefore=spot.intensity;
     auto settings=app.GetSceneSettings();settings.environment.enabled=false;settings.antiAliasing=AntiAliasingMode::FxaaHigh;settings.lighting.enabled=true;settings.lighting.ambientIntensity=.01f;settings.shadows.enabled=false;Check(app.SetSceneSettings(settings),"render fixture settings");app.SetViewportUnlit(false);ui.SetDiagnosticViewport(400,300);ui.SetGameView(true);ui.ClearSelection();app.SetEditorCameraPose({0,1,-6},0,0);frame();auto authored=SceneSerializer::CaptureWorld(w,app.GetSceneSettings());
-    app.SetEditorPlayMode(true);app.SetEditorPaused(true);auto& runtime=app.GetWorld();auto rg=scripting::ResolveEntityReference(runtime,Ref(w,globe)),rl=scripting::ResolveEntityReference(runtime,Ref(w,light));Check(runtime.IsAlive(rl)&&runtime.HasComponent<SpotLightComponent>(rl),"runtime spot identity resolves");auto& lua=app.GetLuaRuntime();lua.Update(.1f);Check(lua.Error(script.scriptPath).empty(),"Concert native starts in Runtime World");Near(runtime.GetComponent<TransformComponent>(rg)->rotation.y,.05f,"native Concert rotation");
+    app.SetEditorPlayMode(true);app.SetEditorPaused(true);auto& runtime=app.GetWorld();auto rg=scripting::ResolveEntityReference(runtime,Ref(w,globe)),rl=scripting::ResolveEntityReference(runtime,Ref(w,light));Check(runtime.IsAlive(rl)&&runtime.HasComponent<SpotLightComponent>(rl),"runtime spot identity resolves");auto& lua=app.GetLuaRuntime();lua.Update(.1f);Check(lua.Error(script.scriptPath).empty(),"Concert native starts in Runtime World");Near(runtime.GetComponent<TransformComponent>(rg)->rotation.y,0,"native Concert waits for start_concert");Near(runtime.GetComponent<SpotLightComponent>(rl)->intensity,lightBefore,"native light idle before event");StartConcert(lua,runtime,scripting::ResolveEntityReference(runtime,Ref(w,sender)));Near(runtime.GetComponent<TransformComponent>(rg)->rotation.y,.05f,"native Concert rotation");Near(runtime.GetComponent<SpotLightComponent>(rl)->intensity,100+std::sin(.2f)*80,"native event starts light pulse");
     auto* gpu=dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter());frame(12);auto beforeTransform=gpu->ReadBackHdrPixels();
-    files.Write("return {fields={target={type='entity'}},on_start=function(self) World.set_rotation(self.target,Vec3.new(0,1.57,0));World.set_scale(self.target,Vec3.new(3,1,1)) end}");auto ra=scripting::ResolveEntityReference(runtime,Ref(w,actor));auto* rs=runtime.GetComponent<LuaScriptComponent>(ra);Check(rs!=nullptr,"runtime controller still exists");rs->scriptPath=files.key;rs->properties={{"target",Ref(w,globe)}};Check(lua.ReloadScript(files.key),"reload Transform fixture");lua.Update(.01f);frame(12);auto bright=gpu->ReadBackHdrPixels();Check(beforeTransform.size()==bright.size()&&!bright.empty(),"Transform render readback valid");double geometryDifference=0;for(std::size_t i=0;i<bright.size();i+=4)geometryDifference+=std::abs(beforeTransform[i]-bright[i]);Check(geometryDifference>1,"Lua rotation and scale update rendered mesh");
-    files.Write("return {fields={target={type='entity'}},on_start=function(self) Light.set_intensity(self.target,0) end}");rs->properties={{"target",Ref(w,light)}};Check(lua.ReloadScript(files.key),"reload lighting fixture");lua.Update(.01f);frame(12);auto dark=gpu->ReadBackHdrPixels();Check(bright.size()==400*300*4&&dark.size()==bright.size(),"HDR fixture readbacks match target dimensions");double difference=0;for(std::size_t i=0;i<bright.size();i+=4)difference+=std::max(0.f,bright[i]-dark[i]);Check(difference>1,"Lua intensity changes actual DX12 HDR rendering");
-    app.SetEditorPlayMode(false);frame();Check(SceneSerializer::CaptureWorld(w,app.GetSceneSettings())==authored,"Stop preserves Editor World and references");Check(gpu->GetValidationErrorCount()==0,"DX12 validation zero");
+    files.Write("return {fields={target={type='entity'}},on_start=function(self) World.set_rotation(self.target,Vec3.new(0,1.57,0));World.set_scale(self.target,Vec3.new(3,1,1)) end}");auto ra=scripting::ResolveEntityReference(runtime,Ref(w,actor));auto* rs=runtime.GetComponent<LuaScriptComponent>(ra);Check(rs!=nullptr,"runtime controller still exists");rs->scriptPath=files.key;rs->properties={{"target",Ref(w,globe)}};Check(lua.ReloadScript(files.key),"reload Transform fixture");lua.Update(.01f);Check(lua.Error(files.key).empty(),"native Transform fixture callbacks healthy");frame(12);auto bright=gpu->ReadBackHdrPixels();Check(beforeTransform.size()==bright.size()&&!bright.empty(),"Transform render readback valid");double geometryDifference=0;for(std::size_t i=0;i<bright.size();i+=4)geometryDifference+=std::abs(beforeTransform[i]-bright[i]);Check(geometryDifference>1,"Lua rotation and scale update rendered mesh");
+    files.Write("return {fields={target={type='entity'}},on_start=function(self) Light.set_intensity(self.target,0) end}");rs->properties={{"target",Ref(w,light)}};Check(lua.ReloadScript(files.key),"reload lighting fixture");lua.Update(.01f);Check(lua.Error(files.key).empty(),"native Light fixture callbacks healthy");frame(12);auto dark=gpu->ReadBackHdrPixels();Check(bright.size()==400*300*4&&dark.size()==bright.size(),"HDR fixture readbacks match target dimensions");double difference=0;for(std::size_t i=0;i<bright.size();i+=4)difference+=std::max(0.f,bright[i]-dark[i]);Check(difference>1,"Lua intensity changes actual DX12 HDR rendering");
+    app.SetEditorPlayMode(false);frame();Check(SceneSerializer::CaptureWorld(w,app.GetSceneSettings())==authored,"Stop preserves Editor World and references");app.SetEditorPlayMode(true);app.SetEditorPaused(true);auto& again=app.GetWorld();auto againGlobe=scripting::ResolveEntityReference(again,Ref(w,globe));lua.Update(.1f);Near(again.GetComponent<TransformComponent>(againGlobe)->rotation.y,0,"native repeated Play resets Concert activation");StartConcert(lua,again,scripting::ResolveEntityReference(again,Ref(w,sender)));Near(again.GetComponent<TransformComponent>(againGlobe)->rotation.y,.05f,"native repeated Play restores reference and event delivery");app.SetEditorPlayMode(false);Check(SceneSerializer::CaptureWorld(w,app.GetSceneSettings())==authored,"repeated Stop preserves authoring scene");Check(gpu->GetValidationErrorCount()==0,"DX12 validation zero");
 }
 #endif
 int main(int argc,char** argv){ScopedEditorPreferenceRestore preferences;try{
 #if defined(ENABLE_DX12)
-    if(argc>1&&std::string(argv[1])=="--dx12")Native();else
+    if(argc>1&&std::string(argv[1])=="--dx12"){for(float fps:{30.f,60.f,144.f})Native(1.f/fps);}else
 #endif
     Cpu();std::cout<<"Lua Gameplay API: "<<checks<<" checks passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

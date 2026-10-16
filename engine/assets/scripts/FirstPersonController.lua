@@ -34,7 +34,7 @@ return {
         Character.move_world(self.entity, Vec3.new(forward.x*z + right.x*x, 0, forward.z*z + right.z*x))
         if Input.was_pressed("Jump") then Character.jump(self.entity) end
         if Input.was_pressed("Interact") then
-            Log.info("E pressed!")
+            Log.info("E pressed")
 
             local hit = Physics.raycast(
                 Camera.position(),
@@ -44,10 +44,10 @@ return {
             )
 
             if hit then
-                Log.info("Raycast hit!")
+                Log.info("Raycast hit")
                 World.send_event(hit.entity, "interact", 0)
             else
-                Log.info("Raycast missed!")
+                Log.info("Raycast missed")
             end
         end
     end,

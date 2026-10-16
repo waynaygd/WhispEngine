@@ -1,5 +1,6 @@
 #pragma once
 #include <chrono>
+#include <optional>
 
 class Time
 {
@@ -10,6 +11,9 @@ public:
     float GetFrameDeltaTime() const { return m_FrameDeltaTime; }
 
 private:
+    friend struct ApplicationTestAccess;
+    // Only the test adapter can supply a deterministic delta. Normal runs use steady_clock.
+    std::optional<float> m_TestFrameDelta;
     using Clock = std::chrono::steady_clock;
 
     Clock::time_point m_LastTime;

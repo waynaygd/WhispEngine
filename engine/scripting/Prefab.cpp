@@ -1,5 +1,6 @@
 #include "Prefab.h"
 #include "../core/AssetPaths.h"
+#include "../core/ProjectContext.h"
 #include "../ecs/ComponentRegistry.h"
 #include "../ecs/components/SceneIdentityComponent.h"
 #include "../ecs/components/TransformComponent.h"
@@ -11,6 +12,7 @@ std::filesystem::path SafeAsset(const std::string& key,const std::string& suffix
     if(key.empty()||!key.ends_with(suffix)||!ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::None,&error)||key.find('\0')!=std::string::npos)
         throw std::runtime_error("Invalid asset key: "+key);
     const auto assetRoot=AssetPaths::ResolveAssetRoot();
+    if(auto project=ProjectManager::Active())return project->ResolveAsset(key);
     if(assetRoot.empty())throw std::runtime_error("Project asset root is unavailable");
     const auto root=std::filesystem::weakly_canonical(assetRoot);
     const auto path=std::filesystem::weakly_canonical(root/std::filesystem::u8path(key));

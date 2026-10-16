@@ -1,4 +1,5 @@
 #include "AssetPaths.h"
+#include "ProjectContext.h"
 
 #include <algorithm>
 #include <vector>
@@ -133,6 +134,18 @@ std::filesystem::path GetExecutableDirectory()
 
 std::filesystem::path ResolveAssetRoot()
 {
+    if(auto project=ProjectManager::Active())return project->AssetRoot();
+    return ResolveCandidatePaths({std::filesystem::path("assets"),std::filesystem::path("engine")/"assets"});
+}
+
+std::filesystem::path ResolveEngineAssetRoot()
+{
+    // Built-ins belong to the editor installation even when the process was
+    // launched with a game's Assets directory in its working-directory chain.
+    std::vector<fs::path> roots;AppendRootChain(roots,GetExecutableDirectory());
+    for(const auto& root:roots)for(const auto& suffix:{fs::path("assets"),fs::path("engine")/"assets"}){
+        auto resolved=NormalizeIfExists(root/suffix);if(!resolved.empty())return resolved;
+    }
     return ResolveCandidatePaths(
         {
             std::filesystem::path("assets"),
@@ -142,6 +155,12 @@ std::filesystem::path ResolveAssetRoot()
 
 std::filesystem::path ResolveShaderRoot()
 {
+    if(ProjectManager::Active()){
+        std::vector<fs::path> roots;AppendRootChain(roots,GetExecutableDirectory());
+        for(const auto& root:roots)for(const auto& suffix:{fs::path("shaders"),fs::path("engine")/"shaders"}){
+            auto resolved=NormalizeIfExists(root/suffix);if(!resolved.empty())return resolved;
+        }
+    }
     return ResolveCandidatePaths(
         {
             std::filesystem::path("shaders"),
@@ -153,6 +172,20 @@ std::string NormalizeAssetKey(const std::filesystem::path& path)
 {
     if (path.empty())
         return {};
+
+    const auto raw=ToUtf8String(path);
+    if(raw.starts_with("@engine/")) {
+        try {ProjectContext::ValidateRelative(raw.substr(8));return raw;}catch(...){return {};}
+    }
+
+    if(auto project=ProjectManager::Active()) {
+        try {
+            auto key=path.is_absolute()?NormalizeKeyAgainstRoot(path,project->AssetRoot()):ToUtf8String(path);
+            // Embedded texture suffixes are runtime identifiers; validate their file part.
+            project->ResolveAsset(key.substr(0,key.find("#embedded/")));
+            return key;
+        }catch(...){return {};}
+    }
 
     if (!path.is_absolute())
         return NormalizeRelativeKey(path);
@@ -178,6 +211,17 @@ std::string NormalizeShaderKey(const std::filesystem::path& path)
 
 std::filesystem::path ResolveAssetPath(const std::filesystem::path& relativePath)
 {
+    const auto raw=ToUtf8String(relativePath);
+    if(raw.starts_with("@engine/")) {
+        try{const auto key=raw.substr(8);ProjectContext::ValidateRelative(key);
+            const auto path=ResolveEngineAssetRoot()/std::filesystem::u8path(key);ProjectContext::CheckNoLinks(path);
+            return std::filesystem::is_regular_file(path)?path:std::filesystem::path{};
+        }catch(...){return {};}
+    }
+    if(auto project=ProjectManager::Active()) {
+        try {auto key=NormalizeAssetKey(relativePath);if(key.empty())return {};auto path=project->ResolveAsset(key);return std::filesystem::is_regular_file(path)?path:std::filesystem::path{};}
+        catch(...){return {};}
+    }
     const std::string key = NormalizeAssetKey(relativePath);
     if (key.empty())
         return {};
@@ -195,6 +239,11 @@ std::filesystem::path ResolveAssetPath(const std::filesystem::path& relativePath
 
 std::filesystem::path ResolveAssetOutputPath(const std::filesystem::path& relativePath)
 {
+    if(ToUtf8String(relativePath).starts_with("@engine/"))return {};
+    if(auto project=ProjectManager::Active()) {
+        try {auto key=NormalizeAssetKey(relativePath);return key.empty()?std::filesystem::path{}:project->ResolveAsset(key);}
+        catch(...){return {};}
+    }
     const std::string key = NormalizeAssetKey(relativePath);
     if (key.empty())
         return {};

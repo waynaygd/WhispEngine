@@ -34,12 +34,25 @@ void ResourceManager::ClearAll()
     m_DirtyMaterials.clear();
     m_HotReloadWatches.clear();
     m_PendingAsyncKeys.clear();
+    ++m_CacheEpoch;
 
     Logger::Get().Info(
         "ResourceManager: cleared all caches mesh=" + std::to_string(meshCount) +
         " texture=" + std::to_string(textureCount) +
         " shader=" + std::to_string(shaderCount) +
         " material=" + std::to_string(materialCount));
+}
+
+void ResourceManager::DrainProjectLoads()
+{
+    // Finalization may schedule material dependencies. Reach a fixed point before
+    // publishing the next context so no worker resolves a key in the next project.
+    for (;;) {
+        if(m_JobSystem&&m_JobSystem->IsInitialized())m_JobSystem->WaitAll();
+        PollAsyncLoads();
+        const auto finalized=PumpFinalization(static_cast<std::size_t>(-1));
+        if(finalized==0)break;
+    }
 }
 
 void ResourceManager::PollAsyncLoads()

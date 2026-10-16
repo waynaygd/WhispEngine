@@ -147,7 +147,8 @@ ecs::Entity EditorLayer::BeginDuplicateDrag(Application& app){
 }
 ecs::Entity EditorLayer::CreatePrimitive(Application& app,const std::string& type){
     if(app.IsEditorPlayMode()||(type!="cube"&&type!="sphere"&&type!="cylinder"&&type!="cone"&&type!="plane"))return {};
-    auto e=CreateModelEntity(app,"models/primitives/"+type+".obj",type);if(e.IsValid())app.GetWorld().GetComponent<ecs::MaterialComponent>(e)->materialPath="materials/default_primitive.material.json";return e;
+    const std::string prefix=app.GetProject()?"@engine/":"";
+    auto e=CreateModelEntity(app,prefix+"models/primitives/"+type+".obj",type);if(e.IsValid())app.GetWorld().GetComponent<ecs::MaterialComponent>(e)->materialPath=prefix+"materials/default_primitive.material.json";return e;
 }
 ecs::Entity EditorLayer::CreateModelEntity(Application& app,const std::string& key,const std::string& name){
     if(app.IsEditorPlayMode()||key.empty()||!ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::Mesh,&m_EditorError))return {};
