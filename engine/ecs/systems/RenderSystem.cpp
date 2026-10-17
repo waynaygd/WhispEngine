@@ -1,6 +1,7 @@
 #include "../FogGather.h"
 #include "RenderSystem.h"
 #include "../LightGather.h"
+#include "../HierarchyPhysics.h"
 
 #include "../World.h"
 #include "../components/MaterialComponent.h"
@@ -150,14 +151,15 @@ void BuildMvp(
     float verticalFovRadians,
     float aspectRatio,
     float nearPlane,
-    float farPlane, float* outModel = nullptr)
+    float farPlane, float* outModel = nullptr,const float* affineModel = nullptr)
 {
     float modelMatrix[16];
     float viewMatrix[16];
     float projectionMatrix[16];
     float viewModel[16];
 
-    ecs::BuildRenderModelMatrix(modelMatrix, pose);
+    if(affineModel)std::copy(affineModel,affineModel+16,modelMatrix);
+    else ecs::BuildRenderModelMatrix(modelMatrix, pose);
     if(outModel) std::copy(modelMatrix, modelMatrix+16, outModel);
     BuildViewMatrix(viewMatrix, cameraPosition, cameraYaw, cameraPitch);
     BuildPerspectiveMatrix(projectionMatrix, verticalFovRadians, aspectRatio, nearPlane, farPlane);
@@ -265,6 +267,9 @@ namespace ecs {
 
     void RenderSystem::Update(World& world, float dt)
     {
+        auto hierarchy=world.IsHierarchyData()?HierarchyGraph::Build(world):std::optional<HierarchyGraph>{};
+        if(world.IsHierarchyData()&&!hierarchy)throw std::runtime_error("Render: invalid hierarchy");
+        if(hierarchy&&m_DebugCollidersEnabled)(void)RequireHierarchyRuntime(world);
         ZoneScopedN("RenderSystem");
 
         (void)dt;
@@ -350,19 +355,23 @@ namespace ecs {
                         if(resource==m_MeshResources.end())return;
                         const auto& mesh=resource->second->GetData().meshData;
                         const auto count=std::max(std::size_t(1),mesh.submeshes.size());
-                        const auto pose=m_Interpolation?m_Interpolation->Resolve(entity,transform):RenderPose::From(transform);
+                        RenderPose pose;std::optional<std::array<float,16>> affine;
+                        if(hierarchy){
+                            affine.emplace();const auto& matrix=*hierarchy->nodes[hierarchy->entities.at(entity)].matrix;
+                            for(int i=0;i<16;++i){(*affine)[i]=float(matrix[i]);if(!std::isfinite((*affine)[i])||std::abs(matrix[i])>1e8)throw std::runtime_error("Render: hierarchy matrix exceeds supported GPU range [+-1e8]");}
+                        }else{const auto worldTransform=*ReadWorldTransform(world,entity);pose=m_Interpolation?m_Interpolation->Resolve(entity,worldTransform):RenderPose::From(worldTransform);}
                         bool visible=false,casts=false;
                         for(std::size_t slot=0;slot<count;++slot) {
                             RenderSnapshot snapshot{};
                             if(TryBuildRenderSnapshot(meshRenderer,world.GetComponent<MaterialComponent>(entity),snapshot,mesh,meshHandle,slot)) {
-                                casts|=snapshot.castShadows;snapshot.pose=pose;if(m_TraceMaterials&&!m_MaterialDiagnostics.empty()){m_MaterialDiagnostics.back()["entity"]=entity.index;m_MaterialDiagnostics.back()["generation"]=entity.generation;}m_RenderSnapshots.push_back(std::move(snapshot));visible=true;
+                                casts|=snapshot.castShadows;snapshot.pose=pose;snapshot.affineModel=affine;if(m_TraceMaterials&&!m_MaterialDiagnostics.empty()){m_MaterialDiagnostics.back()["entity"]=entity.index;m_MaterialDiagnostics.back()["generation"]=entity.generation;}m_RenderSnapshots.push_back(std::move(snapshot));visible=true;
                             }
                         }
                         if(visible)++m_Statistics.visibleObjects;
                         if(casts){auto it=m_ShadowLocalBounds.find(meshHandle.value);
                             if(it==m_ShadowLocalBounds.end()){ShadowCasterBounds b{{INFINITY,INFINITY,INFINITY},{-INFINITY,-INFINITY,-INFINITY}};for(auto& v:mesh.vertices)for(int k=0;k<3;++k){b.minimum[k]=std::min(b.minimum[k],v.position[k]);b.maximum[k]=std::max(b.maximum[k],v.position[k]);}it=m_ShadowLocalBounds.emplace(meshHandle.value,b).first;}
-                            ShadowCasterBounds b{{INFINITY,INFINITY,INFINITY},{-INFINITY,-INFINITY,-INFINITY}};float model[16];BuildRenderModelMatrix(model,pose);
-                            for(int c=0;c<8;++c)for(int row=0;row<3;++row){float value=model[12+row];for(int k=0;k<3;++k)value+=model[k*4+row]*(c&(1<<k)?it->second.maximum[k]:it->second.minimum[k]);b.minimum[row]=std::min(b.minimum[row],value);b.maximum[row]=std::max(b.maximum[row],value);}m_ShadowWorldBounds.push_back(b);
+                            ShadowCasterBounds b{{INFINITY,INFINITY,INFINITY},{-INFINITY,-INFINITY,-INFINITY}};float model[16];if(affine)std::copy(affine->begin(),affine->end(),model);else BuildRenderModelMatrix(model,pose);
+                            for(int c=0;c<8;++c)for(int row=0;row<3;++row){float value=model[12+row];for(int k=0;k<3;++k)value+=model[k*4+row]*(c&(1<<k)?it->second.maximum[k]:it->second.minimum[k]);if(hierarchy&&!std::isfinite(value))throw std::runtime_error("Render: nonfinite affine world bounds");b.minimum[row]=std::min(b.minimum[row],value);b.maximum[row]=std::max(b.maximum[row],value);}m_ShadowWorldBounds.push_back(b);
                         }
                     });
                 m_Statistics.gatherMs = elapsed(start);
@@ -485,23 +494,26 @@ namespace ecs {
                 [&](Entity entity, TransformComponent& transform, ColliderComponent& collider)
                 {
                     float mvp[16];
-                    RenderPose debugTransform = m_Interpolation && !m_PhysicsDebugPose ? m_Interpolation->Resolve(entity, transform) : RenderPose::From(transform);
-                    debugTransform.position.x += collider.offset.x;
-                    debugTransform.position.y += collider.offset.y;
-                    debugTransform.position.z += collider.offset.z;
+                    auto geometry=hierarchy?std::optional(ResolveHierarchyCollider(world,*hierarchy,entity,true)):std::optional<HierarchyColliderShape>{};
+                    const auto worldTransform=geometry?geometry->transform:*ReadWorldTransform(world,entity);
+                    auto shape=geometry?geometry->collider:collider;
+                    RenderPose debugTransform = !hierarchy&&m_Interpolation && !m_PhysicsDebugPose ? m_Interpolation->Resolve(entity, worldTransform) : RenderPose::From(worldTransform);
+                    debugTransform.position.x += shape.offset.x;
+                    debugTransform.position.y += shape.offset.y;
+                    debugTransform.position.z += shape.offset.z;
                     // Box colliders can be oriented; keep rotation for box debug draw.
-                    if (collider.type == ColliderType::Sphere)
+                    if (shape.type == ColliderType::Sphere)
                     {
-                        const float radius = std::max(collider.halfExtents.x, std::max(collider.halfExtents.y, collider.halfExtents.z));
+                        const float radius = std::max(shape.halfExtents.x, std::max(shape.halfExtents.y, shape.halfExtents.z));
                         debugTransform.scale = ecs::Vec3{ radius * 2.0f, radius * 2.0f, radius * 2.0f };
                     }
                     else
                     {
                         // Box colliders can be oriented; keep rotation for box debug draw.
                         debugTransform.scale = ecs::Vec3{
-                            collider.halfExtents.x * 2.0f,
-                            collider.halfExtents.y * 2.0f,
-                            collider.halfExtents.z * 2.0f
+                            shape.halfExtents.x * 2.0f,
+                            shape.halfExtents.y * 2.0f,
+                            shape.halfExtents.z * 2.0f
                         };
                     }
                     BuildMvp(
@@ -599,7 +611,7 @@ namespace ecs {
             m_CameraVerticalFovRadians,
             m_CameraAspectRatio,
             m_CameraNearPlane,
-            m_CameraFarPlane, outPacket.instance.model.data());
+            m_CameraFarPlane, outPacket.instance.model.data(),snapshot.affineModel?snapshot.affineModel->data():nullptr);
 
         outPacket.range=snapshot.range;outPacket.materialState=snapshot.materialState;outPacket.castShadows=snapshot.castShadows;
         outPacket.mesh = snapshot.mesh;

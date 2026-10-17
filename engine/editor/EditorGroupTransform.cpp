@@ -9,9 +9,9 @@ bool EditorLayer::BeginGroupTransform(Application& app,bool local){
     PruneSelection(app);EndGroupTransform(app);FinishTransaction(app);if(m_Selection.items.size()<2)return false;
     GroupSession group;group.entities=m_Selection.items;group.before=CaptureSelection(app);
     double x=0,y=0,z=0;
-    for(auto e:group.entities){auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(e);if(!t||!ValidGroupSource(*t)){m_EditorError="Group Transform requires valid Transform on every selected entity";return false;}group.originals.push_back(*t);x+=t->position.x;y+=t->position.y;z+=t->position.z;}
+    for(auto e:group.entities){auto t=ecs::ReadWorldTransform(app.GetWorld(),e);if(!t||!ValidGroupSource(*t)){m_EditorError="Group Transform requires valid Transform on every selected entity";return false;}group.originals.push_back(*t);x+=t->position.x;y+=t->position.y;z+=t->position.z;}
     const double n=double(group.entities.size());group.pivot.position={float(x/n),float(y/n),float(z/n)};
-    if(local)group.pivot.rotation=app.GetWorld().GetComponent<ecs::TransformComponent>(m_Selection.active)->rotation;
+    if(local)group.pivot.rotation=ecs::ReadWorldTransform(app.GetWorld(),m_Selection.active)->rotation;
     group.current=TransformMatrix(group.pivot);m_GroupTransform=std::move(group);return true;
 }
 bool EditorLayer::UpdateGroupTransform(Application& app,const ImportMatrix& target){
@@ -24,12 +24,12 @@ bool EditorLayer::UpdateGroupTransform(Application& app,const ImportMatrix& targ
         const auto& value=(*result)[i];const auto& original=group.originals[i];
         auto a=ecs::RenderRotation(value.rotation),b=ecs::RenderRotation(original.rotation);float dot=std::abs(a.x*b.x+a.y*b.y+a.z*b.z+a.w*b.w);
         if(group.entities[i]==sun&&app.GetSceneBackground().sunSync==SunSyncMode::SkyDrivesLight&&dot<.999999f){m_EditorError="Group rotation contains a sun driven by the sky";return false;}
-        auto current=TransformMatrix(*app.GetWorld().GetComponent<ecs::TransformComponent>(group.entities[i]));auto proposed=TransformMatrix(value);for(int k=0;k<16;++k)changed|=std::abs(current[k]-proposed[k])>1e-6;
+        auto current=TransformMatrix(*ecs::ReadWorldTransform(app.GetWorld(),group.entities[i]));auto proposed=TransformMatrix(value);for(int k=0;k<16;++k)changed|=std::abs(current[k]-proposed[k])>1e-6;
     }
     if(changed){
         if(!m_Transaction)BeginTransaction("Group Transform",group.before);
         // All targets were validated before the first component mutation.
-        for(std::size_t i=0;i<group.entities.size();++i)*app.GetWorld().GetComponent<ecs::TransformComponent>(group.entities[i])=(*result)[i];
+        for(std::size_t i=0;i<group.entities.size();++i)if(!ecs::TrySetWorldTransform(app.GetWorld(),group.entities[i],(*result)[i]))throw std::runtime_error("Validated group Transform could not be applied");
         for(auto e:group.entities)app.NotifyEditorMutation(e);
     }
     group.current=target;return true;
@@ -45,9 +45,9 @@ void EditorLayer::DrawGroupGizmo(Application& app,const float* view,const float*
     ecs::TransformComponent reference;
     if(m_GroupTransform)reference=m_GroupTransform->pivot;
     else{
-        double x=0,y=0,z=0;for(auto e:m_Selection.items){auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(e);if(!t||!ValidGroupSource(*t))return;x+=t->position.x;y+=t->position.y;z+=t->position.z;}
+        double x=0,y=0,z=0;for(auto e:m_Selection.items){auto t=ecs::ReadWorldTransform(app.GetWorld(),e);if(!t||!ValidGroupSource(*t))return;x+=t->position.x;y+=t->position.y;z+=t->position.z;}
         double count=double(m_Selection.items.size());reference.position={float(x/count),float(y/count),float(z/count)};
-        if(m_GizmoMode==0)reference.rotation=app.GetWorld().GetComponent<ecs::TransformComponent>(m_Selection.active)->rotation;
+        if(m_GizmoMode==0)reference.rotation=ecs::ReadWorldTransform(app.GetWorld(),m_Selection.active)->rotation;
     }
     auto current=m_GroupTransform?m_GroupTransform->current:TransformMatrix(reference);float matrix[16];for(int i=0;i<16;++i)matrix[i]=float(current[i]);
     const auto operation=m_GizmoOperation==0?ImGuizmo::TRANSLATE:m_GizmoOperation==1?ImGuizmo::ROTATE:ImGuizmo::SCALE;

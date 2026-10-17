@@ -226,7 +226,7 @@ void EditorLayer::LeaveRuntime(){
 
 namespace editor {
 bool EditorLayer::RotateSelectedQuarter(Application& app,int axis,int turns,bool world){
-    if(app.IsEditorPlayMode())return false;auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(m_Selection.active);if(!t)return false;
+    if(app.IsEditorPlayMode())return false;auto t=ecs::ReadWorldTransform(app.GetWorld(),m_Selection.active);if(!t)return false;
     if(app.GetSceneBackground().sunSync==SunSyncMode::SkyDrivesLight&&PrimarySun(app.GetWorld())==m_Selection.active)return false;
     auto rotation=RotateQuarterTurn(*t,axis,turns,world);if(!rotation)return false;
     return SetProperty(app,m_Selection.active,ecs::ComponentId("Transform"),"rotation",*rotation);

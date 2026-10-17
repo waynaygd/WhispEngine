@@ -1,5 +1,6 @@
 #pragma once
 #include "World.h"
+#include "TransformAccess.h"
 #include "components/TransformComponent.h"
 #include "components/PlayerStartComponent.h"
 #include "components/PlayerComponent.h"
@@ -8,6 +9,7 @@
 #include "components/ColliderComponent.h"
 #include "components/TagComponent.h"
 #include "components/LuaScriptComponent.h"
+#include "components/SceneIdentityComponent.h"
 #include "events/EventBus.h"
 #include <cmath>
 #include <algorithm>
@@ -31,17 +33,19 @@ inline Vec3 PlayerBoxPoint(const TransformComponent& start,Vec3 local,float half
  return {center.x+c*local.x+s*local.z,center.y+local.y,center.z-s*local.x+c*local.z};
 }
 inline Entity SpawnPlayer(World& world,TransformComponent* spawnPoint=nullptr){
+ world.RequireRuntimeWorld();
  Entity chosen;TransformComponent spawn;PlayerStartComponent settings;
  // Collect handles before adding/removing entities.
  auto markers=world.Entities();
- for(auto e:markers){auto* s=world.GetComponent<PlayerStartComponent>(e);auto* t=world.GetComponent<TransformComponent>(e);
+ for(auto e:markers){auto* s=world.GetComponent<PlayerStartComponent>(e);auto t=ReadWorldTransform(world,e);
   if(!chosen.IsValid()&&s&&s->enabled&&t){chosen=e;spawn=*t;settings=*s;}}
  Entity player;
  if(chosen.IsValid()){
   if(spawnPoint)*spawnPoint=spawn;
-  player=world.CreateEntity();auto& t=world.AddComponent<TransformComponent>(player);
+  player=world.CreateEntity();if(world.IsHierarchyData())world.AddComponent<SceneIdentityComponent>(player);world.AddComponent<TransformComponent>(player);TransformComponent t;
   const auto half=PlayerBodyHalfExtents(settings);
   t.position=PlayerBodyCenter(spawn.position,half.y);t.rotation={0,spawn.rotation.y,0};
+  if(!TrySetWorldTransform(world,player,t))throw std::runtime_error("PlayerStart produced a nonfinite world Transform");
   world.AddComponent<PlayerComponent>(player).eyeHeight=PlayerEyeHeight(settings);world.AddComponent<CharacterMovementComponent>(player);
   auto& b=world.AddComponent<RigidbodyComponent>(player);b.mass=70;b.lockRotation=true;
   auto& c=world.AddComponent<ColliderComponent>(player);c.halfExtents=half;c.autoFitFromMesh=false;c.restitution=0;c.friction=.8f;

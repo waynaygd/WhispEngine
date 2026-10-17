@@ -230,7 +230,7 @@ ecs::Vec3 EditorLayer::PlacementPoint(Application& app,float u,float v)const{
 ecs::Entity EditorLayer::PlaceModel(Application& app,const std::string& key,ecs::Vec3 point){
     if(!std::isfinite(point.x)||!std::isfinite(point.y)||!std::isfinite(point.z)){m_EditorError="Invalid placement position";return {};}
     auto entity=CreateModelEntity(app,key,std::filesystem::u8path(key).stem().string());if(!entity.IsValid())return {};
-    app.GetWorld().GetComponent<ecs::TransformComponent>(entity)->position=point;app.NotifyEditorMutation(entity);
+    if(!ecs::TrySetWorldPosition(app.GetWorld(),entity,point,&m_EditorError))return {};app.NotifyEditorMutation(entity);
     if(auto* resources=app.GetResourceManager())resources->LoadAsync<MeshResource>(key);return entity;
 }
 }

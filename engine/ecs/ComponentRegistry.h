@@ -53,6 +53,9 @@ public:
     bool Get(const World&,Entity,ComponentTypeId,const std::string& property,PropertyValue&,std::string* error=nullptr)const;
     nlohmann::json Capture(const World&,Entity)const;
     void Restore(World&,Entity,const nlohmann::json&)const;
+    // Atomic upsert of id/components records; publishes a new World identity.
+    // Future transaction callers must remap handles by stable SceneIdentity.
+    bool RestoreBatch(World&,const nlohmann::json& entities,std::string* error=nullptr)const;
     static bool ValidateAssetKey(const std::string&,AssetKind,std::string* error=nullptr);
 };
 }

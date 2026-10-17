@@ -61,6 +61,7 @@ public:
     void SetShadingModelOverride(int mode) { m_ShadingModelOverride=mode; }
     void SetInstancingEnabled(bool enabled) { m_InstancingEnabled = enabled; }
     bool IsInstancingEnabled() const { return m_InstancingEnabled; }
+    const std::vector<ShadowCasterBounds>& GetShadowWorldBounds()const{return m_ShadowWorldBounds;}
     void SetMaterialDiagnostics(bool enabled){m_TraceMaterials=enabled;}
     const auto& GetMaterialDiagnostics()const{return m_MaterialDiagnostics;}
     struct Statistics {
@@ -81,6 +82,7 @@ private:
     struct RenderSnapshot
     {
         RenderPose pose{};
+        std::optional<std::array<float,16>> affineModel;
 
         RenderMeshRange range;
         MaterialRenderState materialState;

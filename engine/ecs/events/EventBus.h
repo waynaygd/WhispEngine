@@ -4,14 +4,37 @@
 #include <functional>
 #include <vector>
 namespace ecs {
-    enum class CollisionKind { Contact, TriggerEnter, TriggerExit };
-    struct CollisionEvent
+
+enum class CollisionKind {
+    Contact,
+    TriggerEnter,
+    TriggerExit
+};
+
+struct CollisionEvent
+{
+    Entity a{};
+    Entity b{};
+
+    Vec3 normal{};
+    CollisionKind kind = CollisionKind::Contact;
+};
+
+class EventBus {
+public:
+    using CollisionListener = std::function<void(const CollisionEvent&)>;
+
+    void SubscribeCollision(CollisionListener listener)
     {
-        Entity a{};
-        Entity b{};
+        m_CollisionListeners.push_back(std::move(listener));
+    }
 
-        Vec3 normal{};
-        CollisionKind kind=CollisionKind::Contact;
-    };
+    void PublishCollision(const CollisionEvent& event) const
+    {
+        for (const auto& listener : m_CollisionListeners) listener(event);
+    }
 
-    class EventBus { public: using CollisionListener = std::function<void(const CollisionEvent&)>; void SubscribeCollision(CollisionListener listener){ m_CollisionListeners.push_back(std::move(listener)); } void PublishCollision(const CollisionEvent& event) const { for (const auto& listener : m_CollisionListeners) listener(event);} private: std::vector<CollisionListener> m_CollisionListeners; }; }
+private:
+    std::vector<CollisionListener> m_CollisionListeners;
+};
+}

@@ -10,7 +10,7 @@ void EditorLayer::PruneSelection(Application& app){
             if(m_DuplicateDrag){CancelTransaction(app);m_CancelGizmoUntilRelease=true;m_Selection.Prune(world);return;}
             // External destruction is not undone by cancelling a drag. Roll back
             // survivors only; do not resurrect an unrelated destroyed entity.
-            for(std::size_t i=0;i<group.entities.size();++i)if(auto* t=world.GetComponent<ecs::TransformComponent>(group.entities[i])){*t=group.originals[i];app.NotifyEditorMutation(group.entities[i]);}
+            for(std::size_t i=0;i<group.entities.size();++i)if(ecs::TrySetWorldTransform(world,group.entities[i],group.originals[i]))app.NotifyEditorMutation(group.entities[i]);
             if(m_Transaction&&m_Transaction->label=="Group Transform")m_Transaction.reset();m_GroupTransform.reset();m_GizmoUndoCaptured=false;m_CancelGizmoUntilRelease=true;
         }else if(group.entities!=m_Selection.items)EndGroupTransform(app,false);
     }

@@ -1538,9 +1538,7 @@ int Application::Run()
         m_RenderInterpolation.SetFrame(GetWorld(),IsSimulationRunning(),m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
         if(m_EditorPlayMode&&m_LuaRuntime.HasCameraOwner()){
             if(m_GameplayCamera.following){
-                auto* t=GetWorld().GetComponent<ecs::TransformComponent>(m_GameplayCamera.target);
-                if(t){auto p=m_RenderInterpolation.Resolve(m_GameplayCamera.target,*t).position;m_GameplayCamera.position=Add(p,m_GameplayCamera.offset);}
-                else m_GameplayCamera.following=false;
+                scripting::ResolveGameplayCamera(m_GameplayCamera,GetWorld(),&m_RenderInterpolation);
             }
             m_Camera.position=m_GameplayCamera.position;m_Camera.yaw=m_GameplayCamera.yaw;m_Camera.pitch=m_GameplayCamera.pitch;
         }
@@ -2198,7 +2196,7 @@ void Application::NotifyEditorMutation(ecs::Entity entity){
     if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
 }
 void Application::FocusEntity(ecs::Entity entity){
-    if(auto* t=GetWorld().GetComponent<ecs::TransformComponent>(entity)){
+    if(auto t=ecs::ReadWorldTransform(GetWorld(),entity)){
         float radius=std::max({std::abs(t->scale.x),std::abs(t->scale.y),std::abs(t->scale.z),1.f});
         auto center=t->position;
         if(m_ResourceManager)if(auto* mr=GetWorld().GetComponent<ecs::MeshRendererComponent>(entity))if(auto mesh=m_ResourceManager->Get<MeshResource>(mr->meshPath);mesh&&mesh->IsLoaded()&&!mesh->GetData().meshData.vertices.empty()){

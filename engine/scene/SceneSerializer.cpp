@@ -1,8 +1,10 @@
 #define NOMINMAX
 #include "SceneSerializer.h"
 #include "../ecs/ComponentRegistry.h"
+#include "../ecs/Hierarchy.h"
 #include "../ecs/components/SceneIdentityComponent.h"
 #include <set>
+#include <algorithm>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -208,16 +210,20 @@ std::string SceneSerializer::EntitySceneId(const ecs::World& world,ecs::Entity e
 }
 std::string SceneSerializer::PrimaryDirectionalId(ecs::World& world){
     ecs::Entity selected;bool preferred=false;
-    for(auto e:world.Entities())if(auto* d=world.GetComponent<ecs::DirectionalLightComponent>(e)){
+    auto entities=world.Entities();
+    // Data-only scenes must not acquire index-dependent preferences on restore.
+    if(world.IsHierarchyData())std::sort(entities.begin(),entities.end(),[&](auto a,auto b){return EntitySceneId(world,a)<EntitySceneId(world,b);});
+    for(auto e:entities)if(auto* d=world.GetComponent<ecs::DirectionalLightComponent>(e)){
         if(d->enabled&&(!selected.IsValid()||(!preferred&&d->primary))){selected=e;preferred=d->primary;}
     }
     return selected.IsValid()?EntitySceneId(world,selected):std::string();
 }
 nlohmann::json SceneSerializer::CaptureWorld(ecs::World& world,const SceneSettings& settings){
+    if(world.IsHierarchyData()){std::string error;if(!ecs::ValidateHierarchy(world,&error))throw std::runtime_error(error);}
     auto resolved=settings;resolved.primaryDirectional=PrimaryDirectionalId(world);
     nlohmann::json scene={{"version",4},{"settings",SceneSettingsToJson(resolved)},{"entities",nlohmann::json::array()}};
     std::set<std::string> ids;const auto& registry=ecs::ComponentRegistry::Builtins();
-    ecs::World check;auto test=check.CreateEntity();
+    ecs::World check(world.GetDataMode());auto test=check.CreateEntity();
     for(auto e:world.Entities()){
         auto components=registry.Capture(world,e);components.erase("SceneIdentity");const auto id=EntitySceneId(world,e);
         if(id.empty()||id.size()>128||!ids.insert(id).second)throw std::runtime_error("Duplicate/invalid scene entity ID");
@@ -230,14 +236,19 @@ nlohmann::json SceneSerializer::CaptureWorld(ecs::World& world,const SceneSettin
 bool SceneSerializer::RestoreWorld(const nlohmann::json& scene,ecs::World& world,SceneSettings& settings,std::string* error){
     try{
         if(!scene.is_object()||scene.value("version",0)!=4||!scene.contains("entities")||!scene.at("entities").is_array())throw std::runtime_error("Expected scene schema v4");
-        ecs::World staged;auto next=scene.contains("settings")?SceneSettingsFromJson(scene.at("settings")):SceneSettings{};
+        ecs::World staged(world.GetDataMode());auto next=scene.contains("settings")?SceneSettingsFromJson(scene.at("settings")):SceneSettings{};
         std::set<std::string> ids;const auto& registry=ecs::ComponentRegistry::Builtins();
         for(const auto& node:scene.at("entities")){
             const auto id=node.at("id").get<std::string>();if(id.empty()||id.size()>128||!ids.insert(id).second)throw std::runtime_error("Duplicate/invalid scene entity ID: "+id);
-            auto e=staged.CreateEntity();try{registry.Restore(staged,e,node.at("components"));}catch(const std::exception& failure){throw std::runtime_error("Entity "+id+": "+failure.what());}
-            if(staged.HasComponent<ecs::SceneIdentityComponent>(e))throw std::runtime_error("SceneIdentity belongs in entity.id, not components");
-            staged.AddComponent<ecs::SceneIdentityComponent>(e).value=id;
+            if(!ecs::ValidSceneIdentity(id))throw std::runtime_error("Invalid stable SceneIdentity");
+            if(node.at("components").contains("SceneIdentity"))throw std::runtime_error("SceneIdentity belongs in entity.id, not components");
+            auto e=staged.CreateEntity();staged.AddComponent<ecs::SceneIdentityComponent>(e).value=id;
         }
+        // All identities exist before any relationship-bearing component restore.
+        const auto created=staged.Entities();std::size_t index=0;
+        for(const auto& node:scene.at("entities")){auto components=node.at("components");components["SceneIdentity"]={{"value",node.at("id")}};
+            try{registry.Restore(staged,created[index++],components);}catch(const std::exception& failure){throw std::runtime_error("Entity "+node.at("id").get<std::string>()+": "+failure.what());}}
+        if(staged.IsHierarchyData()){std::string failure;if(!ecs::ValidateHierarchy(staged,&failure))throw std::runtime_error(failure);}
         if(!next.primaryDirectional.empty()&&next.primaryDirectional!=PrimaryDirectionalId(staged))throw std::runtime_error("Primary directional reference conflicts with ECS preferences/order");
         world.ReplaceData(staged);settings=std::move(next);return true;
     }catch(const std::exception& e){SetError(error,std::string("Scene load: ")+e.what());return false;}

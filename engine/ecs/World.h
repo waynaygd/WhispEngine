@@ -16,13 +16,26 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <functional>
 
 namespace ecs
 {
+struct RelationshipComponent;
 class World
 {
 public:
-    World() : m_Identity(s_NextIdentity.fetch_add(1)) {}
+    enum class DataMode {RootOnly,HierarchyData};
+    explicit World(DataMode mode=DataMode::RootOnly) : m_Identity(s_NextIdentity.fetch_add(1)),m_DataMode(mode) {}
+    DataMode GetDataMode()const{return m_DataMode;}
+    bool IsHierarchyData()const{return m_DataMode==DataMode::HierarchyData;}
+    void RequireGameplayWorld()const{if(IsHierarchyData())throw std::logic_error("Root-only adapter cannot access HierarchyData; use checked runtime consumers");}
+    void RequireRuntimeWorld()const;
+    // Internal runtime ownership; not cloned or serialized. Components remain
+    // alive while the owner retires a validated children-first closure.
+    void AttachHierarchyLifecycle(void* owner,std::function<void(const std::vector<Entity>&)> callback);
+    void DetachHierarchyLifecycle(void* owner);
+    bool CanAttachHierarchyLifecycle(void* owner)const{return !m_HierarchyLifecycleOwner||m_HierarchyLifecycleOwner==owner;}
+    bool IsRetiringHierarchy()const{return m_InHierarchyLifecycle;}
     World(const World&)=delete;World& operator=(const World&)=delete;
     [[nodiscard]] std::uint64_t GetIdentity() const {return m_Identity;}
     [[nodiscard]] Entity LocalEntity(std::uint32_t index) const {
@@ -35,8 +48,8 @@ public:
     using CloneMap=std::unordered_map<Entity,Entity,EntityHash>;
     [[nodiscard]] std::unique_ptr<World> CloneData(CloneMap* mapping=nullptr) const;
     void ReplaceData(World& source); // Keeps this World's systems, invalidates prior identity.
-    void UpdateFixedSystemsOn(World& target,float dt){m_Systems.UpdatePhase(target,dt,true);}
-    void UpdateFrameSystemsOn(World& target,float dt){m_Systems.UpdatePhase(target,dt,false);}
+    void UpdateFixedSystemsOn(World& target,float dt){target.RequireRuntimeWorld();m_Systems.UpdatePhase(target,dt,true);}
+    void UpdateFrameSystemsOn(World& target,float dt){target.RequireRuntimeWorld();m_Systems.UpdatePhase(target,dt,false);}
     void AssertOwnerThread()const {if(std::this_thread::get_id()!=m_OwnerThread)throw std::logic_error("Mutate World only on its owner thread");}
     [[nodiscard]] bool IsIterating()const{return m_IterationDepth!=0;}
     Entity CreateEntity();
@@ -72,6 +85,7 @@ public:
 
     void UpdateSystems(float dt)
     {
+        RequireRuntimeWorld();
         m_Systems.Update(*this, dt);
     }
 
@@ -79,13 +93,14 @@ public:
     {
         m_Systems.Clear();
     }
-    void UpdateFixedSystems(float dt) { m_Systems.UpdatePhase(*this, dt, true); }
-    void UpdateFrameSystems(float dt) { m_Systems.UpdatePhase(*this, dt, false); }
+    void UpdateFixedSystems(float dt) { RequireRuntimeWorld();m_Systems.UpdatePhase(*this, dt, true); }
+    void UpdateFrameSystems(float dt) { RequireRuntimeWorld();m_Systems.UpdatePhase(*this, dt, false); }
 
     void Clear();
     [[nodiscard]] std::string DebugDescribeEntity(Entity entity) const;
 
 private:
+    bool DestroyEntityStorage(Entity);
     struct IComponentStorage
     {
         virtual ~IComponentStorage() = default;
@@ -195,9 +210,13 @@ private:
 
     inline static std::atomic<std::uint64_t> s_NextIdentity{1};
     std::uint64_t m_Identity;
+    const DataMode m_DataMode;
+    void* m_HierarchyLifecycleOwner=nullptr;
+    std::function<void(const std::vector<Entity>&)> m_HierarchyLifecycle;
+    bool m_InHierarchyLifecycle=false;
     const std::thread::id m_OwnerThread=std::this_thread::get_id();
     unsigned m_IterationDepth=0;
-    void CheckMutation()const {AssertOwnerThread();if(IsIterating())throw std::logic_error("Structural mutation during World iteration: enqueue a command");}
+    void CheckMutation()const {AssertOwnerThread();if(IsIterating()||m_InHierarchyLifecycle)throw std::logic_error("Structural mutation during World iteration/lifecycle: enqueue a command");}
     std::vector<EntitySlot> m_Slots;
     std::vector<std::uint32_t> m_FreeIndices;
     std::unordered_map<std::type_index, std::unique_ptr<IComponentStorage>> m_ComponentStorages;
@@ -209,6 +228,7 @@ template <typename T, typename... Args>
 T& World::AddComponent(Entity entity, Args&&... args)
 {
     CheckMutation();
+    if constexpr(std::is_same_v<T,RelationshipComponent>)if(!IsHierarchyData())throw std::logic_error("Hierarchy scenes require HierarchyData; public editor support awaits P0.3d");
     if (!IsAlive(entity))
         throw std::logic_error("Cannot add component to dead or foreign-world entity");
 

@@ -1,4 +1,5 @@
 #include "Prefab.h"
+#include "../ecs/TransformAccess.h"
 #include "../core/AssetPaths.h"
 #include "../core/ProjectContext.h"
 #include "../ecs/ComponentRegistry.h"
@@ -29,6 +30,18 @@ ecs::Entity SpawnPrefab(ecs::World& world,const std::string& key,ecs::Vec3 posit
     std::ifstream stream(path);nlohmann::json data;stream>>data;
     if(data.at("version")!=1)throw std::runtime_error("Expected prefab version 1");
     auto components=data.at("components");components.erase("SceneIdentity");
+    if(world.IsHierarchyData()){
+        // The existing single-entity prefab format still creates roots. Validate
+        // its runtime geometry and requested pose before allocating in the live World.
+        world.RequireRuntimeWorld();if(components.contains("Relationship"))throw std::runtime_error("Runtime prefab parenting is not supported");
+        auto graph=ecs::HierarchyGraph::Build(world);std::string id;
+        do{id=ecs::NewSceneIdentity();}while(std::any_of(graph->nodes.begin(),graph->nodes.end(),[&](const auto& node){return node.id==id;}));
+        components["SceneIdentity"]={{"value",id}};ecs::World staged(ecs::World::DataMode::HierarchyData);auto test=staged.CreateEntity();auto& registry=ecs::ComponentRegistry::Builtins();registry.Restore(staged,test,components);
+        if(!staged.HasComponent<ecs::TransformComponent>(test))staged.AddComponent<ecs::TransformComponent>(test);
+        std::string error;if(!ecs::TrySetWorldPosition(staged,test,position,&error))throw std::runtime_error(error);staged.RequireRuntimeWorld();auto prepared=registry.Capture(staged,test);
+        auto entity=world.CreateEntity();world.AddComponent<ecs::SceneIdentityComponent>(entity).value=id;
+        try{registry.Restore(world,entity,prepared);return entity;}catch(...){world.DestroyEntity(entity);throw;}
+    }
     // Validate completely in a temporary World before touching the destination.
     ecs::World staged;auto test=staged.CreateEntity();auto& registry=ecs::ComponentRegistry::Builtins();registry.Restore(staged,test,components);
     auto entity=world.CreateEntity();
@@ -37,7 +50,7 @@ ecs::Entity SpawnPrefab(ecs::World& world,const std::string& key,ecs::Vec3 posit
         world.AddComponent<ecs::SceneIdentityComponent>(entity);
         auto* transform=world.GetComponent<ecs::TransformComponent>(entity);
         if(!transform)transform=&world.AddComponent<ecs::TransformComponent>(entity);
-        transform->position=position;return entity;
+        std::string error;if(!ecs::TrySetWorldPosition(world,entity,position,&error))throw std::runtime_error(error);return entity;
     }catch(...){world.DestroyEntity(entity);throw;}
 }
 }

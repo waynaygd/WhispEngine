@@ -800,8 +800,8 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
     if (!m_Selection.active.IsValid() || !world.IsAlive(m_Selection.active))
         return;
 
-    auto* transform = world.GetComponent<ecs::TransformComponent>(m_Selection.active);
-    if (transform == nullptr)
+    auto transform = ecs::ReadWorldTransform(world,m_Selection.active);
+    if (!transform)
         return;
 
     float view[16];
@@ -851,13 +851,13 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
     {
         if (!m_GizmoUndoCaptured)
         {
-            if(m_GizmoOperation==0&&ImGui::GetIO().KeyAlt){auto copy=BeginDuplicateDrag(app);if(!copy.IsValid())return;transform=world.GetComponent<ecs::TransformComponent>(copy);}
+            if(m_GizmoOperation==0&&ImGui::GetIO().KeyAlt){auto copy=BeginDuplicateDrag(app);if(!copy.IsValid())return;transform=ecs::ReadWorldTransform(world,copy);}
             else PushUndoBeforeChange(app,"Transform Gizmo");
             m_GizmoUndoCaptured = true;
         }
 
         ImportMatrix result;std::copy(matrix,matrix+16,result.begin());
-        if(auto decomposed=DecomposeTransform(result,transform->scale)){*transform=*decomposed;app.NotifyEditorMutation(m_Selection.active);}else m_EditorError="Transform requires shear/singular scale; use Local scale handles";
+        if(auto decomposed=DecomposeTransform(result,transform->scale);decomposed&&ecs::TrySetWorldTransform(world,m_Selection.active,*decomposed)){app.NotifyEditorMutation(m_Selection.active);}else m_EditorError="Transform requires shear/singular scale; use Local scale handles";
     }
     else if (!ImGuizmo::IsUsing())
     {

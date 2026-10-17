@@ -6,7 +6,7 @@ inline bool ValidGroupSource(const ecs::TransformComponent& t){
     for(float v:{t.position.x,t.position.y,t.position.z,t.rotation.x,t.rotation.y,t.rotation.z})if(!std::isfinite(v)||std::abs(v)>1e6f)return false;
     for(float v:{t.scale.x,t.scale.y,t.scale.z})if(!std::isfinite(v)||std::abs(v)<.001f||std::abs(v)>10000.f)return false;return true;
 }
-inline ImportMatrix TransformMatrix(const ecs::TransformComponent& t){float f[16];ecs::BuildRenderModelMatrix(f,ecs::RenderPose::From(t));ImportMatrix m;std::copy(f,f+16,m.begin());return m;}
+inline ImportMatrix TransformMatrix(const ecs::TransformComponent& t){return ecs::ComposeTRS(t);}
 inline ImportMatrix InverseGroupPivot(const ecs::TransformComponent& pivot){
     // A group reference has unit scale; transpose its orthonormal rotation.
     auto m=TransformMatrix(pivot),inverse=IdentityMatrix();

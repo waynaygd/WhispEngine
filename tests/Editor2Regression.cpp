@@ -32,7 +32,8 @@ static void Extension(){
 }
 static void Cpu(){
     Extension();
-    const auto& registry=ecs::ComponentRegistry::Builtins();Check(registry.Components().size()==17,"builtin component coverage including Fog, LuaScript and player components");
+    const auto& registry=ecs::ComponentRegistry::Builtins();Check(registry.Components().size()==18,"builtin component coverage including Fog, LuaScript, player components and Relationship");
+    const auto* relationship=registry.Find("Relationship");Check(relationship&&relationship->id==ecs::ComponentId("Relationship")&&!relationship->addable&&!relationship->removable&&relationship->properties.empty(),"data-only Relationship descriptor is not editable through Inspector");
     for(const char* key:{"Fog","PlayerStart","Player","CharacterMovement"}){const auto* component=registry.Find(key);Check(component&&component->id==ecs::ComponentId(key),"player component stable descriptor");}
     const auto* script=registry.Find("LuaScript");Check(script&&script->id==ecs::ComponentId("LuaScript")&&script->properties.size()==4,"LuaScript stable descriptor, asset/enabled and explicit input/camera permissions");
     ecs::World a,b;auto e=a.CreateEntity(),other=b.CreateEntity();Check(e.index==other.index&&e.generation==other.generation&&e!=other,"World identity in Entity equality");Check(!a.IsAlive(other)&&!b.IsAlive(e),"foreign handles cannot alias");

@@ -27,13 +27,27 @@ inline GatheredLights GatherSceneLights(World& world,const LightingSettings& leg
     auto start=std::chrono::steady_clock::now();GatheredLights out;out.lighting=legacy;
     struct Entry { Entity entity;LightType type;LightParameters p;RenderPose pose;bool primary; };
     std::vector<Entry> entries;entries.reserve(32);
+    auto graph=world.IsHierarchyData()?HierarchyGraph::Build(world):std::optional<HierarchyGraph>{};
+    std::vector<RenderQuaternion> orientations;
+    if(world.IsHierarchyData()){
+        if(!graph)throw std::runtime_error("Lights: invalid hierarchy");orientations.resize(graph->nodes.size());
+        // Authored rotation-chain orientation: scale/shear/reflection affect
+        // world position, never the direction of outgoing light rays.
+        for(auto index:graph->preorder){const auto& node=graph->nodes[index];auto q=node.local?RenderRotation(node.local->rotation):RenderQuaternion{};
+            if(node.parent){auto p=orientations[*node.parent];q=NormalizeQuaternion({p.w*q.x+p.x*q.w+p.y*q.z-p.z*q.y,p.w*q.y-p.x*q.z+p.y*q.w+p.z*q.x,p.w*q.z+p.x*q.y-p.y*q.x+p.z*q.w,p.w*q.w-p.x*q.x-p.y*q.y-p.z*q.z});}orientations[index]=q;
+        }
+    }
     auto add=[&](Entity e,const TransformComponent& t,const LightParameters& p,LightType type,bool primary){
         ++out.diagnostics.total;
         if(type==LightType::Directional)++out.diagnostics.directional;
         else if(type==LightType::Point)++out.diagnostics.point;else ++out.diagnostics.spot;
         auto safe=SanitizeLight(p);if(!safe.enabled)return;
-        auto pose=interpolation?interpolation->Resolve(e,t):RenderPose::From(t);
-        if(!std::isfinite(pose.position.x)||!std::isfinite(pose.position.y)||!std::isfinite(pose.position.z))return;
+        RenderPose pose;
+        if(graph){auto index=graph->entities.at(e);const auto& m=*graph->nodes[index].matrix;pose.position={float(m[12]),float(m[13]),float(m[14])};pose.rotation=orientations[index];}
+        else{const auto worldTransform=*ReadWorldTransform(world,e);pose=interpolation?interpolation->Resolve(e,worldTransform):RenderPose::From(worldTransform);}
+        if(!std::isfinite(pose.position.x)||!std::isfinite(pose.position.y)||!std::isfinite(pose.position.z)){
+            if(graph)throw std::runtime_error("Lights: hierarchy world position exceeds GPU float range");return;
+        }
         // Invalid Euler/quaternion data never reaches light buffers.
         if(!std::isfinite(pose.rotation.x)||!std::isfinite(pose.rotation.y)||!std::isfinite(pose.rotation.z)||!std::isfinite(pose.rotation.w))pose.rotation={};
         ++out.diagnostics.enabled;entries.push_back({e,type,safe,pose,primary});
@@ -41,7 +55,10 @@ inline GatheredLights GatherSceneLights(World& world,const LightingSettings& leg
     world.ForEach<TransformComponent,DirectionalLightComponent>([&](Entity e,auto& t,auto& p){add(e,t,p,LightType::Directional,p.primary);});
     world.ForEach<TransformComponent,PointLightComponent>([&](Entity e,auto& t,auto& p){add(e,t,p,LightType::Point,false);});
     world.ForEach<TransformComponent,SpotLightComponent>([&](Entity e,auto& t,auto& p){add(e,t,p,LightType::Spot,false);});
-    std::sort(entries.begin(),entries.end(),[](const Entry& a,const Entry& b){return a.entity.index<b.entity.index||(a.entity.index==b.entity.index&&a.entity.generation<b.entity.generation);});
+    std::sort(entries.begin(),entries.end(),[&](const Entry& a,const Entry& b){
+        if(graph)return graph->nodes[graph->entities.at(a.entity)].id<graph->nodes[graph->entities.at(b.entity)].id;
+        return a.entity.index<b.entity.index||(a.entity.index==b.entity.index&&a.entity.generation<b.entity.generation);
+    });
     const Entry* primary=nullptr;
     for(const auto& e:entries)if(e.type==LightType::Directional&&(!primary||(!primary->primary&&e.primary)))primary=&e;
     if(primary){if(legacy.enabled&&primary->p.intensity>0)++out.diagnostics.influencing;auto d=LightDirection(primary->pose);out.lighting.directional.direction={d.x,d.y,d.z};

@@ -17,8 +17,11 @@
 #include "../resources/MaterialSerialization.h"
 #include "../scene/LightSerialization.h"
 #include "../scripting/EntityReference.h"
+#include "TransformAccess.h"
+#include "Hierarchy.h"
 #include <cmath>
 #include <filesystem>
+#include <set>
 namespace ecs {
 namespace {
 using Json=nlohmann::json;
@@ -133,7 +136,30 @@ ComponentRegistry Build(){
     };r.Register(script);
     auto tag=Descriptor<TagComponent>("Tag","Name");Field<TagComponent>(tag,"name","Name",&TagComponent::name,PropertyKind::String);Complete(tag);r.Register(tag);
     auto identity=Descriptor<SceneIdentityComponent>("SceneIdentity","Scene identity");identity.addable=identity.removable=false;Field<SceneIdentityComponent>(identity,"value","Persistent ID",&SceneIdentityComponent::value,PropertyKind::String).readOnly=true;Complete(identity);r.Register(identity);
-    auto t=Descriptor<TransformComponent>("Transform","Transform");Field<TransformComponent>(t,"position","Position",&TransformComponent::position,PropertyKind::Vector);Field<TransformComponent>(t,"rotation","Rotation (rad)",&TransformComponent::rotation,PropertyKind::Vector);Field<TransformComponent>(t,"scale","Scale",&TransformComponent::scale,PropertyKind::Vector);Complete(t);r.Register(t);
+    auto t=Descriptor<TransformComponent>("Transform","Transform");Field<TransformComponent>(t,"position","Position",&TransformComponent::position,PropertyKind::Vector);Field<TransformComponent>(t,"rotation","Rotation (rad)",&TransformComponent::rotation,PropertyKind::Vector);Field<TransformComponent>(t,"scale","Scale",&TransformComponent::scale,PropertyKind::Vector);
+    for(auto& p:t.properties){const auto key=p.key;
+        p.get=[key](const World& w,Entity e)->PropertyValue{auto value=ReadWorldTransform(w,e);if(!value)Fail("Dead/foreign entity or absent Transform");return key=="position"?value->position:key=="rotation"?value->rotation:value->scale;};
+        p.set=[key](World& w,Entity e,const PropertyValue& v){std::string error;auto value=std::get<Vec3>(v);bool ok=key=="position"?TrySetWorldPosition(w,e,value,&error):key=="rotation"?TrySetWorldRotation(w,e,value,&error):TrySetWorldScale(w,e,value,&error);if(!ok)Fail(error);};
+    }Complete(t);
+    // Persistence is authored LOCAL data, independently of world property UI.
+    t.serialize=[](const World& w,Entity e){const auto& v=*w.GetComponent<TransformComponent>(e);return Json{{"position",ToJson(PropertyValue(v.position))},{"rotation",ToJson(PropertyValue(v.rotation))},{"scale",ToJson(PropertyValue(v.scale))}};};
+    const auto transformProperties=t.properties;
+    t.deserialize=[transformProperties](World& w,Entity e,const Json& j){
+        if(!j.is_object())Fail("Transform must be an object");TransformComponent value;
+        for(const auto& p:transformProperties)if(j.contains(p.key)){auto field=FromJson(j.at(p.key),p);Validate(p,field);auto v=std::get<Vec3>(field);if(p.key=="position")value.position=v;else if(p.key=="rotation")value.rotation=v;else value.scale=v;}
+        if(!w.HasComponent<TransformComponent>(e))w.AddComponent<TransformComponent>(e);*w.GetComponent<TransformComponent>(e)=value;
+    };r.Register(t);
+    auto relationship=Descriptor<RelationshipComponent>("Relationship","Hierarchy (data-only)");relationship.addable=relationship.removable=false;
+    relationship.serialize=[](const World& w,Entity e){const auto& v=*w.GetComponent<RelationshipComponent>(e);return Json{{"parent",v.parent?Json(*v.parent):Json(nullptr)},{"order",v.order}};};
+    relationship.deserialize=[](World& w,Entity e,const Json& j){
+        if(!w.IsHierarchyData())Fail("Hierarchy scene requires a data-only World; normal Editor/Play support awaits P0.3c/d");
+        if(!j.is_object()||j.size()!=2||!j.contains("parent")||!j.contains("order"))Fail("Relationship requires parent and order only");
+        RelationshipComponent value;
+        if(!j["parent"].is_null()){if(!j["parent"].is_string()||!ValidSceneIdentity(j["parent"].get<std::string>()))Fail("Invalid parent SceneIdentity");value.parent=j["parent"].get<std::string>();}
+        const auto& order=j["order"];if(!(order.is_number_unsigned()||(order.is_number_integer()&&order.get<std::int64_t>()>=0)))Fail("Sibling order must be a nonnegative integer");
+        value.order=order.get<std::uint64_t>();if(value.order>MaximumSiblingOrder)Fail("Sibling order exceeds int64 range");
+        if(!w.HasComponent<RelationshipComponent>(e))w.AddComponent<RelationshipComponent>(e);*w.GetComponent<RelationshipComponent>(e)=std::move(value);
+    };r.Register(relationship);
     auto mesh=Descriptor<MeshRendererComponent>("MeshRenderer","Mesh renderer");Field<MeshRendererComponent>(mesh,"meshPath","Mesh",&MeshRendererComponent::meshPath,PropertyKind::Asset,0,0,AssetKind::Mesh);Field<MeshRendererComponent>(mesh,"texturePath","Texture",&MeshRendererComponent::texturePath,PropertyKind::Asset,0,0,AssetKind::Texture);Field<MeshRendererComponent>(mesh,"shaderPath","Shader",&MeshRendererComponent::shaderPath,PropertyKind::Asset,0,0,AssetKind::Shader);Field<MeshRendererComponent>(mesh,"visible","Visible",&MeshRendererComponent::visible,PropertyKind::Boolean);Complete(mesh);r.Register(mesh);
     auto material=Descriptor<MaterialComponent>("Material","Material");Field<MaterialComponent>(material,"materialPath","Asset",&MaterialComponent::materialPath,PropertyKind::Asset,0,0,AssetKind::Material);Field<MaterialComponent>(material,"slotMaterials","Slots",&MaterialComponent::slotMaterials,PropertyKind::AssetList,0,0,AssetKind::Material);Field<MaterialComponent>(material,"shaderPath","Shader",&MaterialComponent::shaderPath,PropertyKind::Asset,0,0,AssetKind::Shader);Field<MaterialComponent>(material,"texturePath","Base texture",&MaterialComponent::texturePath,PropertyKind::Asset,0,0,AssetKind::Texture);
     PropertyDescriptor tint;tint.key="tint";tint.label="Tint";tint.kind=PropertyKind::Color;tint.minimum=0;tint.maximum=1;tint.get=[](const World& w,Entity e){auto& a=w.GetComponent<MaterialComponent>(e)->tint;return PropertyValue(std::array<float,4>{a[0],a[1],a[2],a[3]});};tint.set=[](World& w,Entity e,const PropertyValue& v){auto c=std::get<std::array<float,4>>(v);std::copy(c.begin(),c.end(),w.GetComponent<MaterialComponent>(e)->tint);};material.properties.push_back(tint);
@@ -274,6 +300,16 @@ void ComponentRegistry::Restore(World& w,Entity e,const nlohmann::json& j)const{
     if(w.HasComponent<TransformComponent>(e)==false&&(GetLightParameters(w,e)||w.HasComponent<MeshRendererComponent>(e)||w.HasComponent<RigidbodyComponent>(e)||w.HasComponent<ColliderComponent>(e)))Fail("Render/light/physics entity requires Transform");
     int lights=int(w.HasComponent<DirectionalLightComponent>(e))+int(w.HasComponent<PointLightComponent>(e))+int(w.HasComponent<SpotLightComponent>(e));if(lights>1)Fail("Multiple light component types on one entity");
 }
+bool ComponentRegistry::RestoreBatch(World& w,const nlohmann::json& records,std::string* error)const{return Checked([&]{
+    w.AssertOwnerThread();if(w.IsIterating()||!records.is_array())Fail("Restore batch requires an array at a phase boundary");
+    auto staged=w.CloneData();std::unordered_map<std::string,Entity> byId;std::set<std::string> batch;
+    for(auto e:staged->Entities()){auto* id=staged->GetComponent<SceneIdentityComponent>(e);if(!id||!ValidSceneIdentity(id->value)||!byId.emplace(id->value,e).second)Fail("Batch source needs unique stable IDs");}
+    for(const auto& node:records){const auto id=node.at("id").get<std::string>();if(!ValidSceneIdentity(id)||!batch.insert(id).second)Fail("Duplicate/invalid batch ID");if(!node.at("components").is_object()||node["components"].contains("SceneIdentity"))Fail("Batch identity belongs in id");
+        if(!byId.contains(id)){auto e=staged->CreateEntity();staged->AddComponent<SceneIdentityComponent>(e).value=id;byId.emplace(id,e);}}
+    for(const auto& node:records){const auto id=node.at("id").get<std::string>();auto components=node.at("components");components["SceneIdentity"]={{"value",id}};Restore(*staged,byId.at(id),components);}
+    if(staged->IsHierarchyData()){std::string failure;if(!ValidateHierarchy(*staged,&failure))Fail(failure);}
+    w.ReplaceData(*staged);
+},error);}
 bool ComponentRegistry::ValidateAssetKey(const std::string& key,AssetKind kind,std::string* error){return Checked([&]{if(key.empty())return;
     const auto path=std::filesystem::u8path(key);if(key.size()>1024||path.is_absolute()||path.has_root_name()||key.find(':')!=std::string::npos||key.find('\\')!=std::string::npos)Fail("Use a portable relative resource key");for(auto& part:path)if(part=="..")Fail("Resource key cannot escape project root");
     std::string ext=path.extension().string();std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});
