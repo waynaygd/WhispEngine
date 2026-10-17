@@ -62,19 +62,30 @@ bool Application::CommitProject(std::shared_ptr<const ProjectContext> next,ecs::
     if(error)error->clear();return true;
 }
 bool Application::SetStartupScene(const std::string& key,std::string* error){
+    auto project=GetProject();
+    return SaveProjectSettings(key,project?project->settings:ProjectSettings{},error);
+}
+bool Application::SaveProjectSettings(const std::string& key,const ProjectSettings& settings,std::string* error){
     try{
+        m_World.AssertOwnerThread();
         auto project=GetProject();if(!project)throw std::runtime_error("No project is open");
-        ecs::World check;SceneSettings settings;
-        if(!SceneSerializer::LoadWorld(project->ResolveScene(key),check,settings,error))return false;
-        ProjectManager::Activate(ProjectManager::WithStartupScene(*project,key));return true;
+        ecs::World check;SceneSettings sceneSettings;
+        if(!SceneSerializer::LoadWorld(project->ResolveScene(key),check,sceneSettings,error))return false;
+        auto next=ProjectManager::WithSettings(*project,key,settings);
+        ProjectManager::Activate(std::move(next));
+        if(error)error->clear();return true;
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
+}
+AntiAliasingMode Application::GetEffectiveAntiAliasing()const{
+    const auto project=GetProject();
+    return project&&!m_AntiAliasingOverride?project->settings.antiAliasing:m_AntiAliasing;
 }
 
 bool Application::SaveAuthoringSceneForTransition(std::string* error){
     if(!IsEditorPlayMode())return SaveCurrentScene(error);
     // Save the editor snapshot, never runtime entities or gameplay settings.
     auto settings=GetSceneSettings();settings.lighting=m_EditLighting;settings.environment=m_EditEnvironment;
-    settings.shadows=m_EditShadows;settings.background=m_EditBackground;settings.antiAliasing=m_EditAntiAliasing;
+    settings.shadows=m_EditShadows;settings.background=m_EditBackground;settings.antiAliasing=m_EditAntiAliasing;settings.antiAliasingOverride=m_EditAntiAliasingOverride;
     settings.primaryDirectional=SceneSerializer::PrimaryDirectionalId(m_World);
     try{
         const auto key=m_SceneKey.empty()?DefaultSceneKey():m_SceneKey;

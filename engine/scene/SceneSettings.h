@@ -13,6 +13,9 @@ struct SceneSettings {
     ShadowSettings shadows;
     SceneBackground background;
     AntiAliasingMode antiAliasing=AntiAliasingMode::Off;
+    // Missing on disk means an explicit legacy override. Only new project scenes
+    // opt into inheritance; schema v4 and the existing numeric AA value remain.
+    bool antiAliasingOverride=true;
     std::string primaryDirectional;
     bool operator==(const SceneSettings&)const=default;
 };

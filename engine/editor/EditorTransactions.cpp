@@ -8,6 +8,7 @@
 #include "../scene/SceneSerializer.h"
 #include "../ecs/components/PlayerStartComponent.h"
 #include "../ecs/components/FogComponent.h"
+#include "../scripting/EntityReference.h"
 namespace editor {
 namespace {
 bool Same(const nlohmann::json& a,const nlohmann::json& b){return a==b;}
@@ -82,7 +83,7 @@ void EditorLayer::FinishTransaction(Application& app){
 }
 void EditorLayer::CancelTransaction(Application& app){
     if(!m_Transaction)return;auto pending=std::move(*m_Transaction);m_Transaction.reset();
-    try{RestoreSnapshot(app,pending.before);if(m_DuplicateDrag){SelectEntity(app.GetWorld().IsAlive(m_DragOriginal)?m_DragOriginal:ecs::Entity{});m_DuplicateDrag=false;}}catch(const std::exception& e){m_EditorError=e.what();Logger::Get().Error(m_EditorError);}m_GizmoUndoCaptured=false;m_DuplicateDrag=false;m_LightPointerCaptured=false;m_PlaneScaleCaptured=false;m_GroupTransform.reset();
+    try{RestoreSnapshot(app,pending.before);}catch(const std::exception& e){m_EditorError=e.what();Logger::Get().Error(m_EditorError);}m_GizmoUndoCaptured=false;m_DuplicateDrag=false;m_LightPointerCaptured=false;m_PlaneScaleCaptured=false;m_GroupTransform.reset();
 }
 void EditorLayer::Undo(Application& app){
     FinishTransaction(app);if(m_UndoStack.empty())return;auto record=std::move(m_UndoStack.back());m_UndoStack.pop_back();
@@ -138,12 +139,39 @@ ecs::Entity EditorLayer::PasteEntity(Application& app){
 }
 ecs::Entity EditorLayer::BeginDuplicateDrag(Application& app){
     if(app.IsEditorPlayMode()||m_DuplicateDrag||!app.GetWorld().IsAlive(m_Selection.active))return {};
-    FinishTransaction(app);m_DragOriginal=m_Selection.active;
-    auto values=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),m_Selection.active);values.erase("SceneIdentity");
-    auto e=app.CreateEmptyEntity();ecs::ComponentRegistry::Builtins().Restore(app.GetWorld(),e,values);
-    if(!app.GetWorld().HasComponent<ecs::SceneIdentityComponent>(e))app.GetWorld().AddComponent<ecs::SceneIdentityComponent>(e);
-    app.GetWorld().GetComponent<ecs::SceneIdentityComponent>(e)->value=ecs::NewSceneIdentity();
-    SelectEntityFromUser(app,e);m_DuplicateDrag=true;EntitySnapshot before;before.entity=e;before.world=e.world;before.previousSelection=m_DragOriginal;BeginTransaction("Duplicate and move",before);return e;
+    FinishTransaction(app);
+    auto& world=app.GetWorld();const auto source=m_Selection;
+    std::vector<nlohmann::json> values;std::vector<ecs::Entity> copies;
+    std::unordered_map<std::string,std::string> identities;
+    auto selected=source;
+    EntitySnapshot before;before.world=world.GetIdentity();before.selection=source;
+    try{
+        // Capture the entire source set before creating or restoring any entity.
+        for(auto e:source.items)values.push_back(ecs::ComponentRegistry::Builtins().Capture(world,e));
+        for(std::size_t i=0;i<source.items.size();++i){
+            const auto id=ecs::NewSceneIdentity();auto& data=values[i];
+            if(data.contains("SceneIdentity"))identities.emplace(data["SceneIdentity"]["value"].get<std::string>(),id);
+            data["SceneIdentity"]={{"value",id}};
+            auto e=app.CreateEmptyEntity();copies.push_back(e);selected.Remap(source.items[i],e);
+            EntitySnapshot absent;absent.entity=e;absent.world=world.GetIdentity();before.related.push_back(std::move(absent));
+        }
+        for(std::size_t i=0;i<copies.size();++i){
+            auto& data=values[i];
+            // Lua Inspector entity fields are the only registered persistent
+            // entity references today. Strings/assets are deliberately untouched.
+            if(data.contains("LuaScript")&&data["LuaScript"].contains("properties"))
+                for(auto& value:data["LuaScript"]["properties"])
+                    if(!value.is_null()&&scripting::ValidEntityReference(value)){
+                        auto found=identities.find(value["$entity"].get<std::string>());
+                        if(found!=identities.end())value["$entity"]=found->second;
+                    }
+            ecs::ComponentRegistry::Builtins().Restore(world,copies[i],data);app.NotifyEditorMutation(copies[i]);
+        }
+    }catch(const std::exception& error){for(auto e:copies)app.DestroySceneEntity(e);m_EditorError=error.what();return {};}
+    m_Selection=std::move(selected);m_PropertyDrafts.clear();m_GameView=false;
+    // Keep pivot/current and immutable source transforms for this same gesture.
+    if(m_GroupTransform)m_GroupTransform->entities=copies;
+    m_DragOriginal=source.active;m_DuplicateDrag=true;BeginTransaction("Duplicate and move",std::move(before));return m_Selection.active;
 }
 ecs::Entity EditorLayer::CreatePrimitive(Application& app,const std::string& type){
     if(app.IsEditorPlayMode()||(type!="cube"&&type!="sphere"&&type!="cylinder"&&type!="cone"&&type!="plane"))return {};

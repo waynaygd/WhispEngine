@@ -54,6 +54,7 @@ add_library(Engine
   scene/SceneSettings.cpp
   editor/EditorLayer.cpp
   editor/EditorProject.cpp
+  editor/EditorProjectSettings.cpp
   editor/EditorTransactions.cpp
   editor/EditorSelection.cpp
   editor/EditorGroupTransform.cpp

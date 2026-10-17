@@ -55,7 +55,11 @@ void EditorLayer::DrawGroupGizmo(Application& app,const float* view,const float*
     const bool changed=ImGuizmo::Manipulate(view,projection,operation,m_GizmoMode==0?ImGuizmo::LOCAL:ImGuizmo::WORLD,matrix,nullptr,(m_GizmoOperation==1?m_RotationSnapping:m_Snapping)?snap:nullptr);
     if(ImGuizmo::IsUsing()){
         if(!m_GroupTransform&&!BeginGroupTransform(app,m_GizmoMode==0))return;
-        if(changed&&ImGui::IsMouseDragging(0,.5f*ImGui::GetStyle().FontScaleDpi)){ImportMatrix target;std::copy(matrix,matrix+16,target.begin());UpdateGroupTransform(app,target);}
+        bool moved=false;for(int i=0;i<16;++i)moved|=std::abs(matrix[i]-float(current[i]))>1e-6f;
+        if(changed&&moved&&ImGui::IsMouseDragging(0,.5f*ImGui::GetStyle().FontScaleDpi)){
+            if(!m_Transaction&&m_GizmoOperation==0&&ImGui::GetIO().KeyAlt&&!BeginDuplicateDrag(app).IsValid())return;
+            ImportMatrix target;std::copy(matrix,matrix+16,target.begin());UpdateGroupTransform(app,target);
+        }
     }else if(m_GroupTransform)EndGroupTransform(app);
 }
 }

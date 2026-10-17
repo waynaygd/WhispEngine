@@ -1107,7 +1107,7 @@ void Application::SetEditorPlayMode(bool enabled)
         const auto start=std::chrono::steady_clock::now();
         auto runtime=m_World.CloneData(&m_CloneMapping);
         m_EditDebugEntities=m_EcsDebugEntities;m_EditStressEntities=m_StressEntities;
-        m_EditLighting=m_LightingSettings;m_EditEnvironment=m_EnvironmentSettings;m_EditShadows=m_ShadowSettings;m_EditBackground=m_Background;m_EditAntiAliasing=m_AntiAliasing;
+        m_EditLighting=m_LightingSettings;m_EditEnvironment=m_EnvironmentSettings;m_EditShadows=m_ShadowSettings;m_EditBackground=m_Background;m_EditAntiAliasing=m_AntiAliasing;m_EditAntiAliasingOverride=m_AntiAliasingOverride;
         auto map=[&](std::vector<ecs::Entity>& entities){std::erase_if(entities,[&](auto e){return !m_CloneMapping.contains(e);});for(auto& e:entities)e=m_CloneMapping.at(e);};
         map(m_EcsDebugEntities);map(m_StressEntities);
         m_EditorLayer.EnterRuntime(m_CloneMapping);
@@ -1133,7 +1133,7 @@ void Application::SetEditorPlayMode(bool enabled)
         m_Camera.yaw = m_SavedEditorCamera.yaw;
         m_Camera.pitch = m_SavedEditorCamera.pitch;
         m_EcsDebugEntities=std::move(m_EditDebugEntities);m_StressEntities=std::move(m_EditStressEntities);
-        m_LightingSettings=m_EditLighting;m_EnvironmentSettings=m_EditEnvironment;m_ShadowSettings=m_EditShadows;m_Background=m_EditBackground;m_AntiAliasing=m_EditAntiAliasing;
+        m_LightingSettings=m_EditLighting;m_EnvironmentSettings=m_EditEnvironment;m_ShadowSettings=m_EditShadows;m_Background=m_EditBackground;m_AntiAliasing=m_EditAntiAliasing;m_AntiAliasingOverride=m_EditAntiAliasingOverride;
     }
     m_EditorPlayMode=enabled;m_EditorPaused=false;ResetPhysicsClock();m_ActiveCollisionPairs.clear();
     if(m_PhysicsSystem){m_PhysicsSystem->ResetState();m_PhysicsSystem->SetEnabled(enabled);}
@@ -1617,7 +1617,7 @@ int Application::Run()
                     if(m_ShadowBenchmark){m_LightingSettings.enabled=true;m_ShadowSettings.enabled=block%6>=2;m_ShadowSettings.pcf=block%6>=4;}
                 }
 
-                wc.renderer->SetAntiAliasing(m_AntiAliasing);
+                wc.renderer->SetAntiAliasing(GetEffectiveAntiAliasing());
                 wc.renderer->SetEditorVisuals(m_EditorLayer.BuildVisualFrame(*this));
                 const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
                 const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();
@@ -2158,12 +2158,12 @@ bool SceneKeyValid(const std::string& key){
 }
 }
 SceneSettings Application::GetSceneSettings()const{
-    SceneSettings s;s.lighting=m_LightingSettings;s.environment=m_EnvironmentSettings;s.shadows=m_ShadowSettings;s.background=m_Background;s.antiAliasing=m_AntiAliasing;
+    SceneSettings s;s.lighting=m_LightingSettings;s.environment=m_EnvironmentSettings;s.shadows=m_ShadowSettings;s.background=m_Background;s.antiAliasing=m_AntiAliasing;s.antiAliasingOverride=m_AntiAliasingOverride;
     s.primaryDirectional=SceneSerializer::PrimaryDirectionalId(const_cast<ecs::World&>(GetWorld()));return s;
 }
 bool Application::SetSceneSettings(const SceneSettings& s,std::string* error){
     try{(void)SceneSettingsToJson(s);const bool enabled=m_LightingSettings.enabled;const int debug=m_ShadowSettings.debugMode;
-        m_LightingSettings=s.lighting;m_LightingSettings.enabled=enabled;m_EnvironmentSettings=s.environment;m_ShadowSettings=s.shadows;m_Background=s.background;m_AntiAliasing=s.antiAliasing;m_ShadowSettings.debugMode=debug;editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);return true;
+        m_LightingSettings=s.lighting;m_LightingSettings.enabled=enabled;m_EnvironmentSettings=s.environment;m_ShadowSettings=s.shadows;m_Background=s.background;m_AntiAliasing=s.antiAliasing;m_AntiAliasingOverride=s.antiAliasingOverride;m_ShadowSettings.debugMode=debug;editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);return true;
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }
 bool Application::SaveSceneAs(const std::string& key,bool overwrite,std::string* error){
@@ -2186,7 +2186,7 @@ bool Application::OpenScene(const std::string& key,std::string* error){
 }
 void Application::NewScene(){
     SetEditorPlayMode(false);ClearPhysicsStressScene();m_World.Clear();m_EcsDebugEntities.clear();m_StressEntities.clear();m_Mutations.Clear();
-    m_SceneKey.clear();m_Config.ecsDemo.sceneFile.clear();SetSceneSettings(SceneSettings{});m_EditorLayer.ResetHistory();m_EditorLayer.MarkSaved();
+    m_SceneKey.clear();m_Config.ecsDemo.sceneFile.clear();SceneSettings settings;settings.antiAliasingOverride=!GetProject();SetSceneSettings(settings);m_EditorLayer.ResetHistory();m_EditorLayer.MarkSaved();
 }
 ecs::Entity Application::CreateEmptyEntity(const std::string& name){
     auto e=GetWorld().CreateEntity();GetWorld().AddComponent<ecs::TagComponent>(e).name=name;GetWorld().AddComponent<ecs::TransformComponent>(e);GetWorld().AddComponent<ecs::SceneIdentityComponent>(e);m_EcsDebugEntities.push_back(e);return e;

@@ -5,7 +5,7 @@
 При обычном запуске `WhispEngine.exe` появляется отдельный стартовый **Project
 Browser**, без сцены и панелей редактора позади. Редактор становится доступен
 после открытия проекта или явного выбора **Legacy Workspace**. Project Browser
-также доступен через **File → New Project / Open Project / Project Settings**.
+также доступен через **File → New Project / Open Project**.
 `WhispEngine.exe --project <descriptor.whispproject>` сразу открывает проект;
 при ошибке остаётся стартовый экран с сообщением. **Close Project** возвращает
 на стартовый экран, не включая Legacy Workspace автоматически.
@@ -46,6 +46,13 @@ Save As требует подтверждения замены существу�
 При открытии загружается Startup Scene; отсутствие или повреждение сцены — ошибка
 открытия, текущий проект сохраняется.
 
+**File → Project Settings** открывает отдельное dockable-окно активного проекта.
+В **General** имя, descriptor и каталоги доступны только для чтения; Startup Scene
+можно ввести или выбрать кнопкой Use current scene. В **Rendering** выбирается
+проектное AA: Off, FXAA Low или FXAA High. Save атомарно сохраняет Startup Scene
+и AA, Cancel отбрасывает черновик. Несохранённый черновик также учитывается при
+Save / Discard / Cancel перед сменой проекта или выходом.
+
 Минимальные настройки описаны в `.whispproject`:
 
 ```json
@@ -53,15 +60,30 @@ Save As требует подтверждения замены существу�
   "formatVersion": 1,
   "name": "HospitalDemo",
   "startupScene": "Scenes/Main.json",
-  "directories": { "assets": "Assets", "scenes": "Scenes" }
+  "directories": { "assets": "Assets", "scenes": "Scenes" },
+  "settings": { "rendering": { "antiAliasing": 2 } }
 }
 ```
 
 Имя и каталоги можно изменить в descriptor при закрытом проекте. Перенесите
 соответствующие папки вручную и обновите startupScene, если меняете scenes.
 Asset/scene directories должны быть раздельными и находиться внутри проекта.
-Неизвестные поля descriptor сохраняются при изменении Startup Scene: формат
-оставляет место для rendering/input/build/runtime settings.
+`settings` необязателен: старые проекты используют Off. AA кодируется строго
+целым числом: 0 — Off, 1 — FXAA Low, 2 — FXAA High. Неизвестные поля descriptor,
+включая вложенные поля settings/rendering, сохраняются при обновлении.
+
+Новые проектные сцены наследуют **Project Default**. В Scene Settings видны
+источник и эффективное AA; **Scene Override** позволяет сохранить отдельное
+значение в сцене и поддерживает Undo/Redo. Старые сцены сохраняют своё прежнее AA
+как явный override (включая Off, если AA ранее отсутствовало).
+
+Scene schema остаётся v4. Необязательный `settings.antiAliasingOverride: false`
+включает наследование; отсутствие поля означает прежнее явное значение
+`settings.antiAliasing`. Числовое поле AA сохраняется; при отсутствии проекта оно
+служит самостоятельным значением. Смена Project Default не переписывает сцену
+и не помечает её изменённой. Свет, окружение, тени и фон остаются Scene Settings;
+layout, камера редактора, grid, snapping и visual override — Editor Preferences.
+В Legacy Workspace новые сцены, AA и сериализация работают по прежним правилам.
 
 ## Ресурсы и Lua
 

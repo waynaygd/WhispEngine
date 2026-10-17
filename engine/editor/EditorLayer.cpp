@@ -342,7 +342,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     if(m_ViewportMaximized){
         m_HierarchyFocused=false;
         ImGui::DockSpace(ImHashStr("WhispEngine.Editor.Dockspace"),ImVec2(0,0),ImGuiDockNodeFlags_KeepAliveOnly);
-        DrawProjectBrowser(app);DrawViewport(app,renderer);HandleEditorShortcuts(app);return;
+        DrawProjectBrowser(app);DrawProjectSettings(app);DrawViewport(app,renderer);HandleEditorShortcuts(app);return;
     }
     ConfigureDocking();DrawToolbar(app);
 
@@ -354,6 +354,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     m_ViewportFocused=false;m_HierarchyFocused=false;
     DrawMainMenu(app);DrawSceneDialogs(app);DrawProjectBrowser(app);
     if(app.IsProjectBrowserActive())return;
+    DrawProjectSettings(app);
     if(m_ShowSceneSettings)DrawSceneSettings(app,renderer,dt);
     if(m_ShowVisualSettings)DrawEditorVisualSettings(app,renderer);
     PrepareEditorSky(app,renderer);
@@ -850,7 +851,7 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
     {
         if (!m_GizmoUndoCaptured)
         {
-            if(m_GizmoOperation==0&&ImGui::GetIO().KeyAlt){auto copy=BeginDuplicateDrag(app);if(copy.IsValid())transform=world.GetComponent<ecs::TransformComponent>(copy);}
+            if(m_GizmoOperation==0&&ImGui::GetIO().KeyAlt){auto copy=BeginDuplicateDrag(app);if(!copy.IsValid())return;transform=world.GetComponent<ecs::TransformComponent>(copy);}
             else PushUndoBeforeChange(app,"Transform Gizmo");
             m_GizmoUndoCaptured = true;
         }
@@ -872,7 +873,22 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
     ImGui::SetNextWindowSizeConstraints(ImVec2(270,180),ImVec2(FLT_MAX,FLT_MAX));
     if(!ImGui::Begin("Scene Settings",&m_ShowSceneSettings)){ImGui::End();return;}
     auto beforeSettings=app.GetSceneSettings();
-    {auto settings=beforeSettings;int aa=int(settings.antiAliasing);if(ImGui::Combo("Anti-Aliasing",&aa,"OFF\0FXAA Low\0FXAA High\0")){BeginSceneTransaction(app,"Anti-aliasing");settings.antiAliasing=AntiAliasingMode(aa);app.SetSceneSettings(settings);FinishTransaction(app);beforeSettings=app.GetSceneSettings();}
+    {auto settings=beforeSettings;const auto project=app.GetProject();
+    if(project){
+        ImGui::TextUnformatted("Anti-Aliasing");
+        bool override=settings.antiAliasingOverride;
+        if(ImGui::Checkbox("Scene Override##AntiAliasing",&override)){
+            BeginSceneTransaction(app,"Anti-aliasing inheritance");
+            if(override)settings.antiAliasing=app.GetEffectiveAntiAliasing();
+            settings.antiAliasingOverride=override;app.SetSceneSettings(settings);FinishTransaction(app);beforeSettings=app.GetSceneSettings();
+        }
+        if(ImGui::IsItemHovered())ImGui::SetTooltip("Unchecked: follow Project Settings. Checked: store this scene's own AA mode. Existing scenes keep their previous mode as an override.");
+        ImGui::TextWrapped("Project Default: %s | Source: %s",AntiAliasingName(project->settings.antiAliasing),settings.antiAliasingOverride?"Scene Override":"Project Default");
+    }
+    int aa=int(app.GetEffectiveAntiAliasing());ImGui::BeginDisabled(project&&!settings.antiAliasingOverride);
+    if(project)ImGui::SetNextItemWidth(-FLT_MIN);
+    if(ImGui::Combo(project?"##SceneAntiAliasing":"Anti-Aliasing",&aa,"OFF\0FXAA Low\0FXAA High\0")){BeginSceneTransaction(app,"Anti-aliasing");settings.antiAliasing=AntiAliasingMode(aa);settings.antiAliasingOverride=true;app.SetSceneSettings(settings);FinishTransaction(app);beforeSettings=app.GetSceneSettings();}
+    ImGui::EndDisabled();if(project)ImGui::Text("Effective AA: %s",AntiAliasingName(app.GetEffectiveAntiAliasing()));
     if(renderer){auto d=renderer->GetAntiAliasingDiagnostics();ImGui::Text("Effective samples: %u (post-process AA), intermediate %.2f MiB",d.effectiveSamples,d.intermediateBytes/1048576.);ImGui::Text("HDR/output GPU %.3f ms",renderer->GetGpuTimings().outputMs);}}
 
     {

@@ -152,6 +152,8 @@ public:
     bool OpenProject(const std::filesystem::path&,ProjectDecision=ProjectDecision::Cancel,std::string* error=nullptr);
     bool CloseProject(ProjectDecision=ProjectDecision::Cancel,std::string* error=nullptr);
     bool SetStartupScene(const std::string&,std::string* error=nullptr);
+    bool SaveProjectSettings(const std::string& startupScene,const ProjectSettings&,std::string* error=nullptr);
+    AntiAliasingMode GetEffectiveAntiAliasing()const;
     bool SaveAuthoringSceneForTransition(std::string* error=nullptr);
     std::shared_ptr<const ProjectContext> GetProject()const{return ProjectManager::Active();}
     std::string DefaultSceneKey()const {auto p=GetProject();return p?p->sceneDirectory+"/Untitled.json":"scenes/editor_scene.json";}
@@ -255,6 +257,7 @@ private:
     ShadowSettings m_EditShadows;
     SceneBackground m_Background,m_EditBackground;
     AntiAliasingMode m_AntiAliasing=AntiAliasingMode::Off,m_EditAntiAliasing=AntiAliasingMode::Off;
+    bool m_AntiAliasingOverride=true,m_EditAntiAliasingOverride=true;
     bool m_EditorPaused=false;
     double m_LastCloneMs=0;
     ecs::PhysicsSystem* m_PhysicsSystem = nullptr;

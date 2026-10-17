@@ -86,6 +86,19 @@ std::shared_ptr<const ProjectContext> ProjectManager::Prepare(const fs::path& pa
     p->name=j.at("name").get<std::string>();if(p->name.empty()||p->name.size()>240)throw std::runtime_error("Invalid project name");
     p->assetDirectory=j.at("directories").at("assets").get<std::string>();p->sceneDirectory=j.at("directories").at("scenes").get<std::string>();
     p->startupScene=j.at("startupScene").get<std::string>();
+    if(j.contains("settings")){
+        const auto& settings=j.at("settings");
+        if(!settings.is_object())throw std::runtime_error("Project settings must be an object");
+        if(settings.contains("rendering")){
+            const auto& rendering=settings.at("rendering");
+            if(!rendering.is_object())throw std::runtime_error("Project rendering settings must be an object");
+            if(rendering.contains("antiAliasing")){
+                const auto& aa=rendering.at("antiAliasing");
+                if(!aa.is_number_integer()||(aa!=0&&aa!=1&&aa!=2))throw std::runtime_error("Project antiAliasing must be an integer: 0 (Off), 1 (FXAA Low), 2 (FXAA High)");
+                p->settings.antiAliasing=AntiAliasingMode(aa.get<int>());
+            }
+        }
+    }
     auto assets=p->AssetRoot(), scenes=p->SceneRoot();
     auto a=assets.lexically_relative(scenes),s=scenes.lexically_relative(assets);
     if(a.empty()||a=="."||*a.begin()!=".."||s.empty()||*s.begin()!="..")throw std::runtime_error("Asset and scene directories must be separate");
@@ -108,19 +121,24 @@ std::shared_ptr<const ProjectContext> ProjectManager::Create(const fs::path& par
     // Only this newly created directory belongs to the transaction.
     try {
         for(auto folder:{"Assets/models","Assets/textures","Assets/materials","Assets/scripts","Assets/audio","Assets/prefabs","Assets/environments","Scenes","Settings"})fs::create_directories(root/folder);
-        Write(root/"Scenes/Main.json",{{"version",4},{"entities",nlohmann::json::array()}},false);
+        Write(root/"Scenes/Main.json",{{"version",4},{"settings",{{"antiAliasing",0},{"antiAliasingOverride",false}}},{"entities",nlohmann::json::array()}},false);
         auto path=root/fs::u8path(name+".whispproject");
         Write(path,{{"formatVersion",1},{"name",name},{"startupScene","Scenes/Main.json"},{"directories",{{"assets","Assets"},{"scenes","Scenes"}}}},false);
         return Prepare(path);
     }catch(...){std::error_code ec;fs::remove_all(root,ec);throw;}
 }
 std::shared_ptr<const ProjectContext> ProjectManager::WithStartupScene(const ProjectContext& context,const std::string& key) {
+    return WithSettings(context,key,context.settings);
+}
+std::shared_ptr<const ProjectContext> ProjectManager::WithSettings(const ProjectContext& context,const std::string& key,const ProjectSettings& settings) {
+    if(!ValidAntiAliasingMode(settings.antiAliasing))throw std::runtime_error("Unsupported project anti-aliasing mode");
     if(!fs::is_regular_file(context.ResolveScene(key)))throw std::runtime_error("Save the startup scene first");
     ProjectContext::CheckNoLinks(context.descriptorPath);
     std::ifstream current(context.descriptorPath);nlohmann::json disk;current>>disk;
     if(disk!=context.descriptor)throw std::runtime_error("Project descriptor changed outside the editor. Reopen it before changing settings.");
     current.close(); // Windows cannot atomically replace a descriptor held open by this stream.
     auto next=std::make_shared<ProjectContext>(context);next->startupScene=key;next->descriptor["startupScene"]=key;
+    next->settings=settings;next->descriptor["settings"]["rendering"]["antiAliasing"]=int(settings.antiAliasing);
     ProjectContext::CheckNoLinks(context.descriptorPath);Write(context.descriptorPath,next->descriptor,true);return next;
 }
 std::shared_ptr<const ProjectContext> ProjectManager::Active(){return active.load();}

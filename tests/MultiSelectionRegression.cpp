@@ -5,6 +5,10 @@
 #include "editor/LightGizmoMath.h"
 #include "ecs/components/SceneIdentityComponent.h"
 #include "scene/SceneSerializer.h"
+#include "scripting/EntityReference.h"
+#include "ecs/components/LuaScriptComponent.h"
+#include "ecs/components/ColliderComponent.h"
+#include <set>
 #include <imgui_internal.h>
 #include <ImGuizmo.h>
 #include <iostream>
@@ -19,6 +23,33 @@ static int checks=0;
 static void Check(bool value,const char* label){if(!value)throw std::runtime_error(label);++checks;}
 static void Near(float a,float b,const char* label,float epsilon=.0002f){Check(std::abs(a-b)<epsilon,label);}
 static void SameTransform(const TransformComponent& a,const TransformComponent& b,const char* label){auto x=TransformMatrix(a),y=TransformMatrix(b);for(int i=0;i<16;++i)Near(float(x[i]),float(y[i]),label);}
+static void DuplicateGroup(){
+ for(int size:{1,2,16}){
+  Application app;app.NewScene();auto& ui=app.GetEditorLayer();auto& w=app.GetWorld();
+  auto external=ui.CreateEntity(app,"External");std::vector<Entity> sources;std::vector<nlohmann::json> snapshots;
+  for(int i=0;i<size;++i){auto e=ui.CreateEntity(app,"Source");sources.push_back(e);auto& t=*w.GetComponent<TransformComponent>(e);t.position={float(i*2),0,0};t.rotation={.1f*i,.2f,.3f};t.scale={1,2,3};
+   if(i%2==0)w.AddComponent<ColliderComponent>(e);else w.AddComponent<PointLightComponent>(e);
+  }
+  for(int i=0;i<size;++i){auto& lua=w.AddComponent<LuaScriptComponent>(sources[i]);auto internal=SceneSerializer::EntitySceneId(w,sources[(i+1)%size]);lua.properties={{"target",{{"$entity",internal}}},{"outside",{{"$entity",SceneSerializer::EntitySceneId(w,external)}}},{"text",internal}};snapshots.push_back(ComponentRegistry::Builtins().Capture(w,sources[i]));}
+  ui.ResetHistory();for(auto e:sources)ui.SelectViewportEntity(app,e,true,false);
+  const auto count=w.GetAliveCount();if(size>1)Check(ui.BeginGroupTransform(app,false),"duplicate group baseline");
+  Check(ui.BeginDuplicateDrag(app).IsValid(),"begin duplicate set");auto copies=ui.GetSelectedEntities();Check(copies.size()==size&&ui.GetSelectedEntity()==copies.back(),"duplicate selection and active");
+  Check(!ui.BeginDuplicateDrag(app).IsValid()&&w.GetAliveCount()==count+size,"once per gesture");
+  if(size>1){TransformComponent pivot;pivot.position={float(size-1)+5,2,-3};Check(ui.UpdateGroupTransform(app,TransformMatrix(pivot)),"move cloned group");ui.EndGroupTransform(app);}else{ui.FinishTransaction(app);}
+  auto verify=[&]{std::set<std::string> ids;for(auto e:w.Entities())Check(ids.insert(SceneSerializer::EntitySceneId(w,e)).second,"unique scene identities");
+   copies=ui.GetSelectedEntities();for(int i=0;i<size;++i){Check(ComponentRegistry::Builtins().Capture(w,sources[i])==snapshots[i],"original components unchanged");auto& p=w.GetComponent<LuaScriptComponent>(copies[i])->properties;
+    Check(scripting::ResolveEntityReference(w,p["target"])==copies[(i+1)%size],"internal references remapped");Check(scripting::ResolveEntityReference(w,p["outside"])==external,"external reference retained");Check(p["text"]==snapshots[i]["LuaScript"]["properties"]["text"],"ordinary strings untouched");
+    auto expected=*w.GetComponent<TransformComponent>(sources[i]);if(size>1){expected.position.x+=5;expected.position.y+=2;expected.position.z-=3;}SameTransform(*w.GetComponent<TransformComponent>(copies[i]),expected,"clone relative transform");
+   }};
+  Check(ui.UndoCount()==1,"duplicate plus movement one Undo");verify();
+  for(int n=0;n<4;++n){ui.UndoEdit(app);Check(w.GetAliveCount()==count&&ui.GetSelectedEntities()==sources,"Undo removes entire set and restores selection");ui.RedoEdit(app);Check(w.GetAliveCount()==count+size,"Redo restores entire set");verify();}
+  auto saved=SceneSerializer::CaptureWorld(w);World loaded;SceneSettings settings;std::string error;Check(SceneSerializer::RestoreWorld(saved,loaded,settings,&error),"clone scene round trip");Check(loaded.GetAliveCount()==w.GetAliveCount(),"round trip count");
+  for(auto e:loaded.Entities())if(auto* lua=loaded.GetComponent<LuaScriptComponent>(e))Check(loaded.IsAlive(scripting::ResolveEntityReference(loaded,lua->properties["target"])),"round trip references resolve");
+  if(size>1){Check(ui.BeginGroupTransform(app,false),"cancel baseline");Check(ui.BeginDuplicateDrag(app).IsValid(),"cancel duplicate");ui.EndGroupTransform(app,true);Check(w.GetAliveCount()==count+size&&ui.GetSelectedEntities()==copies,"cancel removes all new copies restores group");}
+  app.SetEditorPlayMode(true);auto runtimeCount=app.GetWorld().GetAliveCount();Check(!ui.BeginDuplicateDrag(app).IsValid()&&app.GetWorld().GetAliveCount()==runtimeCount,"Play prohibits authoring duplication");app.SetEditorPaused(true);Check(!ui.BeginDuplicateDrag(app).IsValid(),"Pause prohibits authoring duplication");app.SetEditorPlayMode(false);
+  app.NewScene();Check(ui.GetSelectedEntities().empty()&&!ui.HasPendingTransaction(),"scene switch resets duplicate state");
+ }
+}
 static void Cpu(){
  Application app;app.NewScene();auto& ui=app.GetEditorLayer();auto& world=app.GetWorld();
  auto a=ui.CreateEntity(app,"A"),b=ui.CreateEntity(app,"B"),c=ui.CreateEntity(app,"C"),d=ui.CreateEntity(app,"D");
@@ -69,10 +100,50 @@ static void Gpu(){
  auto history=ui.UndoCount();auto beforeA=*app.GetWorld().GetComponent<TransformComponent>(cubes[0]),beforeC=*app.GetWorld().GetComponent<TransformComponent>(cubes[2]);
  ui.SetSnapping(true);SyntheticEditorInput::Button(0,true);frame(1);Check(ui.UndoCount()==history,"press without movement no Undo");point(center.x+grab+55,center.y);point(center.x+grab+80,center.y);SyntheticEditorInput::Button(0,false);frame();
  auto afterA=*app.GetWorld().GetComponent<TransformComponent>(cubes[0]),afterC=*app.GetWorld().GetComponent<TransformComponent>(cubes[2]);float moved=afterA.position.x-beforeA.position.x;Check(std::abs(moved)>.1f,"native group moved");Near(afterC.position.x-beforeC.position.x,moved,"native common movement");Near(moved,std::round(moved),"group Move snap");Check(ui.UndoCount()==history+1,"native Move one Undo");chord(ImGuiKey_Z);SameTransform(*app.GetWorld().GetComponent<TransformComponent>(cubes[0]),beforeA,"native Move Undo A");SameTransform(*app.GetWorld().GetComponent<TransformComponent>(cubes[2]),beforeC,"native Move Undo C");chord(ImGuiKey_Y);Near(app.GetWorld().GetComponent<TransformComponent>(cubes[0])->position.x,afterA.position.x,"native Move Redo");chord(ImGuiKey_Z);
+ // P0.2: exercise the actual ImGuizmo input path, not just duplication helpers.
+ auto baseCount=app.GetWorld().GetAliveCount();auto originals=ui.GetSelectedEntities();
+ auto alt=[&](bool down){SyntheticEditorInput::Key(ImGuiMod_Alt,down);frame();};
+ auto release=[&]{SyntheticEditorInput::Button(0,false);frame();};
+ auto start=[&]{point(center.x+grab,center.y);SyntheticEditorInput::Button(0,true);frame(1);};
+ alt(true);start();release();Check(app.GetWorld().GetAliveCount()==baseCount&&ui.GetSelectedEntities()==originals,"Alt click creates no copies");
+ history=ui.UndoCount();start();point(center.x+grab+55,center.y);auto firstCopies=ui.GetSelectedEntities();
+ Check(app.GetWorld().GetAliveCount()==baseCount+2&&firstCopies!=originals,"native Alt drag clones every selected entity");
+ alt(false);point(center.x+grab+80,center.y);point(center.x+grab+90,center.y);release();
+ Check(app.GetWorld().GetAliveCount()==baseCount+2&&ui.GetSelectedEntities()==firstCopies,"Alt release and continued drag create no extra copies");
+ Check(ui.UndoCount()==history+1,"native duplicate move one Undo");
+ SameTransform(*app.GetWorld().GetComponent<TransformComponent>(cubes[0]),beforeA,"native Alt drag preserves A");SameTransform(*app.GetWorld().GetComponent<TransformComponent>(cubes[2]),beforeC,"native Alt drag preserves C");
+ chord(ImGuiKey_Z);Check(app.GetWorld().GetAliveCount()==baseCount&&ui.GetSelectedEntities()==originals,"native duplicate Undo selection");
+ chord(ImGuiKey_Y);Check(app.GetWorld().GetAliveCount()==baseCount+2&&ui.GetSelectedEntities().size()==2,"native duplicate Redo");chord(ImGuiKey_Z);
+ alt(true);start();point(center.x+grab+60,center.y);Check(app.GetWorld().GetAliveCount()==baseCount+2,"second drag creates one new set");
+ press(ImGuiKey_Escape);Check(app.GetWorld().GetAliveCount()==baseCount&&ui.GetSelectedEntities()==originals&&!ui.HasPendingTransaction(),"Escape removes complete batch restores selection");
+ release();alt(false);
  ui.SetSnapping(false);ui.SetGizmoOperation(1);frame();float radius=0;for(float r=20;r<=110;r+=5){point(center.x+r*.7071068f,center.y-r*.7071068f);if(ImGuizmo::IsOver(ImGuizmo::ROTATE_Z)){radius=r;break;}}Check(radius>0,"shared Rotate Z ring");history=ui.UndoCount();SyntheticEditorInput::Button(0,true);frame(1);point(center.x+radius*.258819f,center.y-radius*.965926f);SyntheticEditorInput::Button(0,false);frame();
  auto rotateA=*app.GetWorld().GetComponent<TransformComponent>(cubes[0]),rotateC=*app.GetWorld().GetComponent<TransformComponent>(cubes[2]);Check(std::abs(rotateA.position.y)>.1f&&std::abs(rotateA.rotation.z)>.01f,"native group rotates positions and orientation");Near(std::hypot(rotateC.position.x-rotateA.position.x,rotateC.position.y-rotateA.position.y),4,"native rotation preserves distance",.002f);Check(ui.UndoCount()==history+1,"native rotation one Undo");chord(ImGuiKey_Z);
  ui.SetGizmoOperation(2);frame();point(center.x,center.y);Check(ImGuizmo::IsOver(ImGuizmo::SCALE),"shared uniform scale handle");history=ui.UndoCount();SyntheticEditorInput::Button(0,true);frame(1);point(center.x+45,center.y-20);SyntheticEditorInput::Button(0,false);frame();
  auto scaleA=*app.GetWorld().GetComponent<TransformComponent>(cubes[0]),scaleC=*app.GetWorld().GetComponent<TransformComponent>(cubes[2]);Check(std::abs(scaleA.scale.x-.8f)>.01f&&std::abs(scaleA.position.x+2)>.01f,"native group scale changes sizes and offsets");Near(scaleC.scale.x,scaleA.scale.x,"native uniform scale shared");Check(ui.UndoCount()==history+1,"native scale one Undo");chord(ImGuiKey_Z);
+ // All native Move axes and plane handles use the same duplicate transaction.
+ ui.SetGizmoOperation(0);ui.SetSnapping(false);
+ Check(app.SetEditorCameraPose({-8,7,-7},std::atan2(8.f,12.f),-std::atan2(7.f,std::sqrt(208.f))),"oblique move camera");frame();
+ center=screen({0,0,5});std::array<ImVec2,3> directions;
+ for(int axis=0;axis<3;++axis){Vec3 p{0,0,5};if(axis==0)p.x+=1;if(axis==1)p.y+=1;if(axis==2)p.z+=1;auto q=screen(p);float length=std::hypot(q.x-center.x,q.y-center.y);directions[axis]={(q.x-center.x)/length,(q.y-center.y)/length};}
+ for(int handle=0;handle<6;++handle){
+  const auto expected=ImGuizmo::MOVETYPE(ImGuizmo::MT_MOVE_X+handle);ImVec2 hit{};bool found=false;
+  for(float radius:{16.f,24.f,32.f,40.f,48.f,56.f}){
+   for(int signs=0;signs<4;++signs){float sign=(signs&1)?-1.f:1.f,other=(signs&2)?-1.f:1.f;ImVec2 offset{};
+    if(handle<3){offset={directions[handle].x*radius*sign,directions[handle].y*radius*sign};}
+    else{int a=(handle-3+1)%3,b=(handle-3+2)%3;offset={(directions[a].x*sign+directions[b].x*other)*radius,(directions[a].y*sign+directions[b].y*other)*radius};}
+    hit={center.x+offset.x,center.y+offset.y};point(hit.x,hit.y);if(ImGuizmo::GetHoveredHandleType()==expected){found=true;break;}
+   }if(found)break;
+  }
+  Check(found,"native Move axis/plane available");history=ui.UndoCount();alt(true);SyntheticEditorInput::Button(0,true);frame(1);Check(ImGuizmo::GetActiveHandleType()==expected,"native intended axis/plane captured");
+  point(hit.x+(hit.x-center.x)*.8f,hit.y+(hit.y-center.y)*.8f);release();alt(false);
+  Check(app.GetWorld().GetAliveCount()==baseCount+2&&ui.UndoCount()==history+1,"native each axis/plane clones group once");
+  auto group=ui.GetSelectedEntities();auto& ta=*app.GetWorld().GetComponent<TransformComponent>(group[0]);auto& tc=*app.GetWorld().GetComponent<TransformComponent>(group[1]);
+  Near(tc.position.x-ta.position.x,4,"axis/plane relative X");Near(tc.position.y-ta.position.y,0,"axis/plane relative Y");Near(tc.position.z-ta.position.z,0,"axis/plane relative Z");
+  Check(std::hypot(ta.position.x-beforeA.position.x,ta.position.y-beforeA.position.y,ta.position.z-beforeA.position.z)>.01f,"axis/plane actual movement");
+  chord(ImGuiKey_Z);Check(app.GetWorld().GetAliveCount()==baseCount&&ui.GetSelectedEntities()==originals,"axis/plane Undo group");
+ }
+ Check(app.SetEditorCameraPose({0,0,-7},0,0),"restore front camera");frame();
  // Actual Hierarchy rows exercise Ctrl/Shift routing and text-field safety.
  press(ImGuiKey_F11);ui.SetGizmoOperation(0);frame();auto* hierarchy=ImGui::FindWindowByName("Scene Hierarchy");ImGui::FocusWindow(hierarchy);frame();
  auto rows=app.GetWorld().Entities();float hx=hierarchy->WorkRect.Min.x+40,hy=hierarchy->WorkRect.Min.y+ImGui::GetFrameHeightWithSpacing()+ImGui::GetTextLineHeight()*.5f,step=ImGui::GetTextLineHeightWithSpacing();click(hx,hy);Check(ui.GetSelectedEntity()==rows[0]&&ui.GetSelectedEntities().size()==1,"Hierarchy single row");click(hx,hy+2*step,false,true);Check(ui.GetSelectedEntities().size()==3&&ui.GetSelectedEntity()==rows[2],"Hierarchy real Shift range");
@@ -85,5 +156,5 @@ int main(int argc,char** argv){ScopedEditorPreferenceRestore preferences;try{
 #if defined(ENABLE_DX12)
  if(argc>1&&std::string(argv[1])=="--dx12")Gpu();else
 #endif
- Cpu();std::cout<<"Multi-selection: "<<checks<<" checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+ {Cpu();DuplicateGroup();}std::cout<<"Multi-selection: "<<checks<<" checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
 

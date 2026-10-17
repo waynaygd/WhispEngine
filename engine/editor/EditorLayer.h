@@ -3,6 +3,7 @@
 #include "../ecs/Entity.h"
 #include "../ecs/ComponentRegistry.h"
 #include "../scene/SceneSettings.h"
+#include "../core/ProjectContext.h"
 #include "../render/RenderResourceHandles.h"
 #include "EditorPreferences.h"
 #include "InputRouting.h"
@@ -81,7 +82,9 @@ public:
     bool ResolveProjectEdits(Application&,int decision,std::string* error);
     void ResetProjectState(IRenderAdapter*);
     void ProjectOpened(Application&);
-    bool HasProjectEdits()const{return m_MaterialDirty||(m_EditHistory?(m_EditHistory->external||m_EditHistory->revision!=m_EditHistory->saved):IsSceneDirty());}
+    bool HasProjectEdits()const{return ProjectSettingsDirty()||m_MaterialDirty||(m_EditHistory?(m_EditHistory->external||m_EditHistory->revision!=m_EditHistory->saved):IsSceneDirty());}
+    void ShowProjectSettings(Application&);
+    bool ProjectSettingsDirty()const;
     void ShowProjectBrowser(const std::string& error={}){m_ShowProjectBrowser=true;if(!error.empty())m_ProjectError=error;}
     void RequestProjectOpen(Application&,const std::string& descriptor,bool close=false);
     void RequestProjectExit(){m_ProjectExit=true;m_ProjectConfirm=true;}
@@ -211,6 +214,14 @@ private:
     void HandleEditorShortcuts(Application& app);
     void DrawMainMenu(Application& app);
     void DrawProjectBrowser(Application&);
+    void DrawProjectSettings(Application&);
+    void ResetProjectSettingsDraft();
+    bool SaveProjectSettingsDraft(Application&);
+    bool m_ShowProjectSettings=false,m_FocusProjectSettings=false;
+    int m_ProjectSettingsCategory=0;
+    std::shared_ptr<const ProjectContext> m_ProjectSettingsBase;
+    ProjectSettings m_ProjectSettingsDraft;
+    std::string m_ProjectStartupDraft,m_ProjectSettingsError;
     bool ExecuteProjectAction(Application&,int decision);
     bool m_ShowProjectBrowser=false,m_ProjectConfirm=false,m_ProjectClose=false,m_ProjectExit=false,m_ProjectExitConfirmed=false;
     int m_ProjectTab=-1;
