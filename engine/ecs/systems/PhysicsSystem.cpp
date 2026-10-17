@@ -29,61 +29,74 @@ struct StageTimer {
     std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
     ~StageTimer() { value += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(); }
 };
-static Vec3 Add(const Vec3&a,const Vec3&b){return {a.x+b.x,a.y+b.y,a.z+b.z};}
+static Vec3 Add(const Vec3&a,const Vec3&b){
+    return {
+        a.x+b.x,
+        a.y+b.y,
+        a.z+b.z};
+}
+
 static Vec3 Sub(const Vec3&a,const Vec3&b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
 static Vec3 Scale(const Vec3&v,float s){return {v.x*s,v.y*s,v.z*s};}
 static float Dot(const Vec3&a,const Vec3&b){return a.x*b.x+a.y*b.y+a.z*b.z;}
 static Vec3 Cross(const Vec3&a,const Vec3&b){return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};}
 static float Abs(float v){ return v >= 0.0f ? v : -v; }
 static float Sign(float v){ return v >= 0.0f ? 1.0f : -1.0f; }
-static float Clamp(float value, float minValue, float maxValue)
-{
+
+static float Clamp(float value, float minValue, float maxValue){
     return std::max(minValue, std::min(value, maxValue));
 }
-static float LengthSq(const Vec3& v){ return Dot(v, v); }
-static float Length(const Vec3& v){ return std::sqrt(LengthSq(v)); }
-static Vec3 NormalizeSafe(const Vec3& v)
-{
+
+static float LengthSq(const Vec3& v){
+    return Dot(v, v);
+}
+
+static float Length(const Vec3& v){
+    return std::sqrt(LengthSq(v));
+}
+
+static Vec3 NormalizeSafe(const Vec3& v){
     const float len = Length(v);
     if (len <= 0.000001f)
         return Vec3{ 0.0f, 1.0f, 0.0f };
     const float inv = 1.0f / len;
     return Scale(v, inv);
 }
-static float SphereRadius(const ecs::ColliderComponent& c)
-{
+
+static float SphereRadius(const ecs::ColliderComponent& c){
     return std::max(c.halfExtents.x, std::max(c.halfExtents.y, c.halfExtents.z));
 }
-static float BoundingRadius(const ecs::ColliderComponent& c)
-{
+
+static float BoundingRadius(const ecs::ColliderComponent& c){
     if (c.type == ecs::ColliderType::Sphere)
         return SphereRadius(c);
     return std::sqrt(c.halfExtents.x * c.halfExtents.x +
                      c.halfExtents.y * c.halfExtents.y +
                      c.halfExtents.z * c.halfExtents.z);
 }
-static int CellCoord(float v, float cellSize)
-{
+
+static int CellCoord(float v, float cellSize){
     return static_cast<int>(std::floor(v / cellSize));
 }
-static std::uint64_t CellKey(int x, int y, int z)
-{
+
+static std::uint64_t CellKey(int x, int y, int z){
     const std::uint64_t ux = static_cast<std::uint32_t>(x) & 0x1fffffu;
     const std::uint64_t uy = static_cast<std::uint32_t>(y) & 0x1fffffu;
     const std::uint64_t uz = static_cast<std::uint32_t>(z) & 0x1fffffu;
     return (ux << 42) | (uy << 21) | uz;
 }
-static std::uint64_t PairKey(std::size_t a, std::size_t b)
-{
+
+static std::uint64_t PairKey(std::size_t a, std::size_t b){
     const std::uint64_t lo = static_cast<std::uint64_t>(std::min(a, b));
     const std::uint64_t hi = static_cast<std::uint64_t>(std::max(a, b));
     return (hi << 32) ^ lo;
 }
-static Vec3 RotatedAabbHalfExtents(const Vec3& localHalf, const Vec3& rot)
-{
+
+static Vec3 RotatedAabbHalfExtents(const Vec3& localHalf, const Vec3& rot){
     const float cx = std::cos(rot.x), sx = std::sin(rot.x);
     const float cy = std::cos(rot.y), sy = std::sin(rot.y);
     const float cz = std::cos(rot.z), sz = std::sin(rot.z);
+
     const float r00 = cz * cy;
     const float r01 = cz * sy * sx - sz * cx;
     const float r02 = cz * sy * cx + sz * sx;
@@ -93,24 +106,25 @@ static Vec3 RotatedAabbHalfExtents(const Vec3& localHalf, const Vec3& rot)
     const float r20 = -sy;
     const float r21 = cy * sx;
     const float r22 = cy * cx;
+
     return Vec3{
         Abs(r00) * localHalf.x + Abs(r01) * localHalf.y + Abs(r02) * localHalf.z,
         Abs(r10) * localHalf.x + Abs(r11) * localHalf.y + Abs(r12) * localHalf.z,
         Abs(r20) * localHalf.x + Abs(r21) * localHalf.y + Abs(r22) * localHalf.z
     };
 }
-struct BoxAxes
-{
+
+struct BoxAxes{
     Vec3 xAxis;
     Vec3 yAxis;
     Vec3 zAxis;
 };
 
-static BoxAxes BuildBoxAxes(const Vec3& rot)
-{
+static BoxAxes BuildBoxAxes(const Vec3& rot){
     const float cx = std::cos(rot.x), sx = std::sin(rot.x);
     const float cy = std::cos(rot.y), sy = std::sin(rot.y);
     const float cz = std::cos(rot.z), sz = std::sin(rot.z);
+
     const float r00 = cz * cy;
     const float r01 = cz * sy * sx - sz * cx;
     const float r02 = cz * sy * cx + sz * sx;
@@ -120,6 +134,7 @@ static BoxAxes BuildBoxAxes(const Vec3& rot)
     const float r20 = -sy;
     const float r21 = cy * sx;
     const float r22 = cy * cx;
+
     return BoxAxes{
         Vec3{ r00, r10, r20 },
         Vec3{ r01, r11, r21 },
@@ -127,8 +142,7 @@ static BoxAxes BuildBoxAxes(const Vec3& rot)
     };
 }
 
-struct BodyRef
-{
+struct BodyRef{
     ecs::Entity entity{};
     ecs::TransformComponent* transform = nullptr;
     ecs::ColliderComponent* collider = nullptr;
@@ -136,10 +150,10 @@ struct BodyRef
     BoxAxes axes{};
     Vec3 inverseInertia{};
 };
+
 static Vec3 InverseInertiaLocal(
     const ecs::RigidbodyComponent& rb,
-    const ecs::ColliderComponent& collider)
-{
+    const ecs::ColliderComponent& collider){
     if (rb.isStatic || rb.lockRotation || rb.mass <= 0.0001f)
         return Vec3{};
 
@@ -181,8 +195,7 @@ static Vec3 InverseInertiaLocal(
 
 static Vec3 ApplyInverseInertiaWorld(
     const BodyRef& body,
-    const Vec3& worldVector)
-{
+    const Vec3& worldVector){
     if (body.rigidbody->isStatic ||
         body.rigidbody->mass <= 0.0001f)
     {
@@ -226,17 +239,21 @@ static Vec3 ApplyInverseInertiaWorld(
 // the engine's existing world-sized collider convention.
 constexpr float contactMargin = 0.001f;
 constexpr float penetrationSlop = 0.0005f;
-static Vec3 Center(const BodyRef& b) { return Add(b.transform->position, b.collider->offset); }
-static float InvMass(const BodyRef& b)
-{
+
+static Vec3 Center(const BodyRef& b) {
+    return Add(b.transform->position, b.collider->offset);
+}
+
+static float InvMass(const BodyRef& b){
     const auto& rb = *b.rigidbody;
     return !rb.isStatic && rb.simulatePhysics && rb.mass > 0.0001f ? 1.0f / rb.mass : 0.0f;
 }
-static std::array<Vec3, 3> Axes(const BodyRef& b)
-{
+
+static std::array<Vec3, 3> Axes(const BodyRef& b){
     const auto& axes = b.axes;
     return { axes.xAxis, axes.yAxis, axes.zAxis };
 }
+
 static float Component(const Vec3& v, int i) { return i == 0 ? v.x : (i == 1 ? v.y : v.z); }
 static Vec3 ToLocal(const BodyRef& b, const Vec3& r)
 {
