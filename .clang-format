@@ -1,0 +1,62 @@
+
+BasedOnStyle: Microsoft
+Language: Cpp
+Standard: c++17
+
+# Отступы
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+IndentCaseLabels: true
+
+# Длина строк
+ColumnLimit: 120
+ReflowComments: false
+
+# Фигурные скобки
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterClass: false
+  AfterStruct: true
+  AfterEnum: false
+  AfterFunction: true
+  AfterNamespace: false
+  AfterControlStatement: Never
+  AfterUnion: true
+  AfterExternBlock: false
+  BeforeCatch: false
+  BeforeElse: false
+  IndentBraces: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+
+# Короткие конструкции
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Never
+AllowShortLambdasOnASingleLine: All
+
+# Пробелы
+SpaceBeforeParens: ControlStatements
+SpaceBeforeAssignmentOperators: true
+SpaceInEmptyParentheses: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+SpacesInContainerLiterals: false
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# Переносы аргументов
+BinPackArguments: true
+BinPackParameters: true
+AlignOperands: Align
+AlignTrailingComments: true
+
+# Дополнительные настройки
+SortIncludes: Never
+FixNamespaceComments: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 2
