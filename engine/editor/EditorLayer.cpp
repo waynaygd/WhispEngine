@@ -313,6 +313,14 @@ bool EditorLayer::IsPointInsideViewport(double x, double y) const
 
 void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
 {
+    // Controlled H sessions admit the checked tree and Local Transform panel. Legacy
+    // Inspector/Gizmo/shortcut/asset mutation surfaces remain behind this return.
+    if(app.GetEditorWorld().IsHierarchyData()){
+        m_ViewportPixelWidth=m_ViewportPixelHeight=0;
+        m_ViewportHovered=m_ViewportHasBounds=m_ViewportFocused=m_HierarchyFocused=false;
+        m_ToolActive=m_LightPointerCaptured=m_LightHandleHovered=false;
+        m_InputTextActive=m_ModalActive=false;DrawHierarchyTree(app);DrawHierarchyTransformInspector(app);m_InputTextActive=ImGui::GetIO().WantTextInput;return;
+    }
     ZoneScopedN("EditorLayer");
     m_Statistics.hierarchyMs=m_Statistics.inspectorMs=m_Statistics.assetBrowserMs=m_Statistics.lightGizmoMs=0;
     const auto uiStart=std::chrono::steady_clock::now();

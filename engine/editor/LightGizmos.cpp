@@ -188,7 +188,9 @@ void EditorLayer::DrawViewportOverlays(Application& app,const ImVec2& origin,con
     auto project=[&](V p)->std::optional<ImVec2>{auto v=ProjectGizmo(p,camera);if(!v)return {};return ImVec2(origin.x+(*v)[0]*size.x,origin.y+(*v)[1]*size.y);};
     auto line=[&](V a,V b,ImU32 color){auto q=ProjectEditorLine(a,b,camera);if(q)draw->AddLine(ImVec2(origin.x+(*q)[0]*size.x,origin.y+(*q)[1]*size.y),ImVec2(origin.x+(*q)[2]*size.x,origin.y+(*q)[3]*size.y),color);};
     auto& world=app.GetWorld();auto* resources=app.GetResourceManager();
-    if(resources&&!m_PlaneScaleCaptured&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&!m_LightHandleHovered&&!m_LightPointerCaptured&&!m_LightIconClicked&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&(!ImGuizmo::IsOver()||ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
+    // IsOver queries ImGuizmo's last transform even after selection is cleared.
+    // With no selected entity there is no transform gizmo to occlude mesh picking.
+    if(resources&&!m_PlaneScaleCaptured&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&!m_LightHandleHovered&&!m_LightPointerCaptured&&!m_LightIconClicked&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&(!m_Selection.active.IsValid()||!ImGuizmo::IsOver()||ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
         auto mouse=ImGui::GetMousePos();float x=((mouse.x-origin.x)/size.x*2-1)/camera.projection[0],y=(1-(mouse.y-origin.y)/size.y*2)/camera.projection[5];
         V ray{camera.view[0]*x+camera.view[1]*y+camera.view[2],camera.view[4]*x+camera.view[5]*y+camera.view[6],camera.view[8]*x+camera.view[9]*y+camera.view[10]};ray=Scale(ray,1/std::sqrt(Dot(ray,ray)));
         float nearest=app.GetCameraFarPlane();ecs::Entity hit;

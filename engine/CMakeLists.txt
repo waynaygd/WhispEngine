@@ -29,6 +29,7 @@ add_library(Engine
   scripting/Prefab.cpp
   core/Application.cpp
   core/ApplicationProject.cpp
+  core/ApplicationWorld.cpp
   core/AssetDependencyValidation.cpp
   core/AssetPaths.cpp
   core/ProjectContext.cpp
@@ -36,6 +37,7 @@ add_library(Engine
   core/Logger.cpp
   ecs/World.cpp
   ecs/Hierarchy.cpp
+  ecs/HierarchyEdit.cpp
   ecs/ComponentRegistry.cpp
   ecs/systems/BoundsBounceSystem.cpp
   ecs/systems/MotionSystem.cpp
@@ -58,6 +60,11 @@ add_library(Engine
   editor/EditorProjectSettings.cpp
   editor/EditorTransactions.cpp
   editor/EditorSelection.cpp
+  editor/HierarchyTree.cpp
+  editor/EditorHierarchyTree.cpp
+  editor/EditorHierarchyTransactions.cpp
+  editor/HierarchyTransformInspector.cpp
+  editor/EditorHierarchyTransformInspector.cpp
   editor/EditorGroupTransform.cpp
   editor/EditorInspector.cpp
   editor/EditorPreferences.cpp

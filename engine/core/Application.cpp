@@ -431,8 +431,8 @@ void Application::SetupEcsRuntimeDemo(bool populate)
 {
     ClearPhysicsStressScene();
     GetWorld().Clear();
-    m_World.ClearSystems();
-    m_PhysicsSystem = &m_World.AddSystem<ecs::PhysicsSystem>(
+    m_SystemWorld.ClearSystems();
+    m_PhysicsSystem = &m_SystemWorld.AddSystem<ecs::PhysicsSystem>(
         &m_EventBus,
         m_Config.physics.gravity,
         m_Config.physics.linearDamping,
@@ -447,7 +447,7 @@ void Application::SetupEcsRuntimeDemo(bool populate)
     m_PhysicsSystem->SetJobSystem(
         m_JobSystem.get());
     m_PhysicsSystem->SetEnabled(m_EditorPlayMode);
-    m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
+    m_RenderSystem = &m_SystemWorld.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
     m_RenderSystem->SetInterpolation(&m_RenderInterpolation);
     m_RenderSystem->SetPhysicsDebugPose(m_PhysicsDebugPose);
@@ -622,7 +622,7 @@ void Application::ConfigureInputBindings()
 
 void Application::PollConfigHotReload()
 {
-    if(m_ProjectBrowserActive||ProjectManager::Active())return;
+    if(m_ProjectBrowserActive||ProjectManager::Active()||GetEditorWorld().IsHierarchyData())return;
     std::error_code ec;
 
     if (m_HasConfigWatch && std::filesystem::exists(m_ConfigWatchPath, ec))
@@ -1085,8 +1085,15 @@ bool Application::IsInputActionActive(const std::string& action) const
 
 void Application::SetEditorPlayMode(bool enabled)
 {
+    if(m_InPlayTransition){Logger::Get().Warn("Reentrant Play/Stop transition refused");return;}
     if(enabled&&m_ProjectBrowserActive)return;
     if(m_EditorPlayMode==enabled)return;
+    if(m_WorldExecutionDepth||GetWorld().IsIterating()||GetWorld().IsRetiringHierarchy()){Logger::Get().Warn("Play/Stop requires an ECS phase boundary");return;}
+    if(enabled&&GetEditorWorld().IsHierarchyData()&&!m_ControlledHierarchySession){Logger::Get().Warn("Hierarchy Play requires controlled infrastructure activation; active session unchanged");return;}
+    std::unique_ptr<RuntimeCandidate> prepared;
+    if(enabled){std::string error;prepared=PrepareRuntimeWorld(&error);if(!prepared)throw std::runtime_error(error);}
+    struct PlayScope {bool& active;explicit PlayScope(bool& value):active(value){active=true;}~PlayScope(){active=false;}} playScope(m_InPlayTransition);
+    WorldOperationScope transition(m_WorldTransitionDepth);
     // A Play/Stop transition must release editor free-fly capture as well.
     // Keep previousRightMouseDown until release, so a held RMB cannot recapture
     // and move the restored editor pose in the Stop frame.
@@ -1105,15 +1112,15 @@ void Application::SetEditorPlayMode(bool enabled)
         m_SavedEditorCamera.yaw = m_Camera.yaw;
         m_SavedEditorCamera.pitch = m_Camera.pitch;
         const auto start=std::chrono::steady_clock::now();
-        auto runtime=m_World.CloneData(&m_CloneMapping);
+        auto runtime=std::move(prepared->world);m_CloneMapping=std::move(prepared->mapping);
         m_EditDebugEntities=m_EcsDebugEntities;m_EditStressEntities=m_StressEntities;
         m_EditLighting=m_LightingSettings;m_EditEnvironment=m_EnvironmentSettings;m_EditShadows=m_ShadowSettings;m_EditBackground=m_Background;m_EditAntiAliasing=m_AntiAliasing;m_EditAntiAliasingOverride=m_AntiAliasingOverride;
         auto map=[&](std::vector<ecs::Entity>& entities){std::erase_if(entities,[&](auto e){return !m_CloneMapping.contains(e);});for(auto& e:entities)e=m_CloneMapping.at(e);};
         map(m_EcsDebugEntities);map(m_StressEntities);
         m_EditorLayer.EnterRuntime(m_CloneMapping);
         m_RuntimeWorld=std::move(runtime);
-        ecs::TransformComponent spawnPoint;
-        m_PlayerEntity=ecs::SpawnPlayer(*m_RuntimeWorld,&spawnPoint);
+        ecs::TransformComponent spawnPoint=prepared->spawn;
+        m_PlayerEntity=prepared->player;
         if(m_RuntimeWorld->IsAlive(m_PlayerEntity)){
             const auto& t=*m_RuntimeWorld->GetComponent<ecs::TransformComponent>(m_PlayerEntity);
             const auto& player=*m_RuntimeWorld->GetComponent<ecs::PlayerComponent>(m_PlayerEntity);
@@ -1128,7 +1135,7 @@ void Application::SetEditorPlayMode(bool enabled)
         ReleasePlayerMouse();
         if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
         m_StateMachine.Clear(*this);
-        m_LuaRuntime.Stop();m_InputManager.RestoreBindings(std::move(m_EditInputBindings));m_Mutations.Clear();m_RenderInterpolation.Clear();m_EditorLayer.LeaveRuntime();m_RuntimeWorld.reset();m_CloneMapping.clear();
+        m_LuaRuntime.Stop();m_InputManager.RestoreBindings(std::move(m_EditInputBindings));m_Mutations.Clear();m_RenderInterpolation.Clear();m_EditorLayer.LeaveRuntime();m_RuntimeWorld.reset();m_CloneMapping.clear();if(m_RenderSystem&&GetEditorWorld().IsHierarchyData())m_RenderSystem->ResetWorldState();
         m_Camera.position = m_SavedEditorCamera.position;
         m_Camera.yaw = m_SavedEditorCamera.yaw;
         m_Camera.pitch = m_SavedEditorCamera.pitch;
@@ -1461,7 +1468,7 @@ int Application::Run()
 
                 m_ResourceManager->PollHotReload();
 
-                GetWorld().ForEach<ecs::ColliderComponent, ecs::MeshRendererComponent, ecs::TransformComponent>(
+                if(!GetWorld().IsHierarchyData())GetWorld().ForEach<ecs::ColliderComponent, ecs::MeshRendererComponent, ecs::TransformComponent>(
                     [&](ecs::Entity, ecs::ColliderComponent& collider, ecs::MeshRendererComponent& meshRenderer, ecs::TransformComponent& transform)
                     {
                         if (!collider.autoFitFromMesh)
@@ -1491,10 +1498,11 @@ int Application::Run()
             ZoneScopedN("GameUpdate");
 
             if(m_EditorPlayMode)UpdateGameplayInput();
-            if(IsSimulationRunning())m_LuaRuntime.Update(dt);
+            if(IsSimulationRunning()){WorldOperationScope executing(m_WorldExecutionDepth);m_LuaRuntime.Update(dt);}
             UpdateCameraController(dt);
 
             if (IsSimulationRunning() && m_UpdateMode == UpdateMode::Variable) {
+                WorldOperationScope executing(m_WorldExecutionDepth);
                 m_StateMachine.Update(*this, dt);
                 m_StateMachine.ApplyPending(*this);
             }
@@ -1511,14 +1519,15 @@ int Application::Run()
             for (int tick = 0; tick < plan.ticks; ++tick) {
                 ZoneScopedN("PhysicsFixedTick");
                 if (IsSimulationRunning() && m_UpdateMode == UpdateMode::Fixed) {
+                    WorldOperationScope executing(m_WorldExecutionDepth);
                     m_StateMachine.Update(*this, float(FixedStepClock::TickSeconds));
                     m_StateMachine.ApplyPending(*this);
                 }
                 if (IsSimulationRunning() && m_PhysicsSystem) {
                     m_RenderInterpolation.BeginTick(GetWorld());
-                    m_LuaRuntime.FixedUpdate(float(FixedStepClock::TickSeconds));
+                    {WorldOperationScope executing(m_WorldExecutionDepth);m_LuaRuntime.FixedUpdate(float(FixedStepClock::TickSeconds));}
                     GetWorld().ForEach<ecs::CharacterMovementComponent>([&](ecs::Entity e,auto&){ecs::ApplyCharacterMovement(GetWorld(),e);});
-                    m_World.UpdateFixedSystemsOn(GetWorld(),float(FixedStepClock::TickSeconds));
+                    UpdateWorldSystems(true,float(FixedStepClock::TickSeconds));
                     m_RenderInterpolation.EndTick(GetWorld());
                     m_PhysicsFrame.AddTick(m_PhysicsSystem->GetStatistics());
                     m_FixedSimulationSeconds += FixedStepClock::TickSeconds;
@@ -1616,7 +1625,7 @@ int Application::Run()
                 }
 
                 wc.renderer->SetAntiAliasing(GetEffectiveAntiAliasing());
-                wc.renderer->SetEditorVisuals(m_EditorLayer.BuildVisualFrame(*this));
+                if(GetWorld().IsHierarchyData())wc.renderer->SetEditorVisuals({});else wc.renderer->SetEditorVisuals(m_EditorLayer.BuildVisualFrame(*this));
                 const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
                 const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();
                 const bool renderSceneToViewport =
@@ -1638,9 +1647,9 @@ int Application::Run()
                         m_RenderInterpolation.SetFrame(GetWorld(), IsSimulationRunning(),
                             m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
                         editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);
-                        m_World.UpdateFrameSystemsOn(GetWorld(),dt);
+                        UpdateWorldSystems(false,dt);
                     }
-                    m_StateMachine.Render(*this, *wc.renderer);
+                    {WorldOperationScope executing(m_WorldExecutionDepth);m_StateMachine.Render(*this, *wc.renderer);}
                     wc.renderer->EndViewportRender();
                 }
 
@@ -1659,10 +1668,10 @@ int Application::Run()
                         m_RenderInterpolation.SetFrame(GetWorld(), IsSimulationRunning(),
                             m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
                         editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);
-                        m_World.UpdateFrameSystemsOn(GetWorld(),dt);
+                        UpdateWorldSystems(false,dt);
                     }
 
-                    m_StateMachine.Render(*this, *wc.renderer);
+                    {WorldOperationScope executing(m_WorldExecutionDepth);m_StateMachine.Render(*this, *wc.renderer);}
                 }
 
                 if (wc.editorUiAvailable)
@@ -1797,7 +1806,7 @@ void Application::Shutdown()
         m_JobSystem.reset();
     }
 
-    m_World.ClearSystems();
+    m_SystemWorld.ClearSystems();
     m_PhysicsSystem = nullptr;
     m_RenderSystem = nullptr;
     m_EcsDebugEntities.clear();
@@ -2160,6 +2169,13 @@ SceneSettings Application::GetSceneSettings()const{
     s.primaryDirectional=SceneSerializer::PrimaryDirectionalId(const_cast<ecs::World&>(GetWorld()));return s;
 }
 bool Application::SetSceneSettings(const SceneSettings& s,std::string* error){
+    if(GetWorld().IsHierarchyData()){
+        try{auto staged=SceneSettingsFromJson(SceneSettingsToJson(s));
+            editor::SynchronizeSun(GetWorld(),staged.background,staged.background.useIblEnvironment?staged.environment.rotationDegrees:staged.background.skyRotation);
+            const bool enabled=m_LightingSettings.enabled;const int debug=m_ShadowSettings.debugMode;
+            m_LightingSettings=staged.lighting;m_LightingSettings.enabled=enabled;m_EnvironmentSettings=std::move(staged.environment);m_ShadowSettings=staged.shadows;m_ShadowSettings.debugMode=debug;m_Background=std::move(staged.background);m_AntiAliasing=staged.antiAliasing;m_AntiAliasingOverride=staged.antiAliasingOverride;return true;
+        }catch(const std::exception& e){if(error)*error=std::string("Hierarchy settings preflight: ")+e.what();return false;}
+    }
     try{(void)SceneSettingsToJson(s);const bool enabled=m_LightingSettings.enabled;const int debug=m_ShadowSettings.debugMode;
         m_LightingSettings=s.lighting;m_LightingSettings.enabled=enabled;m_EnvironmentSettings=s.environment;m_ShadowSettings=s.shadows;m_Background=s.background;m_AntiAliasing=s.antiAliasing;m_AntiAliasingOverride=s.antiAliasingOverride;m_ShadowSettings.debugMode=debug;editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);return true;
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
@@ -2168,23 +2184,28 @@ bool Application::SaveSceneAs(const std::string& key,bool overwrite,std::string*
     if(IsEditorPlayMode()){if(error)*error="Stop Play before saving the authoring scene";return false;}
     if(!SceneKeyValid(key)){if(error)*error="Scene key must be a portable scenes/*.json path";return false;}
     try{
-        m_EditorLayer.FinishTransaction(*this);auto document=SceneSerializer::CaptureWorld(m_World,GetSceneSettings());
+        m_EditorLayer.FinishTransaction(*this);auto document=SceneSerializer::CaptureWorld(GetEditorWorld(),GetSceneSettings());
         if(!SceneSerializer::WriteAtomic(SafeScenePath(key,true),document,error,overwrite))return false;
         m_SceneKey=key;m_Config.ecsDemo.sceneFile=key;m_EditorLayer.MarkSaved();m_EditorLayer.RememberScene(key);InitializeConfigHotReload();return true;
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }
 bool Application::OpenScene(const std::string& key,std::string* error){
+    return OpenSceneInternal(key,false,error);
+}
+bool Application::OpenSceneInternal(const std::string& key,bool allowHierarchy,std::string* error){
     if(!SceneKeyValid(key)){if(error)*error="Scene key must be a portable scenes/*.json path";return false;}
-    // Parse/validate completely before changing modes or discarding the current scene.
-    ecs::World staged;SceneSettings settings;std::filesystem::path path;try{path=SafeScenePath(key,false);}catch(const std::exception& e){if(error)*error=e.what();return false;}
-    if(!SceneSerializer::LoadWorld(path,staged,settings,error))return false;
-    SetEditorPlayMode(false);m_Mutations.Clear();if(m_PhysicsSystem)m_PhysicsSystem->ResetState();ResetPhysicsClock();
-    m_World.ReplaceData(staged);m_EcsDebugEntities=m_World.Entities();m_StressEntities.clear();m_ActiveCollisionPairs.clear();
-    SetSceneSettings(settings);m_SceneKey=key;m_Config.ecsDemo.sceneFile=key;m_EditorLayer.ResetHistory();m_EditorLayer.MarkSaved();m_EditorLayer.RememberScene(key);InitializeConfigHotReload();return true;
+    bool committed=false;
+    try{
+        auto candidate=PrepareAuthoringScene(SafeScenePath(key,false),error);if(!candidate)return false;
+        if(candidate->world->IsHierarchyData()&&!allowHierarchy){if(error)*error="Scene preflight: worldMode mismatch: hierarchy Editor is not enabled";return false;}
+        candidate->controlledHierarchy=allowHierarchy;
+        candidate->sceneKey=key;candidate->configSceneKey=key;
+        if(!PublishAuthoringWorld(candidate,error))return false;committed=true;
+        m_EditorLayer.RememberScene(key);InitializeConfigHotReload();return true;
+    }catch(const std::exception& e){if(error)*error=std::string(committed?"Scene commit failed (world published): ":"Scene preflight: ")+e.what();return false;}
 }
 void Application::NewScene(){
-    SetEditorPlayMode(false);ClearPhysicsStressScene();m_World.Clear();m_EcsDebugEntities.clear();m_StressEntities.clear();m_Mutations.Clear();
-    m_SceneKey.clear();m_Config.ecsDemo.sceneFile.clear();SceneSettings settings;settings.antiAliasingOverride=!GetProject();SetSceneSettings(settings);m_EditorLayer.ResetHistory();m_EditorLayer.MarkSaved();
+    std::string error;if(!NewSceneInternal(ecs::World::DataMode::RootOnly,&error))throw std::runtime_error(error);
 }
 ecs::Entity Application::CreateEmptyEntity(const std::string& name){
     auto e=GetWorld().CreateEntity();GetWorld().AddComponent<ecs::TagComponent>(e).name=name;GetWorld().AddComponent<ecs::TransformComponent>(e);GetWorld().AddComponent<ecs::SceneIdentityComponent>(e);m_EcsDebugEntities.push_back(e);return e;

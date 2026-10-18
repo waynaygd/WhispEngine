@@ -60,12 +60,15 @@ public:
     void SetViewportUnlit(bool value){if(m_RenderSystem)m_RenderSystem->SetViewportUnlit(value);}
     bool IsViewportUnlit()const{return m_RenderSystem&&m_RenderSystem->IsViewportUnlit();}
     bool IsViewportMouseCaptured()const{return m_Camera.controlsActive||m_PlayerMouseCaptured;}
-    ecs::World& GetWorld() { return m_RuntimeWorld?*m_RuntimeWorld:m_World; }
-    ecs::World& GetEditorWorld(){return m_World;}
+    // Borrowed references expire at author/session publication. Reacquire after
+    // Open/New/Project changes; Entity identity guards reject prior handles.
+    ecs::World& GetWorld() { return m_RuntimeWorld?*m_RuntimeWorld:*m_EditorWorld; }
+    ecs::World& GetEditorWorld(){return *m_EditorWorld;}
+    const ecs::World& GetEditorWorld()const{return *m_EditorWorld;}
     scripting::LuaRuntime& GetLuaRuntime(){return m_LuaRuntime;}
     ecs::MutationQueue& GetMutationQueue(){return m_Mutations;}
     void ApplyStructuralCommands(){if(m_Mutations.Apply(GetWorld())&&m_PhysicsSystem)m_PhysicsSystem->ResetState();}
-    const ecs::World& GetWorld() const { return m_RuntimeWorld?*m_RuntimeWorld:m_World; }
+    const ecs::World& GetWorld() const { return m_RuntimeWorld?*m_RuntimeWorld:*m_EditorWorld; }
     ResourceManager* GetResourceManager() { return m_ResourceManager.get(); }
     const ResourceManager* GetResourceManager() const { return m_ResourceManager.get(); }
     void EnterGameplayScene();
@@ -175,7 +178,41 @@ private:
     bool m_ProjectBrowserActive=false;
     std::string m_LegacyStartupScene;
     friend struct ApplicationTestAccess;
-    bool CommitProject(std::shared_ptr<const ProjectContext>,ecs::World&,const SceneSettings&,ProjectDecision,std::string*);
+    struct WorldOperationScope {
+        unsigned& depth;
+        explicit WorldOperationScope(unsigned& value)noexcept:depth(value){++depth;}
+        ~WorldOperationScope(){--depth;}
+        WorldOperationScope(const WorldOperationScope&)=delete;
+    };
+    void UpdateWorldSystems(bool fixed,float dt);
+    struct AuthoringCandidate {
+        std::unique_ptr<ecs::World> world;
+        SceneSettings settings;
+        std::vector<ecs::Entity> entities;
+        std::string sceneKey,configSceneKey;
+        bool controlledHierarchy=false;
+    };
+    struct RuntimeCandidate {
+        std::unique_ptr<ecs::World> world;
+        ecs::World::CloneMap mapping;
+        ecs::Entity player{};
+        ecs::TransformComponent spawn;
+    };
+    // Internal A2 boundaries; ordinary UI callers still enforce RootOnly.
+    std::unique_ptr<AuthoringCandidate> PrepareAuthoringScene(const std::filesystem::path&,std::string*,bool requirePublicationBoundary=true);
+    std::unique_ptr<AuthoringCandidate> PrepareEmptyAuthoring(ecs::World::DataMode,const SceneSettings&,std::string*);
+    bool ValidateAuthoringCandidate(AuthoringCandidate&,std::string*);
+    bool CheckWorldPublication(std::string*)const;
+    void InstallAuthoringWorld(AuthoringCandidate&)noexcept;
+    bool PublishAuthoringWorld(std::unique_ptr<AuthoringCandidate>&,std::string*);
+    std::unique_ptr<RuntimeCandidate> PrepareRuntimeWorld(std::string*);
+    // Infrastructure-only entry points. No UI/menu/CLI enables this policy.
+    bool OpenSceneInternal(const std::string&,bool allowHierarchy,std::string*);
+    bool NewSceneInternal(ecs::World::DataMode,std::string*);
+    bool OpenProjectInternal(const std::filesystem::path&,ProjectDecision,bool allowHierarchy,std::string*);
+    bool SaveProjectSettingsInternal(const std::string&,const ProjectSettings&,bool allowHierarchy,std::string*);
+    std::unique_ptr<AuthoringCandidate> PrepareHierarchyUpgrade(std::string*);
+    bool CommitProject(std::shared_ptr<const ProjectContext>,std::unique_ptr<AuthoringCandidate>&,ProjectDecision,std::string*);
     void ResetPhysicsClock() {
         m_FixedClock.Reset(); m_FixedSimulationSeconds = 0;
         m_ResetPhysicsDelta = true;
@@ -244,7 +281,11 @@ private:
     std::unique_ptr<ResourceManager> m_ResourceManager;
     std::unique_ptr<JobSystem> m_JobSystem;
 
-    ecs::World m_World; // Editor data and shared system/GPU-cache owner.
+    ecs::World m_SystemWorld; // Permanent system/GPU-cache owner; no author data.
+    unsigned m_WorldExecutionDepth=0,m_WorldTransitionDepth=0;
+    bool m_InPlayTransition=false;
+    bool m_ControlledHierarchySession=false;
+    std::unique_ptr<ecs::World> m_EditorWorld=std::make_unique<ecs::World>();
     std::unique_ptr<ecs::World> m_RuntimeWorld;
     scripting::GameplayCamera m_GameplayCamera;
     scripting::LuaRuntime m_LuaRuntime;

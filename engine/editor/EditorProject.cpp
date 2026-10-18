@@ -44,7 +44,7 @@ void EditorLayer::ResetProjectState(IRenderAdapter* renderer){
     m_AssetMetadataKey.clear();m_AssetMetadata.clear();m_AssetMetadataVersion=0;
     m_MeshAssets.clear();m_TextureAssets.clear();m_MaterialAssets.clear();m_ShaderAssets.clear();m_EnvironmentAssets.clear();
     m_AssetListsDirty=true;m_RecentScenes.clear();m_SceneCatalog={};m_RenameTarget={};m_DragOriginal={};
-    m_HierarchyVisible.clear();m_AssetActionSource.clear();m_AssetActionPath.clear();m_AssetActionBlockers.clear();m_AssetActionWarnings.clear();
+    m_HierarchyVisible.clear();m_HierarchyTree={};m_EditHierarchyTree.reset();m_HierarchyTreeRows.clear();m_HierarchyDrag.reset();m_HierarchyClick={};m_HierarchyDragCancelled=false;m_AssetActionSource.clear();m_AssetActionPath.clear();m_AssetActionBlockers.clear();m_AssetActionWarnings.clear();
     m_AssetActionRequested=m_FolderPopup=m_ImportPopup=m_RenameRequested=m_SceneDialogRequested=false;
     m_ImportSource.clear();m_ImportRoot.clear();m_ImportTarget.clear();m_ImportPreview.clear();m_ImportTargetFolder.clear();m_ImportPackageName.clear();
     m_SceneSearch.clear();m_AssetFilter.clear();m_EditorError.clear();m_BackgroundOverride=false;

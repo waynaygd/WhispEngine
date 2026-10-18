@@ -8,6 +8,9 @@
 #include "EditorPreferences.h"
 #include "InputRouting.h"
 #include "SelectionSet.h"
+#include "HierarchyTree.h"
+#include "../ecs/HierarchyEdit.h"
+#include "HierarchyTransformInspector.h"
 #include "GroupTransform.h"
 #include "AssetCatalog.h"
 #include "AssetNavigation.h"
@@ -99,12 +102,13 @@ public:
     void SetLightGizmosVisible(bool v){m_ShowLightGizmos=v;}
     void EnterRuntime(const ecs::World::CloneMap&);
     void LeaveRuntime();
-    void ResetHistory(){m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
+    void ResetHistory(){m_HierarchyTransformDraft.reset();m_HierarchyTransformInvalidateInput=true;m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
     void FinishTransaction(Application&);
     void CancelTransaction(Application&);
     bool HasPendingTransaction()const{return m_Transaction.has_value();}
     bool IsSceneDirty()const{return m_ExternalDirty||m_Revision!=m_SavedRevision||m_Transaction.has_value();}
     void MarkSaved(){m_SavedRevision=m_Revision;m_ExternalDirty=false;}
+    void ResetWorldState(){ResetHistory();m_EditHistory.reset();m_RenameTarget={};m_DragOriginal={};m_HierarchyVisible.clear();m_HierarchyTree={};m_EditHierarchyTree.reset();m_HierarchyTreeRows.clear();m_HierarchyDrag.reset();m_HierarchyClick={};m_HierarchyDragCancelled=false;m_BackgroundDraftWorld=0;m_RenameRequested=false;}
     void MarkDirty(){m_ExternalDirty=true;}
     ecs::Entity CreateEntity(Application&,const std::string& name="Entity");
     ecs::Entity CreatePlayerStart(Application&);
@@ -180,6 +184,9 @@ public:
     bool IsPointInsideViewport(double x, double y) const;
 
 private:
+    friend struct EditorHierarchyTreeTestAccess;
+    friend struct EditorHierarchyReparentTestAccess;
+    friend struct EditorHierarchyTransformInspectorTestAccess;
     struct EntitySnapshot {
         ecs::Entity entity{},previousSelection{};
         std::uint64_t world=0;
@@ -188,6 +195,8 @@ private:
         std::optional<SceneSettings> settings;
         std::vector<EntitySnapshot> related;
         std::optional<SelectionSet> selection;
+        std::optional<std::vector<ecs::HierarchyEditState>> hierarchy;
+        bool hierarchyLocal=false;
     };
     struct UndoRecord {std::string label;EntitySnapshot snapshot;std::uint64_t before=0,after=0;};
     struct PendingTransaction {std::string label;EntitySnapshot before;};
@@ -203,6 +212,20 @@ private:
     EntitySnapshot CaptureSelection(Application&)const;
     void DrawGroupGizmo(Application&,const float* view,const float* projection);
     std::vector<ecs::Entity> m_HierarchyVisible;
+    HierarchyTreeState m_HierarchyTree;
+    std::optional<HierarchyTreeState> m_EditHierarchyTree;
+    std::vector<HierarchyTreeRow> m_HierarchyTreeRows;
+    struct HierarchyDrag {std::uint64_t world=0;ecs::Entity source;std::vector<ecs::Entity> entities;};
+    std::optional<HierarchyDrag> m_HierarchyDrag;
+    ecs::Entity m_HierarchyClick;
+    bool m_HierarchyDragCancelled=false;
+    bool ReparentHierarchy(Application&,const std::vector<ecs::Entity>&,ecs::Entity);
+    void RestoreHierarchyHistory(Application&,bool redo);
+    bool EditHierarchyLocal(Application&,ecs::Entity,const ecs::TransformComponent&);
+    void DrawHierarchyTransformInspector(Application&);
+    struct HierarchyTransformDraft {ecs::HierarchyEditState before;ecs::TransformComponent value;unsigned item=0;int field=-1;};
+    std::optional<HierarchyTransformDraft> m_HierarchyTransformDraft;
+    bool m_HierarchyTransformInvalidateInput=false;
     std::uint64_t m_Revision=0,m_SavedRevision=0,m_NextRevision=0;
     bool m_ExternalDirty=false;
     EntitySnapshot CaptureLike(Application&,const EntitySnapshot&)const;
@@ -245,6 +268,7 @@ private:
     void DrawSceneDialogs(Application&);
     void DrawViewportOverlays(Application&,const ImVec2&,const ImVec2&);
     void DrawSceneHierarchy(Application& app);
+    void DrawHierarchyTree(Application& app);
     void DrawInspector(Application& app);
     void DrawStatistics(Application& app, float dt);
     void DrawViewport(Application& app, IRenderAdapter* renderer);

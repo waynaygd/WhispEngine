@@ -100,6 +100,7 @@ public:
     [[nodiscard]] std::string DebugDescribeEntity(Entity entity) const;
 
 private:
+    friend struct HierarchyEdit;
     bool DestroyEntityStorage(Entity);
     struct IComponentStorage
     {

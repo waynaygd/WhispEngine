@@ -145,6 +145,9 @@ bool SceneSerializer::LoadEntityConfigs(
         return false;
     }
 
+    ecs::World::DataMode mode;
+    if(!DetermineWorldMode(scene,mode,outError))return false;
+    if(mode!=ecs::World::DataMode::RootOnly){SetError(outError,"Scene load: hierarchy worldMode is incompatible with RootOnly legacy configs");return false;}
     if(scene.is_object()&&scene.value("version",1)==4){
         ecs::World world;SceneSettings settings;if(!RestoreWorld(scene,world,settings,outError))return false;
         std::vector<EcsDemoEntityConfig> loaded;
@@ -221,7 +224,7 @@ std::string SceneSerializer::PrimaryDirectionalId(ecs::World& world){
 nlohmann::json SceneSerializer::CaptureWorld(ecs::World& world,const SceneSettings& settings){
     if(world.IsHierarchyData()){std::string error;if(!ecs::ValidateHierarchy(world,&error))throw std::runtime_error(error);}
     auto resolved=settings;resolved.primaryDirectional=PrimaryDirectionalId(world);
-    nlohmann::json scene={{"version",4},{"settings",SceneSettingsToJson(resolved)},{"entities",nlohmann::json::array()}};
+    nlohmann::json scene={{"version",4},{"worldMode",world.IsHierarchyData()?"hierarchy":"rootOnly"},{"settings",SceneSettingsToJson(resolved)},{"entities",nlohmann::json::array()}};
     std::set<std::string> ids;const auto& registry=ecs::ComponentRegistry::Builtins();
     ecs::World check(world.GetDataMode());auto test=check.CreateEntity();
     for(auto e:world.Entities()){
@@ -233,10 +236,42 @@ nlohmann::json SceneSerializer::CaptureWorld(ecs::World& world,const SceneSettin
     }
     return scene;
 }
+bool SceneSerializer::DetermineWorldMode(const nlohmann::json& scene,ecs::World::DataMode& mode,std::string* error){
+    try{
+        if(!scene.is_object()&&!scene.is_array())throw std::runtime_error("Expected scene object or legacy entity array");
+        int version=1;
+        if(scene.is_object()&&scene.contains("version")){
+            const auto& value=scene.at("version");
+            if(!value.is_number_integer()||value<1||value>4)throw std::runtime_error("Unsupported scene version");
+            version=value.get<int>();
+        }
+        auto required=ecs::World::DataMode::RootOnly;
+        if(scene.is_object()&&scene.contains("worldMode")){
+            const auto& value=scene.at("worldMode");
+            if(!value.is_string())throw std::runtime_error("worldMode must be a string (rootOnly or hierarchy)");
+            if(value=="hierarchy")required=ecs::World::DataMode::HierarchyData;
+            else if(value!="rootOnly")throw std::runtime_error("Unknown worldMode: "+value.get<std::string>());
+        }
+        if(required==ecs::World::DataMode::HierarchyData&&version!=4)throw std::runtime_error("hierarchy worldMode requires scene schema v4");
+        if(required==ecs::World::DataMode::RootOnly&&version==4&&scene.contains("entities")&&scene.at("entities").is_array()){
+            for(const auto& node:scene.at("entities"))if(node.is_object()&&node.contains("components")&&node.at("components").is_object()&&node.at("components").contains("Relationship"))
+                throw std::runtime_error("RootOnly worldMode cannot contain Relationship; hierarchy requires explicit worldMode");
+        }
+        mode=required;return true;
+    }catch(const std::exception& e){SetError(error,std::string("Scene mode: ")+e.what());return false;}
+}
+bool SceneSerializer::ReadWorldMode(const std::filesystem::path& path,ecs::World::DataMode& mode,std::string* error){
+    try{
+        std::ifstream file(path);if(!file)throw std::runtime_error("Cannot open scene: "+path.string());
+        nlohmann::json scene;file>>scene;return DetermineWorldMode(scene,mode,error);
+    }catch(const std::exception& e){SetError(error,std::string("Scene mode: ")+e.what());return false;}
+}
 bool SceneSerializer::RestoreWorld(const nlohmann::json& scene,ecs::World& world,SceneSettings& settings,std::string* error){
     try{
         if(!scene.is_object()||scene.value("version",0)!=4||!scene.contains("entities")||!scene.at("entities").is_array())throw std::runtime_error("Expected scene schema v4");
-        ecs::World staged(world.GetDataMode());auto next=scene.contains("settings")?SceneSettingsFromJson(scene.at("settings")):SceneSettings{};
+        ecs::World::DataMode mode;if(!DetermineWorldMode(scene,mode,error))return false;
+        if(mode!=world.GetDataMode())throw std::runtime_error("worldMode mismatch: scene requires "+std::string(mode==ecs::World::DataMode::HierarchyData?"hierarchy":"rootOnly")+", destination World is "+(world.IsHierarchyData()?"hierarchy":"rootOnly"));
+        ecs::World staged(mode);auto next=scene.contains("settings")?SceneSettingsFromJson(scene.at("settings")):SceneSettings{};
         std::set<std::string> ids;const auto& registry=ecs::ComponentRegistry::Builtins();
         for(const auto& node:scene.at("entities")){
             const auto id=node.at("id").get<std::string>();if(id.empty()||id.size()>128||!ids.insert(id).second)throw std::runtime_error("Duplicate/invalid scene entity ID: "+id);
@@ -256,6 +291,8 @@ bool SceneSerializer::RestoreWorld(const nlohmann::json& scene,ecs::World& world
 bool SceneSerializer::LoadWorld(const std::filesystem::path& path,ecs::World& world,SceneSettings& settings,std::string* error){
     try{
         std::ifstream file(path);if(!file)throw std::runtime_error("Cannot open scene: "+path.string());nlohmann::json scene;file>>scene;
+        ecs::World::DataMode mode;if(!DetermineWorldMode(scene,mode,error))return false;
+        if(mode!=world.GetDataMode())throw std::runtime_error("worldMode mismatch: scene requires "+std::string(mode==ecs::World::DataMode::HierarchyData?"hierarchy":"rootOnly")+", destination World is "+(world.IsHierarchyData()?"hierarchy":"rootOnly"));
         if(scene.is_object()&&scene.value("version",1)==4)return RestoreWorld(scene,world,settings,error);
         std::vector<EcsDemoEntityConfig> configs;if(!LoadEntityConfigs(path,configs,error))return false;
         ecs::World staged;for(const auto& c:configs){

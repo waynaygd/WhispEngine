@@ -3,6 +3,7 @@
 namespace editor {
 void EditorLayer::PruneSelection(Application& app){
     auto& world=app.GetWorld();
+    if(world.IsHierarchyData()){m_Selection.Prune(world);return;}
     if(m_GroupTransform){
         const auto& group=*m_GroupTransform;
         const bool alive=group.before.world==world.GetIdentity()&&std::all_of(group.entities.begin(),group.entities.end(),[&](auto e){return world.IsAlive(e)&&world.HasComponent<ecs::TransformComponent>(e);});
@@ -24,6 +25,11 @@ void EditorLayer::SelectViewportEntity(Application& app,ecs::Entity e,bool ctrl,
 }
 void EditorLayer::SelectHierarchyEntity(Application& app,ecs::Entity e,bool ctrl,bool shift,const std::vector<ecs::Entity>& order){
     if(!app.GetWorld().IsAlive(e))return;
+    if(app.GetWorld().IsHierarchyData()){
+        m_Selection.Prune(app.GetWorld());
+        if(shift)m_Selection.Range(order,e,ctrl);else if(ctrl)m_Selection.Toggle(e);else m_Selection.Replace(e);
+        m_PropertyDrafts.clear();return;
+    }
     if(!shift){SelectViewportEntity(app,e,ctrl,false);return;}
     PruneSelection(app);EndGroupTransform(app);FinishTransaction(app);m_Selection.Range(order,e,ctrl);m_Selection.Prune(app.GetWorld());m_PropertyDrafts.clear();if(!app.IsEditorPlayMode())m_GameView=false;
 }

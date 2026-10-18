@@ -1,6 +1,7 @@
 #include "EditorTestPreferences.h"
 #define NOMINMAX
 #include "core/Application.h"
+struct ApplicationTestAccess {static void FrameSystems(Application& app){app.UpdateWorldSystems(false,0);}};
 #include "core/Logger.h"
 #include "core/AssetPaths.h"
 #include "ecs/ComponentRegistry.h"
@@ -121,7 +122,7 @@ static void Gpu(){
     Check(!app.SaveSceneAs(key,false,&error)&&!app.SaveSceneAs("../escape.json",false,&error),"Application overwrite/path rejection");
     for(int cycle=0;cycle<3;++cycle){app.SetEditorPlayMode(true);app.SetFrameLimit(20);Check(app.Run()==0,"repeated Runtime GPU frames");app.SetEditorPaused(true);app.SetEditorPlayMode(false);Check(app.OpenScene(key,&error),"scene reload replaces references");glfwSetWindowSize(window->GetGlfwHandle(),960+cycle*80,640);app.SetFrameLimit(20);Check(app.Run()==0,"viewport resize after scene reload");}
     Check(!app.GetWorld().IsAlive(entity),"reload invalidates old scene handle");
-    renderer->BeginFrame();renderer->Clear(0,0,0,1);app.GetEditorWorld().UpdateFrameSystemsOn(app.GetWorld(),0);app.NewScene();renderer->EndFrame();renderer->Present();
+    renderer->BeginFrame();renderer->Clear(0,0,0,1);ApplicationTestAccess::FrameSystems(app);app.NewScene();renderer->EndFrame();renderer->Present();
     app.SetFrameLimit(20);Check(app.Run()==0&&app.GetRenderStatistics().submitted.drawCalls==0,"destroy before submit / empty scene after Clear/New");
     Check(renderer->GetValidationErrorCount()==0,"DX12 debug ERROR/CORRUPTION");app.Shutdown();std::filesystem::remove(path);
     std::cout<<"Editor2 DX12 viewport readback, owned physics isolation, batching, Pause/Resume, reload/resize, empty scene and debug validation passed\n";

@@ -86,11 +86,13 @@ void EditorLayer::CancelTransaction(Application& app){
     try{RestoreSnapshot(app,pending.before);}catch(const std::exception& e){m_EditorError=e.what();Logger::Get().Error(m_EditorError);}m_GizmoUndoCaptured=false;m_DuplicateDrag=false;m_LightPointerCaptured=false;m_PlaneScaleCaptured=false;m_GroupTransform.reset();
 }
 void EditorLayer::Undo(Application& app){
+    if(app.GetWorld().IsHierarchyData()){RestoreHierarchyHistory(app,false);return;}
     FinishTransaction(app);if(m_UndoStack.empty())return;auto record=std::move(m_UndoStack.back());m_UndoStack.pop_back();
     try{auto inverse=CaptureLike(app,record.snapshot);inverse.entity=RestoreSnapshot(app,record.snapshot,&inverse);m_Revision=record.before;m_RedoStack.push_back({record.label,std::move(inverse),record.before,record.after});}
     catch(const std::exception& e){m_EditorError=e.what();Logger::Get().Error(m_EditorError);m_UndoStack.push_back(std::move(record));}
 }
 void EditorLayer::Redo(Application& app){
+    if(app.GetWorld().IsHierarchyData()){RestoreHierarchyHistory(app,true);return;}
     FinishTransaction(app);if(m_RedoStack.empty())return;auto record=std::move(m_RedoStack.back());m_RedoStack.pop_back();
     try{auto inverse=CaptureLike(app,record.snapshot);inverse.entity=RestoreSnapshot(app,record.snapshot,&inverse);m_Revision=record.after;m_UndoStack.push_back({record.label,std::move(inverse),record.before,record.after});}
     catch(const std::exception& e){m_EditorError=e.what();Logger::Get().Error(m_EditorError);m_RedoStack.push_back(std::move(record));}
@@ -210,6 +212,9 @@ bool EditorLayer::SetProperty(Application& app,ecs::Entity e,ecs::ComponentTypeI
     if(transactional)CommitUndo(app,"Edit property",std::move(before));return true;
 }
 void EditorLayer::EnterRuntime(const ecs::World::CloneMap& mapping){
+    m_HierarchyTransformDraft.reset();m_HierarchyTransformInvalidateInput=true;
+    m_HierarchyDrag.reset();m_HierarchyClick={};m_HierarchyDragCancelled=false;
+    m_EditHierarchyTree=std::move(m_HierarchyTree);m_HierarchyTree={};m_HierarchyTreeRows.clear();m_HierarchyVisible.clear();
     ImGuizmo::Enable(false);m_ToolActive=false;m_CancelGizmoUntilRelease=true;
     m_GroupTransform.reset();m_EditHistory=HistoryContext{m_Selection,std::move(m_UndoStack),std::move(m_RedoStack),m_Revision,m_SavedRevision,m_NextRevision,m_ExternalDirty};
     SelectionSet runtime;for(auto e:m_Selection.items)if(auto found=mapping.find(e);found!=mapping.end())runtime.Add(found->second);
@@ -218,6 +223,9 @@ void EditorLayer::EnterRuntime(const ecs::World::CloneMap& mapping){
     m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_GizmoUndoCaptured=false;m_DuplicateDrag=false;m_LightPointerCaptured=false;m_PlaneScaleCaptured=false;
 }
 void EditorLayer::LeaveRuntime(){
+    m_HierarchyTransformDraft.reset();m_HierarchyTransformInvalidateInput=true;
+    m_HierarchyDrag.reset();m_HierarchyClick={};m_HierarchyDragCancelled=false;
+    m_HierarchyTree=m_EditHierarchyTree?std::move(*m_EditHierarchyTree):HierarchyTreeState{};m_EditHierarchyTree.reset();m_HierarchyTreeRows.clear();m_HierarchyVisible.clear();
     ImGuizmo::Enable(false);m_ToolActive=m_DuplicateDrag=m_LightPointerCaptured=false;m_CancelGizmoUntilRelease=true;
     m_GroupTransform.reset();m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_Transaction.reset();m_PropertyDrafts.clear();m_GizmoUndoCaptured=false;
     if(m_EditHistory){m_Selection=m_EditHistory->selection;m_UndoStack=std::move(m_EditHistory->undo);m_RedoStack=std::move(m_EditHistory->redo);m_Revision=m_EditHistory->revision;m_SavedRevision=m_EditHistory->saved;m_NextRevision=m_EditHistory->next;m_ExternalDirty=m_EditHistory->external;m_EditHistory.reset();}

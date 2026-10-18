@@ -6,17 +6,23 @@
 #include <GLFW/glfw3.h>
 
 bool Application::OpenProject(const std::filesystem::path& path,ProjectDecision decision,std::string* error){
+    return OpenProjectInternal(path,decision,false,error);
+}
+bool Application::OpenProjectInternal(const std::filesystem::path& path,ProjectDecision decision,bool allowHierarchy,std::string* error){
     if(decision==ProjectDecision::Cancel)return false;
     try {
         auto next=ProjectManager::Prepare(path);
-        ecs::World staged;SceneSettings settings;
-        if(!SceneSerializer::LoadWorld(next->ResolveScene(next->startupScene),staged,settings,error))return false;
-        return CommitProject(std::move(next),staged,settings,decision,error);
+        auto candidate=PrepareAuthoringScene(next->ResolveScene(next->startupScene),error);if(!candidate)return false;
+        if(candidate->world->IsHierarchyData()&&!allowHierarchy){if(error)*error="Project preflight: worldMode mismatch: hierarchy Editor is not enabled";return false;}
+        candidate->controlledHierarchy=allowHierarchy;
+        candidate->sceneKey=next->startupScene;candidate->configSceneKey=candidate->sceneKey;
+        return CommitProject(std::move(next),candidate,decision,error);
     }catch(const std::exception& e){if(error)*error=std::string("Open project: ")+e.what();return false;}
 }
 bool Application::CloseProject(ProjectDecision decision,std::string* error){
     if(decision==ProjectDecision::Cancel)return false;
-    ecs::World empty;return CommitProject({},empty,SceneSettings{},decision,error);
+    auto candidate=PrepareEmptyAuthoring(ecs::World::DataMode::RootOnly,SceneSettings{},error);
+    if(!candidate)return false;return CommitProject({},candidate,decision,error);
 }
 bool Application::OpenLegacyWorkspace(std::string* error){
     if(!IsProjectBrowserActive()){
@@ -33,10 +39,14 @@ bool Application::OpenLegacyWorkspace(std::string* error){
     if(error)error->clear();
     return true;
 }
-bool Application::CommitProject(std::shared_ptr<const ProjectContext> next,ecs::World& staged,const SceneSettings& settings,ProjectDecision decision,std::string* error){
-    // Descriptor and startup scene are staged before changing the current state.
-    m_World.AssertOwnerThread();GetWorld().AssertOwnerThread();
-    if(m_World.IsIterating()||GetWorld().IsIterating()){if(error)*error="Project changes require an ECS phase boundary";return false;}
+bool Application::CommitProject(std::shared_ptr<const ProjectContext> next,std::unique_ptr<AuthoringCandidate>& candidate,ProjectDecision decision,std::string* error){
+    if(!CheckWorldPublication(error))return false;
+    if(!candidate){if(error)*error="Project preflight: Missing candidate";return false;}
+    if(!ValidateAuthoringCandidate(*candidate,error))return false;
+    // Commit begins with explicit edit resolution (Save may write files), then
+    // lifecycle/resource cleanup. Failures here are not advertised as rollback.
+    try{
+    WorldOperationScope committing(m_WorldTransitionDepth);
     if(!m_EditorLayer.ResolveProjectEdits(*this,static_cast<int>(decision),error))return false;
     SetEditorPlayMode(false);m_StateMachine.Clear(*this);m_LuaRuntime.Stop();ReleasePlayerMouse();
     m_PlayerAltWasDown=false;m_ProjectileInput={};m_InputManager.ResetMouseDelta();
@@ -52,25 +62,28 @@ bool Application::CommitProject(std::shared_ptr<const ProjectContext> next,ecs::
     m_Mutations.Clear();if(m_PhysicsSystem)m_PhysicsSystem->ResetState();ResetPhysicsClock();
     m_PlayerEntity={};m_GameplayCamera={};m_CloneMapping.clear();m_ActiveCollisionPairs.clear();
     ProjectManager::Activate(std::move(next));
-    m_World.ReplaceData(staged);m_EcsDebugEntities=m_World.Entities();m_StressEntities.clear();
-    m_EditDebugEntities.clear();m_EditStressEntities.clear();
-    SetSceneSettings(settings);auto project=GetProject();
+    InstallAuthoringWorld(*candidate);candidate.reset();auto project=GetProject();
     m_ProjectBrowserActive=!project;
-    m_SceneKey=project?project->startupScene:std::string();m_Config.ecsDemo.sceneFile=m_SceneKey;
     m_HasConfigWatch=m_HasSceneWatch=false;m_SceneWatchPath.clear();
     m_EditorLayer.ProjectOpened(*this);
     if(error)error->clear();return true;
+    }catch(const std::exception& e){if(error)*error=std::string("Project commit failed (session may have changed): ")+e.what();return false;}
 }
 bool Application::SetStartupScene(const std::string& key,std::string* error){
     auto project=GetProject();
     return SaveProjectSettings(key,project?project->settings:ProjectSettings{},error);
 }
 bool Application::SaveProjectSettings(const std::string& key,const ProjectSettings& settings,std::string* error){
+    return SaveProjectSettingsInternal(key,settings,false,error);
+}
+bool Application::SaveProjectSettingsInternal(const std::string& key,const ProjectSettings& settings,bool allowHierarchy,std::string* error){
     try{
-        m_World.AssertOwnerThread();
+        GetEditorWorld().AssertOwnerThread();
         auto project=GetProject();if(!project)throw std::runtime_error("No project is open");
-        ecs::World check;SceneSettings sceneSettings;
-        if(!SceneSerializer::LoadWorld(project->ResolveScene(key),check,sceneSettings,error))return false;
+        // Descriptor validation only: no World publication. This is also called
+        // by Save-and-continue inside the already guarded project commit.
+        auto check=PrepareAuthoringScene(project->ResolveScene(key),error,false);if(!check)return false;
+        if(check->world->IsHierarchyData()&&!allowHierarchy){if(error)*error="Project settings preflight: worldMode mismatch: hierarchy Editor is not enabled";return false;}
         auto next=ProjectManager::WithSettings(*project,key,settings);
         ProjectManager::Activate(std::move(next));
         if(error)error->clear();return true;
@@ -86,11 +99,11 @@ bool Application::SaveAuthoringSceneForTransition(std::string* error){
     // Save the editor snapshot, never runtime entities or gameplay settings.
     auto settings=GetSceneSettings();settings.lighting=m_EditLighting;settings.environment=m_EditEnvironment;
     settings.shadows=m_EditShadows;settings.background=m_EditBackground;settings.antiAliasing=m_EditAntiAliasing;settings.antiAliasingOverride=m_EditAntiAliasingOverride;
-    settings.primaryDirectional=SceneSerializer::PrimaryDirectionalId(m_World);
+    settings.primaryDirectional=SceneSerializer::PrimaryDirectionalId(GetEditorWorld());
     try{
         const auto key=m_SceneKey.empty()?DefaultSceneKey():m_SceneKey;
         const auto path=GetProject()?GetProject()->ResolveScene(key):editor::AssetImport::SafeTarget(AssetPaths::ResolveAssetRoot(),key);
-        if(!SceneSerializer::WriteAtomic(path,SceneSerializer::CaptureWorld(m_World,settings),error,!m_SceneKey.empty()))return false;
+        if(!SceneSerializer::WriteAtomic(path,SceneSerializer::CaptureWorld(GetEditorWorld(),settings),error,!m_SceneKey.empty()))return false;
         m_SceneKey=key;m_EditorLayer.MarkSaved();return true;
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }

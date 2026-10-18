@@ -46,6 +46,8 @@ public:
 
     const char* Name() const override { return "RenderSystem"; }
     void Update(World& world, float dt) override;
+    // Drop per-world value snapshots, retaining Application-owned asset/GPU caches.
+    void ResetWorldState(){m_RenderSnapshots.clear();m_RenderPackets.clear();m_Batches.clear();m_ShadowBatches.clear();m_InstanceData.clear();m_ShadowWorldBounds.clear();m_Statistics={};}
     void SetRenderAdapter(IRenderAdapter* renderer);
     void SetCameraTransform(const Vec3& position, float yawRadians, float pitchRadians);
     void SetCameraProjection(float verticalFovRadians, float aspectRatio, float nearPlane, float farPlane);

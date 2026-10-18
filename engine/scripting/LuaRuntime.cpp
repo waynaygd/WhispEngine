@@ -168,6 +168,7 @@ struct LuaRuntime::Impl
         Json overrides;
         bool failed = false;
         ecs::Entity entity{};
+        std::uint64_t starts=0,updates=0,fixedUpdates=0;
     };
     std::map<std::string, Program> programs;
     std::map<std::string, std::string> errors;
@@ -719,6 +720,10 @@ struct LuaRuntime::Impl
             sol::object fn = instance.definition[callback];
             if (!fn.valid() || fn == sol::nil) return;
             if (fn.get_type() != sol::type::function) throw std::runtime_error("Callback is no longer a function");
+            const std::string_view name=callback;
+            if(name=="on_start")++instance.starts;
+            else if(name=="on_update")++instance.updates;
+            else if(name=="on_fixed_update")++instance.fixedUpdates;
             ExecutionBudget budget(lua.lua_state());
             sol::protected_function function = fn;
             auto result = function(instance.self, std::forward<Args>(args)...);
@@ -820,9 +825,34 @@ struct LuaRuntime::Impl
 };
 LuaRuntime::LuaRuntime() : impl(std::make_unique<Impl>())
 {}
+LuaRuntime::InstanceDiagnostics LuaRuntime::InspectInstance(ecs::Entity entity)const{
+    impl->Check();InstanceDiagnostics result;
+    result.alive=impl->world&&impl->world->IsAlive(entity);if(!result.alive)return result;
+    impl->world->AssertOwnerThread();auto* component=impl->world->GetComponent<ecs::LuaScriptComponent>(entity);
+    if(!component)return result;
+    result.loaded=impl->programs.contains(component->scriptPath);
+    result.inputAllowed=impl->InputAllowed(entity);result.cameraOwner=impl->cameraOwner==entity;result.cursorOwner=impl->cursorOwner==entity;
+    if(auto error=impl->errors.find(component->scriptPath);error!=impl->errors.end())result.error=error->second;
+    if(auto at=impl->instances.find(entity);at!=impl->instances.end()){
+        const auto& instance=at->second;result.present=true;result.path=instance.path;
+        result.matches=instance.path==component->scriptPath;result.failed=instance.failed;result.revision=instance.revision;
+        result.starts=instance.starts;result.updates=instance.updates;result.fixedUpdates=instance.fixedUpdates;
+    }return result;
+}
 LuaRuntime::~LuaRuntime()
 {
     Stop();
+}
+bool LuaRuntime::ValidateStartupScripts(const ecs::World& world,std::string* error)
+{
+    try{
+        world.AssertOwnerThread();LuaRuntime validation;
+        for(auto e:world.Entities())if(auto* script=world.GetComponent<ecs::LuaScriptComponent>(e);script&&script->enabled&&!script->scriptPath.empty()){
+            (void)validation.Fields(script->scriptPath);auto diagnostic=validation.Error(script->scriptPath);
+            if(!diagnostic.empty())throw std::runtime_error("Entity "+std::to_string(e.index)+" script "+script->scriptPath+": "+diagnostic);
+        }
+        return true;
+    }catch(const std::exception& e){if(error)*error=std::string("Play preflight Lua: ")+e.what();return false;}
 }
 void LuaRuntime::Start(ecs::World& world, std::function<bool(const std::string&)> input, GameplayServices services)
 {
