@@ -43,6 +43,9 @@ public:
     virtual void EndViewportRender() {}
     virtual std::uint64_t GetViewportTextureId() const { return 0; }
     virtual std::uint64_t GetTexturePreviewId(RenderTextureHandle)const{return 0;}
+    // Called before scene rendering. The caller owns the returned cached texture.
+    virtual RenderTextureHandle RenderMeshThumbnail(const MeshData&, RenderShaderHandle, RenderTextureHandle) { return {}; }
+    virtual RenderTextureHandle CreateThumbnailTexture(const TextureData& data) { return CreateTexture2D(data); }
     virtual void BeginFrame() = 0;
     virtual void Clear(float r, float g, float b, float a) = 0;
 

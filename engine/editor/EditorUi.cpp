@@ -48,7 +48,7 @@ void EditorLayer::ConfigureDocking(){
         ImGuiID center=root,left,right,bottom,settings;
         ImGui::DockBuilderSplitNode(center,ImGuiDir_Left,.19f,&left,&center);
         ImGui::DockBuilderSplitNode(center,ImGuiDir_Right,.29f,&right,&center);
-        ImGui::DockBuilderSplitNode(center,ImGuiDir_Down,.25f,&bottom,&center);
+        ImGui::DockBuilderSplitNode(center,ImGuiDir_Down,.40f,&bottom,&center);
         ImGui::DockBuilderSplitNode(right,ImGuiDir_Down,.42f,&settings,&right);
         ImGui::DockBuilderDockWindow("Scene Hierarchy",left);ImGui::DockBuilderDockWindow("Inspector",right);ImGui::DockBuilderDockWindow("Scene Settings",settings);ImGui::DockBuilderDockWindow("Editor Visuals",settings);
         ImGui::DockBuilderDockWindow("Viewport",center);ImGui::DockBuilderDockWindow("Asset Browser",bottom);ImGui::DockBuilderDockWindow("Console / Diagnostics",bottom);ImGui::DockBuilderDockWindow("Material Editor",bottom);ImGui::DockBuilderDockWindow("Statistics",bottom);ImGui::DockBuilderDockWindow("Physics Stress Test",bottom);

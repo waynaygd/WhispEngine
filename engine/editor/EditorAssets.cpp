@@ -135,6 +135,12 @@ template<class T>const char* LoadState(ResourceManager* resources,const std::str
 const char* AssetLoadState(ResourceManager* resources,ecs::AssetKind kind,const std::string& key){
     switch(kind){case ecs::AssetKind::Mesh:return LoadState<MeshResource>(resources,key);case ecs::AssetKind::Texture:return LoadState<TextureResource>(resources,key);case ecs::AssetKind::Material:return LoadState<MaterialResource>(resources,key);case ecs::AssetKind::Shader:return LoadState<ShaderResource>(resources,key);case ecs::AssetKind::Environment:return LoadState<EnvironmentResource>(resources,key);default:return "Indexed";}
 }
+template<class T>std::string LoadError(ResourceManager* resources,const std::string& key){
+    auto asset=resources?resources->Get<T>(std::filesystem::u8path(key)):nullptr;return asset&&asset->IsFailed()?asset->GetErrorMessage():"";
+}
+std::string AssetLoadError(ResourceManager* resources,ecs::AssetKind kind,const std::string& key){
+    switch(kind){case ecs::AssetKind::Mesh:return LoadError<MeshResource>(resources,key);case ecs::AssetKind::Texture:return LoadError<TextureResource>(resources,key);case ecs::AssetKind::Material:return LoadError<MaterialResource>(resources,key);case ecs::AssetKind::Shader:return LoadError<ShaderResource>(resources,key);case ecs::AssetKind::Environment:return LoadError<EnvironmentResource>(resources,key);default:return {};}
+}
 }
 std::string EditorLayer::CreateLuaScriptAsset(Application& app,const std::string& directory){
         try{
@@ -164,6 +170,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
     struct Timing {double& ms;std::chrono::steady_clock::time_point start;~Timing(){ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}} timing{m_Statistics.assetBrowserMs,start};
     ImGui::SetNextWindowSizeConstraints(ImVec2(280,180),ImVec2(FLT_MAX,FLT_MAX));if(!ImGui::Begin("Asset Browser",&m_ShowAssetBrowser)){ImGui::End();return;}
     const auto& types=m_AssetCatalog.Types();auto* resources=app.GetResourceManager();
+    BeginAssetThumbnailFrame(app);
     auto openMaterial=[&](const std::string& key){OpenMaterial(app,key);};
     auto action=[&](int kind,const std::string& key){m_AssetAction=kind;m_AssetActionSource=key;m_AssetActionKey=key;m_AssetActionRequested=true;m_EditorError.clear();};
     auto creationMenu=[&](const std::string& directory){
@@ -234,16 +241,50 @@ void EditorLayer::DrawAssetBrowser(Application& app){
         if(ImGui::BeginPopupContextItem("ContentFolderActions")){creationMenu(folder);ImGui::EndPopup();}ImGui::PopID();
     }
     if(rows.empty())ImGui::TextWrapped("No assets match. Change the folder/filter, or right-click to create or import.");
+    const float dpi=ImGui::GetStyle().FontScaleDpi;
+    // Leave room for name/state even in a short dock; the size setting still
+    // controls column width and the preferred image size.
+    const float cardImage=std::min(m_AssetCardSize*dpi-24*dpi,std::max(16*dpi,ImGui::GetContentRegionAvail().y-ImGui::GetScrollY()-ImGui::GetTextLineHeight()*2-16*dpi-ImGui::GetStyle().CellPadding.y*2));
+    const float cardHeight=cardImage+ImGui::GetTextLineHeight()*2+16*dpi;
     if(ImGui::BeginTable("ContentItems",columns,ImGuiTableFlags_SizingStretchSame)){
-        ImGuiListClipper clipper;clipper.Begin(int((rows.size()+columns-1)/columns),m_AssetGrid?92.f*ImGui::GetStyle().FontScaleDpi:ImGui::GetFrameHeightWithSpacing());
+        ImGuiListClipper clipper;clipper.Begin(int((rows.size()+columns-1)/columns),m_AssetGrid?cardHeight+ImGui::GetStyle().CellPadding.y*2:ImGui::GetFrameHeightWithSpacing());
         while(clipper.Step())for(int rowIndex=clipper.DisplayStart;rowIndex<clipper.DisplayEnd;++rowIndex){ImGui::TableNextRow();for(int col=0;col<columns;++col){auto index=rowIndex*columns+col;if(index>=int(rows.size()))break;ImGui::TableSetColumnIndex(col);const auto& entry=*rows[index];const auto& type=types[entry.type];const auto& key=entry.key;auto name=AssetPaths::ToUtf8String(std::filesystem::u8path(key).filename());ImGui::PushID(key.c_str());
-            const char* state=AssetLoadState(resources,type.kind,key);std::string label=m_AssetGrid?type.icon+"\n"+name+"\n"+state:type.icon+" "+name+"  |  "+type.name+"  |  "+state;
-            if(ImGui::Selectable(label.c_str(),m_SelectedAsset==key,ImGuiSelectableFlags_None,ImVec2(0,m_AssetGrid?84.f*ImGui::GetStyle().FontScaleDpi:0))){m_SelectedAsset=key;m_SelectedAssetKind=type.name;}
-            if(ImGui::IsItemHovered())ImGui::SetTooltip("%s\n%s / %s\n%s",key.c_str(),type.name.c_str(),state,type.kind==ecs::AssetKind::LuaScript?"Double-click: open in Visual Studio 2022. Drag: assign script.":"Double-click material: open editor. Drag: assign compatible slot.");
+            const AssetThumbnail* thumbnail=nullptr;
+            if(m_AssetGrid&&(type.kind==ecs::AssetKind::Texture||type.kind==ecs::AssetKind::Mesh))thumbnail=&RequestAssetThumbnail(app,type.kind,key);
+            const char* state=thumbnail?thumbnail->state.c_str():AssetLoadState(resources,type.kind,key);
+            std::string label=m_AssetGrid?"##card":type.icon+" "+name+"  |  "+type.name+"  |  "+state;
+            const auto origin=ImGui::GetCursorScreenPos();const float width=ImGui::GetContentRegionAvail().x;
+            if(ImGui::Selectable(label.c_str(),m_SelectedAsset==key,ImGuiSelectableFlags_None,ImVec2(0,m_AssetGrid?cardHeight:0))){m_SelectedAsset=key;m_SelectedAssetKind=type.name;}
+            if(m_AssetGrid){
+                auto* draw=ImGui::GetWindowDrawList();
+                const float side=std::min(cardImage,std::max(1.f,width-8*dpi));
+                const ImVec2 p{origin.x+(width-side)*.5f,origin.y+4*dpi};
+                draw->AddRectFilled(p,{p.x+side,p.y+cardImage},IM_COL32(22,25,30,255),4*dpi);
+                const auto id=thumbnail&&app.GetRenderAdapter()?app.GetRenderAdapter()->GetTexturePreviewId(thumbnail->texture):0;
+                if(id&&thumbnail->width>0&&thumbnail->height>0){
+                    const float scale=std::min(side/thumbnail->width,cardImage/thumbnail->height);
+                    const ImVec2 size{thumbnail->width*scale,thumbnail->height*scale};
+                    const ImVec2 start{p.x+(side-size.x)*.5f,p.y+(cardImage-size.y)*.5f};
+                    draw->AddImage(ImTextureID(id),start,{start.x+size.x,start.y+size.y});
+                }else draw->AddText({p.x+8*dpi,p.y+cardImage*.45f},ImGui::GetColorU32(ImGuiCol_TextDisabled),type.icon.c_str());
+                draw->PushClipRect(origin,{origin.x+width,origin.y+cardHeight},true);
+                draw->AddText({origin.x+4*dpi,p.y+cardImage+4*dpi},ImGui::GetColorU32(ImGuiCol_Text),name.c_str());
+                draw->AddText({origin.x+4*dpi,p.y+cardImage+4*dpi+ImGui::GetTextLineHeight()},ImGui::GetColorU32(ImGuiCol_TextDisabled),state);
+                draw->PopClipRect();
+            }
+            if(ImGui::IsItemHovered())ImGui::SetTooltip("%s\n%s / %s\n%s\n%s",key.c_str(),type.name.c_str(),state,thumbnail?thumbnail->error.c_str():AssetLoadError(resources,type.kind,key).c_str(),type.kind==ecs::AssetKind::LuaScript?"Double-click: open in Visual Studio 2022. Drag: assign script.":"Double-click material: open editor. Drag: assign compatible slot.");
             if((type.kind!=ecs::AssetKind::None||type.name=="Imported Scene")&&ImGui::BeginDragDropSource()){AssetPayload payload{};payload.kind=type.kind;std::memcpy(payload.key,key.data(),std::min(key.size(),sizeof(payload.key)-1));ImGui::SetDragDropPayload("WHISP_ASSET",&payload,sizeof(payload));ImGui::Text("%s %s",type.icon.c_str(),name.c_str());ImGui::EndDragDropSource();}
             if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::Material)openMaterial(key);
             if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::LuaScript)OpenLuaScriptInVisualStudio(key,&m_EditorError);
             if(ImGui::BeginPopupContextItem("AssetActions")){
+                if(thumbnail&&thumbnail->state=="Failed"&&ImGui::MenuItem("Retry thumbnail")){
+                    if(thumbnail->texture.IsValid()&&app.GetRenderAdapter())app.GetRenderAdapter()->DestroyTexture(thumbnail->texture);
+                    m_AssetThumbnails.erase(key);
+                    if(resources){
+                        if(type.kind==ecs::AssetKind::Mesh){auto r=resources->Get<MeshResource>(std::filesystem::u8path(key));if(r&&r->IsFailed())resources->Unload<MeshResource>(std::filesystem::u8path(key));}
+                        else{auto r=resources->Get<TextureResource>(std::filesystem::u8path(key));if(r&&r->IsFailed())resources->Unload<TextureResource>(std::filesystem::u8path(key));}
+                    }
+                }
                 if(type.kind==ecs::AssetKind::LuaScript&&ImGui::MenuItem("Open in Visual Studio"))OpenLuaScriptInVisualStudio(key,&m_EditorError);
                 if(type.kind==ecs::AssetKind::Prefab&&ImGui::MenuItem("Instantiate Prefab",nullptr,false,!app.IsEditorPlayMode())){
                     try{FinishTransaction(app);auto e=scripting::SpawnPrefab(app.GetWorld(),key,{});EntitySnapshot before;before.entity=e;before.world=e.world;SelectEntityFromUser(app,e);app.NotifyEditorMutation(e);CommitUndo(app,"Instantiate Prefab",before);}catch(const std::exception& error){m_EditorError=error.what();}

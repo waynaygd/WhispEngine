@@ -62,6 +62,9 @@ public:
     void SetSkyDiagnosticEnabled(bool enabled){m_SkyDiagnosticEnabled=enabled;}
     void SetDiagnosticViewport(int w,int h){m_DiagnosticWidth=w;m_DiagnosticHeight=h;}
     void SetAssetGrid(bool grid){m_AssetGrid=grid;}
+    void SetAssetCardSize(float size){if(std::isfinite(size))m_AssetCardSize=std::clamp(size,120.f,320.f);}
+    void SetAssetSearch(const std::string& search){m_AssetFilter=search;}
+    void SetAssetTypeFilter(ecs::AssetKind kind){m_AssetKindFilter=0;for(std::size_t i=0;i<m_AssetCatalog.Types().size();++i)if(m_AssetCatalog.Types()[i].kind==kind){m_AssetKindFilter=int(i)+1;break;}}
     void NavigateAssetFolder(const std::string& folder){auto key=AssetCatalog::DirectoryKey(std::filesystem::u8path(folder));m_AssetNavigation.Go(key);m_AssetDirectory=key;}
     const std::string& AssetFolder()const{return m_AssetDirectory;}
     const std::string& ImportTargetFolder()const{return m_ImportTargetFolder;}
@@ -126,6 +129,16 @@ public:
     void EndGroupTransform(Application&,bool cancel=false);
     enum class OpenDecision {Cancel,Discard,Save};
     void ReleaseAssetPreview(IRenderAdapter*);
+    struct AssetThumbnail {
+        RenderTextureHandle texture;
+        int width=0,height=0;
+        std::uint64_t version=0,lastUsed=0;
+        std::string state="Not requested",error;
+        ecs::AssetKind kind=ecs::AssetKind::None;
+    };
+    void BeginAssetThumbnailFrame(Application&);
+    const AssetThumbnail& RequestAssetThumbnail(Application&,ecs::AssetKind,const std::string&);
+    void ReleaseAssetThumbnails(IRenderAdapter*);
     bool RequestRecentScene(Application&,const std::string&);
     bool IsGameView()const{return m_GameView;}
     void SetGameView(bool value){m_GameView=value;}
@@ -239,6 +252,11 @@ private:
     void DrawViewport(Application& app, IRenderAdapter* renderer);
     void DrawAssetPreview(Application&);
     RenderTextureHandle m_AssetPreviewTexture;
+    std::unordered_map<std::string,AssetThumbnail> m_AssetThumbnails;
+    RenderShaderHandle m_ThumbnailShader;
+    RenderTextureHandle m_ThumbnailWhite;
+    std::uint64_t m_ThumbnailFrame=0,m_ThumbnailRevision=0,m_ThumbnailEpoch=0;
+    unsigned m_ThumbnailRequests=0,m_ThumbnailUploads=0;
     std::string m_AssetPreviewKey,m_AssetMetadataKey,m_AssetMetadata;
     std::uint64_t m_AssetPreviewVersion=0,m_AssetMetadataVersion=0;
     void DrawAssetBrowser(Application& app);
@@ -295,7 +313,7 @@ private:
     float m_SnapTranslation=1,m_SnapRotation=15,m_SnapScale=.1f;
     Statistics m_Statistics;
     AssetCatalog m_AssetCatalog;
-    bool m_AssetGrid=false,m_AssetActionRequested=false;
+    bool m_AssetGrid=true,m_AssetActionRequested=false;
     int m_AssetAction=0,m_ModelImportMode=0;
     std::string m_AssetActionSource,m_AssetActionKey="materials/new.material.json";
     bool m_AssetActionFocus=false;

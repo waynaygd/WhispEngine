@@ -39,6 +39,8 @@ public:
 	RenderMeshHandle UploadMesh(const MeshData& meshData) override;
 	void DestroyMesh(RenderMeshHandle handle) override;
 	RenderTextureHandle CreateTexture2D(const TextureData& textureData) override;
+    RenderTextureHandle RenderMeshThumbnail(const MeshData&, RenderShaderHandle, RenderTextureHandle) override;
+    RenderTextureHandle CreateThumbnailTexture(const TextureData& data) override {return CreateTexture(data,false,true);}
 	void DestroyTexture(RenderTextureHandle handle) override;
 	RenderShaderHandle CreateShaderProgram(const ShaderResource& shaderResource) override;
 	void DestroyShader(RenderShaderHandle handle) override;
@@ -70,6 +72,7 @@ public:
     // Diagnostics only, after EndFrame and before Present; waits for readback.
     std::vector<std::uint8_t> ReadBackFramePixels();
     std::vector<std::uint8_t> ReadBackViewportPixels();
+    std::vector<std::uint8_t> ReadBackTexturePixels(RenderTextureHandle);
 
 
     void SetMeshRange(const RenderMeshRange& range) override {m_MeshRange=range;}
@@ -98,6 +101,8 @@ public:
     bool SaveFrameImage(const std::string&) override;
 
 private:
+    RenderTextureHandle CreateTexture(const TextureData&, bool renderTarget, bool deferred=false);
+    std::vector<std::uint8_t> ReadBackColorPixels(ID3D12Resource*);
     GLFWwindow* m_EditorUiWindow=nullptr;
     float m_EditorUiScale=1;
     EditorVisualFrame m_EditorVisualFrame;

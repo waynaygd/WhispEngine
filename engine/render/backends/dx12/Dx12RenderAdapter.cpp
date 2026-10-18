@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "Dx12RenderAdapter.h"
 #include "../../../editor/EditorTheme.h"
 #ifdef _WIN32
@@ -38,6 +41,7 @@
 #include <fstream>
 #include <functional>
 #include <cstring>
+#include <DirectXMath.h>
 
 
 static std::vector<uint8_t> ReadFileBinary(const char* path)
@@ -264,6 +268,11 @@ void Dx12RenderAdapter::DestroyMesh(RenderMeshHandle handle)
 
 RenderTextureHandle Dx12RenderAdapter::CreateTexture2D(const TextureData& textureData)
 {
+    return CreateTexture(textureData, false);
+}
+
+RenderTextureHandle Dx12RenderAdapter::CreateTexture(const TextureData& textureData, bool renderTarget, bool deferred)
+{
     if (!m_Device || !m_Queue || !m_Fence || !m_FenceEvent)
     {
         Logger::Get().Warn("DX12 CreateTexture2D: device is not initialized");
@@ -319,7 +328,7 @@ RenderTextureHandle Dx12RenderAdapter::CreateTexture2D(const TextureData& textur
         textureDesc.Format = DXGI_FORMAT_R8G8B8A8_TYPELESS;
         textureDesc.SampleDesc.Count = 1;
         textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+        textureDesc.Flags = renderTarget ? D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET : D3D12_RESOURCE_FLAG_NONE;
         uploadedTexture.allocationBytes=m_Device->GetResourceAllocationInfo(0,1,&textureDesc).SizeInBytes;
 
         D3D12_HEAP_PROPERTIES defaultHeap{};
@@ -329,7 +338,7 @@ RenderTextureHandle Dx12RenderAdapter::CreateTexture2D(const TextureData& textur
                 &defaultHeap,
                 D3D12_HEAP_FLAG_NONE,
                 &textureDesc,
-                D3D12_RESOURCE_STATE_COPY_DEST,
+                renderTarget ? D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE : D3D12_RESOURCE_STATE_COPY_DEST,
                 nullptr,
                 IID_PPV_ARGS(&uploadedTexture.texture)),
             "DX12 CreateTexture2D: texture resource creation failed");
@@ -354,13 +363,7 @@ RenderTextureHandle Dx12RenderAdapter::CreateTexture2D(const TextureData& textur
         subresourceData.RowPitch = static_cast<LONG_PTR>(textureData.width * 4);
         subresourceData.SlicePitch = subresourceData.RowPitch * textureData.height;
 
-        ExecuteImmediateCommandList(
-            m_Device.Get(),
-            m_Queue.Get(),
-            m_Fence.Get(),
-            m_FenceEvent,
-            m_FenceValue,
-            [&](ID3D12GraphicsCommandList* commandList)
+        auto upload=[&](ID3D12GraphicsCommandList* commandList)
             {
                 UpdateSubresources(commandList, uploadedTexture.texture.Get(), uploadBuffer.Get(), 0, 0, 1, &subresourceData);
 
@@ -369,7 +372,11 @@ RenderTextureHandle Dx12RenderAdapter::CreateTexture2D(const TextureData& textur
                     D3D12_RESOURCE_STATE_COPY_DEST,
                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
                 commandList->ResourceBarrier(1, &barrier);
-            });
+            };
+        if(!renderTarget){
+            if(deferred&&m_FrameRecording){upload(m_CmdList.Get());m_RetiredResources[m_FrameIndex].emplace_back(uploadBuffer.Get());}
+            else ExecuteImmediateCommandList(m_Device.Get(),m_Queue.Get(),m_Fence.Get(),m_FenceEvent,m_FenceValue,upload);
+        }
 
         uploadedTexture.cpuSrvHandle = m_SrvHeap->GetCPUDescriptorHandleForHeapStart();
         uploadedTexture.cpuSrvHandle.ptr += static_cast<SIZE_T>(uploadedTexture.descriptorIndex) * m_SrvDescriptorSize;
@@ -398,6 +405,102 @@ RenderTextureHandle Dx12RenderAdapter::CreateTexture2D(const TextureData& textur
         Logger::Get().Error(std::string("DX12 CreateTexture2D exception: ") + e.what());
         return RenderTextureHandle::Invalid();
     }
+}
+
+RenderTextureHandle Dx12RenderAdapter::RenderMeshThumbnail(const MeshData& data, RenderShaderHandle shader, RenderTextureHandle white)
+{
+    using namespace DirectX;
+    if (!m_FrameRecording || m_ViewportTarget.rendering || m_HdrActive ||
+        !m_UploadedShaders.count(shader.value) || !m_UploadedTextures.count(white.value) ||
+        data.vertices.empty() || data.indices.empty() || m_DrawCbIndex >= MaxDrawsPerFrame)
+        return {};
+
+    XMFLOAT3 lo{FLT_MAX,FLT_MAX,FLT_MAX}, hi{-FLT_MAX,-FLT_MAX,-FLT_MAX};
+    for (const auto& v : data.vertices) {
+        for (float p : v.position) if (!std::isfinite(p)) return {};
+        lo.x=std::min(lo.x,v.position[0]); lo.y=std::min(lo.y,v.position[1]); lo.z=std::min(lo.z,v.position[2]);
+        hi.x=std::max(hi.x,v.position[0]); hi.y=std::max(hi.y,v.position[1]); hi.z=std::max(hi.z,v.position[2]);
+    }
+    // Normalize before constructing the camera: very small and off-origin assets fit alike.
+    const auto center=XMVectorScale(XMVectorAdd(XMLoadFloat3(&lo),XMLoadFloat3(&hi)),.5f);
+    float radius=0;
+    for(const auto& v:data.vertices){
+        const auto point=XMVectorSet(v.position[0],v.position[1],v.position[2],0);
+        radius=std::max(radius,XMVectorGetX(XMVector3Length(XMVectorSubtract(point,center))));
+    }
+    if (!std::isfinite(radius) || radius < 1e-12f) return {};
+    const auto model=XMMatrixTranslationFromVector(XMVectorNegate(center))*XMMatrixScaling(1/radius,1/radius,1/radius);
+    const auto eye=XMVectorSet(2.4f,1.7f,-2.8f,1);
+    const auto mvp=model*XMMatrixLookAtLH(eye,XMVectorZero(),XMVectorSet(0,1,0,0))*XMMatrixPerspectiveFovLH(XM_PIDIV4,1,.1f,10);
+
+    RenderTextureHandle result{}; RenderMeshHandle mesh{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> depth;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> rtvHeap,dsvHeap;
+    try {
+        TextureData pixels; pixels.width=pixels.height=256; pixels.pixels.resize(256*256*4);
+        result=CreateTexture(pixels,true); if(!result.IsValid())return {};
+        mesh=UploadMesh(data); if(!mesh.IsValid()){DestroyTexture(result);return {};}
+        D3D12_DESCRIPTOR_HEAP_DESC heap{}; heap.NumDescriptors=1; heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+        ThrowIfFailed(m_Device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&rtvHeap)),"Thumbnail RTV heap");
+        heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+        ThrowIfFailed(m_Device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&dsvHeap)),"Thumbnail DSV heap");
+        auto desc=CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT,256,256,1,1,1,0,D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
+        D3D12_HEAP_PROPERTIES props{}; props.Type=D3D12_HEAP_TYPE_DEFAULT;
+        D3D12_CLEAR_VALUE clear{}; clear.Format=DXGI_FORMAT_D32_FLOAT; clear.DepthStencil.Depth=1;
+        ThrowIfFailed(m_Device->CreateCommittedResource(&props,D3D12_HEAP_FLAG_NONE,&desc,D3D12_RESOURCE_STATE_DEPTH_WRITE,&clear,IID_PPV_ARGS(&depth)),"Thumbnail depth");
+        auto* color=m_UploadedTextures.at(result.value).texture.Get();
+        D3D12_RENDER_TARGET_VIEW_DESC view{}; view.Format=DXGI_FORMAT_R8G8B8A8_UNORM; view.ViewDimension=D3D12_RTV_DIMENSION_TEXTURE2D;
+        const auto rtv=rtvHeap->GetCPUDescriptorHandleForHeapStart(),dsv=dsvHeap->GetCPUDescriptorHandleForHeapStart();
+        m_Device->CreateRenderTargetView(color,&view,rtv); m_Device->CreateDepthStencilView(depth.Get(),nullptr,dsv);
+        auto barrier=CD3DX12_RESOURCE_BARRIER::Transition(color,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);
+        m_CmdList->ResourceBarrier(1,&barrier);
+        D3D12_VIEWPORT viewport{0,0,256,256,0,1}; D3D12_RECT rect{0,0,256,256};
+        m_CmdList->RSSetViewports(1,&viewport); m_CmdList->RSSetScissorRects(1,&rect); m_CmdList->OMSetRenderTargets(1,&rtv,FALSE,&dsv);
+        const float background[]={.085f,.095f,.115f,1}; m_CmdList->ClearRenderTargetView(rtv,background,0,nullptr); m_CmdList->ClearDepthStencilView(dsv,D3D12_CLEAR_FLAG_DEPTH,1,0,0,nullptr);
+
+        // Reuse the ordinary material renderer. Preserve scene state and use its own
+        // immutable constant slices; no scene entities, shadows, fog or IBL are changed.
+        const auto oldShader=m_BoundShaderHandle; const auto oldTexture=m_BoundTextureHandle;
+        const auto oldMaps=m_BoundMaps; const auto oldModel=m_Model; const auto oldNormal=m_Normal;
+        const auto oldBase=m_BaseColor; const auto oldSurface=m_Surface; const auto oldParams=m_TextureParameters;
+        const auto oldCamera=m_Camera; const auto oldLighting=m_Lighting; const auto oldRange=m_MeshRange;
+        const auto oldMaterial=m_MaterialState; const auto oldEnv=m_EnvironmentSettings;
+        const auto oldShadows=m_ShadowConstants; const auto oldLightPass=m_ActiveLightPass;
+        const auto oldLights=m_PendingLights; const auto oldStats=m_SubmissionStatistics;
+        const auto oldDiagnostics=m_SceneLightDiagnostics;
+        const auto oldWidth=m_ViewportTarget.width,oldHeight=m_ViewportTarget.height;
+        const bool oldRendering=m_ViewportTarget.rendering;
+        float oldMvp[16],oldColor[4]; std::memcpy(oldMvp,m_PendingMVP,sizeof(oldMvp)); std::memcpy(oldColor,m_PendingColor,sizeof(oldColor));
+        struct Restore {std::function<void()> action;~Restore(){action();}} restore{[=,this]{
+            m_BoundShaderHandle=oldShader; m_BoundTextureHandle=oldTexture; m_BoundMaps=oldMaps; m_Model=oldModel; m_Normal=oldNormal;
+            m_BaseColor=oldBase; m_Surface=oldSurface; m_TextureParameters=oldParams; m_Camera=oldCamera; m_Lighting=oldLighting;
+            m_MeshRange=oldRange; m_MaterialState=oldMaterial; m_EnvironmentSettings=oldEnv; m_ShadowConstants=oldShadows;
+            m_ActiveLightPass=oldLightPass; m_PendingLights=oldLights; m_SubmissionStatistics=oldStats; m_FrameConstantsDirty=true; m_LastMaterialTable={};
+            m_ViewportTarget.width=oldWidth;m_ViewportTarget.height=oldHeight;m_ViewportTarget.rendering=oldRendering;m_SceneLightDiagnostics=oldDiagnostics;
+            SetTestTransform(oldMvp); SetTestColor(oldColor[0],oldColor[1],oldColor[2],oldColor[3]);
+        }};
+        // Light buffers use the dimensions of this offscreen pass, not the desktop.
+        m_ViewportTarget.width=m_ViewportTarget.height=256;m_ViewportTarget.rendering=true;
+        XMFLOAT4X4 matrix; XMStoreFloat4x4(&matrix,mvp); SetTestTransform(&matrix._11);
+        XMStoreFloat4x4(&matrix,model); std::memcpy(m_Model.data(),&matrix,sizeof(matrix));
+        m_Normal=BuildNormalMatrix(m_Model); m_BaseColor={.72f,.77f,.84f,1}; m_Surface={0,.65f,0,0}; m_TextureParameters={1,1,0,1};
+        SetTestColor(1,1,1,1); m_Camera={2.4f,1.7f,-2.8f,0}; m_Lighting=BuildLightingConstants(LightingSettings{});
+        m_MeshRange={}; m_MaterialState={true,false,false}; m_BoundMaps={};
+        m_EnvironmentSettings.enabled=false; m_ShadowConstants={}; m_PendingLights.clear(); m_ActiveLightPass=UINT_MAX; m_FrameConstantsDirty=true;
+        BindShader(shader); BindTexture(0,white); DrawMesh(mesh);
+        if(m_SubmissionStatistics.drawCalls==oldStats.drawCalls)throw std::runtime_error("Thumbnail draw was not submitted");
+        barrier=CD3DX12_RESOURCE_BARRIER::Transition(color,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        m_CmdList->ResourceBarrier(1,&barrier);
+    } catch(const std::exception& e) {
+        Logger::Get().Warn(std::string("Mesh thumbnail: ")+e.what());
+        if(result.IsValid())DestroyTexture(result); result={};
+    }
+    // These allocations are referenced by this frame's command list.
+    if(depth)m_RetiredResources[m_FrameIndex].emplace_back(depth.Get());
+    if(rtvHeap)m_RetiredResources[m_FrameIndex].emplace_back(rtvHeap.Get());
+    if(dsvHeap)m_RetiredResources[m_FrameIndex].emplace_back(dsvHeap.Get());
+    if(mesh.IsValid())DestroyMesh(mesh);
+    return result;
 }
 
 void Dx12RenderAdapter::DestroyTexture(RenderTextureHandle handle)
@@ -1001,20 +1104,29 @@ std::vector<std::uint8_t> Dx12RenderAdapter::ReadBackFramePixels()
 
 std::vector<std::uint8_t> Dx12RenderAdapter::ReadBackViewportPixels()
 {
-    if(!m_ViewportTarget.color||m_FrameRecording)return {};
+    return ReadBackColorPixels(m_ViewportTarget.color.Get());
+}
+std::vector<std::uint8_t> Dx12RenderAdapter::ReadBackTexturePixels(RenderTextureHandle handle)
+{
+    auto it=m_UploadedTextures.find(handle.value);
+    return it==m_UploadedTextures.end()?std::vector<std::uint8_t>{}:ReadBackColorPixels(it->second.texture.Get());
+}
+std::vector<std::uint8_t> Dx12RenderAdapter::ReadBackColorPixels(ID3D12Resource* color)
+{
+    if(!color||m_FrameRecording)return {};
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};UINT rows=0;UINT64 rowBytes=0,totalBytes=0;
-    const auto desc=m_ViewportTarget.color->GetDesc();
+    const auto desc=color->GetDesc();
     m_Device->GetCopyableFootprints(&desc,0,1,0,&footprint,&rows,&rowBytes,&totalBytes);
     Microsoft::WRL::ComPtr<ID3D12Resource> staging;
     D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_READBACK;
     const auto bufferDesc=CD3DX12_RESOURCE_DESC::Buffer(totalBytes);
     ThrowIfFailed(m_Device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bufferDesc,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&staging)),"Readback allocation failed");
     ExecuteImmediateCommandList(m_Device.Get(),m_Queue.Get(),m_Fence.Get(),m_FenceEvent,m_FenceValue,[&](ID3D12GraphicsCommandList* command) {
-        auto before=CD3DX12_RESOURCE_BARRIER::Transition(m_ViewportTarget.color.Get(),D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COPY_SOURCE);command->ResourceBarrier(1,&before);
-        D3D12_TEXTURE_COPY_LOCATION src{};src.pResource=m_ViewportTarget.color.Get();src.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        auto before=CD3DX12_RESOURCE_BARRIER::Transition(color,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COPY_SOURCE);command->ResourceBarrier(1,&before);
+        D3D12_TEXTURE_COPY_LOCATION src{};src.pResource=color;src.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
         D3D12_TEXTURE_COPY_LOCATION dst{};dst.pResource=staging.Get();dst.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;dst.PlacedFootprint=footprint;
         command->CopyTextureRegion(&dst,0,0,0,&src,nullptr);
-        auto after=CD3DX12_RESOURCE_BARRIER::Transition(m_ViewportTarget.color.Get(),D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);command->ResourceBarrier(1,&after);
+        auto after=CD3DX12_RESOURCE_BARRIER::Transition(color,D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);command->ResourceBarrier(1,&after);
     });
     void* mapped=nullptr;D3D12_RANGE range{0,static_cast<SIZE_T>(totalBytes)};
     ThrowIfFailed(staging->Map(0,&range,&mapped),"Readback Map failed");

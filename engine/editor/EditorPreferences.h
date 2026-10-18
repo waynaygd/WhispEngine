@@ -12,7 +12,7 @@ struct EditorPreferences {
     EditorVisualSettings visuals;
     std::vector<std::string> recentScenes;
     std::vector<RecentProject> recentProjects;
-    bool assetGrid=false,projectAssets=true;
+    bool assetGrid=true,projectAssets=true;
     float assetCardSize=180;
     bool visualPanel=false,backgroundOverride=false,projectileTestInput=false;
     bool grid=true,lightGizmos=true,xray=false,snapping=false,rotationSnapping=false,physicsStress=false;
