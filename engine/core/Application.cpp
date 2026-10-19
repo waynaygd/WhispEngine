@@ -695,12 +695,13 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     const std::size_t entityOrdinal = m_EcsDebugEntities.size();
     if(entityCfg.light){
         auto& t=GetWorld().AddComponent<ecs::TransformComponent>(entity);
-        t.position=entityCfg.position;t.rotation=entityCfg.rotation;t.scale=entityCfg.scale;
+        t.pivot=entityCfg.pivot;t.position=entityCfg.position;t.rotation=entityCfg.rotation;t.scale=entityCfg.scale;
         GetWorld().AddComponent<ecs::TagComponent>(entity).name=entityCfg.tag;
         ecs::AddSceneLight(GetWorld(),entity,*entityCfg.light);return entity;
     }
 
     auto& transform = GetWorld().AddComponent<ecs::TransformComponent>(entity);
+    transform.pivot = entityCfg.pivot;
     transform.position = entityCfg.position;
     transform.rotation = entityCfg.rotation;
     transform.scale = entityCfg.scale;

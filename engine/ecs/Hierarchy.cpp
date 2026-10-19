@@ -32,7 +32,7 @@ TransformComponent World::WorldTransform(Entity e,const std::function<TransformC
     const auto local=localOf(e);if(!Parent(e).IsValid())return local;
     auto result=Matrix(local);std::unordered_set<Entity,EntityHash> visited{e};
     for(auto p=Parent(e);p.IsValid();p=Parent(p)){if(!visited.insert(p).second||visited.size()>256)throw std::runtime_error("Hierarchy cycle/depth exceeds 256");result=MultiplyMatrix(Matrix(localOf(p)),result);}
-    return Decomposed(result,local.scale);
+    return RebasePivot(Decomposed(result,local.scale),local.pivot);
 }
 bool World::SetLocalTransform(Entity e,const TransformComponent& t,std::string* error){return SetLocalTransforms({{e,t}},error);}
 bool World::SetWorldTransform(Entity e,const TransformComponent& t,std::string* error){return SetWorldTransforms({{e,t}},error);}
@@ -63,7 +63,9 @@ bool World::ApplyHierarchy(const std::vector<std::pair<Entity,Entity>>& parents,
             std::unordered_set<Entity,EntityHash> chain{e};for(auto a=p;a.IsValid();a=parent(a))if(!chain.insert(a).second||chain.size()>256)throw std::runtime_error("Parenting would create a cycle or exceed 256 levels");
         }
         std::unordered_map<Entity,TransformComponent,EntityHash> edits;
-        for(const auto& [e,t]:transforms){LocalTransform(e);(void)Decomposed(Matrix(t),t.scale);edits[e]=t;}
+        for(const auto& [e,t]:transforms){LocalTransform(e);for(float value:{t.pivot.x,t.pivot.y,t.pivot.z})if(!std::isfinite(value)||std::abs(value)>1e6f)throw std::runtime_error("Pivot must be finite and within 1000000 units");
+            if(auto* rb=GetComponent<RigidbodyComponent>(e);rb&&!rb->isStatic&&rb->simulatePhysics&&HasPivot(t))throw std::runtime_error("Nonzero Pivot is unsupported on dynamic Rigidbody; use a static body or a visual child");
+            (void)Decomposed(Matrix(t),t.scale);edits[e]=t;}
         std::unordered_map<Entity,ImportMatrix,EntityHash> matrices;
         std::function<ImportMatrix(Entity)> resolve=[&](Entity e){
             if(auto it=matrices.find(e);it!=matrices.end())return it->second;
@@ -73,10 +75,10 @@ bool World::ApplyHierarchy(const std::vector<std::pair<Entity,Entity>>& parents,
         };
         // Validate the resulting descendants too, before publishing any local value.
         if(!proposed.empty())for(auto e:Entities())if(GetComponent<TransformComponent>(e))(void)Decomposed(resolve(e),LocalTransform(e).scale);
-        if(worldSpace)for(auto& [e,t]:edits)if(auto p=parent(e);p.IsValid())t=Decomposed(MultiplyMatrix(Inverse(resolve(p)),Matrix(t)),LocalTransform(e).scale);
+        if(worldSpace)for(auto& [e,t]:edits)if(auto p=parent(e);p.IsValid())t=RebasePivot(Decomposed(MultiplyMatrix(Inverse(resolve(p)),Matrix(t)),LocalTransform(e).scale),t.pivot);
         for(const auto& [e,t]:edits)*GetComponent<TransformComponent>(e)=t;m_Parents=std::move(proposed);
         if(error)error->clear();return true;
     }catch(const std::exception& ex){if(error)*error=ex.what();return false;}
 }
-void World::ValidateHierarchy()const{for(const auto& [e,p]:m_Parents){if(!IsAlive(e)||!IsAlive(p))throw std::runtime_error("Dangling Parent");if(auto* rb=GetComponent<RigidbodyComponent>(e);rb&&!rb->isStatic&&rb->simulatePhysics)throw std::runtime_error("Dynamic Rigidbody must remain a root entity");(void)WorldTransform(e);}}
+void World::ValidateHierarchy()const{for(auto e:Entities())if(auto* t=GetComponent<TransformComponent>(e)){for(float value:{t->pivot.x,t->pivot.y,t->pivot.z})if(!std::isfinite(value)||std::abs(value)>1e6f)throw std::runtime_error("Invalid Pivot");if(auto* rb=GetComponent<RigidbodyComponent>(e);rb&&!rb->isStatic&&rb->simulatePhysics&&HasPivot(*t))throw std::runtime_error("Nonzero Pivot is unsupported on dynamic Rigidbody");}for(const auto& [e,p]:m_Parents){if(!IsAlive(e)||!IsAlive(p))throw std::runtime_error("Dangling Parent");if(auto* rb=GetComponent<RigidbodyComponent>(e);rb&&!rb->isStatic&&rb->simulatePhysics)throw std::runtime_error("Dynamic Rigidbody must remain a root entity");(void)WorldTransform(e);}}
 }

@@ -9,7 +9,7 @@ bool EditorLayer::BeginGroupTransform(Application& app,bool local){
     PruneSelection(app);EndGroupTransform(app);FinishTransaction(app);if(m_Selection.items.size()<2)return false;
     GroupSession group;group.entities=app.GetWorld().HierarchyRoots(m_Selection.items);group.before=CaptureSelection(app,true);
     double x=0,y=0,z=0;
-    for(auto e:group.entities){auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(e);if(!t||!ValidGroupSource(*t)){m_EditorError="Group Transform requires valid Transform on every selected entity";return false;}auto absolute=app.GetWorld().WorldTransform(e);group.originals.push_back(absolute);x+=absolute.position.x;y+=absolute.position.y;z+=absolute.position.z;}
+    for(auto e:group.entities){auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(e);if(!t||!ValidGroupSource(*t)){m_EditorError="Group Transform requires valid Transform on every selected entity";return false;}auto absolute=app.GetWorld().WorldTransform(e);group.originals.push_back(absolute);auto p=ecs::PivotPosition(absolute);x+=p.x;y+=p.y;z+=p.z;}
     const double n=double(group.entities.size());group.pivot.position={float(x/n),float(y/n),float(z/n)};
     if(local)group.pivot.rotation=app.GetWorld().WorldTransform(m_Selection.active).rotation;
     group.current=TransformMatrix(group.pivot);m_GroupTransform=std::move(group);return true;
@@ -46,14 +46,14 @@ void EditorLayer::DrawGroupGizmo(Application& app,const float* view,const float*
     ecs::TransformComponent reference;
     if(m_GroupTransform)reference=m_GroupTransform->pivot;
     else{
-        double x=0,y=0,z=0;for(auto e:app.GetWorld().HierarchyRoots(m_Selection.items)){auto value=app.GetWorld().WorldTransform(e);auto* t=&value;if(!t||!ValidGroupSource(*t))return;x+=t->position.x;y+=t->position.y;z+=t->position.z;}
+        double x=0,y=0,z=0;for(auto e:app.GetWorld().HierarchyRoots(m_Selection.items)){auto value=app.GetWorld().WorldTransform(e);value.position=ecs::PivotPosition(value);auto* t=&value;if(!t||!ValidGroupSource(*t))return;x+=t->position.x;y+=t->position.y;z+=t->position.z;}
         double count=double(app.GetWorld().HierarchyRoots(m_Selection.items).size());reference.position={float(x/count),float(y/count),float(z/count)};
         if(m_GizmoMode==0)reference.rotation=app.GetWorld().WorldTransform(m_Selection.active).rotation;
     }
     auto current=m_GroupTransform?m_GroupTransform->current:TransformMatrix(reference);float matrix[16];for(int i=0;i<16;++i)matrix[i]=float(current[i]);
     const auto operation=m_GizmoOperation==0?ImGuizmo::TRANSLATE:m_GizmoOperation==1?ImGuizmo::ROTATE:ImGuizmo::SCALE;
     float value=m_GizmoOperation==0?m_SnapTranslation:m_GizmoOperation==1?m_SnapRotation:m_SnapScale;float snap[3]={value,value,value};
-    const bool changed=ImGuizmo::Manipulate(view,projection,operation,m_GizmoMode==0?ImGuizmo::LOCAL:ImGuizmo::WORLD,matrix,nullptr,(m_GizmoOperation==1?m_RotationSnapping:m_Snapping)?snap:nullptr);
+    const bool changed=ImGuizmo::Manipulate(view,projection,operation,m_GizmoMode==0?ImGuizmo::LOCAL:ImGuizmo::WORLD,matrix,nullptr,(m_GizmoOperation==1?m_RotationSnapping:(m_Snapping&&!(m_VertexSnapEnabled&&m_GizmoOperation==0&&!ImGui::GetIO().KeyAlt)))?snap:nullptr);
     if(ImGuizmo::IsUsing()){
         if(!m_GroupTransform&&!BeginGroupTransform(app,m_GizmoMode==0))return;
         if(changed&&ImGui::IsMouseDragging(0,.5f*ImGui::GetStyle().FontScaleDpi)){

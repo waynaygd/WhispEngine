@@ -680,6 +680,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     }
     if(m_ViewportHovered&&ImGui::IsMouseClicked(1))ImGui::SetWindowFocus();
     if(m_ViewportHovered&&ImGui::IsMouseClicked(0))ImGui::SetWindowFocus();
+    DrawVertexSnap(app,contentMin,viewportSize,false);
     m_LightHandleHovered=m_LightIconClicked=false;
     m_SpecialIconHovered=false;
     // Specialized markers retain visual and picking priority over fallback icons.
@@ -694,8 +695,9 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     DrawEntityIcons(app,contentMin,viewportSize);
     iconLayers.Merge(iconDraw);
     ImGui::GetWindowDrawList()->PushClipRect(contentMin,ImVec2(contentMin.x+viewportSize.x,contentMin.y+viewportSize.y),true);
-    if(!m_LightIconClicked&&!m_LightPointerCaptured&&!m_LightHandleHovered)DrawGizmo(app, contentMin, viewportSize);
+    if(!m_LightIconClicked&&!m_LightPointerCaptured&&!m_LightHandleHovered&&!m_VertexSourcePicking)DrawGizmo(app, contentMin, viewportSize);
     ImGui::GetWindowDrawList()->PopClipRect();
+    DrawVertexSnap(app,contentMin,viewportSize,true);
     DrawViewportOverlays(app,contentMin,viewportSize);
     m_ToolActive=ImGuizmo::IsUsing()||(m_Transaction&&!m_Transaction->before.settings);
     ImGui::End();
@@ -830,7 +832,8 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
         app.GetCameraFarPlane());
 
     const auto absolute=world.WorldTransform(m_Selection.active);
-    float translation[3] = { absolute.position.x, absolute.position.y, absolute.position.z };
+    const auto pivotPoint=ecs::PivotPosition(absolute);
+    float translation[3] = { pivotPoint.x,pivotPoint.y,pivotPoint.z };
     float rotation[3] = {
         RadiansToDegrees(absolute.rotation.x),
         RadiansToDegrees(absolute.rotation.y),
@@ -845,6 +848,7 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
     ImGuizmo::SetRect(viewportMin.x, viewportMin.y, viewportSize.x, viewportSize.y);
 
     ImGuizmo::SetGizmoSizeClipSpace(ScaleGizmoClipSize);
+    if(m_EditPivot){DrawPivotGizmo(app,view,projection,viewportMin,viewportSize);return;}
     if(m_Selection.items.size()>1){DrawGroupGizmo(app,view,projection);return;}
     const bool planeOwnsPointer=!ImGuizmo::IsUsing()&&DrawScalePlanes(app,viewportMin,viewportSize,matrix);
     const ImGuizmo::MODE mode = m_GizmoMode == 0 ? ImGuizmo::LOCAL : ImGuizmo::WORLD;
@@ -856,7 +860,7 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
     // NoInputs helper window is distinct from our viewport draw-list owner.
     auto& context=*ImGui::GetCurrentContext();auto* hoveredWindow=context.HoveredWindow;
     if(planeOwnsPointer)context.HoveredWindow=ImGui::FindWindowByName("gizmo");
-    const bool manipulated=ImGuizmo::Manipulate(view, projection, ToGizmoOperation(m_GizmoOperation), mode, matrix,nullptr,(m_GizmoOperation==1?m_RotationSnapping:m_Snapping)?snap:nullptr);
+    const bool manipulated=ImGuizmo::Manipulate(view, projection, ToGizmoOperation(m_GizmoOperation), mode, matrix,nullptr,(m_GizmoOperation==1?m_RotationSnapping:(m_Snapping&&!(m_VertexSnapEnabled&&m_GizmoOperation==0&&!ImGui::GetIO().KeyAlt)))?snap:nullptr);
     context.HoveredWindow=hoveredWindow;
     bool matrixChanged=false;for(int i=0;i<16;++i)matrixChanged|=std::abs(matrix[i]-originalMatrix[i])>1e-6f;
     // ImGuizmo's previous delta may report "modified" on a later stationary drag.
@@ -867,12 +871,14 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
         if (!m_GizmoUndoCaptured)
         {
             if(m_GizmoOperation==0&&ImGui::GetIO().KeyAlt){auto copy=BeginDuplicateDrag(app);if(copy.IsValid())transform=world.GetComponent<ecs::TransformComponent>(copy);}
+            else if(m_VertexSnapEnabled&&m_GizmoOperation==0)BeginTransaction("Vertex Snap",CaptureSelection(app,true));
             else PushUndoBeforeChange(app,"Transform Gizmo");
             m_GizmoUndoCaptured = true;
         }
 
         ImportMatrix result;std::copy(matrix,matrix+16,result.begin());
-        if(auto decomposed=DecomposeTransform(result,absolute.scale)){if(world.SetWorldTransform(m_Selection.active,*decomposed,&m_EditorError))app.NotifyEditorMutation(m_Selection.active);}else m_EditorError="Transform requires shear/singular scale; use Local scale handles";
+        const auto p=absolute.pivot;result[12]-=result[0]*p.x+result[4]*p.y+result[8]*p.z;result[13]-=result[1]*p.x+result[5]*p.y+result[9]*p.z;result[14]-=result[2]*p.x+result[6]*p.y+result[10]*p.z;
+        if(auto decomposed=DecomposeTransform(result,absolute.scale)){if(world.SetWorldTransform(m_Selection.active,ecs::RebasePivot(*decomposed,absolute.pivot),&m_EditorError))app.NotifyEditorMutation(m_Selection.active);}else m_EditorError="Transform requires shear/singular scale; use Local scale handles";
     }
     else if (!ImGuizmo::IsUsing())
     {

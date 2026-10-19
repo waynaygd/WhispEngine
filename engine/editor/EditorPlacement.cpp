@@ -191,6 +191,14 @@ bool EditorLayer::DrawPlacementMenu(Application& app){
         ImGui::BeginDisabled(app.IsEditorPlayMode());ImGui::Checkbox("Surface Snap",&m_SurfaceSnap);
         ImGui::BeginDisabled(!m_SurfaceSnap);ImGui::Checkbox("Align to Normal",&m_AlignToNormal);ImGui::EndDisabled();
         ImGui::Checkbox("Grid Snap",&m_Snapping);ImGui::SetNextItemWidth(130);ImGui::DragFloat("Grid step",&m_SnapTranslation,.05f,.001f,1000,"%.3f",ImGuiSliderFlags_AlwaysClamp);
+        ImGui::BeginDisabled(HasPendingTransaction()||(!m_EditPivot&&m_Selection.items.size()!=1));ImGui::Checkbox("Edit Pivot",&m_EditPivot);ImGui::EndDisabled();
+        ImGui::BeginDisabled(m_Selection.items.size()!=1||HasPendingTransaction());
+        if(ImGui::MenuItem("Reset Pivot"))ResetEntityPivot(app,m_Selection.active);
+        if(ImGui::MenuItem("Pivot to Bounds Center"))CenterEntityPivot(app,m_Selection.active);ImGui::EndDisabled();
+        if(m_Selection.items.size()!=1)ImGui::TextDisabled("Edit Pivot requires one entity.");
+        if(m_EditPivot)ImGui::TextWrapped("Move the pivot; geometry stays in place. Exit Edit Pivot to Rotate/Scale. Escape cancels the drag.");
+        bool vertex=m_VertexSnapEnabled;if(ImGui::Checkbox("Vertex Snap",&vertex))SetVertexSnap(vertex);
+        if(m_VertexSnapEnabled){ImGui::TextWrapped("V + click: choose source on selected geometry. Drag Move Gizmo to a target vertex; release confirms. Escape cancels.");ImGui::TextWrapped("Vertex Snap overrides Grid during Move. Alt+Drag duplicates without vertex snapping.");ImGui::TextWrapped("%s",m_VertexSnapStatus.c_str());}
         ImGui::BeginDisabled(m_Selection.items.empty());if(ImGui::MenuItem("Drop to Floor"))DropSelectionToFloor(app);ImGui::EndDisabled();ImGui::EndDisabled();
         ImGui::TextDisabled("Surface queries use exact Mesh triangles.");ImGui::TextDisabled("No hit: ground Y=0, then 10 units from camera.");ImGui::TextDisabled("Drop without Mesh: transformed unit-cube bounds.");
         ImGui::EndPopup();

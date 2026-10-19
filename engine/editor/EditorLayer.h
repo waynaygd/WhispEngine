@@ -111,7 +111,7 @@ public:
     void SetLightGizmosVisible(bool v){m_ShowLightGizmos=v;}
     void EnterRuntime(const ecs::World::CloneMap&);
     void LeaveRuntime();
-    void ResetHistory(){m_BoxSelection.reset();m_SelectionLocked=false;m_BulkSession.reset();m_BulkUiSelection.clear();m_BulkText.clear();ExitIsolation();CancelPlacement();m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
+    void ResetHistory(){m_EditPivot=false;m_VertexSource.reset();m_VertexTarget.reset();m_VertexSourcePicking=false;m_BoxSelection.reset();m_SelectionLocked=false;m_BulkSession.reset();m_BulkUiSelection.clear();m_BulkText.clear();ExitIsolation();CancelPlacement();m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
     void FinishTransaction(Application&);
     void CancelTransaction(Application&);
     bool HasPendingTransaction()const{return m_Transaction.has_value();}
@@ -192,6 +192,19 @@ public:
     ecs::Entity ConfirmPlacement(Application&);
     void CancelPlacement(){m_PlacementPreview={};m_PrefabPlacement.reset();}
     bool DropSelectionToFloor(Application&);
+    void SetEditPivot(bool enabled){m_EditPivot=enabled;}
+    bool IsEditingPivot()const{return m_EditPivot;}
+    bool SetEntityPivot(Application&,ecs::Entity,ecs::Vec3,bool finish=true);
+    bool ResetEntityPivot(Application&,ecs::Entity);
+    bool CenterEntityPivot(Application&,ecs::Entity);
+    struct VertexReference {ecs::Entity entity;std::string mesh;std::uint64_t version=0;std::size_t index=0;};
+    void SetVertexSnap(bool enabled){m_VertexSnapEnabled=enabled;if(!enabled){m_VertexSource.reset();m_VertexTarget.reset();}}
+    bool IsVertexSnapEnabled()const{return m_VertexSnapEnabled;}
+    bool SetVertexSnapSource(Application&,ecs::Entity,std::size_t vertex);
+    std::optional<VertexReference> FindViewportVertex(Application&,float u,float v,bool source);
+    std::optional<ecs::Vec3> VertexWorldPosition(Application&,const VertexReference&)const;
+    bool SnapSelectionToVertex(Application&,const VertexReference&,bool finish=true);
+    const std::string& GetVertexSnapStatus()const{return m_VertexSnapStatus;}
     void SetSurfaceSnap(bool value){m_SurfaceSnap=value;}
     void SetAlignToNormal(bool value){m_AlignToNormal=value;}
     bool OpenSceneGuarded(Application&,const std::string&,OpenDecision,std::string* error=nullptr);
@@ -389,6 +402,13 @@ private:
     std::optional<PrefabPlacementCache> m_PrefabPlacement;
     const PlacementPreview& UpdatePrefabPlacementPreview(Application&,const std::string&,float,float);
     bool PositionPlacement(Application&,float,float,const PlacementBounds&,const ecs::TransformComponent&);
+    bool m_EditPivot=false;
+    void DrawPivotGizmo(Application&,const float*,const float*,const ImVec2&,const ImVec2&);
+    void DrawVertexSnap(Application&,const ImVec2&,const ImVec2&,bool afterGizmo);
+    bool VertexMovesWithSelection(const Application&,ecs::Entity)const;
+    bool m_VertexSnapEnabled=false,m_VertexSourcePicking=false;
+    std::optional<VertexReference> m_VertexSource,m_VertexTarget;
+    std::string m_VertexSnapStatus="Hold V + click a vertex of the selection, then drag Move Gizmo.";
     bool m_SurfaceSnap=true,m_AlignToNormal=false,m_PlacementCancelled=false;
     void DrawFogGizmos(Application&,const ImVec2&,const ImVec2&);
     void DrawEntityIcons(Application&,const ImVec2&,const ImVec2&);

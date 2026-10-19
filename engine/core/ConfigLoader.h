@@ -32,6 +32,7 @@ struct EcsDemoEntityConfig
     std::array<float, 4> materialTint = { 1.0f, 1.0f, 1.0f, 1.0f };
     bool visible = true;
     bool bounce = true;
+    ecs::Vec3 pivot{};
     ecs::Vec3 position{};
     ecs::Vec3 rotation{};
     ecs::Vec3 scale{ 0.4f, 0.4f, 1.0f };

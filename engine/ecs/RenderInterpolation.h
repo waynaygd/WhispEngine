@@ -23,7 +23,7 @@ class RenderInterpolation {
     float m_Alpha=0;
     std::size_t m_Count=0,m_Growths=0;
     static bool Same(Vec3 a,Vec3 b) { return a.x==b.x&&a.y==b.y&&a.z==b.z; }
-    static bool Same(const TransformComponent& a,const TransformComponent& b) { return Same(a.position,b.position)&&Same(a.rotation,b.rotation)&&Same(a.scale,b.scale); }
+    static bool Same(const TransformComponent& a,const TransformComponent& b) { return Same(a.position,b.position)&&Same(a.rotation,b.rotation)&&Same(a.scale,b.scale)&&Same(a.pivot,b.pivot); }
     void Capture(World& world,bool completedTick) {
         WHISP_INTERPOLATION_ZONE("RenderPoseCapture");
         if(m_Records.size()<world.GetCapacity()) { if(m_Records.capacity()<world.GetCapacity())++m_Growths;m_Records.resize(world.GetCapacity()); }

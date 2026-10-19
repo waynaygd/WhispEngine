@@ -218,7 +218,7 @@ void EditorLayer::DrawInspector(Application& app){
             if(activated||changed){if(!m_Transaction)PushUndoBeforeChange(app,"Edit "+d.label+" / "+p.label);m_PropertyDrafts[id]=value;}
             if(changed){
                 bool applied=false;
-                if(m_InspectorWorldTransform&&d.key=="Transform"){auto target=world.WorldTransform(e);if(p.key=="position")target.position=std::get<ecs::Vec3>(value);else if(p.key=="rotation")target.rotation=std::get<ecs::Vec3>(value);else if(p.key=="scale")target.scale=std::get<ecs::Vec3>(value);applied=world.SetWorldTransform(e,target,&m_EditorError);if(applied)app.NotifyEditorMutation(e);}
+                if(m_InspectorWorldTransform&&d.key=="Transform"){auto target=world.WorldTransform(e);if(p.key=="position")target.position=std::get<ecs::Vec3>(value);else if(p.key=="rotation")target.rotation=std::get<ecs::Vec3>(value);else if(p.key=="scale")target.scale=std::get<ecs::Vec3>(value);else if(p.key=="pivot")target=ecs::RebasePivot(target,std::get<ecs::Vec3>(value));applied=world.SetWorldTransform(e,target,&m_EditorError);if(applied)app.NotifyEditorMutation(e);}
                 else applied=SetProperty(app,e,d.id,p.key,value,false);
                 if(applied)m_EditorError.clear();else ImGui::TextColored(ImVec4(1,.45f,.35f,1),"%s",m_EditorError.c_str());
             }

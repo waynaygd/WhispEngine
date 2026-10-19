@@ -92,7 +92,10 @@ bool EditorLayer::ApplyPrefab(Application& app,ecs::Entity member){
         for(const auto& n:data.at("entities"))currentIds.insert(n.at("id").get<std::string>());
         if(sourceIds!=currentIds)throw std::runtime_error("Prefab topology differs from its source; Update Instances before Apply, or undo local child additions/deletions");
         // Root placement belongs to the scene; Apply never writes it to the template.
-        for(auto& n:data["entities"])if(n.at("id")==data.at("root"))for(const auto& original:source.at("entities"))if(original.at("id")==source.at("root"))n["components"]["Transform"]=original.at("components").at("Transform");
+        for(auto& n:data["entities"])if(n.at("id")==data.at("root"))for(const auto& original:source.at("entities"))if(original.at("id")==source.at("root")){
+            ecs::World staging;auto entity=staging.CreateEntity();ecs::ComponentRegistry::Builtins().Restore(staging,entity,{{"Transform",original.at("components").at("Transform")}});
+            const auto pose=ecs::RebasePivot(staging.LocalTransform(entity),app.GetWorld().LocalTransform(root).pivot);staging.SetLocalTransform(entity,pose);n["components"]["Transform"]=ecs::ComponentRegistry::Builtins().Capture(staging,entity).at("Transform");
+        }
         (void)scripting::InstanceSceneNodes(app.GetWorld(),root,source);return WritePrefabAndUpdate(app,key,data,DiskPrefab(key),true);
     }catch(const std::exception& e){m_EditorError=e.what();return false;}
 }

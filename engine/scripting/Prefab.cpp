@@ -4,6 +4,7 @@
 #include "../ecs/ComponentRegistry.h"
 #include "../ecs/components/SceneIdentityComponent.h"
 #include "../ecs/components/TransformComponent.h"
+#include "../ecs/TransformMath.h"
 #include <fstream>
 #include <cmath>
 #include <unordered_set>
@@ -109,7 +110,10 @@ nlohmann::json InstanceSceneNodes(ecs::World& world,ecs::Entity root,const nlohm
     for(auto& n:nodes){auto local=n.at("id").get<std::string>();auto& c=n["components"];if(!source.value("_legacySceneReferences",false))Remap(c,next);n["id"]=next.at(local);
         if(n.contains("parent"))n["parent"]=next.at(n.at("parent").get<std::string>());
         if(local==source.at("root").get<std::string>()){
-            c["Transform"]=ecs::ComponentRegistry::Builtins().Capture(world,root).at("Transform");
+            const auto desired=c["Transform"].value("pivot",Json::array({0,0,0}));const ecs::Vec3 pivot{desired.at(0).get<float>(),desired.at(1).get<float>(),desired.at(2).get<float>()};
+            const auto pose=ecs::RebasePivot(world.LocalTransform(root),pivot);
+            c["Transform"]=ecs::ComponentRegistry::Builtins().Capture(world,root).at("Transform");c["Transform"]["position"]={pose.position.x,pose.position.y,pose.position.z};
+            if(ecs::HasPivot(pose))c["Transform"]["pivot"]={pivot.x,pivot.y,pivot.z};else c["Transform"].erase("pivot");
             c["PrefabInstance"]={{"asset",link->asset},{"members",members}};
             if(auto parent=world.Parent(root);parent.IsValid())n["parent"]=SceneSerializer::EntitySceneId(world,parent);
         }

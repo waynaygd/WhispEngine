@@ -66,6 +66,8 @@ add_library(Engine
   editor/EditorPreferences.cpp
   editor/EditorUi.cpp
   editor/EditorViewportCreate.cpp
+  editor/EditorPivot.cpp
+  editor/EditorVertexSnap.cpp
   editor/EditorPlacement.cpp
   editor/EditorFogGizmos.cpp
   editor/EditorEntityIcons.cpp

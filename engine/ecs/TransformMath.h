@@ -8,6 +8,13 @@ inline ImportMatrix IdentityMatrix(){ImportMatrix m{};m[0]=m[5]=m[10]=m[15]=1;re
 inline ImportMatrix MultiplyMatrix(const ImportMatrix& a,const ImportMatrix& b){
  ImportMatrix c{};for(int column=0;column<4;++column)for(int row=0;row<4;++row)for(int k=0;k<4;++k)c[column*4+row]+=a[k*4+row]*b[column*4+k];return c;
 }
+inline bool HasPivot(const TransformComponent& t){return t.pivot.x!=0||t.pivot.y!=0||t.pivot.z!=0;}
+// Change the representation without changing the actual geometry matrix.
+inline TransformComponent RebasePivot(TransformComponent t,Vec3 pivot){
+    auto origin=RenderPose::From(t).position;t.pivot=pivot;auto zero=t;zero.position={};auto shift=RenderPose::From(zero).position;
+    t.position={origin.x-shift.x,origin.y-shift.y,origin.z-shift.z};return t;
+}
+inline Vec3 PivotPosition(const TransformComponent& t){return {t.position.x+t.pivot.x,t.position.y+t.pivot.y,t.position.z+t.pivot.z};}
 // Decompose Rz*Ry*Rx TRS. Reject shear and singular transforms rather than losing geometry.
 // Preferred signs preserve existing negative axes during gizmo manipulation.
 inline std::optional<TransformComponent> DecomposeTransform(const ImportMatrix& m,Vec3 signs={1,1,1}){

@@ -23,7 +23,7 @@ void EditorLayer::PruneSelection(Application& app){
     m_Selection.Prune(world);
 }
 void EditorLayer::SelectViewportEntity(Application& app,ecs::Entity e,bool ctrl,bool shift){
-    PruneSelection(app);if(m_SelectionLocked)return;EndGroupTransform(app);FinishTransaction(app);
+    PruneSelection(app);if(m_SelectionLocked||m_VertexSourcePicking)return;EndGroupTransform(app);FinishTransaction(app);
     if(!app.GetWorld().IsAlive(e)){if(!ctrl&&!shift)ClearSelection();return;}
     if(ctrl)m_Selection.Toggle(e);else if(shift)m_Selection.Add(e);else m_Selection.Replace(e);
     m_PropertyDrafts.clear();if(!app.IsEditorPlayMode())m_GameView=false;

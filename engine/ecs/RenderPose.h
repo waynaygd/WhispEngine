@@ -27,7 +27,7 @@ inline RenderQuaternion RenderSlerp(RenderQuaternion a,RenderQuaternion b,float 
 }
 struct RenderPose {
     Vec3 position{},scale{1,1,1}; RenderQuaternion rotation{};
-    static RenderPose From(const TransformComponent& t) { return {t.position,t.scale,RenderRotation(t.rotation)}; }
+    static RenderPose From(const TransformComponent& t);
 };
 inline void BuildRenderModelMatrix(float* m,const RenderPose& p) {
     const auto q=p.rotation;
@@ -36,4 +36,11 @@ inline void BuildRenderModelMatrix(float* m,const RenderPose& p) {
     m[8]=2*(q.x*q.z+q.w*q.y)*p.scale.z; m[9]=2*(q.y*q.z-q.w*q.x)*p.scale.z; m[10]=(1-2*(q.x*q.x+q.y*q.y))*p.scale.z; m[11]=0;
     m[12]=p.position.x;m[13]=p.position.y;m[14]=p.position.z;m[15]=1;
 }
+inline RenderPose RenderPose::From(const TransformComponent& t){
+    RenderPose pose{t.position,t.scale,RenderRotation(t.rotation)};
+    if(t.pivot.x!=0||t.pivot.y!=0||t.pivot.z!=0){float m[16];BuildRenderModelMatrix(m,pose);const auto p=t.pivot;
+        pose.position={t.position.x+p.x-(m[0]*p.x+m[4]*p.y+m[8]*p.z),t.position.y+p.y-(m[1]*p.x+m[5]*p.y+m[9]*p.z),t.position.z+p.z-(m[2]*p.x+m[6]*p.y+m[10]*p.z)};}
+    return pose;
+}
+
 }

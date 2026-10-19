@@ -2,6 +2,7 @@
 #include "../PhysicsQueries.h"
 #include "../World.h"
 #include "../RenderPose.h"
+#include "../TransformMath.h"
 #include "../components/ColliderComponent.h"
 #include "../components/RigidbodyComponent.h"
 #include "../components/TransformComponent.h"
@@ -159,9 +160,13 @@ struct HierarchyPhysicsPoses {
     std::vector<ecs::ColliderComponent> colliders;
     explicit HierarchyPhysicsPoses(std::size_t capacity){transforms.reserve(capacity);colliders.reserve(capacity);}
     BodyRef Ref(const ecs::World& world,ecs::Entity e,ecs::TransformComponent& local,ecs::ColliderComponent& collider,ecs::RigidbodyComponent* rb=nullptr){
-        if(!world.Parent(e).IsValid())return {e,&local,&collider,rb,BuildBoxAxes(local.rotation)};
+        if(!world.Parent(e).IsValid()){
+            if(!ecs::HasPivot(local))return {e,&local,&collider,rb,BuildBoxAxes(local.rotation)};
+            if(rb&&!rb->isStatic&&rb->simulatePhysics)throw std::runtime_error("Dynamic Rigidbody cannot use a nonzero Pivot");
+            auto canonical=ecs::RebasePivot(local,{});transforms.push_back(canonical);return {e,&transforms.back(),&collider,rb,BuildBoxAxes(local.rotation)};
+        }
         if(rb&&!rb->isStatic&&rb->simulatePhysics)throw std::runtime_error("Dynamic Rigidbody must remain a root entity");
-        auto absolute=world.WorldTransform(e);transforms.push_back(absolute);colliders.push_back(collider);auto& c=colliders.back();
+        auto absolute=ecs::RebasePivot(world.WorldTransform(e),{});transforms.push_back(absolute);colliders.push_back(collider);auto& c=colliders.back();
         c.halfExtents={c.halfExtents.x*std::abs(absolute.scale.x/local.scale.x),c.halfExtents.y*std::abs(absolute.scale.y/local.scale.y),c.halfExtents.z*std::abs(absolute.scale.z/local.scale.z)};
         float matrix[16];ecs::BuildRenderModelMatrix(matrix,ecs::RenderPose::From(world.WorldTransform(world.Parent(e))));auto o=c.offset;
         c.offset={matrix[0]*o.x+matrix[4]*o.y+matrix[8]*o.z,matrix[1]*o.x+matrix[5]*o.y+matrix[9]*o.z,matrix[2]*o.x+matrix[6]*o.y+matrix[10]*o.z};

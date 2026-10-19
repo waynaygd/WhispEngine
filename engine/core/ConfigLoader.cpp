@@ -138,6 +138,8 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
                 ReadColor4(je, "color", entityCfg.materialTint);
                 entityCfg.visible = je.value("visible", true);
                 entityCfg.bounce = je.value("bounce", true);
+                if(je.contains("pivot")&&(!je["pivot"].is_array()||je["pivot"].size()!=3)){SetError(outError,"Pivot must have three coordinates");return false;}
+                ReadVec3(je, "pivot", entityCfg.pivot);
                 ReadVec3(je, "position", entityCfg.position);
                 ReadVec3(je, "rotation", entityCfg.rotation);
                 ReadVec3(je, "scale", entityCfg.scale);
@@ -169,6 +171,8 @@ bool ConfigLoader::Load(const std::string& path, AppConfig& outCfg, std::string*
                 if (je.contains("colliderHalfExtents") || je.contains("colliderOffset"))
                     entityCfg.colliderManual = true;
 
+                for(float value:{entityCfg.pivot.x,entityCfg.pivot.y,entityCfg.pivot.z})if(!std::isfinite(value)||std::abs(value)>1e6f){SetError(outError,"Pivot must be finite within 1000000 units");return false;}
+                if(!entityCfg.light&&entityCfg.simulatePhysics&&!entityCfg.isStatic&&(entityCfg.pivot.x||entityCfg.pivot.y||entityCfg.pivot.z)){SetError(outError,"Nonzero Pivot is unsupported on dynamic Rigidbody");return false;}
                 outCfg.ecsDemo.initialEntities.push_back(entityCfg);
             }
         }

@@ -21,7 +21,7 @@ std::array<bool,4> Difference(const PV& a,const PV& b,bool exact=false){
 }
 bool Different(const PV& a,const PV& b){auto values=Difference(a,b,true);return std::any_of(values.begin(),values.end(),[](bool v){return v;});}
 const ecs::PropertyDescriptor* Property(const ecs::ComponentDescriptor* d,const std::string& key){if(d)for(const auto& p:d->properties)if(p.key==key)return &p;return nullptr;}
-PV TransformValue(const ecs::TransformComponent& t,const std::string& key){if(key=="position")return t.position;if(key=="rotation")return t.rotation;if(key=="scale")return t.scale;throw std::runtime_error("Unknown Transform field");}
+PV TransformValue(const ecs::TransformComponent& t,const std::string& key){if(key=="position")return t.position;if(key=="rotation")return t.rotation;if(key=="scale")return t.scale;if(key=="pivot")return t.pivot;throw std::runtime_error("Unknown Transform field");}
 PV Masked(const PV& old,const PV& requested,unsigned axes,bool relative,const std::string& key){
     if(auto v=std::get_if<ecs::Vec3>(&requested)){
         auto result=std::get<ecs::Vec3>(old);float* a[]={&result.x,&result.y,&result.z};const float b[]={v->x,v->y,v->z};
@@ -81,8 +81,8 @@ bool EditorLayer::SetBulkProperty(Application& app,ecs::ComponentTypeId componen
                 // the entire hierarchy edit atomically after all targets validate.
                 d->deserialize(validation,test,{{"position",{t.position.x,t.position.y,t.position.z}},{"rotation",{t.rotation.x,t.rotation.y,t.rotation.z}},{"scale",{t.scale.x,t.scale.y,t.scale.z}}});
                 std::string error;if(!registry.Set(validation,test,component,key,next,&error))throw std::runtime_error(error);
-                if(key=="position")t.position=next;else if(key=="rotation")t.rotation=next;else t.scale=next;
-                changed|=TransformMatrix(t)!=TransformMatrix(worldSpace?world.WorldTransform(e):world.LocalTransform(e));transforms.emplace_back(e,t);
+                if(key=="position")t.position=next;else if(key=="rotation")t.rotation=next;else if(key=="pivot")t=ecs::RebasePivot(t,next);else t.scale=next;
+                changed|=key=="pivot"||TransformMatrix(t)!=TransformMatrix(worldSpace?world.WorldTransform(e):world.LocalTransform(e));transforms.emplace_back(e,t);
             }else {
                 item.componentOnly=d->key;auto original=d->serialize(world,e);item.components[d->key]=original;
                 d->deserialize(validation,test,original);auto old=p->get(validation,test);auto next=Masked(old,value,axes,false,key);std::string error;
