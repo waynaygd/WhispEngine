@@ -6,6 +6,7 @@
 #include "../resources/ResourceManager.h"
 #include "../ecs/components/PlayerStartComponent.h"
 #include "../ecs/components/FogComponent.h"
+#include "../ecs/components/PrefabInstanceComponent.h"
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <ImGuizmo.h>
@@ -19,6 +20,7 @@ bool Matches(const std::string& text,const std::string& filter){
     return std::search(text.begin(),text.end(),filter.begin(),filter.end(),[](unsigned char a,unsigned char b){return std::tolower(a)==std::tolower(b);})!=text.end();
 }
 const char* EntityKind(const ecs::World& w,ecs::Entity e){
+    if(w.HasComponent<ecs::PrefabInstanceComponent>(e))return "[PF]";
     if(w.HasComponent<ecs::PlayerStartComponent>(e))return "[PlayerStart]";
     if(w.HasComponent<ecs::DirectionalLightComponent>(e))return "[D]";if(w.HasComponent<ecs::PointLightComponent>(e))return "[P]";if(w.HasComponent<ecs::SpotLightComponent>(e))return "[S]";if(w.HasComponent<ecs::FogComponent>(e))return "[Fog]";if(w.HasComponent<ecs::MeshRendererComponent>(e))return "[Mesh]";return "[Entity]";
 }
@@ -55,7 +57,7 @@ void EditorLayer::ConfigureDocking(){
         ImGui::DockBuilderSplitNode(center,ImGuiDir_Down,.40f,&bottom,&center);
         ImGui::DockBuilderSplitNode(right,ImGuiDir_Down,.42f,&settings,&right);
         ImGui::DockBuilderDockWindow("Scene Hierarchy",left);ImGui::DockBuilderDockWindow("Inspector",right);ImGui::DockBuilderDockWindow("Scene Settings",settings);ImGui::DockBuilderDockWindow("Editor Visuals",settings);
-        ImGui::DockBuilderDockWindow("Viewport",center);ImGui::DockBuilderDockWindow("Asset Browser",bottom);ImGui::DockBuilderDockWindow("Console / Diagnostics",bottom);ImGui::DockBuilderDockWindow("Material Editor",bottom);ImGui::DockBuilderDockWindow("Statistics",bottom);ImGui::DockBuilderDockWindow("Physics Stress Test",bottom);
+        ImGui::DockBuilderDockWindow("Viewport",center);ImGui::DockBuilderDockWindow("Asset Browser",bottom);ImGui::DockBuilderDockWindow("Console / Diagnostics",bottom);ImGui::DockBuilderDockWindow("Gameplay Events",bottom);ImGui::DockBuilderDockWindow("Material Editor",bottom);ImGui::DockBuilderDockWindow("Statistics",bottom);ImGui::DockBuilderDockWindow("Physics Stress Test",bottom);
         ImGui::DockBuilderFinish(root);m_ResetLayout=false;
     }
     ImGui::DockSpaceOverViewport(root,&dock,ImGuiDockNodeFlags_PassthruCentralNode);
@@ -63,21 +65,25 @@ void EditorLayer::ConfigureDocking(){
 void EditorLayer::DrawToolbar(Application& app){
     auto* viewport=ImGui::GetMainViewport();ImGui::SetNextWindowPos(viewport->WorkPos);ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x,ImGui::GetFrameHeightWithSpacing()+8));
     ImGui::Begin("Main Toolbar",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings);
-    if(ImGui::Button("Save")){std::string error;if(!app.SaveCurrentScene(&error)){m_EditorError=error;Logger::Get().Error(error);}}ImGui::SameLine();
+    if(ImGui::Button(app.IsPrefabEditing()?"Save Prefab":"Save")){std::string error;if(!app.SaveCurrentScene(&error)){m_EditorError=error;Logger::Get().Error(error);}}ImGui::SameLine();
+    if(app.IsPrefabEditing()){if(ImGui::Button("Return to Scene")){if(!IsSceneDirty())ClosePrefabEditor(app);else {m_PrefabAction=2;m_PrefabConfirm=true;}}ImGui::SameLine();}
+    ImGui::BeginDisabled(app.IsPrefabEditing());
     if(!app.IsEditorPlayMode()){if(ImGui::Button("Play"))app.SetEditorPlayMode(true);}else{
         if(ImGui::Button(app.IsEditorPaused()?"Resume":"Pause"))app.SetEditorPaused(!app.IsEditorPaused());ImGui::SameLine();if(ImGui::Button("Stop"))app.SetEditorPlayMode(false);
     }
+    ImGui::EndDisabled();
     ImGui::SameLine();ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);ImGui::SameLine();
     ImGui::RadioButton("Move",&m_GizmoOperation,0);ImGui::SameLine();ImGui::RadioButton("Rotate",&m_GizmoOperation,1);ImGui::SameLine();ImGui::RadioButton("Scale",&m_GizmoOperation,2);ImGui::SameLine();
     ImGui::RadioButton("Local",&m_GizmoMode,0);ImGui::SameLine();auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(m_Selection.active);const bool localScale=m_Selection.items.size()==1&&m_GizmoOperation==2&&t&&(std::abs(t->rotation.x)+std::abs(t->rotation.y)+std::abs(t->rotation.z)>1e-6f);if(localScale)m_GizmoMode=0;ImGui::BeginDisabled(localScale);ImGui::RadioButton("World",&m_GizmoMode,1);ImGui::EndDisabled();if(m_GizmoOperation==2&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Scale axes/planes use local TRS axes. Rotated world non-uniform scale requires shear and is not represented by Transform.");ImGui::SameLine();ImGui::Checkbox(m_GizmoOperation==1?"Rotation Snap":"Snap",m_GizmoOperation==1?&m_RotationSnapping:&m_Snapping);ImGui::SameLine();ImGui::Checkbox("Grid",&m_ShowGrid);ImGui::SameLine();
     if(ImGui::Button("Focus"))FocusSelection(app);ImGui::SameLine();
-    ImGui::Text("%s%s",app.GetSceneKey().empty()?"Untitled":app.GetSceneKey().c_str(),IsSceneDirty()?" *":"");ImGui::End();
+    ImGui::Text("%s%s",app.IsPrefabEditing()?m_EditingPrefab.c_str():(app.GetSceneKey().empty()?"Untitled":app.GetSceneKey().c_str()),IsSceneDirty()?" *":"");ImGui::End();
 }
 void EditorLayer::DrawMainMenu(Application& app){
     if(!ImGui::BeginMainMenuBar())return;
     bool preferencesRequested=false;
     auto action=[&](int kind){m_SceneDialogAction=kind;m_SceneDialogRequested=true;};
     if(ImGui::BeginMenu("File")){
+        ImGui::BeginDisabled(app.IsPrefabEditing());
         if(ImGui::MenuItem("New Project...")){m_ShowProjectBrowser=true;m_ProjectTab=1;}
         if(ImGui::MenuItem("Open Project...")){m_ShowProjectBrowser=true;m_ProjectTab=2;}
         if(ImGui::BeginMenu("Recent Projects",!m_RecentProjects.empty())){
@@ -89,9 +95,10 @@ void EditorLayer::DrawMainMenu(Application& app){
         if(ImGui::MenuItem("New Scene"))action(1);
         if(ImGui::MenuItem("Open Scene"))action(2);
         if(ImGui::BeginMenu("Recent Scenes",!m_RecentScenes.empty())){const auto recent=m_RecentScenes;for(const auto& key:recent)if(ImGui::MenuItem(key.c_str())){RequestRecentScene(app,key);}ImGui::EndMenu();}
+        ImGui::EndDisabled();
         if(ImGui::MenuItem("Save","Ctrl+S",false,!app.IsEditorPlayMode())){std::string error;if(!app.SaveCurrentScene(&error)){m_EditorError=error;Logger::Get().Error(error);}}
-        if(ImGui::MenuItem("Save As","Ctrl+Shift+S",false,!app.IsEditorPlayMode()))action(3);
-        if(ImGui::MenuItem("Reopen Scene",nullptr,false,!app.GetSceneKey().empty())){m_SceneDialogKey=app.GetSceneKey();action(2);}
+        if(ImGui::MenuItem("Save As","Ctrl+Shift+S",false,!app.IsEditorPlayMode()&&!app.IsPrefabEditing()))action(3);
+        if(ImGui::MenuItem("Reopen Scene",nullptr,false,!app.GetSceneKey().empty()&&!app.IsPrefabEditing())){m_SceneDialogKey=app.GetSceneKey();action(2);}
         ImGui::EndMenu();
     }
     if(ImGui::BeginMenu("Edit")){
@@ -106,14 +113,14 @@ void EditorLayer::DrawMainMenu(Application& app){
     if(ImGui::BeginMenu("View")){
         ImGui::MenuItem("Editor Visuals",nullptr,&m_ShowVisualSettings);
         ImGui::MenuItem("Game View (shared viewport)","G",&m_GameView);
-        ImGui::MenuItem("Scene Hierarchy",nullptr,&m_ShowHierarchy);ImGui::MenuItem("Inspector",nullptr,&m_ShowInspector);ImGui::MenuItem("Viewport",nullptr,&m_ShowViewport);ImGui::MenuItem("Asset Browser",nullptr,&m_ShowAssetBrowser);ImGui::MenuItem("Material Editor",nullptr,&m_ShowMaterialEditor);ImGui::MenuItem("Scene Settings / Lighting",nullptr,&m_ShowSceneSettings);ImGui::MenuItem("Console / Diagnostics",nullptr,&m_ShowConsole);ImGui::MenuItem("Statistics",nullptr,&m_ShowStatistics);ImGui::MenuItem("Physics Stress Test",nullptr,&m_ShowPhysicsStress);
+        ImGui::MenuItem("Scene Hierarchy",nullptr,&m_ShowHierarchy);ImGui::MenuItem("Inspector",nullptr,&m_ShowInspector);ImGui::MenuItem("Viewport",nullptr,&m_ShowViewport);ImGui::MenuItem("Asset Browser",nullptr,&m_ShowAssetBrowser);ImGui::MenuItem("Material Editor",nullptr,&m_ShowMaterialEditor);ImGui::MenuItem("Scene Settings / Lighting",nullptr,&m_ShowSceneSettings);ImGui::MenuItem("Console / Diagnostics",nullptr,&m_ShowConsole);ImGui::MenuItem("Gameplay Events",nullptr,&m_ShowGameplayEvents);ImGui::MenuItem("Statistics",nullptr,&m_ShowStatistics);ImGui::MenuItem("Physics Stress Test",nullptr,&m_ShowPhysicsStress);
         ImGui::Separator();if(ImGui::MenuItem("Reset Layout")){m_ResetLayout=true;m_ShowHierarchy=m_ShowInspector=m_ShowViewport=m_ShowAssetBrowser=m_ShowConsole=true;}
         if(ImGui::MenuItem("Navigation and snapping"))preferencesRequested=true;ImGui::MenuItem("ImGui Demo",nullptr,&m_ShowDemoWindow);ImGui::EndMenu();
     }
     if(ImGui::BeginMenu("Scene")){
         if(ImGui::MenuItem("Focus Selected","F"))FocusSelection(app);
         if(ImGui::MenuItem("Drop to Floor",nullptr,false,!app.IsEditorPlayMode()&&!m_Selection.items.empty()))DropSelectionToFloor(app);
-        ImGui::Separator();if(ImGui::MenuItem("Play",nullptr,false,!app.IsEditorPlayMode()))app.SetEditorPlayMode(true);if(ImGui::MenuItem("Pause / Resume",nullptr,false,app.IsEditorPlayMode()))app.SetEditorPaused(!app.IsEditorPaused());if(ImGui::MenuItem("Stop",nullptr,false,app.IsEditorPlayMode()))app.SetEditorPlayMode(false);ImGui::EndMenu();
+        ImGui::Separator();if(ImGui::MenuItem("Play",nullptr,false,!app.IsEditorPlayMode()&&!app.IsPrefabEditing()))app.SetEditorPlayMode(true);if(ImGui::MenuItem("Pause / Resume",nullptr,false,app.IsEditorPlayMode()))app.SetEditorPaused(!app.IsEditorPaused());if(ImGui::MenuItem("Stop",nullptr,false,app.IsEditorPlayMode()))app.SetEditorPlayMode(false);ImGui::EndMenu();
     }
     if(ImGui::BeginMenu("Help")){ImGui::TextUnformatted("WhispEngine Editor 2.5");ImGui::TextUnformatted("RMB + WASD: camera, F: focus, W/E/R: gizmo");ImGui::TextUnformatted("Play clones scene data; Stop discards Runtime edits.");ImGui::TextUnformatted("Ctrl-click: toggle selection; Shift-click: Hierarchy range / Viewport add.");ImGui::TextUnformatted("Multiple selection: shared W/E/R gizmo; Inspector edits Active Entity only.");ImGui::TextUnformatted("Drag in Hierarchy to parent; drop on Scene Root to unparent.");ImGui::EndMenu();}
     if(preferencesRequested)ImGui::OpenPopup("EditorPreferences");
@@ -190,7 +197,12 @@ void EditorLayer::DrawSceneHierarchy(Application& app){
         const std::string rowLabel=label+(e==m_Selection.active?" [Active]":"")+"###EntityRow";
         if(!m_HierarchyFilter.empty())ImGui::SetNextItemOpen(true);
         ImGui::TreeNodeEx(rowLabel.c_str(),ImGuiTreeNodeFlags_NoTreePushOnOpen|ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_SpanAvailWidth|ImGuiTreeNodeFlags_DefaultOpen|(row.branch?0:ImGuiTreeNodeFlags_Leaf)|(IsSelected(e)?ImGuiTreeNodeFlags_Selected:0));
-        if(ImGui::IsItemClicked(0)&&!ImGui::IsItemToggledOpen())SelectHierarchyEntity(app,e,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift,m_HierarchyVisible);
+        // Keep the current Inspector while dragging another entity into one of
+        // its reference fields. A normal row click selects on release.
+        const auto down=ImGui::GetIO().MouseClickedPos[0];const auto minimum=ImGui::GetItemRectMin(),maximum=ImGui::GetItemRectMax();
+        const bool beganHere=down.x>=minimum.x&&down.x<maximum.x&&down.y>=minimum.y&&down.y<maximum.y;
+        const bool arrow=row.branch&&down.x<minimum.x+ImGui::GetTreeNodeToLabelSpacing();
+        if(beganHere&&!arrow&&ImGui::IsItemHovered()&&ImGui::IsMouseReleased(0)&&!ImGui::IsMouseDragPastThreshold(0))SelectHierarchyEntity(app,e,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift,m_HierarchyVisible);
         if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0))app.FocusEntity(e);
         acceptParent(e);
         if(ImGui::BeginDragDropSource()){ImGui::SetDragDropPayload("WHISP_ENTITY",&e,sizeof(e));ImGui::TextUnformatted(label.c_str());ImGui::TextDisabled(m_HierarchyKeepLocal?"Keep Local Transform":"Keep World Transform");ImGui::EndDragDropSource();}
@@ -198,6 +210,7 @@ void EditorLayer::DrawSceneHierarchy(Application& app){
             if(ImGui::MenuItem("Focus")){if(IsSelected(e))FocusSelection(app);else app.FocusEntity(e);}if(ImGui::MenuItem("Rename")){m_RenameTarget=e;m_RenameBuffer=tag?tag->name:"Entity";m_RenameRequested=true;}
             ImGui::BeginDisabled(app.IsEditorPlayMode());
             if(ImGui::MenuItem("Create Child"))CreateChild(app,e);
+            if(ImGui::MenuItem("Create Prefab...",nullptr,false,!app.IsPrefabEditing())){SelectEntity(e);m_PrefabCreatePopup=true;}
             if(ImGui::MenuItem("Unparent",nullptr,false,world.Parent(e).IsValid()))ReparentEntity(app,e,{},!m_HierarchyKeepLocal);
             ImGui::Checkbox("Keep Local Transform",&m_HierarchyKeepLocal);
             if(ImGui::BeginMenu("Reparent...")){for(auto candidate:entities)if(candidate!=e){auto* name=world.GetComponent<ecs::TagComponent>(candidate);ImGui::PushID(int(candidate.index));if(ImGui::MenuItem(name?name->name.c_str():"Entity"))ReparentEntity(app,e,candidate,!m_HierarchyKeepLocal);ImGui::PopID();}ImGui::EndMenu();}

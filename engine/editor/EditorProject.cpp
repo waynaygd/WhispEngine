@@ -16,6 +16,9 @@
 
 namespace editor {
 bool EditorLayer::ResolveProjectEdits(Application& app,int decision,std::string* error){
+    if(app.IsPrefabEditing()){
+        if(error)*error="Save and Return or Discard changes in the Prefab menu before changing project or exiting";return false;
+    }
     if(decision==int(Application::ProjectDecision::Cancel))return false;
     if(decision!=int(Application::ProjectDecision::Save))return true;
     const bool sceneDirty=m_EditHistory?(m_EditHistory->external||m_EditHistory->revision!=m_EditHistory->saved):IsSceneDirty();
@@ -32,6 +35,7 @@ bool EditorLayer::ResolveProjectEdits(Application& app,int decision,std::string*
     return true;
 }
 void EditorLayer::ResetProjectState(IRenderAdapter* renderer){
+    m_EventFilter={};m_SelectedGameplayEvent=0;
     m_ShowProjectSettings=m_FocusProjectSettings=false;m_ProjectSettingsBase.reset();m_ProjectSettingsDraft={};m_ProjectSettingsScenes={};m_ProjectSettingsError.clear();m_ProjectSettingsNotice.clear();
     CancelPlacement();m_PlacementCancelled=false;
     if(ImGui::GetCurrentContext()){ImGui::ClearActiveID();ImGui::ClearDragDrop();}

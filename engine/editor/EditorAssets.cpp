@@ -39,7 +39,7 @@ bool EditorLayer::AssignAsset(Application& app,ecs::Entity e,ecs::AssetKind kind
 bool EditorLayer::AssetReferenced(Application& app,const std::string& key)const{
     auto contains=[&](const auto& j){return AssetCatalog::ContainsReference(j,key);};
     if(contains(SceneSerializer::CaptureWorld(app.GetEditorWorld(),app.GetSceneSettings())))return true;
-    auto snapshot=[&](auto&& self,const EntitySnapshot& s)->bool{if(contains(s.components)||(s.settings&&contains(SceneSettingsToJson(*s.settings))))return true;for(auto& r:s.related)if(self(self,r))return true;return false;};
+    auto snapshot=[&](auto&& self,const EntitySnapshot& s)->bool{if(contains(s.components)||(s.settings&&contains(SceneSettingsToJson(*s.settings))))return true;for(const auto& file:s.files)if(file.key==key||(file.contents&&contains(*file.contents))||(file.expected&&contains(*file.expected)))return true;for(auto& r:s.related)if(self(self,r))return true;return false;};
     for(auto* stack:{&m_UndoStack,&m_RedoStack})for(auto& record:*stack)if(snapshot(snapshot,record.snapshot))return true;
     return m_Transaction&&snapshot(snapshot,m_Transaction->before);
 }
@@ -120,6 +120,7 @@ bool EditorLayer::DeleteAssetFile(Application& app,const std::string& key,bool c
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }
 void EditorLayer::BeginAssetFileAction(Application& app,int action,const std::string& key){
+    if(app.IsPrefabEditing()){m_EditorError="Return from Prefab Editor before modifying asset files";return;}
     m_AssetAction=action;m_AssetActionSource=key;m_AssetActionRequested=true;m_AssetActionFocus=true;m_EditorError.clear();
     m_AssetDynamicRiskAccepted=false;m_AssetActionWarnings.clear();
     try{m_AssetActionWarnings=AssetCatalog::AuditDependencies(key).dynamic;}catch(const std::exception& e){m_EditorError=e.what();}
@@ -158,9 +159,8 @@ std::string EditorLayer::CreatePrefabAsset(Application& app,const std::string& d
             if(app.IsEditorPlayMode())throw std::runtime_error("Stop Play before creating assets");
             if(directory!="prefabs"&&!directory.starts_with("prefabs/"))throw std::runtime_error("Choose prefabs or a subfolder");
             if(!app.GetWorld().IsAlive(m_Selection.active))throw std::runtime_error("Select an entity first");
-            auto components=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),m_Selection.active);components.erase("SceneIdentity");
             std::string key=directory+"/entity_"+ecs::NewSceneIdentity()+".prefab.json";
-            if(!SceneSerializer::WriteAtomic(scripting::SafeAsset(key,".prefab.json"),{{"version",1},{"components",components}},&m_EditorError,false))throw std::runtime_error(m_EditorError);
+            if(!CreatePrefab(app,key))throw std::runtime_error(m_EditorError);
             m_SelectedAsset=key;m_SelectedAssetKind="Prefab";m_AssetListsDirty=true;NavigateAssetFolder(directory);m_EditorError.clear();return key;
         }catch(const std::exception& error){m_EditorError=error.what();}
     return {};
@@ -184,7 +184,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
                 return clicked;
             };
             if(item("Lua Script","scripts"))CreateLuaScriptAsset(app,directory);
-            if(item("Prefab","prefabs",app.GetWorld().IsAlive(m_Selection.active)))CreatePrefabAsset(app,directory);
+            if(item("Prefab","prefabs",app.GetWorld().IsAlive(m_Selection.active))){m_PrefabNewKey=(directory.empty()?"prefabs":directory)+"/new.prefab.json";m_PrefabCreatePopup=true;}
             if(item("Material","materials"))action(1,directory+"/new.material.json");
             ImGui::EndMenu();
         }
@@ -272,8 +272,9 @@ void EditorLayer::DrawAssetBrowser(Application& app){
                 draw->AddText({origin.x+4*dpi,p.y+cardImage+4*dpi+ImGui::GetTextLineHeight()},ImGui::GetColorU32(ImGuiCol_TextDisabled),state);
                 draw->PopClipRect();
             }
-            if(ImGui::IsItemHovered())ImGui::SetTooltip("%s\n%s / %s\n%s\n%s",key.c_str(),type.name.c_str(),state,thumbnail?thumbnail->error.c_str():AssetLoadError(resources,type.kind,key).c_str(),type.kind==ecs::AssetKind::LuaScript?"Double-click: open in Visual Studio 2022. Drag: assign script.":"Double-click material: open editor. Drag: assign compatible slot.");
+            if(ImGui::IsItemHovered())ImGui::SetTooltip("%s\n%s / %s\n%s\n%s",key.c_str(),type.name.c_str(),state,thumbnail?thumbnail->error.c_str():AssetLoadError(resources,type.kind,key).c_str(),type.kind==ecs::AssetKind::Prefab?"Double-click: open Prefab Editor. Drag: create a linked instance in Viewport.":type.kind==ecs::AssetKind::LuaScript?"Double-click: open in Visual Studio 2022. Drag: assign script.":"Double-click material: open editor. Drag: assign compatible slot.");
             if((type.kind!=ecs::AssetKind::None||type.name=="Imported Scene")&&ImGui::BeginDragDropSource()){AssetPayload payload{};payload.kind=type.kind;std::memcpy(payload.key,key.data(),std::min(key.size(),sizeof(payload.key)-1));ImGui::SetDragDropPayload("WHISP_ASSET",&payload,sizeof(payload));ImGui::Text("%s %s",type.icon.c_str(),name.c_str());ImGui::EndDragDropSource();}
+            if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::Prefab)m_PrefabDoubleClick=key;
             if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::Material)openMaterial(key);
             if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::LuaScript)OpenLuaScriptInVisualStudio(key,&m_EditorError);
             if(ImGui::BeginPopupContextItem("AssetActions")){
@@ -286,8 +287,10 @@ void EditorLayer::DrawAssetBrowser(Application& app){
                     }
                 }
                 if(type.kind==ecs::AssetKind::LuaScript&&ImGui::MenuItem("Open in Visual Studio"))OpenLuaScriptInVisualStudio(key,&m_EditorError);
-                if(type.kind==ecs::AssetKind::Prefab&&ImGui::MenuItem("Instantiate Prefab",nullptr,false,!app.IsEditorPlayMode())){
-                    try{FinishTransaction(app);auto e=scripting::SpawnPrefab(app.GetWorld(),key,{});EntitySnapshot before;before.entity=e;before.world=e.world;SelectEntityFromUser(app,e);app.NotifyEditorMutation(e);CommitUndo(app,"Instantiate Prefab",before);}catch(const std::exception& error){m_EditorError=error.what();}
+                if(type.kind==ecs::AssetKind::Prefab){
+                    if(ImGui::MenuItem("Open Prefab Editor",nullptr,false,!app.IsEditorPlayMode()&&!app.IsPrefabEditing()))m_PrefabActionKey=key;
+                    if(ImGui::MenuItem("Create Instance",nullptr,false,!app.IsEditorPlayMode()&&!app.IsPrefabEditing()))InstantiatePrefab(app,key);
+                    if(ImGui::MenuItem("Update Linked Instances...",nullptr,false,!app.IsEditorPlayMode()&&!app.IsPrefabEditing())){m_PrefabActionKey=key;m_PrefabAction=5;m_PrefabConfirm=true;}
                 }
                 if(type.name=="Imported Scene"&&ImGui::MenuItem("Instantiate imported scene"))InstantiateImportedScene(app,key);
                 if(type.kind==ecs::AssetKind::Mesh&&ImGui::MenuItem("Create model entity"))CreateModelEntity(app,key,name);
@@ -295,6 +298,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
                 if(type.kind!=ecs::AssetKind::None&&ImGui::MenuItem("Assign to Active Entity"))AssignAsset(app,m_Selection.active,type.kind,key);
                 std::string blocked;
                 if(app.IsEditorPlayMode())blocked="Stop Play before modifying asset files";
+                else if(app.IsPrefabEditing())blocked="Return from Prefab Editor before modifying asset files";
                 else if(m_MaterialDirty)blocked="Save or Revert material edits first";
                 else try{(void)AssetCatalog::EditablePath(key);}catch(const std::exception& e){blocked=e.what();}
                 if(ImGui::MenuItem("Rename...","F2",false,blocked.empty())){SelectAsset(key,type.name);BeginAssetFileAction(app,2,key);}
@@ -391,6 +395,12 @@ void EditorLayer::DrawAssetBrowser(Application& app){
         if(!rename)ImGui::SetItemDefaultFocus();
         if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());
         ImGui::PopTextWrapPos();ImGui::EndPopup();
+    }
+    // A fast retry after cancelling a drag can look like a double click on
+    // mouse-down. Wait for release so a second drag never opens Prefab Editor.
+    if(!m_PrefabDoubleClick.empty()&&!ImGui::IsMouseDown(0)){
+        if(ImGui::IsMouseReleased(0)&&!ImGui::IsMouseDragPastThreshold(0))m_PrefabActionKey=m_PrefabDoubleClick;
+        m_PrefabDoubleClick.clear();
     }
     DrawImportDialogs(app);
     ImGui::End();

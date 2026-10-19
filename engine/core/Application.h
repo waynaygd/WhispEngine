@@ -60,12 +60,15 @@ public:
     void SetViewportUnlit(bool value){if(m_RenderSystem)m_RenderSystem->SetViewportUnlit(value);}
     bool IsViewportUnlit()const{return m_RenderSystem&&m_RenderSystem->IsViewportUnlit();}
     bool IsViewportMouseCaptured()const{return m_Camera.controlsActive||m_PlayerMouseCaptured;}
-    ecs::World& GetWorld() { return m_RuntimeWorld?*m_RuntimeWorld:m_World; }
+    ecs::World& GetWorld() { return m_RuntimeWorld?*m_RuntimeWorld:(m_PrefabWorld?*m_PrefabWorld:m_World); }
+    bool IsPrefabEditing()const{return bool(m_PrefabWorld);}
+    bool BeginPrefabContext(std::unique_ptr<ecs::World>);
+    void EndPrefabContext();
     ecs::World& GetEditorWorld(){return m_World;}
     scripting::LuaRuntime& GetLuaRuntime(){return m_LuaRuntime;}
     ecs::MutationQueue& GetMutationQueue(){return m_Mutations;}
     void ApplyStructuralCommands(){if(m_Mutations.Apply(GetWorld())&&m_PhysicsSystem)m_PhysicsSystem->ResetState();}
-    const ecs::World& GetWorld() const { return m_RuntimeWorld?*m_RuntimeWorld:m_World; }
+    const ecs::World& GetWorld() const { return m_RuntimeWorld?*m_RuntimeWorld:(m_PrefabWorld?*m_PrefabWorld:m_World); }
     ResourceManager* GetResourceManager() { return m_ResourceManager.get(); }
     const ResourceManager* GetResourceManager() const { return m_ResourceManager.get(); }
     void EnterGameplayScene();
@@ -287,6 +290,10 @@ private:
         float pitch = 0.0f;
     };
 
+    std::unique_ptr<ecs::World> m_PrefabWorld;
+    CameraControllerState m_PrefabSavedCamera;
+    std::vector<ecs::Entity> m_PrefabSavedDebug,m_PrefabSavedStress;
+    SceneSettings m_PrefabSavedSettings;
     CameraPose m_SavedEditorCamera{};
 
     CameraControllerState m_Camera;

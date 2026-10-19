@@ -1,4 +1,5 @@
 #pragma once
+#include "../scripting/GameplayEventHistory.h"
 
 #include "../ecs/Entity.h"
 #include "../ecs/ComponentRegistry.h"
@@ -8,6 +9,8 @@
 #include "InputRouting.h"
 #include "SelectionSet.h"
 #include "GroupTransform.h"
+#include "PlacementMath.h"
+#include "../ecs/PlacementPreview.h"
 #include "AssetCatalog.h"
 #include "AssetNavigation.h"
 #include "TransformPrecision.h"
@@ -22,6 +25,7 @@
 #include "../ecs/components/TransformComponent.h"
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -84,7 +88,7 @@ public:
     bool ResolveProjectEdits(Application&,int decision,std::string* error);
     void ResetProjectState(IRenderAdapter*);
     void ProjectOpened(Application&);
-    bool HasProjectEdits()const{return ProjectSettingsDirty()||m_MaterialDirty||(m_EditHistory?(m_EditHistory->external||m_EditHistory->revision!=m_EditHistory->saved):IsSceneDirty());}
+    bool HasProjectEdits()const{return m_PrefabHistory.has_value()||ProjectSettingsDirty()||m_MaterialDirty||(m_EditHistory?(m_EditHistory->external||m_EditHistory->revision!=m_EditHistory->saved):IsSceneDirty());}
     void ShowProjectSettings(Application&);
     void RevertProjectSettings(Application&);
     bool SaveProjectSettingsDraft(Application&);
@@ -96,6 +100,8 @@ public:
     void RequestProjectExit(){m_ProjectExit=true;m_ProjectConfirm=true;}
     bool ProjectExitConfirmed()const{return m_ProjectExitConfirmed;}
     const auto& RecentProjects()const{return m_RecentProjects;}
+    void ShowGameplayEvents(){m_ShowGameplayEvents=true;}
+    bool SelectGameplayEventEntity(Application&,const scripting::EventEntity&);
     void ResetLayout(){m_ResetLayout=true;}
     void SetFixedDiagnosticLayout(bool fixed){m_FixedDiagnosticLayout=fixed;if(fixed){m_ShowStatistics=m_ShowMaterialEditor=true;}}
     InputOwner InputOwnership(bool right,bool left,bool camera,bool play)const{return RouteInput({m_ViewportFocused,m_ViewportHovered,m_InputTextActive,m_ModalActive,m_ToolActive&&!m_LightPointerCaptured,m_LightPointerCaptured||m_LightHandleHovered,camera,right,left,play});}
@@ -105,7 +111,7 @@ public:
     void SetLightGizmosVisible(bool v){m_ShowLightGizmos=v;}
     void EnterRuntime(const ecs::World::CloneMap&);
     void LeaveRuntime();
-    void ResetHistory(){ExitIsolation();CancelPlacement();m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
+    void ResetHistory(){m_BulkSession.reset();m_BulkUiSelection.clear();m_BulkText.clear();ExitIsolation();CancelPlacement();m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
     void FinishTransaction(Application&);
     void CancelTransaction(Application&);
     bool HasPendingTransaction()const{return m_Transaction.has_value();}
@@ -169,12 +175,17 @@ public:
     ecs::Entity PlaceModel(Application&,const std::string&,ecs::Vec3);
     ecs::Vec3 PlacementPoint(Application&,float u,float v)const;
     struct SurfaceHit {ecs::Entity entity;ecs::Vec3 position,normal;float distance=0;};
-    struct PlacementPreview {std::string key,status;ecs::TransformComponent transform;bool active=false,ready=false,surface=false;};
+    struct PlacementPreview {
+        std::string key,status;ecs::AssetKind kind=ecs::AssetKind::Mesh;
+        ecs::TransformComponent transform;
+        std::vector<ecs::PlacementRenderItem> items;
+        bool active=false,ready=false,surface=false;
+    };
     std::optional<SurfaceHit> RaycastPlacement(Application&,ecs::Vec3 origin,ecs::Vec3 direction,float distance,const std::vector<ecs::Entity>& ignore={})const;
     const PlacementPreview& UpdatePlacementPreview(Application&,const std::string&,float u,float v);
     const PlacementPreview& GetPlacementPreview()const{return m_PlacementPreview;}
     ecs::Entity ConfirmPlacement(Application&);
-    void CancelPlacement(){m_PlacementPreview={};}
+    void CancelPlacement(){m_PlacementPreview={};m_PrefabPlacement.reset();}
     bool DropSelectionToFloor(Application&);
     void SetSurfaceSnap(bool value){m_SurfaceSnap=value;}
     void SetAlignToNormal(bool value){m_AlignToNormal=value;}
@@ -190,6 +201,17 @@ public:
     bool AssignAsset(Application&,ecs::Entity,ecs::AssetKind,const std::string&);
     bool CreateMaterialAsset(Application&,const std::string&,std::string* error=nullptr);
     std::string CreateLuaScriptAsset(Application&,const std::string& directory);
+    bool CreatePrefab(Application&,const std::string& key);
+    ecs::Entity InstantiatePrefab(Application&,const std::string& key,ecs::Vec3 position={},const ecs::TransformComponent* placement=nullptr,const nlohmann::json* prepared=nullptr);
+    bool OpenPrefabEditor(Application&,const std::string& key);
+    bool SavePrefabEditor(Application&);
+    void RequestPrefabSave(){m_PrefabAction=1;m_PrefabConfirm=true;}
+    bool ClosePrefabEditor(Application&,bool discard=false);
+    bool ApplyPrefab(Application&,ecs::Entity);
+    bool RevertPrefab(Application&,ecs::Entity);
+    bool UpdatePrefabInstances(Application&,const std::string& key);
+    const std::string& EditingPrefab()const{return m_EditingPrefab;}
+    void DrawPrefabWorkflow(Application&);
     std::string CreatePrefabAsset(Application&,const std::string& directory);
     bool RenameMaterialAsset(Application&,const std::string&,const std::string&,bool confirmed,std::string* error=nullptr);
     bool DeleteMaterialAsset(Application&,const std::string&,bool confirmed,std::string* error=nullptr);
@@ -199,6 +221,14 @@ public:
     std::vector<std::string> AssetFileBlockers(Application&,const std::string&)const;
     const std::string& SelectedAsset()const{return m_SelectedAsset;}
     void SelectAsset(const std::string& key,const std::string& kind){m_SelectedAsset=key;m_SelectedAssetKind=kind;}
+    struct BulkValue {
+        bool common=false;ecs::PropertyValue value;
+        std::array<bool,4> mixed{};
+        bool IsMixed()const{return std::any_of(mixed.begin(),mixed.end(),[](bool x){return x;});}
+    };
+    std::vector<ecs::ComponentTypeId> CommonInspectorComponents(Application&)const;
+    BulkValue InspectBulkProperty(Application&,ecs::ComponentTypeId,const std::string&,bool world=false)const;
+    bool SetBulkProperty(Application&,ecs::ComponentTypeId,const std::string&,const ecs::PropertyValue&,unsigned axes=15,bool world=false,bool relative=false,bool transactional=true);
     bool SetProperty(Application&,ecs::Entity,ecs::ComponentTypeId,const std::string&,const ecs::PropertyValue&,bool transactional=true);
     bool SetLuaEntityReference(Application&,ecs::Entity,const std::string& field,ecs::Entity target={});
     void BeginSceneTransaction(Application&,const std::string& label="Scene settings");
@@ -235,6 +265,7 @@ private:
     ProjectSettings m_ProjectSettingsDraft;
     SceneCatalog m_ProjectSettingsScenes;
     std::string m_ProjectSettingsError,m_ProjectSettingsNotice;
+    struct PrefabFileSnapshot {std::string key;std::optional<nlohmann::json> contents,expected;};
     struct EntitySnapshot {
         ecs::Entity entity{},previousSelection{};
         std::uint64_t world=0;
@@ -245,6 +276,9 @@ private:
         std::optional<ecs::TransformComponent> transform;
         std::vector<EntitySnapshot> related;
         std::optional<SelectionSet> selection;
+        std::vector<PrefabFileSnapshot> files;
+        bool prefabBatch=false,bulk=false;
+        std::string componentOnly;
     };
     struct UndoRecord {std::string label;EntitySnapshot snapshot;std::uint64_t before=0,after=0;};
     struct PendingTransaction {std::string label;EntitySnapshot before;};
@@ -294,11 +328,23 @@ private:
     std::uint64_t m_FailedSkyVersion=0;
     void ConfigureDocking();
     void DrawConsole(Application&,IRenderAdapter*);
+    void DrawGameplayEvents(Application&);
     void DrawSceneSettings(Application&,IRenderAdapter*,float dt);
     void DrawSceneDialogs(Application&);
     void DrawViewportOverlays(Application&,const ImVec2&,const ImVec2&);
     void DrawSceneHierarchy(Application& app);
     void DrawInspector(Application& app);
+    void DrawBulkInspector(Application&);
+    void RestoreBulkSnapshot(Application&,const EntitySnapshot&);
+    struct BulkSession {
+        ecs::ComponentTypeId component=0;std::string property;bool world=false,relative=false;
+        std::vector<ecs::Entity> selection,targets;
+        std::vector<ecs::TransformComponent> basis;
+    };
+    std::optional<BulkSession> m_BulkSession;
+    bool m_BulkRelative=false;
+    std::vector<ecs::Entity> m_BulkUiSelection;
+    std::unordered_map<unsigned,std::string> m_BulkText;
     void DrawStatistics(Application& app, float dt);
     void DrawViewport(Application& app, IRenderAdapter* renderer);
     void DrawAssetPreview(Application&);
@@ -321,6 +367,23 @@ private:
     bool DrawPlacementMenu(Application&);
     void DrawPlacementTarget(Application&,const ImVec2&,const ImVec2&);
     PlacementPreview m_PlacementPreview;
+    struct PrefabPlacementPart {
+        std::string mesh;ecs::TransformComponent relative;
+        std::weak_ptr<void> owner;std::uint64_t version=0;
+        PlacementBounds bounds;bool usable=false;
+    };
+    struct PrefabPlacementCache {
+        std::string key,error;std::filesystem::path path;
+        std::filesystem::file_time_type time{};std::uintmax_t size=0;
+        nlohmann::json source;
+        ecs::TransformComponent root;
+        std::vector<ecs::TransformComponent> nodes;
+        std::vector<PrefabPlacementPart> parts;
+        PlacementBounds bounds;bool hasBounds=false;
+    };
+    std::optional<PrefabPlacementCache> m_PrefabPlacement;
+    const PlacementPreview& UpdatePrefabPlacementPreview(Application&,const std::string&,float,float);
+    bool PositionPlacement(Application&,float,float,const PlacementBounds&,const ecs::TransformComponent&);
     bool m_SurfaceSnap=true,m_AlignToNormal=false,m_PlacementCancelled=false;
     void DrawFogGizmos(Application&,const ImVec2&,const ImVec2&);
     void DrawEntityIcons(Application&,const ImVec2&,const ImVec2&);
@@ -360,6 +423,10 @@ private:
     std::string m_EditingMaterial,m_MaterialError,m_NewMaterialKey="materials/new.material.json";
     bool m_MaterialDirty=false;
     bool m_ShowDemoWindow = false;
+    bool m_ShowGameplayEvents=false;
+    scripting::GameplayEventFilter m_EventFilter;
+    std::uint64_t m_SelectedGameplayEvent=0;
+    bool m_EventFollow=false;
     bool m_ShowSceneSettings=true,m_ShowConsole=true,m_ShowGrid=true,m_Snapping=false;
     bool m_ResetLayout=true,m_FixedDiagnosticLayout=false,m_ViewportFocused=false,m_ToolActive=false,m_InputTextActive=false,m_ModalActive=false;
     bool m_CameraMouseDrain=false,m_CameraMouseWasSuppressed=false;
@@ -408,6 +475,20 @@ private:
     std::string m_SelectedAssetKind;
     struct HistoryContext {SelectionSet selection;std::vector<UndoRecord> undo,redo;std::uint64_t revision,saved,next;bool external;};
     std::optional<HistoryContext> m_EditHistory;
+    std::optional<HistoryContext> m_PrefabHistory;
+    std::string m_EditingPrefab,m_PrefabActionKey,m_PrefabDoubleClick,m_PrefabNewKey="prefabs/cabinet.prefab.json";
+    nlohmann::json m_PrefabDiskBase;
+    SceneSettings m_PrefabSavedSceneSettings;
+    ecs::Entity m_PrefabRoot{};
+    std::vector<ecs::Entity> m_PrefabIsolation;
+    bool m_PrefabGameView=false;
+    bool m_PrefabConfirm=false,m_PrefabCreatePopup=false;
+    int m_PrefabAction=0;
+    ecs::Entity m_PrefabActionEntity{};
+    EntitySnapshot PrefabNodesSnapshot(Application&,const nlohmann::json&);
+    bool WritePrefabAndUpdate(Application&,const std::string&,const nlohmann::json&,const nlohmann::json&,bool update);
+    void RestorePrefabHistory();
+    bool StartPrefabEditor(Application&,const std::string&,const nlohmann::json&,const nlohmann::json&);
     std::vector<UndoRecord> m_UndoStack;
     std::vector<UndoRecord> m_RedoStack;
     bool m_GizmoUndoCaptured = false;

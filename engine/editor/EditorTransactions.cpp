@@ -9,6 +9,8 @@
 #include "../ecs/components/PlayerStartComponent.h"
 #include "../ecs/components/FogComponent.h"
 #include "../scripting/EntityReference.h"
+#include "../scripting/Prefab.h"
+#include <fstream>
 namespace editor {
 namespace {
 bool Same(const nlohmann::json& a,const nlohmann::json& b){return a==b;}
@@ -19,28 +21,82 @@ EditorLayer::EntitySnapshot EditorLayer::CaptureSelectedEntity(Application& app,
     if(s.alive)s.components=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),s.entity);s.selection=m_Selection;return s;
 }
 EditorLayer::EntitySnapshot EditorLayer::CaptureLike(Application& app,const EntitySnapshot& sample)const{
-    auto result=(sample.settings||sample.transform||(!sample.entity.IsValid()&&!sample.related.empty()))?EntitySnapshot{}:CaptureSelectedEntity(app,sample.entity);result.previousSelection=sample.previousSelection;result.world=app.GetWorld().GetIdentity();
+    auto result=(sample.settings||sample.transform||!sample.componentOnly.empty()||!sample.entity.IsValid())?EntitySnapshot{}:CaptureSelectedEntity(app,sample.entity);result.previousSelection=sample.previousSelection;result.world=app.GetWorld().GetIdentity();
+    result.bulk=sample.bulk;result.componentOnly=sample.componentOnly;
+    if(!sample.componentOnly.empty()){
+        result.entity=sample.entity;result.alive=app.GetWorld().IsAlive(sample.entity);
+        auto* d=ecs::ComponentRegistry::Builtins().Find(sample.componentOnly);
+        if(result.alive&&d&&d->has(app.GetWorld(),sample.entity))result.components[d->key]=d->serialize(app.GetWorld(),sample.entity);
+    }
     if(sample.transform){result.entity=sample.entity;result.alive=app.GetWorld().IsAlive(sample.entity);if(auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(sample.entity))result.transform=*t;}
     if(sample.parent&&result.alive)result.parent=app.GetWorld().Parent(result.entity);
     result.selection=sample.selection?std::optional<SelectionSet>(m_Selection):std::nullopt;
+    result.prefabBatch=sample.prefabBatch;
+    for(const auto& file:sample.files){
+        auto path=scripting::SafeAsset(file.key,".prefab.json");std::optional<nlohmann::json> contents;
+        if(std::filesystem::exists(path)){std::ifstream input(path);nlohmann::json j;input>>j;contents=std::move(j);}
+        result.files.push_back({file.key,contents,file.contents});
+    }
     if(sample.settings)result.settings=app.GetSceneSettings();for(const auto& related:sample.related)result.related.push_back(CaptureLike(app,related));return result;
 }
 void EditorLayer::RemapHistory(ecs::Entity oldEntity,ecs::Entity replacement){
     auto remap=[&](auto&& self,EntitySnapshot& s)->void{if(s.entity==oldEntity)s.entity=replacement;if(s.previousSelection==oldEntity)s.previousSelection=replacement;if(s.parent&&*s.parent==oldEntity)s.parent=replacement;if(s.selection)s.selection->Remap(oldEntity,replacement);for(auto& item:s.related)self(self,item);};
     for(auto* stack:{&m_UndoStack,&m_RedoStack})for(auto& record:*stack)remap(remap,record.snapshot);
     if(m_Transaction)remap(remap,m_Transaction->before);
-    m_Selection.Remap(oldEntity,replacement);
+    m_Selection.Remap(oldEntity,replacement);if(m_PrefabRoot==oldEntity)m_PrefabRoot=replacement;
 }
 ecs::Entity EditorLayer::RestoreSnapshot(Application& app,const EntitySnapshot& snapshot,EntitySnapshot* inverse,ecs::World::CloneMap* remapped){
     ecs::World::CloneMap replacements;const bool root=remapped==nullptr;if(root)remapped=&replacements;
     auto& world=app.GetWorld();auto entity=snapshot.entity;
     const auto owner=snapshot.world?snapshot.world:entity.world;
     if(owner!=world.GetIdentity())throw std::runtime_error("Undo transaction belongs to a different World");
+    if(root&&snapshot.bulk){RestoreBulkSnapshot(app,snapshot);return {};}
     if(root){
         auto validate=[&](auto&& self,const EntitySnapshot& s)->void{
             if(s.transform&&(!world.IsAlive(s.entity)||!world.HasComponent<ecs::TransformComponent>(s.entity)))throw std::runtime_error("Transform history target no longer exists");
             for(auto& child:s.related)self(self,child);
         };validate(validate,snapshot);
+    }
+    if(root){
+        // Check every external file before touching either the file or scene.
+        for(const auto& file:snapshot.files){
+            auto path=scripting::SafeAsset(file.key,".prefab.json");std::optional<nlohmann::json> contents;
+            if(std::filesystem::exists(path)){std::ifstream input(path);nlohmann::json j;input>>j;contents=std::move(j);}
+            if(contents!=file.expected)throw std::runtime_error("Prefab file changed outside this history operation: "+file.key);
+        }
+        if(snapshot.prefabBatch){
+            auto document=SceneSerializer::CaptureWorld(world,app.GetSceneSettings());
+            auto stage=[&](auto&& self,const EntitySnapshot& item)->void{
+                if(item.entity.IsValid()){
+                    const auto id=item.alive?item.components.at("SceneIdentity").at("value").get<std::string>():SceneSerializer::EntitySceneId(world,item.entity);
+                    auto& list=document["entities"];
+                    if(world.IsAlive(item.entity)){const auto currentId=SceneSerializer::EntitySceneId(world,item.entity);if(currentId!=id)list.erase(std::remove_if(list.begin(),list.end(),[&](const auto& n){return n.at("id")==currentId;}),list.end());}
+                    auto found=std::find_if(list.begin(),list.end(),[&](const auto& n){return n.at("id")==id;});
+                    if(!item.alive){if(found!=list.end())list.erase(found);}
+                    else {auto c=item.components;c.erase("SceneIdentity");nlohmann::json n={{"id",id},{"components",c}};
+                        if(item.parent&&item.parent->IsValid()){
+                            auto parentId=SceneSerializer::EntitySceneId(world,*item.parent);
+                            auto resolve=[&](auto&& resolveSelf,const EntitySnapshot& other)->void{if(other.entity==*item.parent&&other.alive)parentId=other.components.at("SceneIdentity").at("value").get<std::string>();for(const auto& child:other.related)resolveSelf(resolveSelf,child);};resolve(resolve,snapshot);
+                            n["parent"]=parentId;
+                        }
+                        if(found!=list.end())*found=std::move(n);else list.push_back(std::move(n));
+                    }
+                }
+                for(const auto& child:item.related)self(self,child);
+            };stage(stage,snapshot);ecs::World check;SceneSettings settings;std::string error;
+            if(!SceneSerializer::RestoreWorld(document,check,settings,&error))throw std::runtime_error(error);
+        }
+        for(const auto& file:snapshot.files){
+            auto path=scripting::SafeAsset(file.key,".prefab.json");std::string error;
+            if(file.contents){if(!SceneSerializer::WriteAtomic(path,*file.contents,&error,true))throw std::runtime_error(error);}
+            else if(!std::filesystem::remove(path))throw std::runtime_error("Cannot remove prefab file: "+file.key);
+            m_AssetListsDirty=true;
+        }
+        if(snapshot.prefabBatch){
+            std::vector<std::pair<ecs::Entity,ecs::Entity>> detached;
+            auto collect=[&](auto&& self,const EntitySnapshot& item)->void{if(world.IsAlive(item.entity))detached.emplace_back(item.entity,ecs::Entity{});for(const auto& child:item.related)self(self,child);};collect(collect,snapshot);
+            std::string error;if(!world.SetParents(detached,false,&error))throw std::runtime_error(error);
+        }
     }
     if(snapshot.settings){std::string error;if(!app.SetSceneSettings(*snapshot.settings,&error))throw std::runtime_error(error);}
     if(entity.IsValid()){
@@ -86,6 +142,7 @@ void EditorLayer::CommitUndo(Application& app,const std::string& label,EntitySna
     FinishTransaction(app);if(!before.world)before.world=before.entity.world;
     auto after=CaptureLike(app,before);
     auto equal=[&](auto&& self,const EntitySnapshot& a,const EntitySnapshot& b)->bool{
+        if(a.files.size()!=b.files.size())return false;for(std::size_t i=0;i<a.files.size();++i)if(a.files[i].contents!=b.files[i].contents)return false;
         if(a.alive!=b.alive||a.parent!=b.parent||!Same(a.components,b.components)||a.related.size()!=b.related.size()||a.settings.has_value()!=b.settings.has_value())return false;
         if(a.transform.has_value()!=b.transform.has_value()||(a.transform&&TransformMatrix(*a.transform)!=TransformMatrix(*b.transform)))return false;
         if(a.settings&&SceneSettingsToJson(*a.settings)!=SceneSettingsToJson(*b.settings))return false;
@@ -96,10 +153,10 @@ void EditorLayer::CommitUndo(Application& app,const std::string& label,EntitySna
     if(m_UndoStack.size()>MaxUndoRecords)m_UndoStack.erase(m_UndoStack.begin());m_RedoStack.clear();
 }
 void EditorLayer::FinishTransaction(Application& app){
-    if(!m_Transaction)return;auto pending=std::move(*m_Transaction);m_Transaction.reset();CommitUndo(app,pending.label,std::move(pending.before));if(pending.label=="Duplicate and move")m_DuplicateDrag=false;if(pending.label=="Group Transform")m_GroupTransform.reset();
+    if(!m_Transaction)return;auto pending=std::move(*m_Transaction);m_Transaction.reset();m_BulkSession.reset();CommitUndo(app,pending.label,std::move(pending.before));if(pending.label=="Duplicate and move")m_DuplicateDrag=false;if(pending.label=="Group Transform")m_GroupTransform.reset();
 }
 void EditorLayer::CancelTransaction(Application& app){
-    if(!m_Transaction)return;auto pending=std::move(*m_Transaction);m_Transaction.reset();
+    if(!m_Transaction)return;auto pending=std::move(*m_Transaction);m_Transaction.reset();m_BulkSession.reset();
     try{RestoreSnapshot(app,pending.before);}catch(const std::exception& e){m_EditorError=e.what();Logger::Get().Error(m_EditorError);}m_GizmoUndoCaptured=false;m_DuplicateDrag=false;m_LightPointerCaptured=false;m_PlaneScaleCaptured=false;m_GroupTransform.reset();
 }
 void EditorLayer::Undo(Application& app){

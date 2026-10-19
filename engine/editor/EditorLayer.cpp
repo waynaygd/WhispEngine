@@ -314,7 +314,11 @@ bool EditorLayer::IsPointInsideViewport(double x, double y) const
 void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
 {
     ZoneScopedN("EditorLayer");
-    CancelPlacement();
+    // Keep prepared prefab data throughout one drag, but never render a stale
+    // previous-frame ghost when the pointer leaves or the viewport is hidden.
+    const auto* placementDrag=ImGui::GetDragDropPayload();
+    if(!placementDrag||!placementDrag->IsDataType("WHISP_ASSET")||!m_ShowViewport||app.IsProjectBrowserActive())CancelPlacement();
+    else {m_PlacementPreview.active=false;m_PlacementPreview.items.clear();}
     m_Statistics.hierarchyMs=m_Statistics.inspectorMs=m_Statistics.assetBrowserMs=m_Statistics.lightGizmoMs=0;
     const auto uiStart=std::chrono::steady_clock::now();
     struct FinishUi {Statistics& stats;std::chrono::steady_clock::time_point start;~FinishUi(){stats.uiMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}} finish{m_Statistics,uiStart};
@@ -353,13 +357,14 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     m_ViewportHovered = false;
     m_ViewportHasBounds = false;
     m_ViewportFocused=false;m_HierarchyFocused=false;
-    DrawMainMenu(app);DrawSceneDialogs(app);DrawProjectBrowser(app);
+    DrawMainMenu(app);DrawPrefabWorkflow(app);DrawSceneDialogs(app);DrawProjectBrowser(app);
     if(app.IsProjectBrowserActive())return;
     if(m_ShowProjectSettings)DrawProjectSettings(app);
     if(m_ShowSceneSettings)DrawSceneSettings(app,renderer,dt);
     if(m_ShowVisualSettings)DrawEditorVisualSettings(app,renderer);
     PrepareEditorSky(app,renderer);
     if(m_ShowConsole)DrawConsole(app,renderer);
+    if(m_ShowGameplayEvents)DrawGameplayEvents(app);
     ImGui::SetNextWindowSize(ImVec2(340, 330), ImGuiCond_FirstUseEver);
     if(m_ShowPhysicsStress){
     if (ImGui::Begin("Physics Stress Test",&m_ShowPhysicsStress)) {
@@ -496,7 +501,7 @@ void EditorLayer::HandleEditorShortcuts(Application& app){
     if(io.KeyCtrl){
         if(ImGui::IsKeyPressed(ImGuiKey_Z,false))Undo(app);
         if(ImGui::IsKeyPressed(ImGuiKey_Y,false))Redo(app);
-        if(ImGui::IsKeyPressed(ImGuiKey_S,false)){if(io.KeyShift){m_SceneDialogAction=3;m_SceneDialogRequested=true;}else{std::string error;if(!app.SaveCurrentScene(&error)){m_EditorError=error;Logger::Get().Error(error);}}}
+        if(ImGui::IsKeyPressed(ImGuiKey_S,false)){if(io.KeyShift&&!app.IsPrefabEditing()){m_SceneDialogAction=3;m_SceneDialogRequested=true;}else{std::string error;if(!app.SaveCurrentScene(&error)){m_EditorError=error;Logger::Get().Error(error);}}}
         if(entityKeys&&ImGui::IsKeyPressed(ImGuiKey_D,false))DuplicateEntity(app,m_Selection.active);
     }
     if(io.KeyAlt&&!io.KeyCtrl&&!io.KeyShift&&(m_ViewportFocused||app.IsViewportMouseCaptured())&&!BlocksGameplayInput()&&!ImGuizmo::IsUsing()&&!ImGui::IsMouseDown(0)&&!ImGui::IsMouseDown(1)){
@@ -599,8 +604,10 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     ImGui::SameLine();DrawViewportTools(app);
     ImGui::SameLine();
     if(ImGui::GetContentRegionAvail().x<370*ImGui::GetStyle().FontScaleDpi)ImGui::NewLine();
+    ImGui::BeginDisabled(app.IsPrefabEditing());
     if (ImGui::Button(playMode ? "Stop" : "Play"))
         app.SetEditorPlayMode(!playMode);
+    ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::TextUnformatted(playMode ? "Play" : "Edit");
     ImGui::SameLine();ImGui::SetNextItemWidth(85*ImGui::GetStyle().FontScaleDpi);

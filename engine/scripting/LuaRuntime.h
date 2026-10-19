@@ -2,6 +2,7 @@
 #include "../ecs/World.h"
 #include "../ecs/events/EventBus.h"
 #include "GameplayServices.h"
+#include "GameplayEventHistory.h"
 #include <nlohmann/json.hpp>
 #include <functional>
 #include <memory>
@@ -17,6 +18,7 @@ public:
     LuaRuntime& operator=(const LuaRuntime&)=delete;
     void Start(ecs::World&,std::function<bool(const std::string&)> input={},GameplayServices services={});
     void Stop();
+    GameplayEventHistory& Events();
     void Update(float dt);
     void FixedUpdate(float dt);
     void SuspendInput();

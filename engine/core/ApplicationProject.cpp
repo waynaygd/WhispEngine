@@ -6,6 +6,7 @@
 #include <GLFW/glfw3.h>
 
 bool Application::OpenProject(const std::filesystem::path& path,ProjectDecision decision,std::string* error){
+    if(IsPrefabEditing()){if(error)*error="Return from Prefab Editor before changing projects";return false;}
     if(decision==ProjectDecision::Cancel)return false;
     try {
         auto next=ProjectManager::Prepare(path);
@@ -15,6 +16,7 @@ bool Application::OpenProject(const std::filesystem::path& path,ProjectDecision 
     }catch(const std::exception& e){if(error)*error=std::string("Open project: ")+e.what();return false;}
 }
 bool Application::CloseProject(ProjectDecision decision,std::string* error){
+    if(IsPrefabEditing()){if(error)*error="Return from Prefab Editor before changing projects";return false;}
     if(decision==ProjectDecision::Cancel)return false;
     ecs::World empty;return CommitProject({},empty,SceneSettings{},decision,error);
 }
@@ -46,6 +48,7 @@ bool Application::CommitProject(std::shared_ptr<const ProjectContext> next,ecs::
     }
     m_Camera.controlsActive=false;m_Camera.previousRightMouseDown=true;
     if(m_ResourceManager)m_ResourceManager->DrainProjectLoads();
+    m_LuaRuntime.Events().StopCapture();m_LuaRuntime.Events().Clear();
     m_EditorLayer.ResetProjectState(GetRenderAdapter());
     if(m_RenderSystem)m_RenderSystem->ReleaseGpuResources();
     if(m_ResourceManager)m_ResourceManager->ClearAll();
@@ -90,4 +93,18 @@ bool Application::SaveAuthoringSceneForTransition(std::string* error){
         if(!SceneSerializer::WriteAtomic(path,SceneSerializer::CaptureWorld(m_World,settings),error,!m_SceneKey.empty()))return false;
         m_SceneKey=key;m_EditorLayer.MarkSaved();return true;
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
+}
+
+bool Application::BeginPrefabContext(std::unique_ptr<ecs::World> world){
+    if(IsEditorPlayMode()||IsPrefabEditing()||!world)return false;
+    m_PrefabSavedDebug=m_EcsDebugEntities;m_PrefabSavedStress=m_StressEntities;
+    m_PrefabSavedCamera=m_Camera;m_PrefabSavedSettings=GetSceneSettings();
+    m_PrefabWorld=std::move(world);SetSceneSettings(SceneSettings{});m_Mutations.Clear();ResetPhysicsClock();
+    if(m_PhysicsSystem)m_PhysicsSystem->ResetState();return true;
+}
+void Application::EndPrefabContext(){
+    if(!m_PrefabWorld)return;
+    m_Mutations.Clear();m_PrefabWorld.reset();m_Camera=m_PrefabSavedCamera;m_EcsDebugEntities=std::move(m_PrefabSavedDebug);m_StressEntities=std::move(m_PrefabSavedStress);
+    m_LightingSettings.enabled=m_PrefabSavedSettings.lighting.enabled;m_ShadowSettings.debugMode=m_PrefabSavedSettings.shadows.debugMode;SetSceneSettings(m_PrefabSavedSettings);
+    if(m_PhysicsSystem)m_PhysicsSystem->ResetState();ResetPhysicsClock();
 }

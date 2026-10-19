@@ -1,0 +1,236 @@
+{
+  "version": 2,
+  "root": "Cabinet",
+  "entities": [
+    {
+      "id": "Cabinet",
+      "components": {
+        "Tag": {
+          "name": "Cabinet"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "Body",
+      "components": {
+        "Tag": {
+          "name": "Body"
+        },
+        "Transform": {
+          "position": [
+            0,
+            1,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2,
+            2,
+            1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.65,
+            0.37,
+            0.16,
+            1
+          ]
+        }
+      },
+      "parent": "Cabinet"
+    },
+    {
+      "id": "DoorLeft",
+      "components": {
+        "Tag": {
+          "name": "DoorLeft"
+        },
+        "Transform": {
+          "position": [
+            -0.51,
+            1,
+            -0.56
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.95,
+            1.9,
+            0.12
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.6,
+            0.3,
+            1
+          ]
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/cabinet_door.lua",
+          "enabled": true,
+          "properties": {
+            "handle": {
+              "$entity": "HandleLeft"
+            },
+            "openAngle": 1.2
+          }
+        }
+      },
+      "parent": "Cabinet"
+    },
+    {
+      "id": "HandleLeft",
+      "components": {
+        "Tag": {
+          "name": "HandleLeft"
+        },
+        "Transform": {
+          "position": [
+            0.28,
+            0,
+            -0.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.084,
+            0.132,
+            0.667
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.65,
+            0.35,
+            1
+          ]
+        }
+      },
+      "parent": "DoorLeft"
+    },
+    {
+      "id": "DoorRight",
+      "components": {
+        "Tag": {
+          "name": "DoorRight"
+        },
+        "Transform": {
+          "position": [
+            0.51,
+            1,
+            -0.56
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.95,
+            1.9,
+            0.12
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.6,
+            0.3,
+            1
+          ]
+        }
+      },
+      "parent": "Cabinet"
+    },
+    {
+      "id": "HandleRight",
+      "components": {
+        "Tag": {
+          "name": "HandleRight"
+        },
+        "Transform": {
+          "position": [
+            -0.28,
+            0,
+            -0.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.084,
+            0.132,
+            0.667
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.65,
+            0.35,
+            1
+          ]
+        }
+      },
+      "parent": "DoorRight"
+    }
+  ]
+}

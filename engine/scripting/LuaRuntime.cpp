@@ -7,6 +7,7 @@
 #include "../ecs/MutationQueue.h"
 #include "../ecs/components/LuaScriptComponent.h"
 #include "../ecs/components/TagComponent.h"
+#include "../ecs/components/SceneIdentityComponent.h"
 #include "../ecs/components/TransformComponent.h"
 #include "../ecs/components/LightComponent.h"
 #include "../ecs/PlayerSpawn.h"
@@ -87,7 +88,8 @@ struct LuaRuntime::Impl {
     std::map<std::string,std::string> errors;
     std::map<ecs::Entity,Instance,EntityLess> instances;
     std::map<ecs::Entity,std::string,EntityLess> rejected;
-    struct Event {ecs::Entity target,other;std::string type;float amount=0;};
+    struct Event {ecs::Entity target,other;std::string type;float amount=0;ecs::Entity source{};std::uint64_t trace=0;std::string kind="Lua";};
+    GameplayEventHistory history;
     std::vector<Event> events;
     struct Timer {ecs::Entity owner;double deadline,interval;std::string event;};
     std::map<lua_Integer,Timer> timers;
@@ -160,8 +162,32 @@ struct LuaRuntime::Impl {
             // periods without building an unbounded catch-up event queue.
             if(timer.interval>0)at->second.deadline=timer.deadline+(std::floor((gameTime-timer.deadline)/timer.interval)+1)*timer.interval;
             else timers.erase(at);
-            auto data=lua.create_table();data["type"]=timer.event;data["amount"]=0;data["timer"]=id;data["other"]=ecs::Entity{};Call(instance->second,"on_event",data);
+            auto data=lua.create_table();data["type"]=timer.event;data["amount"]=0;data["timer"]=id;data["other"]=ecs::Entity{};Event event{timer.owner,{},timer.event,0,timer.owner,0,"Timer"};if(history.Active())event.trace=Trace(event,"; timer = "+std::to_string(id));Deliver(event,data);
         }
+    }
+    EventEntity Snapshot(ecs::Entity e)const{
+        EventEntity out;out.entity=e;
+        if(world&&world->IsAlive(e)){
+            if(auto* t=world->GetComponent<ecs::TagComponent>(e))out.name=t->name;
+            if(auto* id=world->GetComponent<ecs::SceneIdentityComponent>(e))out.stableId=id->value;
+        }
+        return out;
+    }
+    std::uint64_t Trace(const Event& event,const std::string& extra={}){
+        if(!history.Active())return 0;
+        GameplayEvent row;row.time=gameTime;row.name=event.type;row.kind=event.kind;row.handler="on_event";
+        row.source=Snapshot(event.source);row.target=Snapshot(event.target);row.other=Snapshot(event.other);
+        row.payload="amount = "+std::to_string(event.amount)+extra;
+        return history.Add(std::move(row));
+    }
+    void Enqueue(Event event){if(history.Active())event.trace=Trace(event);events.push_back(std::move(event));}
+    void Deliver(const Event& event,sol::table data){
+        auto id=event.trace;if(history.Active()&&(!id||!history.Find(id)))id=Trace(event);
+        auto i=instances.find(event.target);
+        if(!Alive(event.target)||i==instances.end()){if(history.Active())history.Update(id,EventStatus::Skipped,gameTime,{},"Target destroyed, disabled, or has no active script instance");return;}
+        if(!history.Active()){Call(i->second,"on_event",data);return;}
+        const auto result=CallObserved(id,i->second,"on_event",data);
+        history.Update(id,result,gameTime,i->second.path,result==EventStatus::Error?errors[i->second.path]:result==EventStatus::Skipped?"Handler absent or script instance already failed":"");
     }
     ecs::TransformComponent& Transform(ecs::Entity e){if(!Alive(e))throw std::runtime_error("Dead/stale/foreign entity");auto* t=world->GetComponent<ecs::TransformComponent>(e);if(!t)throw std::runtime_error("Entity has no Transform");return *t;}
     void SetTransform(ecs::Entity e,const char* field,ecs::Vec3 value){
@@ -224,7 +250,7 @@ struct LuaRuntime::Impl {
         api.set_function("set_parent",[this](ecs::Entity e,sol::optional<ecs::Entity> parent,sol::optional<bool> keep){std::string error;if(!world->SetParent(e,parent.value_or(ecs::Entity{}),keep.value_or(true),&error))throw std::runtime_error(error);});
         api.set_function("spawn_prefab",[this](const std::string& key,ecs::Vec3 p){if(stopping)throw std::runtime_error("Spawn during Stop");if(world->GetAliveCount()>10000)throw std::runtime_error("Lua entity budget exceeded");return SpawnPrefab(*world,key,p);});
         api.set_function("destroy",[this](ecs::Entity e){if(Alive(e)){destroying.insert(e);mutations.Destroy(e);}});
-        api.set_function("send_event",[this](ecs::Entity e,const std::string& type,float amount){if(Alive(e)&&events.size()<1024&&type.size()<128&&std::isfinite(amount))events.push_back({e,{},type,amount});});
+        api.set_function("send_event",[this,owner](ecs::Entity e,const std::string& type,float amount){if(Alive(e)&&events.size()<1024&&type.size()<128&&std::isfinite(amount))Enqueue({e,{},type,amount,owner});});
         env["World"]=api;
         auto physics=lua.create_table();
         physics.set_function("raycast",[this](ecs::Vec3 origin,ecs::Vec3 direction,float distance,sol::optional<ecs::Entity> ignore)->sol::object{
@@ -277,15 +303,18 @@ struct LuaRuntime::Impl {
         if(action.empty()||action.size()>128||(held.size()>=128&&!held.contains(action)))throw std::runtime_error("Input action name/budget invalid");
         if(!held.contains(action)){bool now=input&&input(action);held[action]=now;pressed[action]=services.pressed?services.pressed(action):now;released[action]=services.released&&services.released(action);fixedPressed[action]|=pressed[action];fixedReleased[action]|=released[action];}
     }
-    template<class... Args>void Call(Instance& instance,const char* callback,Args&&... args){
-        if(instance.failed&&std::string_view(callback)!="on_destroy"&&std::string_view(callback)!="on_stop")return;
+    template<class... Args>EventStatus Call(Instance& instance,const char* callback,Args&&... args){return CallObserved(0,instance,callback,std::forward<Args>(args)...);}
+    template<class... Args>EventStatus CallObserved(std::uint64_t trace,Instance& instance,const char* callback,Args&&... args){
+        if(instance.failed&&std::string_view(callback)!="on_destroy"&&std::string_view(callback)!="on_stop")return EventStatus::Skipped;
         try{
-        sol::object fn=instance.definition[callback];if(!fn.valid()||fn==sol::nil)return;
+        sol::object fn=instance.definition[callback];if(!fn.valid()||fn==sol::nil)return EventStatus::Skipped;
         if(fn.get_type()!=sol::type::function)throw std::runtime_error("Callback is no longer a function");
+        if(trace)history.Update(trace,EventStatus::Processing,gameTime,instance.path);
         ExecutionBudget budget(lua.lua_state());sol::protected_function function=fn;auto result=function(instance.self,std::forward<Args>(args)...);
         if(!result.valid()){sol::error error=result;instance.failed=true;Fail(instance.path,callback,error.what());}
         }catch(const std::exception& error){instance.failed=true;Fail(instance.path,callback,error.what());}
         if(instance.failed){CancelTimers(instance.entity);ClearControl(instance.entity);}
+        return instance.failed?EventStatus::Error:EventStatus::Success;
     }
     void Retire(ecs::Entity e,Instance& instance){Call(instance,"on_stop");Call(instance,"on_destroy");CancelTimers(e);ClearControl(e);}
     void Sync(){
@@ -317,11 +346,11 @@ struct LuaRuntime::Impl {
 };
 LuaRuntime::LuaRuntime():impl(std::make_unique<Impl>()){}
 LuaRuntime::~LuaRuntime(){Stop();}
-void LuaRuntime::Start(ecs::World& world,std::function<bool(const std::string&)> input,GameplayServices services){Stop();impl->Check();world.AssertOwnerThread();impl->programs.clear();impl->errors.clear();impl->world=&world;impl->input=std::move(input);impl->services=std::move(services);}
+void LuaRuntime::Start(ecs::World& world,std::function<bool(const std::string&)> input,GameplayServices services){Stop();impl->Check();world.AssertOwnerThread();impl->programs.clear();impl->errors.clear();impl->world=&world;impl->input=std::move(input);impl->services=std::move(services);impl->history.BeginSession();}
 void LuaRuntime::Stop(){
     impl->Check();impl->stopping=true;
     for(auto& [e,i]:impl->instances)impl->Retire(e,i);
-    impl->instances.clear();impl->rejected.clear();impl->events.clear();
+    impl->history.EndSession();impl->instances.clear();impl->rejected.clear();impl->events.clear();
     impl->programs.clear();impl->errors.clear();
     impl->timers.clear();impl->gameTime=0;
     impl->mutations.Clear();impl->destroying.clear();impl->world=nullptr;
@@ -343,7 +372,7 @@ void LuaRuntime::Update(float dt){
     impl->gameTime+=double(dt);impl->Sync();auto events=std::move(impl->events);impl->events.clear();
     for(auto& [e,i]:impl->instances)if(auto* m=impl->world->GetComponent<ecs::CharacterMovementComponent>(e)){m->desiredDirection={};if(!impl->MotionAllowed(e)||i.failed){m->jumpRequested=false;if(!impl->MotionAllowed(e)){impl->fixedPressed.clear();impl->fixedReleased.clear();}}}
     impl->FireTimers();
-    for(const auto& event:events)if(impl->Alive(event.target)){auto i=impl->instances.find(event.target);if(i!=impl->instances.end()){auto data=impl->lua.create_table();data["type"]=event.type;data["amount"]=event.amount;data["other"]=event.other;impl->Call(i->second,"on_event",data);}}
+    for(const auto& event:events){if(!impl->Alive(event.target)||!impl->instances.contains(event.target)){if(impl->history.Active())impl->Deliver(event,sol::table{});continue;}auto data=impl->lua.create_table();data["type"]=event.type;data["amount"]=event.amount;data["other"]=event.other;impl->Deliver(event,data);}
     for(auto& [e,i]:impl->instances)if(impl->Alive(e))impl->Call(i,"on_update",std::min(dt,.1f));
     // Destruction callback while components still exist; apply once, after all calls.
     for(auto e:impl->destroying){auto i=impl->instances.find(e);if(i!=impl->instances.end()){impl->Retire(e,i->second);impl->instances.erase(i);}}
@@ -366,7 +395,8 @@ void LuaRuntime::SuspendInput(){
     if(impl->world)for(const auto& [e,i]:impl->instances)if(auto* m=impl->world->GetComponent<ecs::CharacterMovementComponent>(e)){m->desiredDirection={};m->jumpRequested=false;if(auto* b=impl->world->GetComponent<ecs::RigidbodyComponent>(e)){b->velocity.x=0;b->velocity.z=0;}}
     if(impl->services.captureCursor)impl->services.captureCursor(false);impl->cursorOwner={};
 }
-void LuaRuntime::QueueCollision(const ecs::CollisionEvent& e){impl->Check();if(impl->world&&impl->events.size()<1022){const char* type=e.kind==ecs::CollisionKind::TriggerEnter?"trigger_enter":e.kind==ecs::CollisionKind::TriggerExit?"trigger_exit":"collision";if(impl->Alive(e.a))impl->events.push_back({e.a,e.b,type});if(impl->Alive(e.b))impl->events.push_back({e.b,e.a,type});}}
+void LuaRuntime::QueueCollision(const ecs::CollisionEvent& e){impl->Check();if(impl->world&&impl->events.size()<1022){const char* type=e.kind==ecs::CollisionKind::TriggerEnter?"trigger_enter":e.kind==ecs::CollisionKind::TriggerExit?"trigger_exit":"collision";if(impl->Alive(e.a))impl->Enqueue({e.a,e.b,type,0,{},0,"Physics"});if(impl->Alive(e.b))impl->Enqueue({e.b,e.a,type,0,{},0,"Physics"});}}
+GameplayEventHistory& LuaRuntime::Events(){impl->Check();return impl->history;}
 bool LuaRuntime::ReloadScript(const std::string& path){return impl->Load(path);}
 nlohmann::json LuaRuntime::Fields(const std::string& path){impl->Check();if(!impl->programs.contains(path)&&!impl->errors.contains(path))impl->Load(path);auto i=impl->programs.find(path);return i==impl->programs.end()?Json::object():i->second.fields;}
 std::string LuaRuntime::Error(const std::string& path)const{impl->Check();auto i=impl->errors.find(path);return i==impl->errors.end()?std::string():i->second;}

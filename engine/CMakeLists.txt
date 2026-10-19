@@ -61,6 +61,8 @@ add_library(Engine
   editor/EditorSelection.cpp
   editor/EditorGroupTransform.cpp
   editor/EditorInspector.cpp
+  editor/EditorGameplayEvents.cpp
+  editor/EditorBulkInspector.cpp
   editor/EditorPreferences.cpp
   editor/EditorUi.cpp
   editor/EditorViewportCreate.cpp
@@ -71,6 +73,7 @@ add_library(Engine
   editor/AssetCatalog.cpp
   editor/EditorAssetPreview.cpp
   editor/EditorAssets.cpp
+  editor/EditorPrefabs.cpp
   editor/ScriptEditor.cpp
   editor/GltfSceneImport.cpp
   editor/EditorLevelWorkflow.cpp

@@ -9,6 +9,7 @@
 #include "../MathTypes.h"
 #include "../components/TransformComponent.h"
 #include "../RenderInterpolation.h"
+#include "../PlacementPreview.h"
 #include "../../render/RenderResourceHandles.h"
 #include "../../render/RenderInstanceData.h"
 #include "../../render/Shadows.h"
@@ -45,7 +46,7 @@ public:
         if(entities==m_EditorIsolation)return;m_EditorIsolation=entities;
         m_EditorIsolated.clear();m_EditorIsolated.insert(entities.begin(),entities.end());
     }
-    void SetPlacementPreview(const std::string& key,const TransformComponent& transform){m_PlacementMesh=key;m_PlacementTransform=transform;}
+    void SetPlacementPreview(const std::vector<PlacementRenderItem>& items){m_PlacementItems=items;}
     void SetViewportUnlit(bool value){m_ViewportUnlit=value;}
     bool IsViewportUnlit()const{return m_ViewportUnlit;}
     ~RenderSystem() override;
@@ -82,8 +83,7 @@ public:
 private:
     std::vector<Entity> m_EditorIsolation;
     std::unordered_set<Entity,EntityHash> m_EditorIsolated;
-    std::string m_PlacementMesh;
-    TransformComponent m_PlacementTransform;
+    std::vector<PlacementRenderItem> m_PlacementItems;
     bool m_TraceMaterials=false;
     std::uint64_t m_ResourceCacheEpoch=0;
     std::vector<nlohmann::json> m_MaterialDiagnostics;

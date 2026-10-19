@@ -1,0 +1,764 @@
+{
+  "version": 4,
+  "entities": [
+    {
+      "id": "cabinet-0-Cabinet",
+      "components": {
+        "Tag": {
+          "name": "Cabinet"
+        },
+        "Transform": {
+          "position": [
+            -3,
+            0,
+            7
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PrefabInstance": {
+          "asset": "prefabs/cabinet.prefab.json",
+          "members": {
+            "Cabinet": {
+              "$entity": "cabinet-0-Cabinet"
+            },
+            "Body": {
+              "$entity": "cabinet-0-Body"
+            },
+            "DoorLeft": {
+              "$entity": "cabinet-0-DoorLeft"
+            },
+            "HandleLeft": {
+              "$entity": "cabinet-0-HandleLeft"
+            },
+            "DoorRight": {
+              "$entity": "cabinet-0-DoorRight"
+            },
+            "HandleRight": {
+              "$entity": "cabinet-0-HandleRight"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "cabinet-0-Body",
+      "components": {
+        "Tag": {
+          "name": "Body"
+        },
+        "Transform": {
+          "position": [
+            0,
+            1,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2,
+            2,
+            1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.65,
+            0.37,
+            0.16,
+            1
+          ]
+        }
+      },
+      "parent": "cabinet-0-Cabinet"
+    },
+    {
+      "id": "cabinet-0-DoorLeft",
+      "components": {
+        "Tag": {
+          "name": "DoorLeft"
+        },
+        "Transform": {
+          "position": [
+            -0.51,
+            1,
+            -0.56
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.95,
+            1.9,
+            0.12
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.6,
+            0.3,
+            1
+          ]
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/cabinet_door.lua",
+          "enabled": true,
+          "properties": {
+            "handle": {
+              "$entity": "cabinet-0-HandleLeft"
+            },
+            "openAngle": 1.2
+          }
+        }
+      },
+      "parent": "cabinet-0-Cabinet"
+    },
+    {
+      "id": "cabinet-0-HandleLeft",
+      "components": {
+        "Tag": {
+          "name": "HandleLeft"
+        },
+        "Transform": {
+          "position": [
+            0.28,
+            0,
+            -0.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.084,
+            0.132,
+            0.667
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.65,
+            0.35,
+            1
+          ]
+        }
+      },
+      "parent": "cabinet-0-DoorLeft"
+    },
+    {
+      "id": "cabinet-0-DoorRight",
+      "components": {
+        "Tag": {
+          "name": "DoorRight"
+        },
+        "Transform": {
+          "position": [
+            0.51,
+            1,
+            -0.56
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.95,
+            1.9,
+            0.12
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.6,
+            0.3,
+            1
+          ]
+        }
+      },
+      "parent": "cabinet-0-Cabinet"
+    },
+    {
+      "id": "cabinet-0-HandleRight",
+      "components": {
+        "Tag": {
+          "name": "HandleRight"
+        },
+        "Transform": {
+          "position": [
+            -0.28,
+            0,
+            -0.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.084,
+            0.132,
+            0.667
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.65,
+            0.35,
+            1
+          ]
+        }
+      },
+      "parent": "cabinet-0-DoorRight"
+    },
+    {
+      "id": "cabinet-1-Cabinet",
+      "components": {
+        "Tag": {
+          "name": "Cabinet"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0,
+            7
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PrefabInstance": {
+          "asset": "prefabs/cabinet.prefab.json",
+          "members": {
+            "Cabinet": {
+              "$entity": "cabinet-1-Cabinet"
+            },
+            "Body": {
+              "$entity": "cabinet-1-Body"
+            },
+            "DoorLeft": {
+              "$entity": "cabinet-1-DoorLeft"
+            },
+            "HandleLeft": {
+              "$entity": "cabinet-1-HandleLeft"
+            },
+            "DoorRight": {
+              "$entity": "cabinet-1-DoorRight"
+            },
+            "HandleRight": {
+              "$entity": "cabinet-1-HandleRight"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "cabinet-1-Body",
+      "components": {
+        "Tag": {
+          "name": "Body"
+        },
+        "Transform": {
+          "position": [
+            0,
+            1,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2,
+            2,
+            1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.65,
+            0.37,
+            0.16,
+            1
+          ]
+        }
+      },
+      "parent": "cabinet-1-Cabinet"
+    },
+    {
+      "id": "cabinet-1-DoorLeft",
+      "components": {
+        "Tag": {
+          "name": "DoorLeft"
+        },
+        "Transform": {
+          "position": [
+            -0.51,
+            1,
+            -0.56
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.95,
+            1.9,
+            0.12
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.6,
+            0.3,
+            1
+          ]
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/cabinet_door.lua",
+          "enabled": true,
+          "properties": {
+            "handle": {
+              "$entity": "cabinet-1-HandleLeft"
+            },
+            "openAngle": 1.2
+          }
+        }
+      },
+      "parent": "cabinet-1-Cabinet"
+    },
+    {
+      "id": "cabinet-1-HandleLeft",
+      "components": {
+        "Tag": {
+          "name": "HandleLeft"
+        },
+        "Transform": {
+          "position": [
+            0.28,
+            0,
+            -0.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.084,
+            0.132,
+            0.667
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.65,
+            0.35,
+            1
+          ]
+        }
+      },
+      "parent": "cabinet-1-DoorLeft"
+    },
+    {
+      "id": "cabinet-1-DoorRight",
+      "components": {
+        "Tag": {
+          "name": "DoorRight"
+        },
+        "Transform": {
+          "position": [
+            0.51,
+            1,
+            -0.56
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.95,
+            1.9,
+            0.12
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.6,
+            0.3,
+            1
+          ]
+        }
+      },
+      "parent": "cabinet-1-Cabinet"
+    },
+    {
+      "id": "cabinet-1-HandleRight",
+      "components": {
+        "Tag": {
+          "name": "HandleRight"
+        },
+        "Transform": {
+          "position": [
+            -0.28,
+            0,
+            -0.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.084,
+            0.132,
+            0.667
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.65,
+            0.35,
+            1
+          ]
+        }
+      },
+      "parent": "cabinet-1-DoorRight"
+    },
+    {
+      "id": "cabinet-2-Cabinet",
+      "components": {
+        "Tag": {
+          "name": "Cabinet"
+        },
+        "Transform": {
+          "position": [
+            3,
+            0,
+            7
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PrefabInstance": {
+          "asset": "prefabs/cabinet.prefab.json",
+          "members": {
+            "Cabinet": {
+              "$entity": "cabinet-2-Cabinet"
+            },
+            "Body": {
+              "$entity": "cabinet-2-Body"
+            },
+            "DoorLeft": {
+              "$entity": "cabinet-2-DoorLeft"
+            },
+            "HandleLeft": {
+              "$entity": "cabinet-2-HandleLeft"
+            },
+            "DoorRight": {
+              "$entity": "cabinet-2-DoorRight"
+            },
+            "HandleRight": {
+              "$entity": "cabinet-2-HandleRight"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "cabinet-2-Body",
+      "components": {
+        "Tag": {
+          "name": "Body"
+        },
+        "Transform": {
+          "position": [
+            0,
+            1,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2,
+            2,
+            1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.65,
+            0.37,
+            0.16,
+            1
+          ]
+        }
+      },
+      "parent": "cabinet-2-Cabinet"
+    },
+    {
+      "id": "cabinet-2-DoorLeft",
+      "components": {
+        "Tag": {
+          "name": "DoorLeft"
+        },
+        "Transform": {
+          "position": [
+            -0.51,
+            1,
+            -0.56
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.95,
+            1.9,
+            0.12
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.6,
+            0.3,
+            1
+          ]
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/cabinet_door.lua",
+          "enabled": true,
+          "properties": {
+            "handle": {
+              "$entity": "cabinet-2-HandleLeft"
+            },
+            "openAngle": 1.2
+          }
+        }
+      },
+      "parent": "cabinet-2-Cabinet"
+    },
+    {
+      "id": "cabinet-2-HandleLeft",
+      "components": {
+        "Tag": {
+          "name": "HandleLeft"
+        },
+        "Transform": {
+          "position": [
+            0.28,
+            0,
+            -0.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.084,
+            0.132,
+            0.667
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.65,
+            0.35,
+            1
+          ]
+        }
+      },
+      "parent": "cabinet-2-DoorLeft"
+    },
+    {
+      "id": "cabinet-2-DoorRight",
+      "components": {
+        "Tag": {
+          "name": "DoorRight"
+        },
+        "Transform": {
+          "position": [
+            0.51,
+            1,
+            -0.56
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.95,
+            1.9,
+            0.12
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.6,
+            0.3,
+            1
+          ]
+        }
+      },
+      "parent": "cabinet-2-Cabinet"
+    },
+    {
+      "id": "cabinet-2-HandleRight",
+      "components": {
+        "Tag": {
+          "name": "HandleRight"
+        },
+        "Transform": {
+          "position": [
+            -0.28,
+            0,
+            -0.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.084,
+            0.132,
+            0.667
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.65,
+            0.35,
+            1
+          ]
+        }
+      },
+      "parent": "cabinet-2-DoorRight"
+    }
+  ]
+}

@@ -6,6 +6,7 @@
 #include "components/MeshRendererComponent.h"
 #include "components/RigidbodyComponent.h"
 #include "components/SceneIdentityComponent.h"
+#include "components/PrefabInstanceComponent.h"
 #include "components/TagComponent.h"
 #include "components/CharacterMovementComponent.h"
 #include "components/PlayerStartComponent.h"
@@ -133,6 +134,15 @@ ComponentRegistry Build(){
     };r.Register(script);
     auto tag=Descriptor<TagComponent>("Tag","Name");Field<TagComponent>(tag,"name","Name",&TagComponent::name,PropertyKind::String);Complete(tag);r.Register(tag);
     auto identity=Descriptor<SceneIdentityComponent>("SceneIdentity","Scene identity");identity.addable=identity.removable=false;Field<SceneIdentityComponent>(identity,"value","Persistent ID",&SceneIdentityComponent::value,PropertyKind::String).readOnly=true;Complete(identity);r.Register(identity);
+    auto prefab=Descriptor<PrefabInstanceComponent>("PrefabInstance","Prefab instance");prefab.addable=prefab.removable=false;
+    Field<PrefabInstanceComponent>(prefab,"asset","Source Prefab",&PrefabInstanceComponent::asset,PropertyKind::Asset,0,0,AssetKind::Prefab).readOnly=true;Complete(prefab);
+    auto prefabSave=prefab.serialize;auto prefabLoad=prefab.deserialize;
+    prefab.serialize=[prefabSave](const World& w,Entity e){auto j=prefabSave(w,e);j["members"]=w.GetComponent<PrefabInstanceComponent>(e)->members;return j;};
+    prefab.deserialize=[prefabLoad](World& w,Entity e,const Json& j){
+        const auto& members=j.at("members");if(!members.is_object()||members.empty())Fail("Invalid prefab member map");
+        for(const auto& ref:members)if(!scripting::ValidEntityReference(ref)||ref.is_null())Fail("Invalid prefab member reference");
+        prefabLoad(w,e,j);w.GetComponent<PrefabInstanceComponent>(e)->members=members;
+    };r.Register(prefab);
     auto t=Descriptor<TransformComponent>("Transform","Transform");Field<TransformComponent>(t,"position","Position",&TransformComponent::position,PropertyKind::Vector);Field<TransformComponent>(t,"rotation","Rotation (rad)",&TransformComponent::rotation,PropertyKind::Vector);Field<TransformComponent>(t,"scale","Scale",&TransformComponent::scale,PropertyKind::Vector);Complete(t);r.Register(t);
     auto mesh=Descriptor<MeshRendererComponent>("MeshRenderer","Mesh renderer");Field<MeshRendererComponent>(mesh,"meshPath","Mesh",&MeshRendererComponent::meshPath,PropertyKind::Asset,0,0,AssetKind::Mesh);Field<MeshRendererComponent>(mesh,"texturePath","Texture",&MeshRendererComponent::texturePath,PropertyKind::Asset,0,0,AssetKind::Texture);Field<MeshRendererComponent>(mesh,"shaderPath","Shader",&MeshRendererComponent::shaderPath,PropertyKind::Asset,0,0,AssetKind::Shader);Field<MeshRendererComponent>(mesh,"visible","Visible",&MeshRendererComponent::visible,PropertyKind::Boolean);Complete(mesh);r.Register(mesh);
     auto material=Descriptor<MaterialComponent>("Material","Material");Field<MaterialComponent>(material,"materialPath","Asset",&MaterialComponent::materialPath,PropertyKind::Asset,0,0,AssetKind::Material);Field<MaterialComponent>(material,"slotMaterials","Slots",&MaterialComponent::slotMaterials,PropertyKind::AssetList,0,0,AssetKind::Material);Field<MaterialComponent>(material,"shaderPath","Shader",&MaterialComponent::shaderPath,PropertyKind::Asset,0,0,AssetKind::Shader);Field<MaterialComponent>(material,"texturePath","Base texture",&MaterialComponent::texturePath,PropertyKind::Asset,0,0,AssetKind::Texture);

@@ -591,6 +591,7 @@ bool Application::ReloadSceneFromCurrentConfig(const char* reason){
 }
 
 bool Application::SaveCurrentScene(std::string* error){
+    if(IsPrefabEditing()){m_EditorLayer.RequestPrefabSave();return true;}
     return SaveSceneAs(m_SceneKey.empty()?DefaultSceneKey():m_SceneKey,!m_SceneKey.empty(),error);
 }
 bool Application::LoadCurrentScene(std::string* error){
@@ -1085,6 +1086,7 @@ bool Application::IsInputActionActive(const std::string& action) const
 
 void Application::SetEditorPlayMode(bool enabled)
 {
+    if(enabled&&IsPrefabEditing())return;
     if(enabled&&m_ProjectBrowserActive)return;
     if(m_EditorPlayMode==enabled)return;
     // A Play/Stop transition must release editor free-fly capture as well.
@@ -1433,7 +1435,7 @@ int Application::Run()
 
         }
 
-        if(GetProject()&&m_EditorLayer.HasProjectEdits()&&!m_EditorLayer.ProjectExitConfirmed()){
+        if((GetProject()||IsPrefabEditing())&&m_EditorLayer.HasProjectEdits()&&!m_EditorLayer.ProjectExitConfirmed()){
             if(auto* native=dynamic_cast<GlfwWindow*>(GetWindow()))if(native->ShouldClose()){
                 glfwSetWindowShouldClose(native->GetGlfwHandle(),GLFW_FALSE);m_EditorLayer.RequestProjectExit();
             }
@@ -1605,7 +1607,7 @@ int Application::Run()
                 if(m_RenderSystem){
                     m_RenderSystem->SetEditorIsolation(!IsEditorPlayMode()&&wc.editorUiAvailable?m_EditorLayer.IsolationEntities():std::vector<ecs::Entity>{});
                     const auto& preview=m_EditorLayer.GetPlacementPreview();
-                    m_RenderSystem->SetPlacementPreview(!IsEditorPlayMode()&&wc.editorUiAvailable&&preview.active&&preview.ready?preview.key:"",preview.transform);
+                    m_RenderSystem->SetPlacementPreview(!IsEditorPlayMode()&&wc.editorUiAvailable&&preview.active?preview.items:std::vector<ecs::PlacementRenderItem>{});
                 }
                 // Diagnostics own the comparison switches after editor input as well.
                 // Ordinary runs continue to apply UI edits immediately.
@@ -2172,6 +2174,7 @@ bool Application::SetSceneSettings(const SceneSettings& s,std::string* error){
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }
 bool Application::SaveSceneAs(const std::string& key,bool overwrite,std::string* error){
+    if(IsPrefabEditing()){if(error)*error="Use Save Prefab and Return";return false;}
     if(IsEditorPlayMode()){if(error)*error="Stop Play before saving the authoring scene";return false;}
     if(!SceneKeyValid(key)){if(error)*error="Scene key must be a portable scenes/*.json path";return false;}
     try{
@@ -2181,6 +2184,7 @@ bool Application::SaveSceneAs(const std::string& key,bool overwrite,std::string*
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }
 bool Application::OpenScene(const std::string& key,std::string* error){
+    if(IsPrefabEditing()){if(error)*error="Return from Prefab Editor before opening a scene";return false;}
     if(!SceneKeyValid(key)){if(error)*error="Scene key must be a portable scenes/*.json path";return false;}
     // Parse/validate completely before changing modes or discarding the current scene.
     ecs::World staged;SceneSettings settings;std::filesystem::path path;try{path=SafeScenePath(key,false);}catch(const std::exception& e){if(error)*error=e.what();return false;}
@@ -2190,6 +2194,7 @@ bool Application::OpenScene(const std::string& key,std::string* error){
     SetSceneSettings(settings);m_SceneKey=key;m_Config.ecsDemo.sceneFile=key;m_EditorLayer.ResetHistory();m_EditorLayer.MarkSaved();m_EditorLayer.RememberScene(key);InitializeConfigHotReload();return true;
 }
 void Application::NewScene(){
+    if(IsPrefabEditing())return;
     SetEditorPlayMode(false);ClearPhysicsStressScene();m_World.Clear();m_EcsDebugEntities.clear();m_StressEntities.clear();m_Mutations.Clear();
     m_SceneKey.clear();m_Config.ecsDemo.sceneFile.clear();SetSceneSettings(SceneSettings{});m_EditorLayer.ResetHistory();m_EditorLayer.MarkSaved();
 }
