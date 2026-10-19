@@ -1,6 +1,7 @@
 #include "EditorLayer.h"
 #include "../core/Application.h"
 namespace editor {
+void EditorLayer::FocusSelection(Application& app){PruneSelection(app);app.FocusEntities(m_Selection.items);}
 void EditorLayer::PruneSelection(Application& app){
     auto& world=app.GetWorld();
     if(m_GroupTransform){
@@ -10,7 +11,10 @@ void EditorLayer::PruneSelection(Application& app){
             // External destruction is not undone by cancelling a drag. Roll back
             // survivors only; do not resurrect an unrelated destroyed entity.
             for(std::size_t i=0;i<group.entities.size();++i)if(auto* t=world.GetComponent<ecs::TransformComponent>(group.entities[i])){*t=group.originals[i];app.NotifyEditorMutation(group.entities[i]);}
-            if(m_Transaction&&m_Transaction->label=="Group Transform")m_Transaction.reset();m_GroupTransform.reset();m_GizmoUndoCaptured=false;m_CancelGizmoUntilRelease=true;
+            m_GroupTransform.reset();
+            if(m_DuplicateDrag)CancelTransaction(app);
+            else if(m_Transaction&&m_Transaction->label=="Group Transform")m_Transaction.reset();
+            m_GizmoUndoCaptured=false;m_CancelGizmoUntilRelease=true;
         }else if(group.entities!=m_Selection.items)EndGroupTransform(app,false);
     }
     m_Selection.Prune(world);
@@ -29,9 +33,14 @@ void EditorLayer::SelectHierarchyEntity(Application& app,ecs::Entity e,bool ctrl
 void EditorLayer::SelectAllEntities(Application& app,const std::vector<ecs::Entity>& order){
     PruneSelection(app);EndGroupTransform(app);FinishTransaction(app);m_Selection.Clear();for(auto e:order)if(app.GetWorld().IsAlive(e))m_Selection.Add(e);m_PropertyDrafts.clear();if(!app.IsEditorPlayMode())m_GameView=false;
 }
-EditorLayer::EntitySnapshot EditorLayer::CaptureSelection(Application& app)const{
+EditorLayer::EntitySnapshot EditorLayer::CaptureSelection(Application& app,bool transformsOnly)const{
     EntitySnapshot snapshot;snapshot.world=app.GetWorld().GetIdentity();snapshot.selection=m_Selection;
-    for(auto e:m_Selection.items){auto child=CaptureSelectedEntity(app,e);child.selection.reset();snapshot.related.push_back(std::move(child));}return snapshot;
+    for(auto e:m_Selection.items){
+        EntitySnapshot child;
+        if(transformsOnly){child.entity=e;child.world=e.world;child.alive=app.GetWorld().IsAlive(e);if(auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(e))child.transform=*t;}
+        else child=CaptureSelectedEntity(app,e);
+        child.selection.reset();snapshot.related.push_back(std::move(child));
+    }return snapshot;
 }
 bool EditorLayer::DeleteSelection(Application& app){
     if(app.IsEditorPlayMode())return false;

@@ -52,6 +52,7 @@ bool Application::CommitProject(std::shared_ptr<const ProjectContext> next,ecs::
     m_Mutations.Clear();if(m_PhysicsSystem)m_PhysicsSystem->ResetState();ResetPhysicsClock();
     m_PlayerEntity={};m_GameplayCamera={};m_CloneMapping.clear();m_ActiveCollisionPairs.clear();
     ProjectManager::Activate(std::move(next));
+    SetGpuInstancingEnabled(GetProject()?GetProject()->gpuInstancing:true);
     m_World.ReplaceData(staged);m_EcsDebugEntities=m_World.Entities();m_StressEntities.clear();
     m_EditDebugEntities.clear();m_EditStressEntities.clear();
     SetSceneSettings(settings);auto project=GetProject();
@@ -62,11 +63,18 @@ bool Application::CommitProject(std::shared_ptr<const ProjectContext> next,ecs::
     if(error)error->clear();return true;
 }
 bool Application::SetStartupScene(const std::string& key,std::string* error){
+    auto project=GetProject();if(!project){if(error)*error="No project is open";return false;}
+    auto settings=project->Settings();settings.startupScene=key;return SaveProjectSettings(settings,error);
+}
+bool Application::SaveProjectSettings(const ProjectSettings& values,std::string* error){
     try{
+        if(IsEditorPlayMode())throw std::runtime_error("Stop Play before saving Project Settings");
         auto project=GetProject();if(!project)throw std::runtime_error("No project is open");
         ecs::World check;SceneSettings settings;
-        if(!SceneSerializer::LoadWorld(project->ResolveScene(key),check,settings,error))return false;
-        ProjectManager::Activate(ProjectManager::WithStartupScene(*project,key));return true;
+        if(!SceneSerializer::LoadWorld(project->ResolveScene(values.startupScene),check,settings,error)){if(error)*error="Startup Scene: "+*error;return false;}
+        auto next=ProjectManager::WithSettings(*project,values);ProjectManager::Activate(std::move(next));SetGpuInstancingEnabled(values.gpuInstancing);
+        m_EditorLayer.ProjectSettingsSaved(*this);
+        if(error)error->clear();return true;
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }
 

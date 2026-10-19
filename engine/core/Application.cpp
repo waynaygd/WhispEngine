@@ -1602,6 +1602,10 @@ int Application::Run()
                     }
                 }
 
+                if(m_RenderSystem){
+                    const auto& preview=m_EditorLayer.GetPlacementPreview();
+                    m_RenderSystem->SetPlacementPreview(!IsEditorPlayMode()&&wc.editorUiAvailable&&preview.active&&preview.ready?preview.key:"",preview.transform);
+                }
                 // Diagnostics own the comparison switches after editor input as well.
                 // Ordinary runs continue to apply UI edits immediately.
                 if(m_LightingBenchmark||m_ShadowBenchmark||m_PbrBenchmark||m_PbrTexturesBenchmark) {
@@ -2198,18 +2202,38 @@ void Application::NotifyEditorMutation(ecs::Entity entity){
     if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
 }
 void Application::FocusEntity(ecs::Entity entity){
-    if(auto* t=GetWorld().GetComponent<ecs::TransformComponent>(entity)){
-        float radius=std::max({std::abs(t->scale.x),std::abs(t->scale.y),std::abs(t->scale.z),1.f});
-        auto center=t->position;
-        if(m_ResourceManager)if(auto* mr=GetWorld().GetComponent<ecs::MeshRendererComponent>(entity))if(auto mesh=m_ResourceManager->Get<MeshResource>(mr->meshPath);mesh&&mesh->IsLoaded()&&!mesh->GetData().meshData.vertices.empty()){
-            ecs::Vec3 low{FLT_MAX,FLT_MAX,FLT_MAX},high{-FLT_MAX,-FLT_MAX,-FLT_MAX};
-            for(const auto& vertex:mesh->GetData().meshData.vertices){low.x=std::min(low.x,vertex.position[0]);low.y=std::min(low.y,vertex.position[1]);low.z=std::min(low.z,vertex.position[2]);high.x=std::max(high.x,vertex.position[0]);high.y=std::max(high.y,vertex.position[1]);high.z=std::max(high.z,vertex.position[2]);}
-            float model[16];ecs::BuildRenderModelMatrix(model,ecs::RenderPose::From(*t));const ecs::Vec3 p{(low.x+high.x)*.5f,(low.y+high.y)*.5f,(low.z+high.z)*.5f};
-            center={model[0]*p.x+model[4]*p.y+model[8]*p.z+model[12],model[1]*p.x+model[5]*p.y+model[9]*p.z+model[13],model[2]*p.x+model[6]*p.y+model[10]*p.z+model[14]};
-            radius=.5f*std::sqrt(std::pow((high.x-low.x)*t->scale.x,2)+std::pow((high.y-low.y)*t->scale.y,2)+std::pow((high.z-low.z)*t->scale.z,2));
+    FocusEntities({entity});
+}
+void Application::FocusEntities(const std::vector<ecs::Entity>& entities){
+    ecs::Vec3 low{FLT_MAX,FLT_MAX,FLT_MAX},high{-FLT_MAX,-FLT_MAX,-FLT_MAX};bool valid=false;
+    auto include=[&](ecs::Vec3 p){
+        if(!std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.z))return;
+        low.x=std::min(low.x,p.x);low.y=std::min(low.y,p.y);low.z=std::min(low.z,p.z);
+        high.x=std::max(high.x,p.x);high.y=std::max(high.y,p.y);high.z=std::max(high.z,p.z);valid=true;
+    };
+    for(auto entity:entities)if(auto* t=GetWorld().GetComponent<ecs::TransformComponent>(entity)){
+        bool geometry=false;
+        if(m_ResourceManager)if(auto* mr=GetWorld().GetComponent<ecs::MeshRendererComponent>(entity)){
+            auto mesh=m_ResourceManager->Get<MeshResource>(mr->meshPath);
+            if(mesh&&mesh->IsLoaded()&&!mesh->GetData().meshData.vertices.empty()){
+                ecs::Vec3 lo{FLT_MAX,FLT_MAX,FLT_MAX},hi{-FLT_MAX,-FLT_MAX,-FLT_MAX};
+                for(const auto& v:mesh->GetData().meshData.vertices){lo.x=std::min(lo.x,v.position[0]);lo.y=std::min(lo.y,v.position[1]);lo.z=std::min(lo.z,v.position[2]);hi.x=std::max(hi.x,v.position[0]);hi.y=std::max(hi.y,v.position[1]);hi.z=std::max(hi.z,v.position[2]);}
+                float m[16];ecs::BuildRenderModelMatrix(m,ecs::RenderPose::From(*t));
+                for(int i=0;i<8;++i){const ecs::Vec3 p{i&1?hi.x:lo.x,i&2?hi.y:lo.y,i&4?hi.z:lo.z};include({m[0]*p.x+m[4]*p.y+m[8]*p.z+m[12],m[1]*p.x+m[5]*p.y+m[9]*p.z+m[13],m[2]*p.x+m[6]*p.y+m[10]*p.z+m[14]});}
+                geometry=true;
+            }
         }
-        if(auto* light=ecs::GetLightParameters(GetWorld(),entity))radius=std::clamp(light->range,1.f,30.f);
-        const float d=std::clamp(radius/std::tan(m_Camera.verticalFovRadians*.5f)*1.6f,2.f,100.f),cp=std::cos(m_Camera.pitch);
-        m_Camera.position={center.x-d*std::sin(m_Camera.yaw)*cp,center.y-d*std::sin(m_Camera.pitch),center.z-d*std::cos(m_Camera.yaw)*cp};
+        if(!geometry){
+            ecs::Vec3 extent{std::max(.5f,std::abs(t->scale.x)*.5f),std::max(.5f,std::abs(t->scale.y)*.5f),std::max(.5f,std::abs(t->scale.z)*.5f)};
+            if(auto* light=ecs::GetLightParameters(GetWorld(),entity)){float r=std::clamp(light->range,1.f,30.f);extent={r,r,r};}
+            include({t->position.x-extent.x,t->position.y-extent.y,t->position.z-extent.z});include({t->position.x+extent.x,t->position.y+extent.y,t->position.z+extent.z});
+        }
     }
+    if(!valid)return;
+    const ecs::Vec3 center{(low.x+high.x)*.5f,(low.y+high.y)*.5f,(low.z+high.z)*.5f};
+    const float radius=.5f*std::sqrt(std::pow(high.x-low.x,2)+std::pow(high.y-low.y,2)+std::pow(high.z-low.z,2));
+    const float aspect=float(std::max(1,m_EditorLayer.GetViewportPixelWidth()))/std::max(1,m_EditorLayer.GetViewportPixelHeight());
+    const float halfFov=std::min(m_Camera.verticalFovRadians*.5f,std::atan(std::tan(m_Camera.verticalFovRadians*.5f)*aspect));
+    const float distance=std::max(2.f,radius/std::sin(halfFov)*1.1f),cp=std::cos(m_Camera.pitch);
+    m_Camera.position={center.x-distance*std::sin(m_Camera.yaw)*cp,center.y-distance*std::sin(m_Camera.pitch),center.z-distance*std::cos(m_Camera.yaw)*cp};
 }

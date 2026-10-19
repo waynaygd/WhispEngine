@@ -34,7 +34,7 @@ float Dot(V a,V b){return a.x*b.x+a.y*b.y+a.z*b.z;}
 V Cross(V a,V b){return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};}
 struct Occluder {ResourceHandle<MeshResource> mesh;std::array<float,12> inverse;V translation,min,max;};
 V Inverse(V p,const std::array<float,12>& n){return {n[0]*p.x+n[4]*p.y+n[8]*p.z,n[1]*p.x+n[5]*p.y+n[9]*p.z,n[2]*p.x+n[6]*p.y+n[10]*p.z};}
-float HitDistance(V eye,V direction,const Occluder& o,float maximum)
+float HitDistance(V eye,V direction,const Occluder& o,float maximum,V* normal=nullptr)
 {
     V p=Inverse(Sub(eye,o.translation),o.inverse),d=Inverse(direction,o.inverse);float low=0,high=maximum;
     float pv[3]={p.x,p.y,p.z},dv[3]={d.x,d.y,d.z},mn[3]={o.min.x,o.min.y,o.min.z},mx[3]={o.max.x,o.max.y,o.max.z};
@@ -45,7 +45,12 @@ float HitDistance(V eye,V direction,const Occluder& o,float maximum)
     for(std::size_t j=0;j+2<mesh.indices.size();j+=3){
         V a=vertex(mesh.indices[j]),e1=Sub(vertex(mesh.indices[j+1]),a),e2=Sub(vertex(mesh.indices[j+2]),a),h=Cross(d,e2);float determinant=Dot(e1,h);
         if(std::abs(determinant)<1e-10f)continue;float inv=1/determinant;V delta=Sub(p,a);float u=inv*Dot(delta,h);if(u<0||u>1)continue;
-        V q=Cross(delta,e1);float v=inv*Dot(d,q);if(v<0||u+v>1)continue;float t=inv*Dot(e2,q);if(t>=0&&t<nearest)nearest=t;
+        V q=Cross(delta,e1);float v=inv*Dot(d,q);if(v<0||u+v>1)continue;float t=inv*Dot(e2,q);if(t>=0&&t<nearest){
+            nearest=t;if(normal){auto n=Cross(e1,e2);const auto& m=o.inverse;
+                n={m[0]*n.x+m[1]*n.y+m[2]*n.z,m[4]*n.x+m[5]*n.y+m[6]*n.z,m[8]*n.x+m[9]*n.y+m[10]*n.z};
+                float length=std::sqrt(Dot(n,n));*normal=length>1e-12f?Scale(n,(Dot(n,direction)>0?-1.f:1.f)/length):V{0,1,0};
+            }
+        }
     }return nearest;
 }
 bool Occluded(V eye,V target,const std::vector<Occluder>& objects){
@@ -212,6 +217,18 @@ void EditorLayer::DrawViewportOverlays(Application& app,const ImVec2& origin,con
 }
 
 namespace editor {
+std::optional<EditorLayer::SurfaceHit> EditorLayer::RaycastPlacement(Application& app,V origin,V direction,float maximum,const std::vector<ecs::Entity>& ignore)const{
+    auto* resources=app.GetResourceManager();if(!resources||!std::isfinite(maximum)||maximum<=0)return {};
+    const float length=std::sqrt(Dot(direction,direction));if(!std::isfinite(length)||length<1e-10f)return {};direction=Scale(direction,1/length);
+    std::optional<SurfaceHit> hit;
+    app.GetWorld().ForEach<ecs::TransformComponent,ecs::MeshRendererComponent>([&](ecs::Entity e,auto& t,auto& m){
+        if(!m.visible||std::find(ignore.begin(),ignore.end(),e)!=ignore.end())return;
+        auto mesh=resources->Get<MeshResource>(m.meshPath);if(!mesh||!mesh->IsLoaded()||mesh->GetData().placeholder||mesh->GetData().meshData.vertices.empty())return;
+        const auto bounds=Bounds(mesh,ecs::RenderPose::From(t));if(bounds.inverse==std::array<float,12>{})return;
+        V normal;const float distance=HitDistance(origin,direction,bounds,maximum,&normal);
+        if(distance<maximum&&distance>=0){maximum=distance;hit=SurfaceHit{e,Add(origin,Scale(direction,distance)),normal,distance};}
+    });return hit;
+}
 ecs::Vec3 EditorLayer::PlacementPoint(Application& app,float u,float v)const{
     auto eye=app.GetCameraPosition();if(!std::isfinite(u)||!std::isfinite(v))return eye;
     u=std::clamp(u,0.f,1.f);v=std::clamp(v,0.f,1.f);

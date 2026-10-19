@@ -11,7 +11,7 @@ nlohmann::json PreferencesToJson(const EditorPreferences& p){
     nlohmann::json projects=nlohmann::json::array();for(const auto& project:p.recentProjects)projects.push_back({{"name",project.name},{"descriptor",project.descriptor}});
     return {{"recentProjects",projects},{"recentScenes",p.recentScenes},{"assetGrid",p.assetGrid},{"projectAssets",p.projectAssets},{"assetCardSize",p.assetCardSize},{"backgroundOverride",p.backgroundOverride},{"projectileTestInput",p.projectileTestInput},{"visuals",VisualsToJson(p.visuals)},{"version",1},{"panels",{{"hierarchy",p.hierarchy},{"inspector",p.inspector},{"viewport",p.viewport},{"assets",p.assets},{"material",p.material},{"settings",p.settings},{"console",p.console},{"diagnostics",p.diagnostics},{"visuals",p.visualPanel}}},
             {"physicsStress",p.physicsStress},{"rotationSnapping",p.rotationSnapping},{"transformPrecision",p.transformPrecision},{"lightXrayMode",p.lightXrayMode},{"grid",p.grid},{"lightGizmos",p.lightGizmos},{"xray",p.xray},{"snapping",p.snapping},{"operation",p.operation},{"space",p.space},
-            {"translationSnap",p.translationSnap},{"rotationSnap",p.rotationSnap},{"scaleSnap",p.scaleSnap},{"cameraSpeed",p.cameraSpeed},{"cameraSensitivity",p.cameraSensitivity}};
+            {"surfaceSnap",p.surfaceSnap},{"alignToNormal",p.alignToNormal},{"translationSnap",p.translationSnap},{"rotationSnap",p.rotationSnap},{"scaleSnap",p.scaleSnap},{"cameraSpeed",p.cameraSpeed},{"cameraSensitivity",p.cameraSensitivity}};
 }
 EditorPreferences PreferencesFromJson(const nlohmann::json& j){
     // Unavailable recent descriptors remain visible; they never prevent startup.
@@ -21,6 +21,7 @@ EditorPreferences PreferencesFromJson(const nlohmann::json& j){
     if(j.contains("recentScenes")){for(const auto& item:j.at("recentScenes")){auto key=item.get<std::string>();if(!ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::None)||std::filesystem::u8path(key).extension()!=".json")throw std::runtime_error("Invalid recent scene key");if(std::find(p.recentScenes.begin(),p.recentScenes.end(),key)==p.recentScenes.end()&&p.recentScenes.size()<12)p.recentScenes.push_back(key);}}
     p.assetGrid=j.value("assetGrid",true);p.projectAssets=j.value("projectAssets",true);p.assetCardSize=j.value("assetCardSize",180.f);if(!std::isfinite(p.assetCardSize)||p.assetCardSize<120||p.assetCardSize>320)throw std::runtime_error("Invalid card size");
     p.backgroundOverride=j.value("backgroundOverride",false);p.projectileTestInput=j.value("projectileTestInput",false);
+    p.surfaceSnap=j.value("surfaceSnap",true);p.alignToNormal=j.value("alignToNormal",false);
     p.physicsStress=j.value("physicsStress",false);p.rotationSnapping=j.value("rotationSnapping",j.value("snapping",false));p.transformPrecision=j.value("transformPrecision",1);p.lightXrayMode=j.value("lightXrayMode",j.value("xray",false)?2:1);
     if(p.transformPrecision<0||p.transformPrecision>2||p.lightXrayMode<0||p.lightXrayMode>2)throw std::runtime_error("Invalid precision/xray preference");
     p.grid=j.value("grid",p.grid);p.lightGizmos=j.value("lightGizmos",p.lightGizmos);p.xray=j.value("xray",p.xray);p.snapping=j.value("snapping",p.snapping);p.operation=j.value("operation",p.operation);p.space=j.value("space",p.space);

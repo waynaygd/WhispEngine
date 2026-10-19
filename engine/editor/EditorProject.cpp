@@ -28,9 +28,12 @@ bool EditorLayer::ResolveProjectEdits(Application& app,int decision,std::string*
         if(!MaterialLoader::Save(m_EditingMaterial,material->GetData(),error))return false;
         resources->SetMaterialDirty(m_EditingMaterial,false);m_MaterialDirty=false;
     }
+    if(ProjectSettingsDirty()&&!SaveProjectSettingsDraft(app)){if(error)*error=m_ProjectSettingsError;return false;}
     return true;
 }
 void EditorLayer::ResetProjectState(IRenderAdapter* renderer){
+    m_ShowProjectSettings=m_FocusProjectSettings=false;m_ProjectSettingsBase.reset();m_ProjectSettingsDraft={};m_ProjectSettingsScenes={};m_ProjectSettingsError.clear();m_ProjectSettingsNotice.clear();
+    CancelPlacement();m_PlacementCancelled=false;
     if(ImGui::GetCurrentContext()){ImGui::ClearActiveID();ImGui::ClearDragDrop();}
     if(renderer)renderer->ReleaseEditorSky();m_RequestedSky.clear();m_FailedSkyVersion=0;
     m_BackgroundAssetDraft.clear();m_BackgroundAssetEditing=false;m_BackgroundDraftWorld=0;
@@ -164,7 +167,7 @@ void EditorLayer::DrawProjectBrowser(Application& app){
     }
     if(m_ProjectConfirm){ImGui::OpenPopup("Unsaved project changes");m_ProjectConfirm=false;}
     if(ImGui::BeginPopupModal("Unsaved project changes",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
-        ImGui::TextWrapped("Save scene and material edits before continuing?");
+        ImGui::TextWrapped("Save scene, material and Project Settings edits before continuing?");
         if(app.GetSceneKey().empty()){ImGui::InputText("Save untitled as",&m_UnsavedSaveKey);ImGui::TextDisabled("Choose a fresh scene filename inside the current scene directory.");}
         if(ImGui::Button("Save and continue")){
             if(app.GetSceneKey().empty()&&!app.IsEditorPlayMode()&&IsSceneDirty()){

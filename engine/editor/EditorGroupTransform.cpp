@@ -7,7 +7,7 @@ namespace editor {
 bool EditorLayer::BeginGroupTransform(Application& app,bool local){
     if(app.IsEditorPlayMode())return false;
     PruneSelection(app);EndGroupTransform(app);FinishTransaction(app);if(m_Selection.items.size()<2)return false;
-    GroupSession group;group.entities=m_Selection.items;group.before=CaptureSelection(app);
+    GroupSession group;group.entities=m_Selection.items;group.before=CaptureSelection(app,true);
     double x=0,y=0,z=0;
     for(auto e:group.entities){auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(e);if(!t||!ValidGroupSource(*t)){m_EditorError="Group Transform requires valid Transform on every selected entity";return false;}group.originals.push_back(*t);x+=t->position.x;y+=t->position.y;z+=t->position.z;}
     const double n=double(group.entities.size());group.pivot.position={float(x/n),float(y/n),float(z/n)};
@@ -55,7 +55,20 @@ void EditorLayer::DrawGroupGizmo(Application& app,const float* view,const float*
     const bool changed=ImGuizmo::Manipulate(view,projection,operation,m_GizmoMode==0?ImGuizmo::LOCAL:ImGuizmo::WORLD,matrix,nullptr,(m_GizmoOperation==1?m_RotationSnapping:m_Snapping)?snap:nullptr);
     if(ImGuizmo::IsUsing()){
         if(!m_GroupTransform&&!BeginGroupTransform(app,m_GizmoMode==0))return;
-        if(changed&&ImGui::IsMouseDragging(0,.5f*ImGui::GetStyle().FontScaleDpi)){ImportMatrix target;std::copy(matrix,matrix+16,target.begin());UpdateGroupTransform(app,target);}
+        if(changed&&ImGui::IsMouseDragging(0,.5f*ImGui::GetStyle().FontScaleDpi)){
+            ImportMatrix target;std::copy(matrix,matrix+16,target.begin());
+            bool matrixChanged=false;for(int i=0;i<16;++i)matrixChanged|=std::abs(target[i]-m_GroupTransform->current[i])>1e-6;
+            if(!matrixChanged)return;
+            if(!m_GizmoUndoCaptured){
+                if(m_GizmoOperation==0&&ImGui::GetIO().KeyAlt){
+                    if(!BeginDuplicateDrag(app).IsValid())return;
+                    // Duplicate retargets the gesture while keeping its original
+                    // pivot and immutable source transforms.
+                }
+                m_GizmoUndoCaptured=true;
+            }
+            UpdateGroupTransform(app,target);
+        }
     }else if(m_GroupTransform)EndGroupTransform(app);
 }
 }

@@ -314,6 +314,7 @@ bool EditorLayer::IsPointInsideViewport(double x, double y) const
 void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
 {
     ZoneScopedN("EditorLayer");
+    CancelPlacement();
     m_Statistics.hierarchyMs=m_Statistics.inspectorMs=m_Statistics.assetBrowserMs=m_Statistics.lightGizmoMs=0;
     const auto uiStart=std::chrono::steady_clock::now();
     struct FinishUi {Statistics& stats;std::chrono::steady_clock::time_point start;~FinishUi(){stats.uiMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}} finish{m_Statistics,uiStart};
@@ -354,6 +355,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     m_ViewportFocused=false;m_HierarchyFocused=false;
     DrawMainMenu(app);DrawSceneDialogs(app);DrawProjectBrowser(app);
     if(app.IsProjectBrowserActive())return;
+    if(m_ShowProjectSettings)DrawProjectSettings(app);
     if(m_ShowSceneSettings)DrawSceneSettings(app,renderer,dt);
     if(m_ShowVisualSettings)DrawEditorVisualSettings(app,renderer);
     PrepareEditorSky(app,renderer);
@@ -489,11 +491,12 @@ void EditorLayer::HandleEditorShortcuts(Application& app){
     }
     const bool entityKeys=!app.IsEditorPlayMode()&&(m_ViewportFocused||m_HierarchyFocused)&&!m_InputTextActive&&!m_ToolActive&&!app.IsCameraControlActive();
     if(entityKeys){if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_C,false))CopyEntity(app,m_Selection.active);if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_V,false))PasteEntity(app);if(ImGui::IsKeyPressed(ImGuiKey_Delete,false))DeleteSelection(app);if(m_HierarchyFocused&&io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_A,false))SelectAllEntities(app,m_HierarchyVisible);}
+    if(entityKeys&&m_HierarchyFocused&&!io.KeyCtrl&&!io.KeyAlt&&ImGui::IsKeyPressed(ImGuiKey_F,false))FocusSelection(app);
     if(io.KeyCtrl){
         if(ImGui::IsKeyPressed(ImGuiKey_Z,false))Undo(app);
         if(ImGui::IsKeyPressed(ImGuiKey_Y,false))Redo(app);
         if(ImGui::IsKeyPressed(ImGuiKey_S,false)){if(io.KeyShift){m_SceneDialogAction=3;m_SceneDialogRequested=true;}else{std::string error;if(!app.SaveCurrentScene(&error)){m_EditorError=error;Logger::Get().Error(error);}}}
-        if(ImGui::IsKeyPressed(ImGuiKey_D,false))DuplicateEntity(app,m_Selection.active);
+        if(entityKeys&&ImGui::IsKeyPressed(ImGuiKey_D,false))DuplicateEntity(app,m_Selection.active);
     }
     if(io.KeyAlt&&!io.KeyCtrl&&!io.KeyShift&&(m_ViewportFocused||app.IsViewportMouseCaptured())&&!BlocksGameplayInput()&&!ImGuizmo::IsUsing()&&!ImGui::IsMouseDown(0)&&!ImGui::IsMouseDown(1)){
         if(ImGui::IsKeyPressed(ImGuiKey_3,false))app.SetViewportUnlit(false);
@@ -501,7 +504,7 @@ void EditorLayer::HandleEditorShortcuts(Application& app){
     }
     if(!EditorHotkeysAllowed(app.IsEditorPlayMode(),OwnsViewportKeyboard(),io.WantCaptureKeyboard,app.IsCameraControlActive()))return;
     if(!io.KeyCtrl&&!io.KeyAlt&&!m_InputTextActive&&ImGui::IsKeyPressed(ImGuiKey_G,false))m_GameView=!m_GameView;
-    if(ImGui::IsKeyPressed(ImGuiKey_F,false))app.FocusEntity(m_Selection.active);
+    if(ImGui::IsKeyPressed(ImGuiKey_F,false))FocusSelection(app);
     if(ImGui::IsKeyPressed(ImGuiKey_W,false))m_GizmoOperation=0;
     if(ImGui::IsKeyPressed(ImGuiKey_E,false))m_GizmoOperation=1;
     if(ImGui::IsKeyPressed(ImGuiKey_R,false))m_GizmoOperation=2;
@@ -591,6 +594,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     const bool playMode = app.IsEditorPlayMode();
     if(!maximized){
     DrawViewportCreateMenu(app);
+    ImGui::SameLine();DrawPlacementMenu(app);
     ImGui::SameLine();
     if (ImGui::Button(playMode ? "Stop" : "Play"))
         app.SetEditorPlayMode(!playMode);
@@ -647,14 +651,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
             "Viewport render target will appear here");
     }
 
-    if(!playMode&&!m_ModalActive&&!m_ToolActive&&!m_LightPointerCaptured&&!m_PlaneScaleCaptured&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&ImGui::BeginDragDropTarget()){
-        if(const auto* payload=ImGui::AcceptDragDropPayload("WHISP_ASSET"))if(payload->DataSize==sizeof(AssetPayload)){
-            const auto& asset=*static_cast<const AssetPayload*>(payload->Data);
-            if((asset.kind==ecs::AssetKind::Mesh||asset.kind==ecs::AssetKind::None)&&std::memchr(asset.key,0,sizeof(asset.key))){
-                auto mouse=ImGui::GetMousePos();auto point=PlacementPoint(app,(mouse.x-contentMin.x)/viewportSize.x,(mouse.y-contentMin.y)/viewportSize.y);if(asset.kind==ecs::AssetKind::Mesh)PlaceModel(app,asset.key,point);else if(std::string(asset.key).ends_with(".wscene"))PlaceImportedScene(app,asset.key,point);
-            }
-        }ImGui::EndDragDropTarget();
-    }
+    DrawPlacementTarget(app,contentMin,viewportSize);
     m_ViewportHovered=ImGui::IsItemHovered();
     if(maximized){
         // The image already registered the full content bounds. Create is the
@@ -663,6 +660,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
         // CursorMaxPos and would extend the window without submitting an item).
         ImGui::SetCursorScreenPos(ImVec2(contentMin.x+8,contentMin.y+8));
         if(DrawViewportCreateMenu(app))m_ViewportHovered=false;
+        ImGui::SameLine();if(DrawPlacementMenu(app))m_ViewportHovered=false;
     }
     if(m_ViewportHovered&&ImGui::IsMouseClicked(1))ImGui::SetWindowFocus();
     if(m_ViewportHovered&&ImGui::IsMouseClicked(0))ImGui::SetWindowFocus();

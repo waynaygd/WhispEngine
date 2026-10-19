@@ -152,6 +152,8 @@ public:
     bool OpenProject(const std::filesystem::path&,ProjectDecision=ProjectDecision::Cancel,std::string* error=nullptr);
     bool CloseProject(ProjectDecision=ProjectDecision::Cancel,std::string* error=nullptr);
     bool SetStartupScene(const std::string&,std::string* error=nullptr);
+    bool SaveProjectSettings(const ProjectSettings&,std::string* error=nullptr);
+    RenderBackend GetRenderBackend()const{return m_Config.activeBackend;}
     bool SaveAuthoringSceneForTransition(std::string* error=nullptr);
     std::shared_ptr<const ProjectContext> GetProject()const{return ProjectManager::Active();}
     std::string DefaultSceneKey()const {auto p=GetProject();return p?p->sceneDirectory+"/Untitled.json":"scenes/editor_scene.json";}
@@ -161,6 +163,7 @@ public:
     ecs::Entity CreateEmptyEntity(const std::string& name="Entity");
     void NotifyEditorMutation(ecs::Entity entity={});
     void FocusEntity(ecs::Entity entity);
+    void FocusEntities(const std::vector<ecs::Entity>& entities);
     void SetCameraNavigation(float speed,float sensitivity){m_Camera.moveSpeed=std::clamp(speed,.2f,25.f);m_Camera.mouseSensitivity=std::clamp(sensitivity,.0001f,.02f);}
     float GetCameraMoveSpeed()const{return m_Camera.moveSpeed;}
     float GetCameraSensitivity()const{return m_Camera.mouseSensitivity;}

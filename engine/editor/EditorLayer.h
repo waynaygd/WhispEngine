@@ -84,7 +84,13 @@ public:
     bool ResolveProjectEdits(Application&,int decision,std::string* error);
     void ResetProjectState(IRenderAdapter*);
     void ProjectOpened(Application&);
-    bool HasProjectEdits()const{return m_MaterialDirty||(m_EditHistory?(m_EditHistory->external||m_EditHistory->revision!=m_EditHistory->saved):IsSceneDirty());}
+    bool HasProjectEdits()const{return ProjectSettingsDirty()||m_MaterialDirty||(m_EditHistory?(m_EditHistory->external||m_EditHistory->revision!=m_EditHistory->saved):IsSceneDirty());}
+    void ShowProjectSettings(Application&);
+    void RevertProjectSettings(Application&);
+    bool SaveProjectSettingsDraft(Application&);
+    void ProjectSettingsSaved(Application&);
+    bool ProjectSettingsDirty()const{return m_ProjectSettingsBase&&m_ProjectSettingsDraft!=m_ProjectSettingsBase->Settings();}
+    ProjectSettings& ProjectSettingsDraft(){return m_ProjectSettingsDraft;}
     void ShowProjectBrowser(const std::string& error={}){m_ShowProjectBrowser=true;if(!error.empty())m_ProjectError=error;}
     void RequestProjectOpen(Application&,const std::string& descriptor,bool close=false);
     void RequestProjectExit(){m_ProjectExit=true;m_ProjectConfirm=true;}
@@ -99,7 +105,7 @@ public:
     void SetLightGizmosVisible(bool v){m_ShowLightGizmos=v;}
     void EnterRuntime(const ecs::World::CloneMap&);
     void LeaveRuntime();
-    void ResetHistory(){m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
+    void ResetHistory(){CancelPlacement();m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
     void FinishTransaction(Application&);
     void CancelTransaction(Application&);
     bool HasPendingTransaction()const{return m_Transaction.has_value();}
@@ -124,6 +130,7 @@ public:
     void SelectHierarchyEntity(Application&,ecs::Entity,bool ctrl,bool shift,const std::vector<ecs::Entity>& order);
     void SelectAllEntities(Application&,const std::vector<ecs::Entity>& order);
     bool DeleteSelection(Application&);
+    void FocusSelection(Application&);
     bool BeginGroupTransform(Application&,bool local);
     bool UpdateGroupTransform(Application&,const ImportMatrix&);
     void EndGroupTransform(Application&,bool cancel=false);
@@ -146,6 +153,16 @@ public:
     std::vector<ecs::Entity> InstantiateImportedScene(Application&,const std::string&,ecs::Vec3 offset={});
     ecs::Entity PlaceModel(Application&,const std::string&,ecs::Vec3);
     ecs::Vec3 PlacementPoint(Application&,float u,float v)const;
+    struct SurfaceHit {ecs::Entity entity;ecs::Vec3 position,normal;float distance=0;};
+    struct PlacementPreview {std::string key,status;ecs::TransformComponent transform;bool active=false,ready=false,surface=false;};
+    std::optional<SurfaceHit> RaycastPlacement(Application&,ecs::Vec3 origin,ecs::Vec3 direction,float distance,const std::vector<ecs::Entity>& ignore={})const;
+    const PlacementPreview& UpdatePlacementPreview(Application&,const std::string&,float u,float v);
+    const PlacementPreview& GetPlacementPreview()const{return m_PlacementPreview;}
+    ecs::Entity ConfirmPlacement(Application&);
+    void CancelPlacement(){m_PlacementPreview={};}
+    bool DropSelectionToFloor(Application&);
+    void SetSurfaceSnap(bool value){m_SurfaceSnap=value;}
+    void SetAlignToNormal(bool value){m_AlignToNormal=value;}
     bool OpenSceneGuarded(Application&,const std::string&,OpenDecision,std::string* error=nullptr);
     void RememberScene(const std::string&);
     const auto& RecentScenes()const{return m_RecentScenes;}
@@ -190,12 +207,20 @@ public:
     bool IsPointInsideViewport(double x, double y) const;
 
 private:
+    void DrawProjectSettings(Application&);
+    bool m_ShowProjectSettings=false,m_FocusProjectSettings=false;
+    int m_ProjectSettingsCategory=0;
+    std::shared_ptr<const ProjectContext> m_ProjectSettingsBase;
+    ProjectSettings m_ProjectSettingsDraft;
+    SceneCatalog m_ProjectSettingsScenes;
+    std::string m_ProjectSettingsError,m_ProjectSettingsNotice;
     struct EntitySnapshot {
         ecs::Entity entity{},previousSelection{};
         std::uint64_t world=0;
         bool alive=false;
         nlohmann::json components=nlohmann::json::object();
         std::optional<SceneSettings> settings;
+        std::optional<ecs::TransformComponent> transform;
         std::vector<EntitySnapshot> related;
         std::optional<SelectionSet> selection;
     };
@@ -210,7 +235,9 @@ private:
         std::vector<ecs::TransformComponent> originals;
     };
     std::optional<GroupSession> m_GroupTransform;
-    EntitySnapshot CaptureSelection(Application&)const;
+    EntitySnapshot CaptureSelection(Application&,bool transformsOnly=false)const;
+    ecs::Entity CreateCopies(Application&,nlohmann::json entities,std::size_t active,const std::string& label,bool dragging=false);
+    nlohmann::json CaptureCopies(Application&,ecs::Entity)const;
     void DrawGroupGizmo(Application&,const float* view,const float* projection);
     std::vector<ecs::Entity> m_HierarchyVisible;
     std::uint64_t m_Revision=0,m_SavedRevision=0,m_NextRevision=0;
@@ -267,6 +294,10 @@ private:
     void DrawMaterialEditor(Application& app);
     void DrawLightGizmos(Application&,IRenderAdapter*,const ImVec2&,const ImVec2&);
     bool DrawViewportCreateMenu(Application&);
+    bool DrawPlacementMenu(Application&);
+    void DrawPlacementTarget(Application&,const ImVec2&,const ImVec2&);
+    PlacementPreview m_PlacementPreview;
+    bool m_SurfaceSnap=true,m_AlignToNormal=false,m_PlacementCancelled=false;
     void DrawFogGizmos(Application&,const ImVec2&,const ImVec2&);
     void DrawEntityIcons(Application&,const ImVec2&,const ImVec2&);
     bool m_SpecialIconHovered=false;

@@ -4,6 +4,10 @@
 #include "core/Application.h"
 #include "editor/LightGizmoMath.h"
 #include "ecs/components/SceneIdentityComponent.h"
+#include "ecs/components/LuaScriptComponent.h"
+#include "scripting/EntityReference.h"
+#include "core/AssetPaths.h"
+#include "resources/ResourceManager.h"
 #include "scene/SceneSerializer.h"
 #include <imgui_internal.h>
 #include <ImGuizmo.h>
@@ -51,6 +55,40 @@ static void Cpu(){
  ui.SelectViewportEntity(app,newA,false,false);ui.SelectViewportEntity(app,newB,true,false);auto survivor=*world.GetComponent<TransformComponent>(newA);Check(ui.BeginGroupTransform(app,false),"begin dying group");pivot.position={5,0,0};Check(ui.UpdateGroupTransform(app,TransformMatrix(pivot)),"dying group moved");world.DestroyEntity(newB);ui.PruneSelection(app);Check(!world.IsAlive(newB)&&ui.GetSelectedEntities().size()==1&&!ui.HasPendingTransaction(),"external destruction cancels drag without resurrection");SameTransform(*world.GetComponent<TransformComponent>(newA),survivor,"survivor restored on invalidated drag");
  auto replacement=ui.CreateEntity(app,"replacement");ui.SelectViewportEntity(app,newB,true,false);Check(!ui.IsSelected(newB)&&ui.IsSelected(replacement),"recycled index does not select stale generation");app.NewScene();Check(ui.GetSelectedEntities().empty()&&!ui.UpdateGroupTransform(app,IdentityMatrix()),"scene replacement fences selection and group session");
 }
+static void EssentialsCpu(){
+ Application app;app.NewScene();auto& ui=app.GetEditorLayer();auto& world=app.GetWorld();std::vector<Entity> objects;
+ for(int i=0;i<5;++i){auto e=ui.CreatePrimitive(app,"cube");world.GetComponent<TagComponent>(e)->name="P02_"+std::to_string(i);world.GetComponent<TransformComponent>(e)->position={float(i)*4,0,5};objects.push_back(e);}
+ auto id=[&](Entity e){return world.GetComponent<SceneIdentityComponent>(e)->value;};
+ auto& script=world.AddComponent<LuaScriptComponent>(objects[0]);script.scriptPath="scripts/wave_controller.lua";
+ script.properties={{"partner",{{"$entity",id(objects[1])}}},{"self",{{"$entity",id(objects[0])}}},{"external",{{"$entity",id(objects[4])}}}};
+ ui.SelectViewportEntity(app,objects[0],false,false);ui.SelectViewportEntity(app,objects[1],true,false);ui.SelectViewportEntity(app,objects[2],true,false);
+ Check(ui.GetSelectedEntities().size()==3,"five objects, three selected");
+ auto originals=[&]{std::vector<TransformComponent> result;for(auto e:ui.GetSelectedEntities())result.push_back(*world.GetComponent<TransformComponent>(e));return result;};
+ auto center=[&]{TransformComponent p;for(auto e:ui.GetSelectedEntities()){auto v=world.GetComponent<TransformComponent>(e)->position;p.position.x+=v.x;p.position.y+=v.y;p.position.z+=v.z;}auto n=float(ui.GetSelectedEntities().size());p.position.x/=n;p.position.y/=n;p.position.z/=n;return p;};
+ for(int op=0;op<3;++op){auto before=originals();auto count=ui.UndoCount();auto target=center();if(op==0)target.position.y+=2;else if(op==1)target.rotation.y=.7f;else target.scale={1.5f,1.5f,1.5f};
+  Check(ui.BeginGroupTransform(app,false)&&ui.UpdateGroupTransform(app,TransformMatrix(target)),"five-object group operation");ui.EndGroupTransform(app);auto after=originals();Check(ui.UndoCount()==count+1,"group user operation is one history record");
+  world.GetComponent<TagComponent>(objects[0])->name="External name edit";ui.UndoEdit(app);Check(world.GetComponent<TagComponent>(objects[0])->name=="External name edit","Transform Undo leaves other components intact");
+  for(int i=0;i<3;++i)SameTransform(*world.GetComponent<TransformComponent>(objects[i]),before[i],"group operation Undo");ui.RedoEdit(app);for(int i=0;i<3;++i)SameTransform(*world.GetComponent<TransformComponent>(objects[i]),after[i],"group operation Redo");
+ }
+ const auto sourceTransforms=originals();const auto sourceSelection=ui.GetSelectedEntities();
+ app.SetEditorCameraPose({},0,0);ui.FocusSelection(app);Near(app.GetCameraPosition().x,center().position.x,"Focus centers the group");for(int i=0;i<3;++i)SameTransform(*world.GetComponent<TransformComponent>(objects[i]),sourceTransforms[i],"Focus does not mutate objects");
+ Check(ui.CopyEntity(app,objects[4]),"independent clipboard source");auto count=ui.UndoCount();auto target=center();target.position.x+=3;
+ Check(ui.BeginGroupTransform(app,false)&&ui.BeginDuplicateDrag(app).IsValid(),"group duplicate gesture starts");
+ Check(!ui.BeginDuplicateDrag(app).IsValid()&&world.GetAliveCount()==8,"duplicate exactly once");
+ Check(ui.UpdateGroupTransform(app,TransformMatrix(target)),"gesture moves copies");ui.EndGroupTransform(app);Check(ui.UndoCount()==count+1,"group duplicate and move is one Undo");
+ auto copies=ui.GetSelectedEntities();std::vector<std::string> copyIds;for(int i=0;i<3;++i){copyIds.push_back(id(copies[i]));Check(copyIds.back()!=id(objects[i]),"copy gets unique persistent identity");SameTransform(*world.GetComponent<TransformComponent>(objects[i]),sourceTransforms[i],"original remains unchanged");Near(world.GetComponent<TransformComponent>(copies[i])->position.x,sourceTransforms[i].position.x+3,"copy retains final drag offset");Check(world.GetComponent<MeshRendererComponent>(copies[i])->meshPath==world.GetComponent<MeshRendererComponent>(objects[i])->meshPath,"shared mesh resource key copied");}
+ auto links=[&]{const auto& p=world.GetComponent<LuaScriptComponent>(ui.GetSelectedEntities()[0])->properties;Check(scripting::ResolveEntityReference(world,p["partner"])==ui.GetSelectedEntities()[1],"internal link points to copied partner");Check(scripting::ResolveEntityReference(world,p["self"])==ui.GetSelectedEntities()[0],"self link remapped");Check(scripting::ResolveEntityReference(world,p["external"])==objects[4],"external link retained");};links();
+ ui.UndoEdit(app);Check(world.GetAliveCount()==5&&ui.GetSelectedEntities()==sourceSelection,"duplicate Undo removes all copies and restores original selection");ui.RedoEdit(app);Check(world.GetAliveCount()==8&&ui.GetSelectedEntities().size()==3,"duplicate Redo restores group");links();for(int i=0;i<3;++i)Check(id(ui.GetSelectedEntities()[i])==copyIds[i],"Redo retains persistent copy identities");
+ auto deleteCount=ui.UndoCount();Check(ui.DeleteSelection(app)&&world.GetAliveCount()==5&&ui.UndoCount()==deleteCount+1,"delete copied group in one operation");ui.UndoEdit(app);Check(world.GetAliveCount()==8&&ui.GetSelectedEntities().size()==3,"deleted group Undo restores selection");links();
+ auto pasted=ui.PasteEntity(app);Check(pasted.IsValid()&&world.GetAliveCount()==9&&world.GetComponent<TagComponent>(pasted)->name=="P02_4 Copy","Duplicate leaves Copy/Paste clipboard intact");ui.UndoEdit(app);
+ auto restoredCopies=ui.GetSelectedEntities();target=center();target.position.z+=4;count=ui.UndoCount();Check(ui.BeginGroupTransform(app,false)&&ui.BeginDuplicateDrag(app).IsValid()&&ui.UpdateGroupTransform(app,TransformMatrix(target)),"second duplicate gesture");ui.CancelTransaction(app);Check(world.GetAliveCount()==8&&ui.GetSelectedEntities()==restoredCopies&&ui.UndoCount()==count,"cancel removes whole duplicated group and restores prior selection");
+ Check(ui.CopyEntity(app,ui.GetSelectedEntity())&&ui.PasteEntity(app).IsValid()&&world.GetAliveCount()==11&&ui.GetSelectedEntities().size()==3,"Copy/Paste copies the selected group");links();ui.UndoEdit(app);Check(ui.GetSelectedEntities()==restoredCopies&&world.GetAliveCount()==8,"group Paste Undo");
+ Check(ui.DuplicateEntity(app,ui.GetSelectedEntity()).IsValid()&&world.GetAliveCount()==11&&ui.GetSelectedEntities().size()==3,"Duplicate command copies selected group");links();ui.UndoEdit(app);Check(ui.GetSelectedEntities()==restoredCopies&&world.GetAliveCount()==8,"group Duplicate Undo");
+ const auto document=SceneSerializer::CaptureWorld(world,app.GetSceneSettings());auto key="scenes/p02-"+ecs::NewSceneIdentity()+".json";std::string error;
+ Check(app.SaveSceneAs(key,false,&error),"save edited five-object scene");
+ struct Cleanup{std::filesystem::path path;~Cleanup(){std::error_code ec;std::filesystem::remove(path,ec);}} cleanup{AssetPaths::ResolveAssetOutputPath(key)};
+ app.NewScene();Check(ui.GetSelectedEntities().empty(),"New Scene clears selection");Check(app.OpenScene(key,&error),"open saved group scene");Check(SceneSerializer::CaptureWorld(app.GetWorld(),app.GetSceneSettings())==document,"saved and reopened components and references match");
+}
 #if defined(ENABLE_DX12)
 static void Gpu(){
  Application app;Check(app.Initialize(),"DX12 initialize");SyntheticEditorInput input;auto* window=dynamic_cast<GlfwWindow*>(app.GetWindow())->GetGlfwHandle();glfwHideWindow(window);SyntheticEditorInput::Queue([](ImGuiIO& io){io.AddFocusEvent(true);});
@@ -78,12 +116,49 @@ static void Gpu(){
  auto rows=app.GetWorld().Entities();float hx=hierarchy->WorkRect.Min.x+40,hy=hierarchy->WorkRect.Min.y+ImGui::GetFrameHeightWithSpacing()+ImGui::GetTextLineHeight()*.5f,step=ImGui::GetTextLineHeightWithSpacing();click(hx,hy);Check(ui.GetSelectedEntity()==rows[0]&&ui.GetSelectedEntities().size()==1,"Hierarchy single row");click(hx,hy+2*step,false,true);Check(ui.GetSelectedEntities().size()==3&&ui.GetSelectedEntity()==rows[2],"Hierarchy real Shift range");
  ui.ClearSelection();chord(ImGuiKey_A);Check(ui.GetSelectedEntities().size()==3,"Hierarchy Ctrl A");ui.ClearSelection();click(hierarchy->WorkRect.Min.x+25,hierarchy->WorkRect.Min.y+8);chord(ImGuiKey_A);Check(ui.GetSelectedEntities().empty(),"search text Ctrl A not stolen");press(ImGuiKey_Escape);
  ImGui::FocusWindow(hierarchy);frame();click(hx,hy);click(hx,hy+2*step,true);Check(ui.GetSelectedEntities().size()==2,"Hierarchy real Ctrl add");history=ui.UndoCount();press(ImGuiKey_Delete);Check(app.GetWorld().GetAliveCount()==1&&ui.GetSelectedEntities().empty()&&ui.UndoCount()==history+1,"native Delete group");chord(ImGuiKey_Z);Check(app.GetWorld().GetAliveCount()==3&&ui.GetSelectedEntities().size()==2,"native Delete Undo selection restored");chord(ImGuiKey_Y);Check(app.GetWorld().GetAliveCount()==1&&ui.GetSelectedEntities().empty(),"native Delete Redo");
- Check(dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter())->GetValidationErrorCount()==0,"DX12 validation zero");
+ // Complete five-object workflow with real pointer/key input, including Alt+drag.
+ app.NewScene();cubes.clear();ui.SetSnapping(false);ui.SetGizmoOperation(0);
+ for(int i=0;i<5;++i){auto e=ui.CreatePrimitive(app,"cube");cubes.push_back(e);app.GetWorld().GetComponent<TransformComponent>(e)->position={float(i-2)*1.5f,0,5};}
+ ui.ClearSelection();app.SetEditorCameraPose({0,0,-7},0,0);ImGui::FocusWindow(ImGui::FindWindowByName("Viewport"));frame();press(ImGuiKey_F11);frame(8);
+ pa=screen({-3,0,5});pb=screen({0,0,5});pc=screen({3,0,5});click(pa.x,pa.y);click(pb.x,pb.y,true);click(pc.x,pc.y,true);
+ Check(ui.GetSelectedEntities().size()==3&&app.GetWorld().GetAliveCount()==5,"five objects: actual Ctrl selection of three");
+ auto mean=[&]{Vec3 p{};for(auto e:ui.GetSelectedEntities()){auto v=app.GetWorld().GetComponent<TransformComponent>(e)->position;p.x+=v.x;p.y+=v.y;p.z+=v.z;}float n=float(ui.GetSelectedEntities().size());return Vec3{p.x/n,p.y/n,p.z/n};};
+ auto move=[&](bool alt,bool cancel=false){
+  ui.SetGizmoOperation(0);frame();auto pivot=mean();auto p=screen(pivot);auto m=TransformMatrix(*app.GetWorld().GetComponent<TransformComponent>(ui.GetSelectedEntity()));
+  auto end=screen({pivot.x+float(m[0]),pivot.y+float(m[1]),pivot.z+float(m[2])});float dx=end.x-p.x,dy=end.y-p.y,n=std::hypot(dx,dy);dx/=n;dy/=n;
+  float handle=0;for(float distance:{15.f,20.f,25.f,30.f,35.f,45.f}){point(p.x+distance*dx,p.y+distance*dy);if(ImGuizmo::IsOver(ImGuizmo::TRANSLATE_X)){handle=distance;break;}}Check(handle>0,"three-object Move handle");
+  auto alive=app.GetWorld().GetAliveCount();auto amount=ui.GetSelectedEntities().size();auto undo=ui.UndoCount();SyntheticEditorInput::Key(ImGuiMod_Alt,alt);frame();SyntheticEditorInput::Button(0,true);frame(1);
+  Check(app.GetWorld().GetAliveCount()==alive,"Alt and press without motion create no copies");point(p.x+(handle+55)*dx,p.y+(handle+55)*dy);point(p.x+(handle+80)*dx,p.y+(handle+80)*dy);
+  Check(app.GetWorld().GetAliveCount()==alive+(alt?amount:0),"selection copied exactly once during native drag");
+  if(cancel)press(ImGuiKey_Escape);
+  SyntheticEditorInput::Button(0,false);SyntheticEditorInput::Key(ImGuiMod_Alt,false);frame();
+  Check(ui.UndoCount()==undo+(cancel?0:1),"native drag is one history operation or cancelled");
+ };
+ move(false);Check(ui.GetSelectedEntities().size()==3,"ordinary Move keeps group");
+ center=screen(mean());ui.SetGizmoOperation(1);frame();radius=0;for(float r=20;r<=110;r+=5){point(center.x+r*.7071068f,center.y-r*.7071068f);if(ImGuizmo::IsOver(ImGuizmo::ROTATE_Z)){radius=r;break;}}Check(radius>0,"three-object Rotate handle");
+ history=ui.UndoCount();SyntheticEditorInput::Button(0,true);frame(1);point(center.x+radius*.258819f,center.y-radius*.965926f);SyntheticEditorInput::Button(0,false);frame();Check(ui.UndoCount()==history+1,"three-object Rotate one record");
+ ui.SetGizmoOperation(2);frame();center=screen(mean());point(center.x,center.y);Check(ImGuizmo::IsOver(ImGuizmo::SCALE),"three-object Scale handle");history=ui.UndoCount();SyntheticEditorInput::Button(0,true);frame(1);point(center.x+45,center.y-20);SyntheticEditorInput::Button(0,false);frame();Check(ui.UndoCount()==history+1,"three-object Scale one record");
+ auto sources=ui.GetSelectedEntities();std::vector<TransformComponent> sourceValues;for(auto e:sources)sourceValues.push_back(*app.GetWorld().GetComponent<TransformComponent>(e));
+ press(ImGuiKey_F);auto bounds=ui.GetViewportBounds();auto focused=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),(bounds[2]-bounds[0])/(bounds[3]-bounds[1]),app.GetCameraNearPlane(),app.GetCameraFarPlane());
+ for(auto e:sources){auto m=TransformMatrix(*app.GetWorld().GetComponent<TransformComponent>(e));for(int corner=0;corner<8;++corner){Vec3 v{corner&1?.5f:-.5f,corner&2?.5f:-.5f,corner&4?.5f:-.5f};auto q=ProjectGizmo({float(m[0]*v.x+m[4]*v.y+m[8]*v.z+m[12]),float(m[1]*v.x+m[5]*v.y+m[9]*v.z+m[13]),float(m[2]*v.x+m[6]*v.y+m[10]*v.z+m[14])},focused);Check(q&&(*q)[0]>0&&(*q)[0]<1&&(*q)[1]>0&&(*q)[1]<1,"Focus fits all real mesh bounds");}}
+ std::filesystem::create_directories("diagnostics/p02");auto* gpu=dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter());Check(gpu->SaveFrameImage("diagnostics/p02/group-selected.ppm"),"group selection screenshot");
+ move(true);Check(ui.GetSelectedEntities().size()==3&&app.GetWorld().GetAliveCount()==8,"Alt+Move selects all three copies");
+ for(int i=0;i<3;++i)SameTransform(*app.GetWorld().GetComponent<TransformComponent>(sources[i]),sourceValues[i],"native Alt leaves originals in place");
+ std::vector<TransformComponent> finalCopies;for(auto e:ui.GetSelectedEntities())finalCopies.push_back(*app.GetWorld().GetComponent<TransformComponent>(e));
+ chord(ImGuiKey_Z);Check(app.GetWorld().GetAliveCount()==5&&ui.GetSelectedEntities()==sources,"native duplicate Undo restores original selection");chord(ImGuiKey_Y);Check(app.GetWorld().GetAliveCount()==8&&ui.GetSelectedEntities().size()==3,"native duplicate Redo restores copies");
+ for(int i=0;i<3;++i)SameTransform(*app.GetWorld().GetComponent<TransformComponent>(ui.GetSelectedEntities()[i]),finalCopies[i],"native duplicate Redo final transforms");
+ auto selectedCopies=ui.GetSelectedEntities();move(true,true);Check(app.GetWorld().GetAliveCount()==8&&ui.GetSelectedEntities()==selectedCopies,"Escape removes drag copies and retains previous group");
+ press(ImGuiKey_Delete);Check(app.GetWorld().GetAliveCount()==5&&ui.GetSelectedEntities().empty(),"native copied group Delete");chord(ImGuiKey_Z);Check(app.GetWorld().GetAliveCount()==8&&ui.GetSelectedEntities().size()==3,"native copied group Delete Undo");
+ auto document=SceneSerializer::CaptureWorld(app.GetWorld(),app.GetSceneSettings());auto key="scenes/p02-gpu-"+NewSceneIdentity()+".json";std::string error;Check(app.SaveSceneAs(key,false,&error),"native workflow save");
+ struct Cleanup{std::filesystem::path path;~Cleanup(){std::error_code ec;std::filesystem::remove(path,ec);}} cleanup{AssetPaths::ResolveAssetOutputPath(key)};
+ app.NewScene();Check(app.OpenScene(key,&error)&&ui.GetSelectedEntities().empty(),"native workflow reopen resets selection");Check(SceneSerializer::CaptureWorld(app.GetWorld(),app.GetSceneSettings())==document,"native workflow disk roundtrip");
+ auto single=app.GetWorld().Entities().front();ui.SelectViewportEntity(app,single,false,false);auto singleBefore=*app.GetWorld().GetComponent<TransformComponent>(single);move(false);Check(ui.GetSelectedEntities().size()==1,"single Move retains one selected entity");chord(ImGuiKey_Z);SameTransform(*app.GetWorld().GetComponent<TransformComponent>(single),singleBefore,"single Move Undo preserved");move(true,true);Check(ui.GetSelectedEntity()==single&&app.GetWorld().GetAliveCount()==8,"single Alt+drag Escape preserved");
+ Check(gpu->GetValidationErrorCount()==0,"DX12 validation zero");
 }
 #endif
 int main(int argc,char** argv){ScopedEditorPreferenceRestore preferences;try{
 #if defined(ENABLE_DX12)
  if(argc>1&&std::string(argv[1])=="--dx12")Gpu();else
 #endif
- Cpu();std::cout<<"Multi-selection: "<<checks<<" checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+ {Cpu();EssentialsCpu();}std::cout<<"Multi-selection: "<<checks<<" checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
 

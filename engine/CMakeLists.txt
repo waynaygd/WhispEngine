@@ -54,6 +54,7 @@ add_library(Engine
   scene/SceneSettings.cpp
   editor/EditorLayer.cpp
   editor/EditorProject.cpp
+  editor/EditorProjectSettings.cpp
   editor/EditorTransactions.cpp
   editor/EditorSelection.cpp
   editor/EditorGroupTransform.cpp
@@ -61,6 +62,7 @@ add_library(Engine
   editor/EditorPreferences.cpp
   editor/EditorUi.cpp
   editor/EditorViewportCreate.cpp
+  editor/EditorPlacement.cpp
   editor/EditorFogGizmos.cpp
   editor/EditorEntityIcons.cpp
   editor/EditorVisualSettings.cpp

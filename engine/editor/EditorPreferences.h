@@ -16,6 +16,7 @@ struct EditorPreferences {
     float assetCardSize=180;
     bool visualPanel=false,backgroundOverride=false,projectileTestInput=false;
     bool grid=true,lightGizmos=true,xray=false,snapping=false,rotationSnapping=false,physicsStress=false;
+    bool surfaceSnap=true,alignToNormal=false;
     int transformPrecision=1,lightXrayMode=1;
     int operation=0,space=0;
     float translationSnap=1,rotationSnap=15,scaleSnap=.1f,cameraSpeed=1.8f,cameraSensitivity=.0025f;

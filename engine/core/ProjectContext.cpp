@@ -4,6 +4,7 @@
 #include <set>
 #include <algorithm>
 #include <stdexcept>
+#include <cctype>
 #ifdef _WIN32
 #define NOMINMAX
 #include <Windows.h>
@@ -51,6 +52,10 @@ void ProjectContext::ValidateRelative(const std::string& key) {
         if(stem=="CON"||stem=="PRN"||stem=="AUX"||stem=="NUL"||(stem.size()==4&&(stem.starts_with("COM")||stem.starts_with("LPT"))&&stem[3]>='0'&&stem[3]<='9'))throw std::runtime_error("Reserved project path");
     }
 }
+void ProjectContext::ValidateName(const std::string& name){
+    if(name.empty()||name.size()>240||std::all_of(name.begin(),name.end(),[](unsigned char c){return std::isspace(c);}))throw std::runtime_error("Project Name must contain 1-240 UTF-8 bytes and cannot be blank");
+    for(unsigned char c:name)if(c<32||c==127)throw std::runtime_error("Project Name cannot contain control characters");
+}
 void ProjectContext::CheckNoLinks(const fs::path& path) {
     for(auto p=fs::absolute(path).lexically_normal();!p.empty();p=p.parent_path()) {
         std::error_code ec;auto status=fs::symlink_status(p,ec);
@@ -83,7 +88,12 @@ std::shared_ptr<const ProjectContext> ProjectManager::Prepare(const fs::path& pa
     auto p=std::make_shared<ProjectContext>();p->descriptorPath=fs::absolute(path).lexically_normal();p->root=p->descriptorPath.parent_path();
     std::ifstream f(path);f>>p->descriptor;const auto& j=p->descriptor;
     if(!j.is_object()||!j.at("formatVersion").is_number_integer()||j.at("formatVersion")!=ProjectContext::CurrentVersion)throw std::runtime_error("Unsupported project format version");
-    p->name=j.at("name").get<std::string>();if(p->name.empty()||p->name.size()>240)throw std::runtime_error("Invalid project name");
+    p->name=j.at("name").get<std::string>();ProjectContext::ValidateName(p->name);
+    if(j.contains("rendering")){
+        if(!j["rendering"].is_object())throw std::runtime_error("Project rendering settings must be an object");
+        if(j["rendering"].contains("gpuInstancing")&&!j["rendering"]["gpuInstancing"].is_boolean())throw std::runtime_error("Project GPU Instancing must be true or false");
+        p->gpuInstancing=j["rendering"].value("gpuInstancing",true);
+    }
     p->assetDirectory=j.at("directories").at("assets").get<std::string>();p->sceneDirectory=j.at("directories").at("scenes").get<std::string>();
     p->startupScene=j.at("startupScene").get<std::string>();
     auto assets=p->AssetRoot(), scenes=p->SceneRoot();
@@ -115,12 +125,17 @@ std::shared_ptr<const ProjectContext> ProjectManager::Create(const fs::path& par
     }catch(...){std::error_code ec;fs::remove_all(root,ec);throw;}
 }
 std::shared_ptr<const ProjectContext> ProjectManager::WithStartupScene(const ProjectContext& context,const std::string& key) {
-    if(!fs::is_regular_file(context.ResolveScene(key)))throw std::runtime_error("Save the startup scene first");
+    auto settings=context.Settings();settings.startupScene=key;return WithSettings(context,settings);
+}
+std::shared_ptr<const ProjectContext> ProjectManager::WithSettings(const ProjectContext& context,const ProjectSettings& settings) {
+    ProjectContext::ValidateName(settings.name);
+    if(!fs::is_regular_file(context.ResolveScene(settings.startupScene)))throw std::runtime_error("Startup Scene does not exist: "+settings.startupScene);
     ProjectContext::CheckNoLinks(context.descriptorPath);
     std::ifstream current(context.descriptorPath);nlohmann::json disk;current>>disk;
     if(disk!=context.descriptor)throw std::runtime_error("Project descriptor changed outside the editor. Reopen it before changing settings.");
     current.close(); // Windows cannot atomically replace a descriptor held open by this stream.
-    auto next=std::make_shared<ProjectContext>(context);next->startupScene=key;next->descriptor["startupScene"]=key;
+    auto next=std::make_shared<ProjectContext>(context);next->name=settings.name;next->startupScene=settings.startupScene;next->gpuInstancing=settings.gpuInstancing;
+    next->descriptor["name"]=settings.name;next->descriptor["startupScene"]=settings.startupScene;next->descriptor["rendering"]["gpuInstancing"]=settings.gpuInstancing;
     ProjectContext::CheckNoLinks(context.descriptorPath);Write(context.descriptorPath,next->descriptor,true);return next;
 }
 std::shared_ptr<const ProjectContext> ProjectManager::Active(){return active.load();}

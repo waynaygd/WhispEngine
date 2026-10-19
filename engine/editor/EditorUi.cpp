@@ -29,12 +29,14 @@ void EditorLayer::InitializePreferences(Application& app){
     m_RecentScenes=p.recentScenes;m_RecentProjects=p.recentProjects;
     m_ShowHierarchy=p.hierarchy;m_ShowInspector=p.inspector;m_ShowViewport=p.viewport;m_ShowAssetBrowser=p.assets;m_ShowMaterialEditor=p.material;m_ShowSceneSettings=p.settings;m_ShowConsole=p.console;m_ShowStatistics=p.diagnostics;
     m_AssetGrid=p.assetGrid;m_ProjectAssets=p.projectAssets;m_AssetCardSize=p.assetCardSize;m_BackgroundOverride=p.backgroundOverride;m_ProjectileTestInput=p.projectileTestInput;
+    m_SurfaceSnap=p.surfaceSnap;m_AlignToNormal=p.alignToNormal;
     m_ShowVisualSettings=p.visualPanel;m_VisualSettings=p.visuals;m_ShowGrid=p.grid;m_ShowLightGizmos=p.lightGizmos;m_LightXray=p.xray;m_LightXrayMode=p.lightXrayMode;m_TransformPrecision=p.transformPrecision;m_RotationSnapping=p.rotationSnapping;m_ShowPhysicsStress=p.physicsStress;m_Snapping=p.snapping;m_GizmoOperation=p.operation;m_GizmoMode=p.space;
     m_SnapTranslation=p.translationSnap;m_SnapRotation=p.rotationSnap;m_SnapScale=p.scaleSnap;app.SetCameraNavigation(p.cameraSpeed,p.cameraSensitivity);
 }
 void EditorLayer::PersistPreferences(Application& app){
     EditorPreferences p;p.recentScenes=app.GetProject()?std::vector<std::string>{}:m_RecentScenes;p.recentProjects=m_RecentProjects;p.hierarchy=m_ShowHierarchy;p.inspector=m_ShowInspector;p.viewport=m_ShowViewport;p.assets=m_ShowAssetBrowser;p.material=m_ShowMaterialEditor;p.settings=m_ShowSceneSettings;p.console=m_ShowConsole;p.diagnostics=m_ShowStatistics;
     p.assetGrid=m_AssetGrid;p.projectAssets=m_ProjectAssets;p.assetCardSize=m_AssetCardSize;p.backgroundOverride=m_BackgroundOverride;p.projectileTestInput=m_ProjectileTestInput;
+    p.surfaceSnap=m_SurfaceSnap;p.alignToNormal=m_AlignToNormal;
     p.visualPanel=m_ShowVisualSettings;p.visuals=m_VisualSettings;p.grid=m_ShowGrid;p.lightGizmos=m_ShowLightGizmos;p.xray=m_LightXray;p.lightXrayMode=m_LightXrayMode;p.transformPrecision=m_TransformPrecision;p.rotationSnapping=m_RotationSnapping;p.physicsStress=m_ShowPhysicsStress;p.snapping=m_Snapping;p.operation=m_GizmoOperation;p.space=m_GizmoMode;
     p.translationSnap=m_SnapTranslation;p.rotationSnap=m_SnapRotation;p.scaleSnap=m_SnapScale;p.cameraSpeed=app.GetCameraMoveSpeed();p.cameraSensitivity=app.GetCameraSensitivity();std::string error;if(!SavePreferences(PreferencesPath(),p,&error))Logger::Get().Warn(error);
 }
@@ -66,7 +68,7 @@ void EditorLayer::DrawToolbar(Application& app){
     ImGui::SameLine();ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);ImGui::SameLine();
     ImGui::RadioButton("Move",&m_GizmoOperation,0);ImGui::SameLine();ImGui::RadioButton("Rotate",&m_GizmoOperation,1);ImGui::SameLine();ImGui::RadioButton("Scale",&m_GizmoOperation,2);ImGui::SameLine();
     ImGui::RadioButton("Local",&m_GizmoMode,0);ImGui::SameLine();auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(m_Selection.active);const bool localScale=m_Selection.items.size()==1&&m_GizmoOperation==2&&t&&(std::abs(t->rotation.x)+std::abs(t->rotation.y)+std::abs(t->rotation.z)>1e-6f);if(localScale)m_GizmoMode=0;ImGui::BeginDisabled(localScale);ImGui::RadioButton("World",&m_GizmoMode,1);ImGui::EndDisabled();if(m_GizmoOperation==2&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Scale axes/planes use local TRS axes. Rotated world non-uniform scale requires shear and is not represented by Transform.");ImGui::SameLine();ImGui::Checkbox(m_GizmoOperation==1?"Rotation Snap":"Snap",m_GizmoOperation==1?&m_RotationSnapping:&m_Snapping);ImGui::SameLine();ImGui::Checkbox("Grid",&m_ShowGrid);ImGui::SameLine();
-    if(ImGui::Button("Focus"))app.FocusEntity(m_Selection.active);ImGui::SameLine();
+    if(ImGui::Button("Focus"))FocusSelection(app);ImGui::SameLine();
     ImGui::Text("%s%s",app.GetSceneKey().empty()?"Untitled":app.GetSceneKey().c_str(),IsSceneDirty()?" *":"");ImGui::End();
 }
 void EditorLayer::DrawMainMenu(Application& app){
@@ -79,7 +81,7 @@ void EditorLayer::DrawMainMenu(Application& app){
         if(ImGui::BeginMenu("Recent Projects",!m_RecentProjects.empty())){
             const auto recent=m_RecentProjects;for(const auto& entry:recent)if(ImGui::MenuItem(entry.name.c_str()))RequestProjectOpen(app,entry.descriptor);ImGui::EndMenu();
         }
-        if(ImGui::MenuItem("Project Settings...",nullptr,false,bool(app.GetProject())))m_ShowProjectBrowser=true;
+        if(ImGui::MenuItem("Project Settings...",nullptr,false,bool(app.GetProject())))ShowProjectSettings(app);
         if(ImGui::MenuItem("Close Project",nullptr,false,!app.IsProjectBrowserActive()))RequestProjectOpen(app,{},true);
         ImGui::Separator();
         if(ImGui::MenuItem("New Scene"))action(1);
@@ -107,7 +109,8 @@ void EditorLayer::DrawMainMenu(Application& app){
         if(ImGui::MenuItem("Navigation and snapping"))preferencesRequested=true;ImGui::MenuItem("ImGui Demo",nullptr,&m_ShowDemoWindow);ImGui::EndMenu();
     }
     if(ImGui::BeginMenu("Scene")){
-        if(ImGui::MenuItem("Focus Selected","F"))app.FocusEntity(m_Selection.active);
+        if(ImGui::MenuItem("Focus Selected","F"))FocusSelection(app);
+        if(ImGui::MenuItem("Drop to Floor",nullptr,false,!app.IsEditorPlayMode()&&!m_Selection.items.empty()))DropSelectionToFloor(app);
         ImGui::Separator();if(ImGui::MenuItem("Play",nullptr,false,!app.IsEditorPlayMode()))app.SetEditorPlayMode(true);if(ImGui::MenuItem("Pause / Resume",nullptr,false,app.IsEditorPlayMode()))app.SetEditorPaused(!app.IsEditorPaused());if(ImGui::MenuItem("Stop",nullptr,false,app.IsEditorPlayMode()))app.SetEditorPlayMode(false);ImGui::EndMenu();
     }
     if(ImGui::BeginMenu("Help")){ImGui::TextUnformatted("WhispEngine Editor 2.5");ImGui::TextUnformatted("RMB + WASD: camera, F: focus, W/E/R: gizmo");ImGui::TextUnformatted("Play clones scene data; Stop discards Runtime edits.");ImGui::TextUnformatted("Ctrl-click: toggle selection; Shift-click: Hierarchy range / Viewport add.");ImGui::TextUnformatted("Multiple selection: shared W/E/R gizmo; Inspector edits Active Entity only.");ImGui::TextUnformatted("Hierarchy is flat; parent transforms are not implemented.");ImGui::EndMenu();}
@@ -173,8 +176,10 @@ void EditorLayer::DrawSceneHierarchy(Application& app){
         if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0))app.FocusEntity(e);
         if(ImGui::BeginDragDropSource()){ImGui::SetDragDropPayload("WHISP_ENTITY",&e,sizeof(e));ImGui::TextUnformatted(label.c_str());ImGui::EndDragDropSource();}
         if(ImGui::BeginPopupContextItem("EntityActions")){
-            if(ImGui::MenuItem("Focus"))app.FocusEntity(e);if(ImGui::MenuItem("Rename")){m_RenameTarget=e;m_RenameBuffer=tag?tag->name:"Entity";m_RenameRequested=true;}
-            if(ImGui::MenuItem("Duplicate entity"))DuplicateEntity(app,e);if(ImGui::MenuItem("Delete selection")){if(!IsSelected(e))SelectEntity(e);DeleteSelection(app);}ImGui::EndPopup();
+            if(ImGui::MenuItem("Focus")){if(IsSelected(e))FocusSelection(app);else app.FocusEntity(e);}if(ImGui::MenuItem("Rename")){m_RenameTarget=e;m_RenameBuffer=tag?tag->name:"Entity";m_RenameRequested=true;}
+            if(ImGui::MenuItem(IsSelected(e)&&m_Selection.items.size()>1?"Duplicate selection":"Duplicate entity"))DuplicateEntity(app,e);
+            if(ImGui::MenuItem("Drop to Floor",nullptr,false,!app.IsEditorPlayMode())){if(!IsSelected(e))SelectEntity(e);DropSelectionToFloor(app);}
+            if(ImGui::MenuItem("Delete selection")){if(!IsSelected(e))SelectEntity(e);DeleteSelection(app);}ImGui::EndPopup();
         }ImGui::PopID();ImGui::PopID();
     }
     if(ImGui::IsWindowHovered()&&ImGui::IsMouseClicked(0)&&!ImGui::IsAnyItemHovered()&&!m_LightPointerCaptured&&!ImGuizmo::IsUsing()&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)){FinishTransaction(app);ClearSelection();ImGui::ClearActiveID();}

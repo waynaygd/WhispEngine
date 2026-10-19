@@ -40,6 +40,7 @@ struct TransformComponent;
 class RenderSystem final : public ISystem
 {
 public:
+    void SetPlacementPreview(const std::string& key,const TransformComponent& transform){m_PlacementMesh=key;m_PlacementTransform=transform;}
     void SetViewportUnlit(bool value){m_ViewportUnlit=value;}
     bool IsViewportUnlit()const{return m_ViewportUnlit;}
     ~RenderSystem() override;
@@ -74,6 +75,8 @@ public:
     void ReleaseGpuResources();
 
 private:
+    std::string m_PlacementMesh;
+    TransformComponent m_PlacementTransform;
     bool m_TraceMaterials=false;
     std::uint64_t m_ResourceCacheEpoch=0;
     std::vector<nlohmann::json> m_MaterialDiagnostics;

@@ -365,6 +365,16 @@ namespace ecs {
                             for(int c=0;c<8;++c)for(int row=0;row<3;++row){float value=model[12+row];for(int k=0;k<3;++k)value+=model[k*4+row]*(c&(1<<k)?it->second.maximum[k]:it->second.minimum[k]);b.minimum[row]=std::min(b.minimum[row],value);b.maximum[row]=std::max(b.maximum[row],value);}m_ShadowWorldBounds.push_back(b);
                         }
                     });
+                if(!m_PlacementMesh.empty()){
+                    const auto resource=m_ResourceManager->Get<MeshResource>(m_PlacementMesh);
+                    if(resource&&resource->IsLoaded()&&!resource->GetData().placeholder){
+                        RenderSnapshot preview;preview.mesh=GetOrUploadMesh(m_PlacementMesh);
+                        preview.shader=GetOrCreateShader("dx12/textured.hlsl");preview.texture=GetOrCreateTexture("defaults/texture");
+                        preview.pose=RenderPose::From(m_PlacementTransform);preview.castShadows=false;preview.materialState={true,false,false};
+                        preview.baseColor={.08f,.8f,1,1};preview.tint={.5f,1,1,1};
+                        if(preview.mesh.IsValid()&&preview.shader.IsValid()&&preview.texture.IsValid())m_RenderSnapshots.push_back(preview);
+                    }
+                }
                 m_Statistics.gatherMs = elapsed(start);
                 m_Statistics.visibleSubmeshes = m_RenderSnapshots.size();
             }

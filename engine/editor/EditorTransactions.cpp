@@ -8,6 +8,7 @@
 #include "../scene/SceneSerializer.h"
 #include "../ecs/components/PlayerStartComponent.h"
 #include "../ecs/components/FogComponent.h"
+#include "../scripting/EntityReference.h"
 namespace editor {
 namespace {
 bool Same(const nlohmann::json& a,const nlohmann::json& b){return a==b;}
@@ -17,7 +18,8 @@ EditorLayer::EntitySnapshot EditorLayer::CaptureSelectedEntity(Application& app,
     if(s.alive)s.components=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),s.entity);s.selection=m_Selection;return s;
 }
 EditorLayer::EntitySnapshot EditorLayer::CaptureLike(Application& app,const EntitySnapshot& sample)const{
-    auto result=(sample.settings||(!sample.entity.IsValid()&&!sample.related.empty()))?EntitySnapshot{}:CaptureSelectedEntity(app,sample.entity);result.previousSelection=sample.previousSelection;result.world=app.GetWorld().GetIdentity();
+    auto result=(sample.settings||sample.transform||(!sample.entity.IsValid()&&!sample.related.empty()))?EntitySnapshot{}:CaptureSelectedEntity(app,sample.entity);result.previousSelection=sample.previousSelection;result.world=app.GetWorld().GetIdentity();
+    if(sample.transform){result.entity=sample.entity;result.alive=app.GetWorld().IsAlive(sample.entity);if(auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(sample.entity))result.transform=*t;}
     result.selection=sample.selection?std::optional<SelectionSet>(m_Selection):std::nullopt;
     if(sample.settings)result.settings=app.GetSceneSettings();for(const auto& related:sample.related)result.related.push_back(CaptureLike(app,related));return result;
 }
@@ -32,9 +34,16 @@ ecs::Entity EditorLayer::RestoreSnapshot(Application& app,const EntitySnapshot& 
     auto& world=app.GetWorld();auto entity=snapshot.entity;
     const auto owner=snapshot.world?snapshot.world:entity.world;
     if(owner!=world.GetIdentity())throw std::runtime_error("Undo transaction belongs to a different World");
+    if(root){
+        auto validate=[&](auto&& self,const EntitySnapshot& s)->void{
+            if(s.transform&&(!world.IsAlive(s.entity)||!world.HasComponent<ecs::TransformComponent>(s.entity)))throw std::runtime_error("Transform history target no longer exists");
+            for(auto& child:s.related)self(self,child);
+        };validate(validate,snapshot);
+    }
     if(snapshot.settings){std::string error;if(!app.SetSceneSettings(*snapshot.settings,&error))throw std::runtime_error(error);}
     if(entity.IsValid()){
         if(!snapshot.alive){if(world.IsAlive(entity))app.DestroySceneEntity(entity);if(m_Selection.active==entity)m_Selection.active=world.IsAlive(snapshot.previousSelection)?snapshot.previousSelection:ecs::Entity{};}
+        else if(snapshot.transform){*world.GetComponent<ecs::TransformComponent>(entity)=*snapshot.transform;app.NotifyEditorMutation(entity);}
         else {
             if(snapshot.components.contains("SceneIdentity")){
                 const auto& id=snapshot.components.at("SceneIdentity").at("value");
@@ -70,6 +79,7 @@ void EditorLayer::CommitUndo(Application& app,const std::string& label,EntitySna
     auto after=CaptureLike(app,before);
     auto equal=[&](auto&& self,const EntitySnapshot& a,const EntitySnapshot& b)->bool{
         if(a.alive!=b.alive||!Same(a.components,b.components)||a.related.size()!=b.related.size()||a.settings.has_value()!=b.settings.has_value())return false;
+        if(a.transform.has_value()!=b.transform.has_value()||(a.transform&&TransformMatrix(*a.transform)!=TransformMatrix(*b.transform)))return false;
         if(a.settings&&SceneSettingsToJson(*a.settings)!=SceneSettingsToJson(*b.settings))return false;
         for(std::size_t i=0;i<a.related.size();++i)if(!self(self,a.related[i],b.related[i]))return false;return true;
     };
@@ -82,7 +92,7 @@ void EditorLayer::FinishTransaction(Application& app){
 }
 void EditorLayer::CancelTransaction(Application& app){
     if(!m_Transaction)return;auto pending=std::move(*m_Transaction);m_Transaction.reset();
-    try{RestoreSnapshot(app,pending.before);if(m_DuplicateDrag){SelectEntity(app.GetWorld().IsAlive(m_DragOriginal)?m_DragOriginal:ecs::Entity{});m_DuplicateDrag=false;}}catch(const std::exception& e){m_EditorError=e.what();Logger::Get().Error(m_EditorError);}m_GizmoUndoCaptured=false;m_DuplicateDrag=false;m_LightPointerCaptured=false;m_PlaneScaleCaptured=false;m_GroupTransform.reset();
+    try{RestoreSnapshot(app,pending.before);}catch(const std::exception& e){m_EditorError=e.what();Logger::Get().Error(m_EditorError);}m_GizmoUndoCaptured=false;m_DuplicateDrag=false;m_LightPointerCaptured=false;m_PlaneScaleCaptured=false;m_GroupTransform.reset();
 }
 void EditorLayer::Undo(Application& app){
     FinishTransaction(app);if(m_UndoStack.empty())return;auto record=std::move(m_UndoStack.back());m_UndoStack.pop_back();
@@ -119,31 +129,64 @@ bool EditorLayer::DeleteEntity(Application& app,ecs::Entity e){
 }
 ecs::Entity EditorLayer::DuplicateEntity(Application& app,ecs::Entity source){
     if(app.IsEditorPlayMode())return {};
-    FinishTransaction(app);if(!app.GetWorld().IsAlive(source))return {};auto values=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),source);
-    auto e=app.CreateEmptyEntity();ecs::ComponentRegistry::Builtins().Restore(app.GetWorld(),e,values);
-    if(auto* id=app.GetWorld().GetComponent<ecs::SceneIdentityComponent>(e))id->value=ecs::NewSceneIdentity();else app.GetWorld().AddComponent<ecs::SceneIdentityComponent>(e);
-    if(auto* tag=app.GetWorld().GetComponent<ecs::TagComponent>(e))tag->name+=" Copy";
-    SelectEntityFromUser(app,e);EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Duplicate entity",before);return e;
+    FinishTransaction(app);auto copy=CaptureCopies(app,source);if(copy.is_null())return {};
+    return CreateCopies(app,std::move(copy["entities"]),copy["active"].get<std::size_t>(),"Duplicate entity");
+}
+nlohmann::json EditorLayer::CaptureCopies(Application& app,ecs::Entity source)const{
+    if(app.IsEditorPlayMode()||!app.GetWorld().IsAlive(source))return {};
+    auto entities=IsSelected(source)?m_Selection.items:std::vector<ecs::Entity>{source};
+    auto values=nlohmann::json::array();std::size_t active=0;
+    for(auto e:entities)if(app.GetWorld().IsAlive(e)){
+        if(e==source)active=values.size();values.push_back(ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),e));
+    }
+    return {{"entities",std::move(values)},{"active",active}};
 }
 bool EditorLayer::CopyEntity(Application& app,ecs::Entity source){
-    if(app.IsEditorPlayMode()||!app.GetWorld().IsAlive(source))return false;
-    m_Clipboard=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),source);m_Clipboard.erase("SceneIdentity");return true;
+    auto copy=CaptureCopies(app,source);if(copy.is_null())return false;m_Clipboard=std::move(copy);return true;
 }
 ecs::Entity EditorLayer::PasteEntity(Application& app){
-    if(app.IsEditorPlayMode()||!m_Clipboard.is_object())return {};
-    FinishTransaction(app);auto e=app.CreateEmptyEntity();
-    try{ecs::ComponentRegistry::Builtins().Restore(app.GetWorld(),e,m_Clipboard);if(!app.GetWorld().HasComponent<ecs::SceneIdentityComponent>(e))app.GetWorld().AddComponent<ecs::SceneIdentityComponent>(e);app.GetWorld().GetComponent<ecs::SceneIdentityComponent>(e)->value=ecs::NewSceneIdentity();}
-    catch(const std::exception& ex){app.DestroySceneEntity(e);m_EditorError=ex.what();return {};}
-    SelectEntityFromUser(app,e);app.NotifyEditorMutation(e);EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Paste entity",before);return e;
+    if(app.IsEditorPlayMode()||!m_Clipboard.is_object()||!m_Clipboard.contains("entities"))return {};
+    return CreateCopies(app,m_Clipboard["entities"],m_Clipboard["active"].get<std::size_t>(),"Paste entity");
+}
+ecs::Entity EditorLayer::CreateCopies(Application& app,nlohmann::json values,std::size_t active,const std::string& label,bool dragging){
+    if(app.IsEditorPlayMode()||!values.is_array()||values.empty())return {};
+    FinishTransaction(app);
+    EntitySnapshot before;before.world=app.GetWorld().GetIdentity();before.selection=m_Selection;
+    std::unordered_map<std::string,std::string> identities;
+    // Allocate all persistent identities before restoring any components. Only
+    // typed $entity references within this copied set are redirected.
+    for(auto& components:values){
+        const auto id=ecs::NewSceneIdentity();
+        if(components.contains("SceneIdentity"))identities[components["SceneIdentity"]["value"].get<std::string>()]=id;
+        components["SceneIdentity"]={{"value",id}};
+        if(components.contains("Tag"))components["Tag"]["name"]=components["Tag"]["name"].get<std::string>()+" Copy";
+    }
+    auto remap=[&](auto&& self,nlohmann::json& value)->void{
+        if(value.is_object()&&value.contains("$entity")&&scripting::ValidEntityReference(value)){
+            auto found=identities.find(value["$entity"].get<std::string>());if(found!=identities.end())value["$entity"]=found->second;
+        }else if(value.is_structured())for(auto& child:value)self(self,child);
+    };remap(remap,values);
+    SelectionSet copies;
+    try{
+        for(const auto& components:values){
+            const auto e=app.CreateEmptyEntity();EntitySnapshot absent;absent.entity=e;absent.world=e.world;before.related.push_back(std::move(absent));
+            ecs::ComponentRegistry::Builtins().Restore(app.GetWorld(),e,components);copies.Add(e);app.NotifyEditorMutation(e);
+        }
+    }catch(const std::exception& ex){
+        for(auto& item:before.related)app.DestroySceneEntity(item.entity);m_EditorError=ex.what();return {};
+    }
+    copies.active=copies.items[std::min(active,copies.items.size()-1)];copies.anchor=copies.active;
+    m_Selection=std::move(copies);m_PropertyDrafts.clear();m_GameView=false;
+    if(dragging){m_DuplicateDrag=true;BeginTransaction(label,std::move(before));}
+    else CommitUndo(app,label,std::move(before));
+    return m_Selection.active;
 }
 ecs::Entity EditorLayer::BeginDuplicateDrag(Application& app){
     if(app.IsEditorPlayMode()||m_DuplicateDrag||!app.GetWorld().IsAlive(m_Selection.active))return {};
-    FinishTransaction(app);m_DragOriginal=m_Selection.active;
-    auto values=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),m_Selection.active);values.erase("SceneIdentity");
-    auto e=app.CreateEmptyEntity();ecs::ComponentRegistry::Builtins().Restore(app.GetWorld(),e,values);
-    if(!app.GetWorld().HasComponent<ecs::SceneIdentityComponent>(e))app.GetWorld().AddComponent<ecs::SceneIdentityComponent>(e);
-    app.GetWorld().GetComponent<ecs::SceneIdentityComponent>(e)->value=ecs::NewSceneIdentity();
-    SelectEntityFromUser(app,e);m_DuplicateDrag=true;EntitySnapshot before;before.entity=e;before.world=e.world;before.previousSelection=m_DragOriginal;BeginTransaction("Duplicate and move",before);return e;
+    FinishTransaction(app);auto copy=CaptureCopies(app,m_Selection.active);if(copy.is_null())return {};
+    auto result=CreateCopies(app,std::move(copy["entities"]),copy["active"].get<std::size_t>(),"Duplicate and move",true);
+    if(result.IsValid()&&m_GroupTransform){m_GroupTransform->entities=m_Selection.items;m_GroupTransform->before=CaptureSelection(app,true);}
+    return result;
 }
 ecs::Entity EditorLayer::CreatePrimitive(Application& app,const std::string& type){
     if(app.IsEditorPlayMode()||(type!="cube"&&type!="sphere"&&type!="cylinder"&&type!="cone"&&type!="plane"))return {};
@@ -182,6 +225,7 @@ bool EditorLayer::SetProperty(Application& app,ecs::Entity e,ecs::ComponentTypeI
     if(transactional)CommitUndo(app,"Edit property",std::move(before));return true;
 }
 void EditorLayer::EnterRuntime(const ecs::World::CloneMap& mapping){
+    CancelPlacement();m_PlacementCancelled=false;
     ImGuizmo::Enable(false);m_ToolActive=false;m_CancelGizmoUntilRelease=true;
     m_GroupTransform.reset();m_EditHistory=HistoryContext{m_Selection,std::move(m_UndoStack),std::move(m_RedoStack),m_Revision,m_SavedRevision,m_NextRevision,m_ExternalDirty};
     SelectionSet runtime;for(auto e:m_Selection.items)if(auto found=mapping.find(e);found!=mapping.end())runtime.Add(found->second);
@@ -190,6 +234,7 @@ void EditorLayer::EnterRuntime(const ecs::World::CloneMap& mapping){
     m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_GizmoUndoCaptured=false;m_DuplicateDrag=false;m_LightPointerCaptured=false;m_PlaneScaleCaptured=false;
 }
 void EditorLayer::LeaveRuntime(){
+    CancelPlacement();m_PlacementCancelled=false;
     ImGuizmo::Enable(false);m_ToolActive=m_DuplicateDrag=m_LightPointerCaptured=false;m_CancelGizmoUntilRelease=true;
     m_GroupTransform.reset();m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_Transaction.reset();m_PropertyDrafts.clear();m_GizmoUndoCaptured=false;
     if(m_EditHistory){m_Selection=m_EditHistory->selection;m_UndoStack=std::move(m_EditHistory->undo);m_RedoStack=std::move(m_EditHistory->redo);m_Revision=m_EditHistory->revision;m_SavedRevision=m_EditHistory->saved;m_NextRevision=m_EditHistory->next;m_ExternalDirty=m_EditHistory->external;m_EditHistory.reset();}

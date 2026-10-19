@@ -71,7 +71,7 @@ void EditorLayer::DrawInspector(Application& app){
     if(!ImGui::Begin("Inspector",&m_ShowInspector)){ImGui::End();return;}
     auto& world=app.GetWorld();auto e=m_Selection.active;
     if(!world.IsAlive(e)){ImGui::TextUnformatted("No entity selected");ImGui::End();return;}
-    if(m_Selection.items.size()>1){ImGui::Text("%zu entities selected",m_Selection.items.size());ImGui::TextWrapped("Properties below affect only the Active Entity. Use the shared viewport gizmo to transform the group.");}
+    if(m_Selection.items.size()>1){ImGui::Text("%zu entities selected",m_Selection.items.size());ImGui::TextWrapped("Properties below affect only the Active Entity. The shared gizmo transforms the group around its center; Local axes follow the Active Entity.");}
     const auto* tag=world.GetComponent<ecs::TagComponent>(e);if(m_Selection.items.size()>1)ImGui::TextUnformatted("Active Entity:");ImGui::SeparatorText(tag?tag->name.c_str():"Entity");
     if(app.IsEditorPlayMode())ImGui::TextWrapped("Runtime edits are discarded on Stop.");
     ImGui::Combo("Transform precision",&m_TransformPrecision,"Compact\0Precise\0Full Precision (9 significant digits)\0");
