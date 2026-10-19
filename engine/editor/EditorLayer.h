@@ -105,7 +105,7 @@ public:
     void SetLightGizmosVisible(bool v){m_ShowLightGizmos=v;}
     void EnterRuntime(const ecs::World::CloneMap&);
     void LeaveRuntime();
-    void ResetHistory(){CancelPlacement();m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
+    void ResetHistory(){ExitIsolation();CancelPlacement();m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
     void FinishTransaction(Application&);
     void CancelTransaction(Application&);
     bool HasPendingTransaction()const{return m_Transaction.has_value();}
@@ -127,6 +127,19 @@ public:
     bool IsSelected(ecs::Entity e)const{return m_Selection.Contains(e);}
     void PruneSelection(Application&);
     void SelectViewportEntity(Application&,ecs::Entity,bool ctrl,bool shift);
+    bool SaveBookmark(Application&,int slot);
+    bool GoToBookmark(Application&,int slot);
+    bool RenameBookmark(Application&,int slot,const std::string& name);
+    bool DeleteBookmark(Application&,int slot);
+    const SceneBookmarks* GetSceneBookmarks(const Application&)const;
+    bool IsolateSelected(Application&);
+    void ExitIsolation(){m_Isolation.clear();}
+    bool IsIsolationActive()const{return !m_Isolation.empty();}
+    const std::vector<ecs::Entity>& IsolationEntities()const{return m_Isolation;}
+    bool EditorEntityVisible(const Application&,ecs::Entity)const;
+    bool CanViewportSelect(const Application&,ecs::Entity)const;
+    SelectionFilters& GetSelectionFilters(){return m_SelectionFilters;}
+    ecs::Entity PickViewportMesh(Application&,ecs::Vec3 origin,ecs::Vec3 direction,float distance)const;
     void SelectHierarchyEntity(Application&,ecs::Entity,bool ctrl,bool shift,const std::vector<ecs::Entity>& order);
     void SelectAllEntities(Application&,const std::vector<ecs::Entity>& order);
     bool DeleteSelection(Application&);
@@ -207,6 +220,12 @@ public:
     bool IsPointInsideViewport(double x, double y) const;
 
 private:
+    std::string BookmarkSceneKey(const Application&)const;
+    bool DrawViewportTools(Application&);
+    void HandleViewportToolShortcuts(Application&);
+    std::map<std::string,SceneBookmarks> m_Bookmarks;
+    SelectionFilters m_SelectionFilters;
+    std::vector<ecs::Entity> m_Isolation;
     void DrawProjectSettings(Application&);
     bool m_ShowProjectSettings=false,m_FocusProjectSettings=false;
     int m_ProjectSettingsCategory=0;

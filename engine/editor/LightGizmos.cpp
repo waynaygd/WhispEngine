@@ -81,7 +81,7 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
     auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),size.x/size.y,app.GetCameraNearPlane(),app.GetCameraFarPlane());
     auto& world=app.GetWorld();std::vector<Occluder> occluders;
     if(app.GetResourceManager())world.ForEach<ecs::TransformComponent,ecs::MeshRendererComponent>([&](ecs::Entity e,auto& t,auto& m){
-        if(!m.visible)return;auto mesh=app.GetResourceManager()->Get<MeshResource>(m.meshPath);if(!mesh||!mesh->IsLoaded()||mesh->GetData().meshData.vertices.empty())return;
+        if(!m.visible||!EditorEntityVisible(app,e))return;auto mesh=app.GetResourceManager()->Get<MeshResource>(m.meshPath);if(!mesh||!mesh->IsLoaded()||mesh->GetData().meshData.vertices.empty())return;
         auto pose=app.GetRenderInterpolation().Resolve(e,t);auto bounds=Bounds(mesh,pose);
         if(bounds.inverse!=std::array<float,12>{})occluders.push_back(std::move(bounds));
     });
@@ -98,6 +98,7 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
     };
     ecs::Entity hit;float hitZ=INFINITY;
     world.ForEach<ecs::TransformComponent>([&](ecs::Entity entity,auto& transform){
+        if(!EditorEntityVisible(app,entity))return;
         LightType type;auto* light=ecs::GetLightParameters(world,entity,&type);if(!light)return;
         auto pose=app.GetRenderInterpolation().Resolve(entity,transform);auto q=ProjectGizmo(pose.position,camera);const bool selected=IsSelected(entity);if(!q&&!selected)return;
         xraySegments=m_LightXrayMode==2||(m_LightXrayMode==1&&selected);
@@ -108,7 +109,7 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
         if(type==LightType::Directional){for(int j=0;j<8;++j){float a=j*.785398f;draw->AddLine(ImVec2(icon.x+9*std::cos(a),icon.y+9*std::sin(a)),ImVec2(icon.x+13*std::cos(a),icon.y+13*std::sin(a)),color,1.5f);}}
         else if(type==LightType::Point){draw->AddLine(ImVec2(icon.x-4,icon.y+8),ImVec2(icon.x+4,icon.y+8),color,2);}
         else {draw->AddTriangle(ImVec2(icon.x-6,icon.y-5),ImVec2(icon.x+6,icon.y-5),ImVec2(icon.x,icon.y+6),color,1.5f);}
-        auto mouse=ImGui::GetMousePos();if((!iconHidden||selected&&xraySegments)&&HitLightIcon(mouse.x-origin.x,mouse.y-origin.y,(*q)[0],(*q)[1],size.x,size.y)&&(*q)[2]<hitZ){hit=entity;hitZ=(*q)[2];}
+        auto mouse=ImGui::GetMousePos();if(CanViewportSelect(app,entity)&&(!iconHidden||selected&&xraySegments)&&HitLightIcon(mouse.x-origin.x,mouse.y-origin.y,(*q)[0],(*q)[1],size.x,size.y)&&(*q)[2]<hitZ){hit=entity;hitZ=(*q)[2];}
         }
         if(!selected)return;
         auto d=ecs::LightDirection(pose);V right=std::abs(d.y)<.95f?Cross({0,1,0},d):Cross({1,0,0},d);right=Scale(right,1/std::sqrt(Dot(right,right)));V up=Cross(d,right);
@@ -155,6 +156,7 @@ void EditorLayer::DrawPlayerStartGizmos(Application& app,const ImVec2& origin,co
     auto line=[&](V a,V b,ImU32 color){auto q=ProjectEditorLine(a,b,camera);if(!q)return;ImVec2 x(origin.x+(*q)[0]*size.x,origin.y+(*q)[1]*size.y),y(origin.x+(*q)[2]*size.x,origin.y+(*q)[3]*size.y);draw->AddLine(x,y,IM_COL32(10,15,20,230),4);draw->AddLine(x,y,color,2);};
     ecs::Entity hit;float nearest=INFINITY;const auto mouse=ImGui::GetMousePos();
     app.GetWorld().ForEach<ecs::PlayerStartComponent,ecs::TransformComponent>([&](ecs::Entity e,auto& start,auto& t){
+        if(!EditorEntityVisible(app,e))return;
         const bool selected=IsSelected(e);const ImU32 color=start.enabled?IM_COL32(80,235,255,255):IM_COL32(155,160,165,255);
         const auto half=ecs::PlayerBodyHalfExtents(start);
         const auto center=ecs::PlayerBodyCenter(t.position,half.y),eye=ecs::PlayerEyePosition(center,ecs::PlayerEyeHeight(start),half.y);
@@ -170,7 +172,7 @@ void EditorLayer::DrawPlayerStartGizmos(Application& app,const ImVec2& origin,co
             stroke(ImVec2(p->x,p->y-18),ImVec2(p->x,p->y-9));stroke(ImVec2(p->x-8,p->y-15),ImVec2(p->x+8,p->y-15));stroke(ImVec2(p->x,p->y-9),ImVec2(p->x-6,p->y));stroke(ImVec2(p->x,p->y-9),ImVec2(p->x+6,p->y));
             if(selected)draw->AddText(ImVec2(p->x+12,p->y-28),color,"PlayerStart (feet)");
             auto depth=ProjectGizmo(t.position,camera);
-            if(mouse.x>=p->x-12&&mouse.x<=p->x+12&&mouse.y>=p->y-32&&mouse.y<=p->y+5&&(*depth)[2]<nearest){hit=e;nearest=(*depth)[2];}
+            if(CanViewportSelect(app,e)&&mouse.x>=p->x-12&&mouse.x<=p->x+12&&mouse.y>=p->y-32&&mouse.y<=p->y+5&&(*depth)[2]<nearest){hit=e;nearest=(*depth)[2];}
         }
         if(!selected)return;
         std::array<V,8> corners;auto h=half;
@@ -196,16 +198,11 @@ void EditorLayer::DrawViewportOverlays(Application& app,const ImVec2& origin,con
     if(resources&&!m_PlaneScaleCaptured&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&!m_LightHandleHovered&&!m_LightPointerCaptured&&!m_LightIconClicked&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&(!ImGuizmo::IsOver()||ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
         auto mouse=ImGui::GetMousePos();float x=((mouse.x-origin.x)/size.x*2-1)/camera.projection[0],y=(1-(mouse.y-origin.y)/size.y*2)/camera.projection[5];
         V ray{camera.view[0]*x+camera.view[1]*y+camera.view[2],camera.view[4]*x+camera.view[5]*y+camera.view[6],camera.view[8]*x+camera.view[9]*y+camera.view[10]};ray=Scale(ray,1/std::sqrt(Dot(ray,ray)));
-        float nearest=app.GetCameraFarPlane();ecs::Entity hit;
-        world.ForEach<ecs::TransformComponent,ecs::MeshRendererComponent>([&](ecs::Entity e,auto& t,auto& m){
-            if(!m.visible)return;auto mesh=resources->Get<MeshResource>(m.meshPath);if(!mesh||!mesh->IsLoaded()||mesh->GetData().meshData.vertices.empty())return;
-            auto bounds=Bounds(mesh,app.GetRenderInterpolation().Resolve(e,t));if(bounds.inverse==std::array<float,12>{})return;
-            float distance=HitDistance(app.GetCameraPosition(),ray,bounds,nearest);if(distance<nearest){nearest=distance;hit=e;}
-        });
+        const auto hit=PickViewportMesh(app,app.GetCameraPosition(),ray,app.GetCameraFarPlane());
         FinishTransaction(app);SelectViewportEntity(app,hit,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift);
     }
     if(m_GameView){draw->PopClipRect();return;}
-    for(auto selected:m_Selection.items)if(resources&&world.IsAlive(selected))if(auto* m=world.GetComponent<ecs::MeshRendererComponent>(selected))if(auto* t=world.GetComponent<ecs::TransformComponent>(selected)){
+    for(auto selected:m_Selection.items)if(resources&&world.IsAlive(selected)&&EditorEntityVisible(app,selected))if(auto* m=world.GetComponent<ecs::MeshRendererComponent>(selected))if(auto* t=world.GetComponent<ecs::TransformComponent>(selected)){
         auto mesh=resources->Get<MeshResource>(m->meshPath);if(mesh&&mesh->IsLoaded()&&!mesh->GetData().meshData.vertices.empty()){
             auto pose=app.GetRenderInterpolation().Resolve(selected,*t);auto bounds=Bounds(mesh,pose);std::array<float,16> model;ecs::BuildRenderModelMatrix(model.data(),pose);V corners[8];
             for(int i=0;i<8;++i){V p{i&1?bounds.max.x:bounds.min.x,i&2?bounds.max.y:bounds.min.y,i&4?bounds.max.z:bounds.min.z};corners[i]={model[0]*p.x+model[4]*p.y+model[8]*p.z+model[12],model[1]*p.x+model[5]*p.y+model[9]*p.z+model[13],model[2]*p.x+model[6]*p.y+model[10]*p.z+model[14]};}
@@ -217,12 +214,23 @@ void EditorLayer::DrawViewportOverlays(Application& app,const ImVec2& origin,con
 }
 
 namespace editor {
+ecs::Entity EditorLayer::PickViewportMesh(Application& app,V origin,V direction,float maximum)const{
+    auto* resources=app.GetResourceManager();if(!resources)return {};
+    const float length=std::sqrt(Dot(direction,direction));if(!std::isfinite(length)||length<1e-10f||!std::isfinite(maximum)||maximum<=0)return {};
+    direction=Scale(direction,1/length);ecs::Entity hit;
+    app.GetWorld().ForEach<ecs::TransformComponent,ecs::MeshRendererComponent>([&](ecs::Entity e,auto& t,auto& m){
+        if(!m.visible||!CanViewportSelect(app,e))return;
+        auto mesh=resources->Get<MeshResource>(m.meshPath);if(!mesh||!mesh->IsLoaded()||mesh->GetData().meshData.vertices.empty())return;
+        auto bounds=Bounds(mesh,app.GetRenderInterpolation().Resolve(e,t));if(bounds.inverse==std::array<float,12>{})return;
+        const float distance=HitDistance(origin,direction,bounds,maximum);if(distance<maximum){maximum=distance;hit=e;}
+    });return hit;
+}
 std::optional<EditorLayer::SurfaceHit> EditorLayer::RaycastPlacement(Application& app,V origin,V direction,float maximum,const std::vector<ecs::Entity>& ignore)const{
     auto* resources=app.GetResourceManager();if(!resources||!std::isfinite(maximum)||maximum<=0)return {};
     const float length=std::sqrt(Dot(direction,direction));if(!std::isfinite(length)||length<1e-10f)return {};direction=Scale(direction,1/length);
     std::optional<SurfaceHit> hit;
     app.GetWorld().ForEach<ecs::TransformComponent,ecs::MeshRendererComponent>([&](ecs::Entity e,auto& t,auto& m){
-        if(!m.visible||std::find(ignore.begin(),ignore.end(),e)!=ignore.end())return;
+        if(!m.visible||!EditorEntityVisible(app,e)||std::find(ignore.begin(),ignore.end(),e)!=ignore.end())return;
         auto mesh=resources->Get<MeshResource>(m.meshPath);if(!mesh||!mesh->IsLoaded()||mesh->GetData().placeholder||mesh->GetData().meshData.vertices.empty())return;
         const auto bounds=Bounds(mesh,ecs::RenderPose::From(t));if(bounds.inverse==std::array<float,12>{})return;
         V normal;const float distance=HitDistance(origin,direction,bounds,maximum,&normal);
@@ -237,7 +245,7 @@ ecs::Vec3 EditorLayer::PlacementPoint(Application& app,float u,float v)const{
     V ray{camera.view[0]*x+camera.view[1]*y+camera.view[2],camera.view[4]*x+camera.view[5]*y+camera.view[6],camera.view[8]*x+camera.view[9]*y+camera.view[10]};ray=Scale(ray,1/std::sqrt(Dot(ray,ray)));
     float nearest=app.GetCameraFarPlane();bool hit=false;
     if(auto* resources=app.GetResourceManager())app.GetWorld().ForEach<ecs::TransformComponent,ecs::MeshRendererComponent>([&](ecs::Entity e,auto& t,auto& m){
-        if(!m.visible)return;auto mesh=resources->Get<MeshResource>(m.meshPath);if(!mesh||!mesh->IsLoaded()||mesh->GetData().meshData.vertices.empty())return;
+        if(!m.visible||!EditorEntityVisible(app,e))return;auto mesh=resources->Get<MeshResource>(m.meshPath);if(!mesh||!mesh->IsLoaded()||mesh->GetData().meshData.vertices.empty())return;
         auto bounds=Bounds(mesh,app.GetRenderInterpolation().Resolve(e,t));if(bounds.inverse==std::array<float,12>{})return;
         float distance=HitDistance(eye,ray,bounds,nearest);if(distance>app.GetCameraNearPlane()&&distance<nearest){nearest=distance;hit=true;}
     });

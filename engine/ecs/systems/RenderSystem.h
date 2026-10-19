@@ -40,6 +40,11 @@ struct TransformComponent;
 class RenderSystem final : public ISystem
 {
 public:
+    // A transient editor view mask. Never changes ECS/runtime visibility.
+    void SetEditorIsolation(const std::vector<Entity>& entities){
+        if(entities==m_EditorIsolation)return;m_EditorIsolation=entities;
+        m_EditorIsolated.clear();m_EditorIsolated.insert(entities.begin(),entities.end());
+    }
     void SetPlacementPreview(const std::string& key,const TransformComponent& transform){m_PlacementMesh=key;m_PlacementTransform=transform;}
     void SetViewportUnlit(bool value){m_ViewportUnlit=value;}
     bool IsViewportUnlit()const{return m_ViewportUnlit;}
@@ -75,6 +80,8 @@ public:
     void ReleaseGpuResources();
 
 private:
+    std::vector<Entity> m_EditorIsolation;
+    std::unordered_set<Entity,EntityHash> m_EditorIsolated;
     std::string m_PlacementMesh;
     TransformComponent m_PlacementTransform;
     bool m_TraceMaterials=false;

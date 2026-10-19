@@ -55,6 +55,7 @@ add_library(Engine
   editor/EditorLayer.cpp
   editor/EditorProject.cpp
   editor/EditorProjectSettings.cpp
+  editor/EditorQualityOfLife.cpp
   editor/EditorTransactions.cpp
   editor/EditorSelection.cpp
   editor/EditorGroupTransform.cpp

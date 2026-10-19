@@ -49,7 +49,7 @@ ecs::Entity EditorLayer::RestoreSnapshot(Application& app,const EntitySnapshot& 
                 const auto& id=snapshot.components.at("SceneIdentity").at("value");
                 for(auto other:world.Entities())if(other!=entity)if(auto* c=world.GetComponent<ecs::SceneIdentityComponent>(other))if(c->value==id.get<std::string>())throw std::runtime_error("Undo scene identity conflicts with another entity");
             }
-            if(!world.IsAlive(entity)){auto old=entity;entity=app.CreateEmptyEntity();(*remapped)[old]=entity;RemapHistory(old,entity);if(inverse)inverse->entity=entity;}
+            if(!world.IsAlive(entity)){auto old=entity;entity=app.CreateEmptyEntity();if(IsIsolationActive())m_Isolation.push_back(entity);(*remapped)[old]=entity;RemapHistory(old,entity);if(inverse)inverse->entity=entity;}
             ecs::ComponentRegistry::Builtins().Restore(world,entity,snapshot.components);app.NotifyEditorMutation(entity);m_Selection.active=entity;
         }
     }
@@ -105,6 +105,7 @@ void EditorLayer::Redo(Application& app){
     catch(const std::exception& e){m_EditorError=e.what();Logger::Get().Error(m_EditorError);m_RedoStack.push_back(std::move(record));}
 }
 void EditorLayer::SelectEntityFromUser(Application& app,ecs::Entity e){
+    if(IsIsolationActive()&&app.GetWorld().IsAlive(e)&&!EditorEntityVisible(app,e))m_Isolation.push_back(e);
     SelectEntity(e);
     if(!app.IsEditorPlayMode()&&app.GetWorld().IsAlive(e))m_GameView=false;
 }
@@ -175,6 +176,7 @@ ecs::Entity EditorLayer::CreateCopies(Application& app,nlohmann::json values,std
     }catch(const std::exception& ex){
         for(auto& item:before.related)app.DestroySceneEntity(item.entity);m_EditorError=ex.what();return {};
     }
+    if(IsIsolationActive())for(auto e:copies.items)m_Isolation.push_back(e);
     copies.active=copies.items[std::min(active,copies.items.size()-1)];copies.anchor=copies.active;
     m_Selection=std::move(copies);m_PropertyDrafts.clear();m_GameView=false;
     if(dragging){m_DuplicateDrag=true;BeginTransaction(label,std::move(before));}

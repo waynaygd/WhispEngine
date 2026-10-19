@@ -341,7 +341,7 @@ namespace ecs {
                         TransformComponent& transform,
                         MeshRendererComponent& meshRenderer)
                     {
-                        if (!meshRenderer.visible)
+                        if (!meshRenderer.visible||(!m_EditorIsolated.empty()&&!m_EditorIsolated.contains(entity)))
                             return;
 
                         const auto key=AssetPaths::NormalizeAssetKey(meshRenderer.meshPath);
@@ -494,6 +494,7 @@ namespace ecs {
             world.ForEach<TransformComponent, ColliderComponent>(
                 [&](Entity entity, TransformComponent& transform, ColliderComponent& collider)
                 {
+                    if(!m_EditorIsolated.empty()&&!m_EditorIsolated.contains(entity))return;
                     float mvp[16];
                     RenderPose debugTransform = m_Interpolation && !m_PhysicsDebugPose ? m_Interpolation->Resolve(entity, transform) : RenderPose::From(transform);
                     debugTransform.position.x += collider.offset.x;

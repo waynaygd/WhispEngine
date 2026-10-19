@@ -2,7 +2,7 @@
 #include <imgui.h>
 #include <algorithm>
 namespace editor {
-// ImGui's bundled font is used; no platform font paths or additional font assets.
+// The bundled font keeps the editor style; the UI backend supplies missing glyphs.
 inline void ApplyEditorTheme(float dpi){
     dpi=std::clamp(dpi,.75f,3.f);
     ImGui::GetStyle()=ImGuiStyle{};ImGui::StyleColorsDark();auto& s=ImGui::GetStyle();

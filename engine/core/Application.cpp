@@ -1603,6 +1603,7 @@ int Application::Run()
                 }
 
                 if(m_RenderSystem){
+                    m_RenderSystem->SetEditorIsolation(!IsEditorPlayMode()&&wc.editorUiAvailable?m_EditorLayer.IsolationEntities():std::vector<ecs::Entity>{});
                     const auto& preview=m_EditorLayer.GetPlacementPreview();
                     m_RenderSystem->SetPlacementPreview(!IsEditorPlayMode()&&wc.editorUiAvailable&&preview.active&&preview.ready?preview.key:"",preview.transform);
                 }

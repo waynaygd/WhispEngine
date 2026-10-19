@@ -483,6 +483,7 @@ bool EditorLayer::BlocksGameplayInput()const{
 
 void EditorLayer::HandleEditorShortcuts(Application& app){
     const auto& io=ImGui::GetIO();if(io.WantTextInput||m_ModalActive||m_EscapeConsumed)return;
+    HandleViewportToolShortcuts(app);
     // Asset file shortcuts are handled by the browser after its widgets. Never
     // let a Delete intended for that window reach the entity command path.
     if(AssetBrowserOwnsKeyboard()&&(ImGui::IsKeyPressed(ImGuiKey_Delete,false)||ImGui::IsKeyPressed(ImGuiKey_F2,false)))return;
@@ -595,7 +596,9 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     if(!maximized){
     DrawViewportCreateMenu(app);
     ImGui::SameLine();DrawPlacementMenu(app);
+    ImGui::SameLine();DrawViewportTools(app);
     ImGui::SameLine();
+    if(ImGui::GetContentRegionAvail().x<370*ImGui::GetStyle().FontScaleDpi)ImGui::NewLine();
     if (ImGui::Button(playMode ? "Stop" : "Play"))
         app.SetEditorPlayMode(!playMode);
     ImGui::SameLine();
@@ -604,7 +607,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     int shading=app.IsViewportUnlit()?1:0;
     if(ImGui::Combo("##ViewportShading",&shading,"Lit\0Unlit\0"))app.SetViewportUnlit(shading==1);
     if(!playMode){
-        if(ImGui::GetWindowWidth()>520*ImGui::GetStyle().FontScaleDpi)ImGui::SameLine();
+        ImGui::SameLine();if(ImGui::GetContentRegionAvail().x<ImGui::CalcTextSize("Game View (G)").x+ImGui::GetFrameHeight()+ImGui::GetStyle().ItemSpacing.x)ImGui::NewLine();
         ImGui::Checkbox("Game View (G)",&m_GameView);
     }
 
@@ -661,6 +664,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
         ImGui::SetCursorScreenPos(ImVec2(contentMin.x+8,contentMin.y+8));
         if(DrawViewportCreateMenu(app))m_ViewportHovered=false;
         ImGui::SameLine();if(DrawPlacementMenu(app))m_ViewportHovered=false;
+        ImGui::SameLine();if(DrawViewportTools(app))m_ViewportHovered=false;
     }
     if(m_ViewportHovered&&ImGui::IsMouseClicked(1))ImGui::SetWindowFocus();
     if(m_ViewportHovered&&ImGui::IsMouseClicked(0))ImGui::SetWindowFocus();
@@ -788,6 +792,7 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
     // shared handle. Snap remains controlled by the existing toolbar settings.
     if((ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&ImGui::IsMouseClicked(0)&&!ImGuizmo::IsUsing())return;
     if(m_ModalActive){if(m_GizmoUndoCaptured)CancelTransaction(app);m_GizmoUndoCaptured=false;m_CancelGizmoUntilRelease=true;ImGuizmo::Enable(false);return;}
+    if(std::any_of(m_Selection.items.begin(),m_Selection.items.end(),[&](auto e){return !EditorEntityVisible(app,e);}))return;
     if((app.IsCameraControlActive()||ImGui::IsMouseDown(1))&&!ImGuizmo::IsUsing())return;
     if (app.IsEditorPlayMode() || m_GameView || viewportSize.x <= 1.0f || viewportSize.y <= 1.0f)
         return;

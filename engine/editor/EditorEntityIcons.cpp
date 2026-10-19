@@ -13,7 +13,7 @@ void EditorLayer::DrawEntityIcons(Application& app, const ImVec2& origin, const 
         app.GetCameraVerticalFovRadians(), size.x / size.y, app.GetCameraNearPlane(), app.GetCameraFarPlane());
     std::vector<EntityIconCandidate> icons;
     world.ForEach<ecs::TransformComponent>([&](ecs::Entity entity, const auto& transform) {
-        if (!HasEntityIcon(world, entity)) return;
+        if (!HasEntityIcon(world, entity)||!EditorEntityVisible(app,entity)) return;
         if (auto projected = ProjectGizmo(transform.position, camera)) icons.push_back({entity, *projected});
     });
     std::sort(icons.begin(), icons.end(), NearerEntityIcon);
@@ -40,7 +40,7 @@ void EditorLayer::DrawEntityIcons(Application& app, const ImVec2& origin, const 
         draw->AddLine({p.x-4*dpi,p.y+3*dpi},{p.x,p.y+5*dpi},ink,dpi);
         draw->AddLine({p.x+4*dpi,p.y+3*dpi},{p.x,p.y+5*dpi},ink,dpi);
         draw->AddLine({p.x,p.y},{p.x,p.y+5*dpi},ink,dpi);
-        if (std::abs(mouse.x-p.x) + std::abs(mouse.y-p.y) <= radius) hit = icon.entity;
+        if (CanViewportSelect(app,icon.entity)&&std::abs(mouse.x-p.x) + std::abs(mouse.y-p.y) <= radius) hit = icon.entity;
     }
     draw->PopClipRect();
     if (!hit.IsValid() || m_SpecialIconHovered || m_LightIconClicked || m_LightHandleHovered

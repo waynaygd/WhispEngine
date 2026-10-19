@@ -4,6 +4,8 @@ namespace editor {
 void EditorLayer::FocusSelection(Application& app){PruneSelection(app);app.FocusEntities(m_Selection.items);}
 void EditorLayer::PruneSelection(Application& app){
     auto& world=app.GetWorld();
+    if(app.IsEditorPlayMode())ExitIsolation();
+    else std::erase_if(m_Isolation,[&](auto e){return !world.IsAlive(e);});
     if(m_GroupTransform){
         const auto& group=*m_GroupTransform;
         const bool alive=group.before.world==world.GetIdentity()&&std::all_of(group.entities.begin(),group.entities.end(),[&](auto e){return world.IsAlive(e)&&world.HasComponent<ecs::TransformComponent>(e);});

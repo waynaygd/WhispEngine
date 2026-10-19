@@ -3,11 +3,27 @@
 #include <filesystem>
 #include <string>
 #include <vector>
+#include <array>
+#include <map>
+#include <optional>
 #include "../render/EditorVisuals.h"
 namespace editor {
 struct RecentProject {std::string name,descriptor;bool operator==(const RecentProject&)const=default;};
 std::filesystem::path PreferencesPath();
+struct CameraBookmark {
+    std::string name;
+    std::array<float,3> position{};
+    float yaw=0,pitch=0;
+    bool operator==(const CameraBookmark&)const=default;
+};
+using SceneBookmarks=std::array<std::optional<CameraBookmark>,9>;
+struct SelectionFilters {
+    bool meshes=true,lights=true,playerStarts=true,fog=true,physics=true,other=true;
+    bool operator==(const SelectionFilters&)const=default;
+};
 struct EditorPreferences {
+    std::map<std::string,SceneBookmarks> bookmarks;
+    SelectionFilters selectionFilters;
     bool hierarchy=true,inspector=true,viewport=true,assets=true,material=false,settings=true,console=true,diagnostics=false;
     EditorVisualSettings visuals;
     std::vector<std::string> recentScenes;

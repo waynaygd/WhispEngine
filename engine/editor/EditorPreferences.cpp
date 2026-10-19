@@ -9,13 +9,30 @@ std::filesystem::path PreferencesPath(){return AssetPaths::GetExecutableDirector
 nlohmann::json VisualsToJson(const EditorVisualSettings& s){return {{"enabled",s.enabled},{"minorSpacing",s.minorSpacing},{"majorSpacing",s.majorSpacing},{"gridOpacity",s.gridOpacity},{"fadeDistance",s.fadeDistance},{"background",int(s.background)},{"solid",s.solid},{"top",s.top},{"horizon",s.horizon},{"bottom",s.bottom},{"skyIntensity",s.skyIntensity},{"gradientBlend",s.gradientBlend},{"skyRotation",s.skyRotation},{"cubemap",s.cubemap}};}
 nlohmann::json PreferencesToJson(const EditorPreferences& p){
     nlohmann::json projects=nlohmann::json::array();for(const auto& project:p.recentProjects)projects.push_back({{"name",project.name},{"descriptor",project.descriptor}});
-    return {{"recentProjects",projects},{"recentScenes",p.recentScenes},{"assetGrid",p.assetGrid},{"projectAssets",p.projectAssets},{"assetCardSize",p.assetCardSize},{"backgroundOverride",p.backgroundOverride},{"projectileTestInput",p.projectileTestInput},{"visuals",VisualsToJson(p.visuals)},{"version",1},{"panels",{{"hierarchy",p.hierarchy},{"inspector",p.inspector},{"viewport",p.viewport},{"assets",p.assets},{"material",p.material},{"settings",p.settings},{"console",p.console},{"diagnostics",p.diagnostics},{"visuals",p.visualPanel}}},
+    nlohmann::json result={{"recentProjects",projects},{"recentScenes",p.recentScenes},{"assetGrid",p.assetGrid},{"projectAssets",p.projectAssets},{"assetCardSize",p.assetCardSize},{"backgroundOverride",p.backgroundOverride},{"projectileTestInput",p.projectileTestInput},{"visuals",VisualsToJson(p.visuals)},{"version",1},{"panels",{{"hierarchy",p.hierarchy},{"inspector",p.inspector},{"viewport",p.viewport},{"assets",p.assets},{"material",p.material},{"settings",p.settings},{"console",p.console},{"diagnostics",p.diagnostics},{"visuals",p.visualPanel}}},
             {"physicsStress",p.physicsStress},{"rotationSnapping",p.rotationSnapping},{"transformPrecision",p.transformPrecision},{"lightXrayMode",p.lightXrayMode},{"grid",p.grid},{"lightGizmos",p.lightGizmos},{"xray",p.xray},{"snapping",p.snapping},{"operation",p.operation},{"space",p.space},
             {"surfaceSnap",p.surfaceSnap},{"alignToNormal",p.alignToNormal},{"translationSnap",p.translationSnap},{"rotationSnap",p.rotationSnap},{"scaleSnap",p.scaleSnap},{"cameraSpeed",p.cameraSpeed},{"cameraSensitivity",p.cameraSensitivity}};
+    auto bookmarks=nlohmann::json::object();
+    for(const auto& [scene,slots]:p.bookmarks){auto values=nlohmann::json::array();for(const auto& slot:slots){if(slot)values.push_back({{"name",slot->name},{"position",slot->position},{"yaw",slot->yaw},{"pitch",slot->pitch}});else values.push_back(nullptr);}bookmarks[scene]=std::move(values);}
+    result["bookmarks"]=std::move(bookmarks);
+    const auto& f=p.selectionFilters;result["selectionFilters"]={{"meshes",f.meshes},{"lights",f.lights},{"playerStarts",f.playerStarts},{"fog",f.fog},{"physics",f.physics},{"other",f.other}};
+    return result;
 }
 EditorPreferences PreferencesFromJson(const nlohmann::json& j){
     // Unavailable recent descriptors remain visible; they never prevent startup.
     if(!j.is_object()||j.value("version",0)!=1)throw std::runtime_error("Unsupported editor preferences schema");EditorPreferences p;
+    if(j.contains("selectionFilters")){const auto& f=j.at("selectionFilters");auto& v=p.selectionFilters;v.meshes=f.value("meshes",true);v.lights=f.value("lights",true);v.playerStarts=f.value("playerStarts",true);v.fog=f.value("fog",true);v.physics=f.value("physics",true);v.other=f.value("other",true);}
+    // One damaged bookmark must not discard other views or preferences.
+    if(j.contains("bookmarks")&&j["bookmarks"].is_object())for(const auto& [scene,values]:j["bookmarks"].items()){
+        if(scene.size()>32768||!std::filesystem::u8path(scene).is_absolute()||!values.is_array())continue;
+        SceneBookmarks slots{};bool any=false;
+        for(std::size_t i=0;i<std::min(values.size(),slots.size());++i){if(values[i].is_null())continue;try{
+            const auto& v=values[i];CameraBookmark b{v.at("name").get<std::string>(),v.at("position").get<std::array<float,3>>(),v.at("yaw").get<float>(),v.at("pitch").get<float>()};
+            if(b.name.empty()||b.name.size()>128||!std::isfinite(b.yaw)||!std::isfinite(b.pitch)||std::abs(b.pitch)>1.553344f||std::any_of(b.position.begin(),b.position.end(),[](float x){return !std::isfinite(x);}))continue;
+            slots[i]=std::move(b);any=true;
+        }catch(...){}}
+        if(any)p.bookmarks.emplace(scene,std::move(slots));
+    }
     if(j.contains("panels")){auto& a=j.at("panels");p.hierarchy=a.value("hierarchy",p.hierarchy);p.inspector=a.value("inspector",p.inspector);p.viewport=a.value("viewport",p.viewport);p.assets=a.value("assets",p.assets);p.material=a.value("material",p.material);p.settings=a.value("settings",p.settings);p.console=a.value("console",p.console);p.diagnostics=a.value("diagnostics",p.diagnostics);p.visualPanel=a.value("visuals",p.visualPanel);}
     if(j.contains("recentProjects")&&j.at("recentProjects").is_array()){for(const auto& item:j.at("recentProjects")){try{auto name=item.at("name").get<std::string>(),path=item.at("descriptor").get<std::string>();if(!name.empty()&&name.size()<241&&path.size()<32768&&std::filesystem::u8path(path).is_absolute()&&p.recentProjects.size()<12)p.recentProjects.push_back({name,path});}catch(...){}}}
     if(j.contains("recentScenes")){for(const auto& item:j.at("recentScenes")){auto key=item.get<std::string>();if(!ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::None)||std::filesystem::u8path(key).extension()!=".json")throw std::runtime_error("Invalid recent scene key");if(std::find(p.recentScenes.begin(),p.recentScenes.end(),key)==p.recentScenes.end()&&p.recentScenes.size()<12)p.recentScenes.push_back(key);}}

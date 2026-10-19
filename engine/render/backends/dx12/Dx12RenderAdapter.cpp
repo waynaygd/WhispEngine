@@ -1185,6 +1185,20 @@ bool Dx12RenderAdapter::InitializeEditorUi(IWindow* window)
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
+    // Keep the bundled editor face; fill its missing Cyrillic glyphs from the
+    // Windows monospace font. No new redistributable font dependency.
+    io.Fonts->AddFontDefault();
+    wchar_t windowsDirectory[MAX_PATH]{};
+    if(GetWindowsDirectoryW(windowsDirectory,MAX_PATH)){
+        const auto font=std::filesystem::path(windowsDirectory)/"Fonts"/"consola.ttf";
+        if(std::filesystem::is_regular_file(font)){
+            static const ImWchar cyrillic[]={0x0400,0x052f,0};
+            ImFontConfig config;config.MergeMode=true;
+            io.Fonts->AddFontFromFileTTF(AssetPaths::ToUtf8String(font).c_str(),16.f,&config,cyrillic);
+        }
+    }
+
+
     float dpiX=1,dpiY=1;glfwGetWindowContentScale(glfwWin->GetGlfwHandle(),&dpiX,&dpiY);
     m_EditorUiWindow=glfwWin->GetGlfwHandle();m_EditorUiScale=(std::max)(dpiX,dpiY);editor::ApplyEditorTheme(m_EditorUiScale);
 
