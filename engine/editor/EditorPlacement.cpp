@@ -7,6 +7,7 @@
 #include "../scripting/Prefab.h"
 #include "../scene/SceneSerializer.h"
 #include <imgui.h>
+#include <ImGuizmo.h>
 #include <imgui_internal.h>
 #include <cstring>
 namespace editor {
@@ -34,16 +35,16 @@ const EditorLayer::PlacementPreview& EditorLayer::UpdatePlacementPreview(Applica
     if(resource->IsFailed()){preview.status=resource->GetErrorMessage();return preview;}
     const auto& mesh=resource->GetData();
     if(!resource->IsLoaded()||mesh.placeholder||mesh.meshData.vertices.empty()||mesh.meshData.indices.empty()){preview.status="Model has no usable geometry";return preview;}
-    PositionPlacement(app,u,v,Bounds(resource),{});
+    PositionPlacement(app,u,v,Bounds(resource),{},[&](const auto& visit){for(const auto& vertex:mesh.meshData.vertices)visit({vertex.position[0],vertex.position[1],vertex.position[2]});});
     if(preview.ready)preview.items.push_back({key,preview.transform});
     return preview;
 }
-bool EditorLayer::PositionPlacement(Application& app,float u,float v,const PlacementBounds& bounds,const ecs::TransformComponent& base){
-    auto& preview=m_PlacementPreview;
+bool EditorLayer::PositionPlacement(Application& app,float u,float v,const PlacementBounds& bounds,const ecs::TransformComponent& base,const PlacementPoints& geometry,const std::vector<ecs::Entity>& ignore,PlacementPreview* output){
+    auto& preview=output?*output:m_PlacementPreview;
     const auto eye=app.GetCameraPosition();const auto camera=GizmoCamera(eye,app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),float(std::max(1,m_ViewportPixelWidth))/std::max(1,m_ViewportPixelHeight),app.GetCameraNearPlane(),app.GetCameraFarPlane());
     float x=(std::clamp(u,0.f,1.f)*2-1)/camera.projection[0],y=(1-std::clamp(v,0.f,1.f)*2)/camera.projection[5];
     V ray{camera.view[0]*x+camera.view[1]*y+camera.view[2],camera.view[4]*x+camera.view[5]*y+camera.view[6],camera.view[8]*x+camera.view[9]*y+camera.view[10]};ray=Scale(ray,1/std::sqrt(Dot(ray,ray)));
-    auto hit=m_SurfaceSnap?RaycastPlacement(app,eye,ray,app.GetCameraFarPlane()):std::nullopt;
+    auto hit=m_SurfaceSnap?RaycastPlacement(app,eye,ray,app.GetCameraFarPlane(),ignore):std::nullopt;
     V normal{0,1,0},contact;bool gridApplied=false;
     if(hit){
         preview.surface=true;normal=hit->normal;contact=hit->position;preview.status="Surface: exact Mesh triangles";
@@ -51,11 +52,12 @@ bool EditorLayer::PositionPlacement(Application& app,float u,float v,const Place
             V snapped{std::round(contact.x/m_SnapTranslation)*m_SnapTranslation,std::round(contact.y/m_SnapTranslation)*m_SnapTranslation,std::round(contact.z/m_SnapTranslation)*m_SnapTranslation};
             snapped=Add(snapped,Scale(normal,Dot(normal,Add(contact,Scale(snapped,-1)))));
             // Keep the snapped contact on real triangles, including small/edge faces.
-            auto snappedHit=RaycastPlacement(app,Add(snapped,Scale(normal,.01f)),Scale(normal,-1),.02f);
+            auto snappedHit=RaycastPlacement(app,Add(snapped,Scale(normal,.01f)),Scale(normal,-1),.02f,ignore);
             if(snappedHit){contact=snappedHit->position;normal=snappedHit->normal;gridApplied=true;}
             else preview.status+=" (grid point outside surface; contact retained)";
         }
     }else{
+        if(output)return false; // A Move gesture without a surface keeps ordinary Gizmo movement.
         float plane=std::abs(ray.y)>1e-6f?-eye.y/ray.y:-1;
         const bool ground=plane>app.GetCameraNearPlane()&&plane<app.GetCameraFarPlane();
         const float distance=ground?plane:std::min(10.f,app.GetCameraFarPlane()*.5f);contact=Add(eye,Scale(ray,distance));
@@ -63,7 +65,8 @@ bool EditorLayer::PositionPlacement(Application& app,float u,float v,const Place
         if(m_Snapping){contact={std::round(contact.x/m_SnapTranslation)*m_SnapTranslation,std::round(contact.y/m_SnapTranslation)*m_SnapTranslation,std::round(contact.z/m_SnapTranslation)*m_SnapTranslation};gridApplied=true;}
     }
     if(gridApplied)preview.status+=" / Grid Snap";
-    preview.transform=ContactPlacement(bounds,base,contact,normal,m_AlignToNormal&&preview.surface);
+    preview.transform=ContactPlacement(bounds,base,contact,normal,m_AlignToNormal&&preview.surface,preview.surface?m_SurfaceOffset:0,preview.surface?m_SurfaceRotationOffset:0,geometry);
+    if(preview.surface)preview.status+=geometry?" / vertex contact":" / bounds contact";
     preview.ready=ValidGroupSource(preview.transform);if(!preview.ready)preview.status="Placement Transform exceeds editor limits";
     return preview.ready;
 }
@@ -117,7 +120,8 @@ const EditorLayer::PlacementPreview& EditorLayer::UpdatePrefabPlacementPreview(A
             }
             cache.bounds=bounds;
         }
-        if(cache.hasBounds&&PositionPlacement(app,u,v,cache.bounds,cache.root)){
+        PlacementPoints geometry=[&](const auto& visit){for(const auto& part:cache.parts)if(part.usable){auto mesh=resources->Get<MeshResource>(part.mesh);if(!mesh||!mesh->IsLoaded()||mesh->GetVersion()!=part.version)continue;const auto matrix=TransformMatrix(part.relative);for(const auto& vertex:mesh->GetData().meshData.vertices)visit(PlacementTransformPoint(matrix,{vertex.position[0],vertex.position[1],vertex.position[2]}));}};
+        if(cache.hasBounds&&PositionPlacement(app,u,v,cache.bounds,cache.root,geometry)){
             const auto rootMatrix=TransformMatrix(preview.transform);
             // Same checked TRS composition used by World hierarchy; never draw a
             // distorted approximation of a graph that could not be instantiated.
@@ -161,11 +165,13 @@ bool EditorLayer::DropSelectionToFloor(Application& app){
     for(auto e:app.GetWorld().HierarchyRoots(m_Selection.items))if(app.GetWorld().HasComponent<ecs::TransformComponent>(e)){
         auto absolute=app.GetWorld().WorldTransform(e);auto* t=&absolute;
         std::vector<V> corners;bool unavailable=false;
-        for(auto descendant:app.GetWorld().Subtree(e))if(auto* renderer=app.GetWorld().GetComponent<ecs::MeshRendererComponent>(descendant)){
+        for(auto descendant:app.GetWorld().Subtree(e))if(auto* renderer=app.GetWorld().GetComponent<ecs::MeshRendererComponent>(descendant);renderer&&renderer->visible){
             auto mesh=resources->Get<MeshResource>(renderer->meshPath);
             if(!mesh){(void)resources->LoadAsync<MeshResource>(renderer->meshPath);unavailable=true;continue;}
             if(!mesh->IsLoaded()||mesh->GetData().placeholder){unavailable=true;continue;}
-            auto values=PlacementCorners(Bounds(mesh),app.GetWorld().WorldTransform(descendant));corners.insert(corners.end(),values.begin(),values.end());
+            const auto pose=app.GetWorld().WorldTransform(descendant);const auto matrix=TransformMatrix(pose);
+            if(!mesh->GetData().meshData.vertices.empty())for(const auto& vertex:mesh->GetData().meshData.vertices)corners.push_back(PlacementTransformPoint(matrix,{vertex.position[0],vertex.position[1],vertex.position[2]}));
+            else {auto values=PlacementCorners(Bounds(mesh),pose);corners.insert(corners.end(),values.begin(),values.end());}
         }
         if(unavailable){++loading;continue;}
         if(corners.empty()){auto values=PlacementCorners(PlacementBounds{},*t);corners.insert(corners.end(),values.begin(),values.end());}
@@ -174,7 +180,7 @@ bool EditorLayer::DropSelectionToFloor(Application& app){
         auto hit=RaycastPlacement(app,{(lo.x+hi.x)*.5f,lo.y+.001f,(lo.z+hi.z)*.5f},{0,-1,0},2000001.f,ignored);
         if(!hit||hit->normal.y<.05f)continue;
         float support=INFINITY;for(auto p:corners)support=std::min(support,Dot(hit->normal,Add(p,Scale(hit->position,-1))));
-        const float drop=-support/hit->normal.y;if(drop>=-.0001f)continue;
+        const float drop=(m_SurfaceOffset-support)/hit->normal.y;if(std::abs(drop)<.0001f)continue;
         auto target=*t;target.position.y+=drop;
         if(!ValidGroupSource(target))continue;
         EntitySnapshot item;item.entity=e;item.world=e.world;item.alive=true;item.transform=app.GetWorld().LocalTransform(e);item.parent=app.GetWorld().Parent(e);before.related.push_back(std::move(item));changes.push_back({e,target});
@@ -189,7 +195,12 @@ bool EditorLayer::DrawPlacementMenu(Application& app){
     if(ImGui::Button("Placement"))ImGui::OpenPopup("PlacementTools");bool owns=ImGui::IsItemHovered()||ImGui::IsPopupOpen("PlacementTools");
     if(ImGui::BeginPopup("PlacementTools")){
         ImGui::BeginDisabled(app.IsEditorPlayMode());ImGui::Checkbox("Surface Snap",&m_SurfaceSnap);
-        ImGui::BeginDisabled(!m_SurfaceSnap);ImGui::Checkbox("Align to Normal",&m_AlignToNormal);ImGui::EndDisabled();
+        bool surfaceChanged=false;ImGui::BeginDisabled(!m_SurfaceSnap);
+        int orientation=m_AlignToNormal?1:0;if(ImGui::Combo("Orientation",&orientation,"Preserve Rotation\0Align to Normal\0")){m_AlignToNormal=orientation==1;surfaceChanged=true;}
+        ImGui::SetNextItemWidth(140);surfaceChanged|=ImGui::DragFloat("Surface Offset",&m_SurfaceOffset,.01f,-1000,1000,"%.3f",ImGuiSliderFlags_AlwaysClamp);
+        ImGui::SetNextItemWidth(140);surfaceChanged|=ImGui::DragFloat("Rotation Offset (deg)",&m_SurfaceRotationOffset,.5f,-180,180,"%.1f",ImGuiSliderFlags_AlwaysClamp);
+        ImGui::TextDisabled("Move Gizmo: hold S before dragging for Surface Snap.");
+        ImGui::TextDisabled("Vertex Snap takes priority. No surface: ordinary movement.");ImGui::EndDisabled();if(surfaceChanged)PersistPreferences(app);
         ImGui::Checkbox("Grid Snap",&m_Snapping);ImGui::SetNextItemWidth(130);ImGui::DragFloat("Grid step",&m_SnapTranslation,.05f,.001f,1000,"%.3f",ImGuiSliderFlags_AlwaysClamp);
         ImGui::BeginDisabled(HasPendingTransaction()||(!m_EditPivot&&m_Selection.items.size()!=1));ImGui::Checkbox("Edit Pivot",&m_EditPivot);ImGui::EndDisabled();
         ImGui::BeginDisabled(m_Selection.items.size()!=1||HasPendingTransaction());
@@ -233,4 +244,40 @@ void EditorLayer::DrawPlacementTarget(Application& app,const ImVec2& origin,cons
         }ImGui::EndDragDropTarget();
     }
 }
+void EditorLayer::DrawSurfaceMove(Application& app,const ImVec2& origin,const ImVec2& size,bool afterGizmo){
+    const auto& io=ImGui::GetIO();
+    if(app.IsEditorPlayMode()||m_EditPivot||m_VertexSnapEnabled||m_GameView||!m_SurfaceSnap||m_GizmoOperation!=0||m_ModalActive||app.IsCameraControlActive()||ImGui::GetDragDropPayload()||io.KeyAlt||io.KeyCtrl||io.WantTextInput){m_SurfaceMove.reset();return;}
+    auto& world=app.GetWorld();auto* resources=app.GetResourceManager();if(!resources)return;
+    if(m_SurfaceMove&&(m_SurfaceMove->world!=world.GetIdentity()||m_SurfaceMove->roots!=world.HierarchyRoots(m_Selection.items)))m_SurfaceMove.reset();
+    if(!afterGizmo){
+        if(ImGui::IsKeyDown(ImGuiKey_S)&&ImGui::IsMouseClicked(0)&&ImGuizmo::IsOver()&&!m_Selection.items.empty()){
+            SurfaceMoveSession session;session.world=world.GetIdentity();session.roots=world.HierarchyRoots(m_Selection.items);
+            for(auto e:session.roots){const auto t=world.WorldTransform(e);session.originals.push_back(t);const auto p=ecs::PivotPosition(t);session.base.position=Add(session.base.position,p);auto subtree=world.Subtree(e);session.ignored.insert(session.ignored.end(),subtree.begin(),subtree.end());}
+            session.base.position=Scale(session.base.position,1.f/session.roots.size());session.base.rotation=world.WorldTransform(m_Selection.active).rotation;const auto inverseFrame=InverseGroupPivot(session.base);session.bounds={{INFINITY,INFINITY,INFINITY},{-INFINITY,-INFINITY,-INFINITY}};
+            auto include=[&](V p){p=PlacementTransformPoint(inverseFrame,p);auto& b=session.bounds;b.min={std::min(b.min.x,p.x),std::min(b.min.y,p.y),std::min(b.min.z,p.z)};b.max={std::max(b.max.x,p.x),std::max(b.max.y,p.y),std::max(b.max.z,p.z)};};
+            for(auto e:session.ignored)if(auto* renderer=world.GetComponent<ecs::MeshRendererComponent>(e);renderer&&renderer->visible){
+                PrefabPlacementPart part;part.mesh=renderer->meshPath;part.relative=world.WorldTransform(e);auto mesh=resources->Get<MeshResource>(part.mesh);part.owner=mesh;part.version=mesh?mesh->GetVersion():0;part.usable=mesh&&mesh->IsLoaded()&&!mesh->GetData().placeholder&&!mesh->GetData().meshData.vertices.empty();part.bounds=part.usable?Bounds(mesh):PlacementBounds{};
+                for(auto point:PlacementCorners(part.bounds,part.relative))include(point);session.parts.push_back(std::move(part));
+            }
+            if(session.parts.empty())for(auto point:PlacementCorners(PlacementBounds{},session.base))include(point);
+            m_SurfaceMove=std::move(session);
+        }return;
+    }
+    if(!m_SurfaceMove)return;
+    if(!ImGuizmo::IsUsing()){m_SurfaceMove.reset();return;}
+    if(!m_GizmoUndoCaptured||m_DuplicateDrag)return;
+    auto& session=*m_SurfaceMove;const auto inverseFrame=InverseGroupPivot(session.base);
+    PlacementPoints geometry=[&](const auto& visit){for(const auto& part:session.parts){auto mesh=resources->Get<MeshResource>(part.mesh);const auto matrix=TransformMatrix(part.relative);
+        if(part.usable&&mesh&&mesh->GetVersion()==part.version){for(const auto& vertex:mesh->GetData().meshData.vertices)visit(PlacementTransformPoint(inverseFrame,PlacementTransformPoint(matrix,{vertex.position[0],vertex.position[1],vertex.position[2]})));}
+        else for(auto point:PlacementCorners(part.bounds,part.relative))visit(PlacementTransformPoint(inverseFrame,point));
+    }};
+    const auto mouse=ImGui::GetMousePos();PlacementPreview preview;
+    if(!PositionPlacement(app,(mouse.x-origin.x)/size.x,(mouse.y-origin.y)/size.y,session.bounds,session.base,geometry,session.ignored,&preview))return;
+    auto transforms=TransformGroup(session.originals,session.base,TransformMatrix(preview.transform));if(!transforms){m_EditorError="Surface alignment requires unsupported shear";return;}
+    std::vector<std::pair<ecs::Entity,ecs::TransformComponent>> edits;for(std::size_t i=0;i<session.roots.size();++i)edits.emplace_back(session.roots[i],(*transforms)[i]);
+    if(!world.SetWorldTransforms(edits,&m_EditorError))return;for(auto e:session.roots)app.NotifyEditorMutation(e);
+    if(m_GroupTransform){const auto delta=MultiplyMatrix(TransformMatrix(preview.transform),InverseGroupPivot(session.base));m_GroupTransform->current=MultiplyMatrix(delta,TransformMatrix(m_GroupTransform->pivot));}
+    ImGui::GetWindowDrawList()->AddText({origin.x+10,origin.y+size.y-24},IM_COL32(80,235,255,255),"SURFACE MOVE: release confirms; Escape cancels.");
+}
+
 }

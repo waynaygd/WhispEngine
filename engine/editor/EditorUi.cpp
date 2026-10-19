@@ -32,7 +32,7 @@ void EditorLayer::InitializePreferences(Application& app){
     m_Bookmarks=p.bookmarks;m_SelectionFilters=p.selectionFilters;
     m_ShowHierarchy=p.hierarchy;m_ShowInspector=p.inspector;m_ShowViewport=p.viewport;m_ShowAssetBrowser=p.assets;m_ShowMaterialEditor=p.material;m_ShowSceneSettings=p.settings;m_ShowConsole=p.console;m_ShowStatistics=p.diagnostics;
     m_AssetGrid=p.assetGrid;m_ProjectAssets=p.projectAssets;m_AssetCardSize=p.assetCardSize;m_BackgroundOverride=p.backgroundOverride;m_ProjectileTestInput=p.projectileTestInput;
-    m_SurfaceSnap=p.surfaceSnap;m_AlignToNormal=p.alignToNormal;
+    m_SurfaceSnap=p.surfaceSnap;m_AlignToNormal=p.alignToNormal;m_SurfaceOffset=p.surfaceOffset;m_SurfaceRotationOffset=p.surfaceRotationOffset;
     m_ShowVisualSettings=p.visualPanel;m_VisualSettings=p.visuals;m_ShowGrid=p.grid;m_ShowLightGizmos=p.lightGizmos;m_LightXray=p.xray;m_LightXrayMode=p.lightXrayMode;m_TransformPrecision=p.transformPrecision;m_RotationSnapping=p.rotationSnapping;m_ShowPhysicsStress=p.physicsStress;m_Snapping=p.snapping;m_GizmoOperation=p.operation;m_GizmoMode=p.space;
     m_SnapTranslation=p.translationSnap;m_SnapRotation=p.rotationSnap;m_SnapScale=p.scaleSnap;app.SetCameraNavigation(p.cameraSpeed,p.cameraSensitivity);
 }
@@ -40,7 +40,7 @@ void EditorLayer::PersistPreferences(Application& app){
     EditorPreferences p;p.recentScenes=app.GetProject()?std::vector<std::string>{}:m_RecentScenes;p.recentProjects=m_RecentProjects;p.hierarchy=m_ShowHierarchy;p.inspector=m_ShowInspector;p.viewport=m_ShowViewport;p.assets=m_ShowAssetBrowser;p.material=m_ShowMaterialEditor;p.settings=m_ShowSceneSettings;p.console=m_ShowConsole;p.diagnostics=m_ShowStatistics;
     p.assetGrid=m_AssetGrid;p.projectAssets=m_ProjectAssets;p.assetCardSize=m_AssetCardSize;p.backgroundOverride=m_BackgroundOverride;p.projectileTestInput=m_ProjectileTestInput;
     p.bookmarks=m_Bookmarks;p.selectionFilters=m_SelectionFilters;
-    p.surfaceSnap=m_SurfaceSnap;p.alignToNormal=m_AlignToNormal;
+    p.surfaceSnap=m_SurfaceSnap;p.alignToNormal=m_AlignToNormal;p.surfaceOffset=m_SurfaceOffset;p.surfaceRotationOffset=m_SurfaceRotationOffset;
     p.visualPanel=m_ShowVisualSettings;p.visuals=m_VisualSettings;p.grid=m_ShowGrid;p.lightGizmos=m_ShowLightGizmos;p.xray=m_LightXray;p.lightXrayMode=m_LightXrayMode;p.transformPrecision=m_TransformPrecision;p.rotationSnapping=m_RotationSnapping;p.physicsStress=m_ShowPhysicsStress;p.snapping=m_Snapping;p.operation=m_GizmoOperation;p.space=m_GizmoMode;
     p.translationSnap=m_SnapTranslation;p.rotationSnap=m_SnapRotation;p.scaleSnap=m_SnapScale;p.cameraSpeed=app.GetCameraMoveSpeed();p.cameraSensitivity=app.GetCameraSensitivity();std::string error;if(!SavePreferences(PreferencesPath(),p,&error))Logger::Get().Warn(error);
 }

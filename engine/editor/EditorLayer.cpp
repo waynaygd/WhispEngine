@@ -681,6 +681,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     if(m_ViewportHovered&&ImGui::IsMouseClicked(1))ImGui::SetWindowFocus();
     if(m_ViewportHovered&&ImGui::IsMouseClicked(0))ImGui::SetWindowFocus();
     DrawVertexSnap(app,contentMin,viewportSize,false);
+    DrawSurfaceMove(app,contentMin,viewportSize,false);
     m_LightHandleHovered=m_LightIconClicked=false;
     m_SpecialIconHovered=false;
     // Specialized markers retain visual and picking priority over fallback icons.
@@ -697,6 +698,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     ImGui::GetWindowDrawList()->PushClipRect(contentMin,ImVec2(contentMin.x+viewportSize.x,contentMin.y+viewportSize.y),true);
     if(!m_LightIconClicked&&!m_LightPointerCaptured&&!m_LightHandleHovered&&!m_VertexSourcePicking)DrawGizmo(app, contentMin, viewportSize);
     ImGui::GetWindowDrawList()->PopClipRect();
+    DrawSurfaceMove(app,contentMin,viewportSize,true);
     DrawVertexSnap(app,contentMin,viewportSize,true);
     DrawViewportOverlays(app,contentMin,viewportSize);
     m_ToolActive=ImGuizmo::IsUsing()||(m_Transaction&&!m_Transaction->before.settings);
@@ -871,7 +873,7 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
         if (!m_GizmoUndoCaptured)
         {
             if(m_GizmoOperation==0&&ImGui::GetIO().KeyAlt){auto copy=BeginDuplicateDrag(app);if(copy.IsValid())transform=world.GetComponent<ecs::TransformComponent>(copy);}
-            else if(m_VertexSnapEnabled&&m_GizmoOperation==0)BeginTransaction("Vertex Snap",CaptureSelection(app,true));
+            else if((m_VertexSnapEnabled||m_SurfaceMove)&&m_GizmoOperation==0)BeginTransaction(m_VertexSnapEnabled?"Vertex Snap":"Surface Move",CaptureSelection(app,true));
             else PushUndoBeforeChange(app,"Transform Gizmo");
             m_GizmoUndoCaptured = true;
         }

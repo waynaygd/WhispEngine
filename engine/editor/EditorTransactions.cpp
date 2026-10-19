@@ -304,7 +304,7 @@ bool EditorLayer::SetProperty(Application& app,ecs::Entity e,ecs::ComponentTypeI
     if(transactional)CommitUndo(app,"Edit property",std::move(before));return true;
 }
 void EditorLayer::EnterRuntime(const ecs::World::CloneMap& mapping){
-    m_EditPivot=false;m_VertexSource.reset();m_VertexTarget.reset();m_VertexSourcePicking=false;
+    m_SurfaceMove.reset();m_EditPivot=false;m_VertexSource.reset();m_VertexTarget.reset();m_VertexSourcePicking=false;
     m_BoxSelection.reset();
     CancelPlacement();m_PlacementCancelled=false;
     ImGuizmo::Enable(false);m_ToolActive=false;m_CancelGizmoUntilRelease=true;
@@ -315,7 +315,7 @@ void EditorLayer::EnterRuntime(const ecs::World::CloneMap& mapping){
     m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_GizmoUndoCaptured=false;m_DuplicateDrag=false;m_LightPointerCaptured=false;m_PlaneScaleCaptured=false;
 }
 void EditorLayer::LeaveRuntime(){
-    m_EditPivot=false;m_VertexSource.reset();m_VertexTarget.reset();m_VertexSourcePicking=false;
+    m_SurfaceMove.reset();m_EditPivot=false;m_VertexSource.reset();m_VertexTarget.reset();m_VertexSourcePicking=false;
     m_BoxSelection.reset();
     CancelPlacement();m_PlacementCancelled=false;
     ImGuizmo::Enable(false);m_ToolActive=m_DuplicateDrag=m_LightPointerCaptured=false;m_CancelGizmoUntilRelease=true;
