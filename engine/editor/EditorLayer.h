@@ -1,5 +1,6 @@
 #pragma once
 #include "../scripting/GameplayEventHistory.h"
+#include "../scripting/LuaInspection.h"
 
 #include "../ecs/Entity.h"
 #include "../ecs/ComponentRegistry.h"
@@ -15,6 +16,7 @@
 #include "AssetNavigation.h"
 #include "TransformPrecision.h"
 #include "SceneCatalog.h"
+#include "SceneValidation.h"
 #include "../core/Logger.h"
 #include "../ecs/components/LightComponent.h"
 #include "../ecs/components/ColliderComponent.h"
@@ -84,7 +86,7 @@ public:
     EditorVisualFrame BuildVisualFrame(const Application&)const;
     void Render(Application& app, IRenderAdapter* renderer, float dt);
     void InitializePreferences(Application&);
-    void PersistPreferences(Application&);
+    bool PersistPreferences(Application&);
     bool ResolveProjectEdits(Application&,int decision,std::string* error);
     void ResetProjectState(IRenderAdapter*);
     void ProjectOpened(Application&);
@@ -100,8 +102,25 @@ public:
     void RequestProjectExit(){m_ProjectExit=true;m_ProjectConfirm=true;}
     bool ProjectExitConfirmed()const{return m_ProjectExitConfirmed;}
     const auto& RecentProjects()const{return m_RecentProjects;}
+    void ShowLuaRuntimeInspector(){m_ShowLuaRuntimeInspector=true;}
+    void SetLuaInspectorAutoRefresh(bool value){m_LuaInspectorAuto=value;}
+    void UpdateLuaRuntimeInspector(Application&,double now,bool refresh=false);
+    const scripting::LuaInstanceSnapshot& GetLuaInspection()const{return m_LuaInspection;}
+    std::uint64_t LuaInspectionRefreshes()const{return m_LuaInspectionRefreshes;}
+    bool ShowEventsForEntity(Application&,ecs::Entity);
+    bool InspectGameplayEventEntity(Application&,const scripting::EventEntity&);
+    const scripting::GameplayEventFilter& GetGameplayEventFilter()const{return m_EventFilter;}
+    void ShowSceneValidation(){m_ShowSceneValidation=true;}
+    void ValidateCurrentScene(Application&);
+    const SceneValidationReport& GetSceneValidation()const{return m_SceneValidation;}
+    bool SelectValidationIssue(Application&,std::size_t,bool focus=false);
+    bool SceneValidationContextMatches(Application&)const;
     void ShowGameplayEvents(){m_ShowGameplayEvents=true;}
     bool SelectGameplayEventEntity(Application&,const scripting::EventEntity&);
+    EditorWorkspace GetWorkspace()const{return m_Workspace;}
+    void SwitchWorkspace(EditorWorkspace value){if(int(value)>=0&&int(value)<4){m_RequestedWorkspace=value;m_WorkspacePending=true;m_WorkspaceFirstApply=false;}}
+    bool SaveCurrentWorkspace(Application&);
+    bool ResetCurrentWorkspace(Application&);
     void ResetLayout(){m_ResetLayout=true;}
     void SetFixedDiagnosticLayout(bool fixed){m_FixedDiagnosticLayout=fixed;if(fixed){m_ShowStatistics=m_ShowMaterialEditor=true;}}
     InputOwner InputOwnership(bool right,bool left,bool camera,bool play)const{return RouteInput({m_ViewportFocused,m_ViewportHovered,m_InputTextActive,m_ModalActive,m_ToolActive&&!m_LightPointerCaptured,m_LightPointerCaptured||m_LightHandleHovered,camera,right,left,play});}
@@ -111,7 +130,7 @@ public:
     void SetLightGizmosVisible(bool v){m_ShowLightGizmos=v;}
     void EnterRuntime(const ecs::World::CloneMap&);
     void LeaveRuntime();
-    void ResetHistory(){m_SurfaceMove.reset();m_EditPivot=false;m_VertexSource.reset();m_VertexTarget.reset();m_VertexSourcePicking=false;m_BoxSelection.reset();m_SelectionLocked=false;m_BulkSession.reset();m_BulkUiSelection.clear();m_BulkText.clear();ExitIsolation();CancelPlacement();m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
+    void ResetHistory(){m_LuaInspection={};m_LuaInspectionCaptured=false;m_SceneValidation={};m_SelectedValidation=-1;m_SurfaceMove.reset();m_EditPivot=false;m_VertexSource.reset();m_VertexTarget.reset();m_VertexSourcePicking=false;m_BoxSelection.reset();m_SelectionLocked=false;m_BulkSession.reset();m_BulkUiSelection.clear();m_BulkText.clear();ExitIsolation();CancelPlacement();m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
     void FinishTransaction(Application&);
     void CancelTransaction(Application&);
     bool HasPendingTransaction()const{return m_Transaction.has_value();}
@@ -349,8 +368,17 @@ private:
     std::string m_RequestedSky;
     std::uint64_t m_FailedSkyVersion=0;
     void ConfigureDocking();
+    std::map<std::string,bool> CaptureWorkspaceVisibility();
+    void ApplyWorkspaceVisibility(const std::map<std::string,bool>&);
+    void WorkspaceDefaults();
+    void BuildWorkspaceDocking(unsigned root,const ImVec2& size);
+    bool CaptureCurrentWorkspace();
+    void InitializeWorkspaces(const EditorPreferences&);
+    void DrawWorkspaceMenu(Application&);
     void DrawConsole(Application&,IRenderAdapter*);
     void DrawGameplayEvents(Application&);
+    void DrawSceneValidation(Application&);
+    void DrawLuaRuntimeInspector(Application&);
     void DrawSceneSettings(Application&,IRenderAdapter*,float dt);
     void DrawSceneDialogs(Application&);
     void DrawViewportOverlays(Application&,const ImVec2&,const ImVec2&);
@@ -470,11 +498,23 @@ private:
     std::string m_EditingMaterial,m_MaterialError,m_NewMaterialKey="materials/new.material.json";
     bool m_MaterialDirty=false;
     bool m_ShowDemoWindow = false;
+    bool m_ShowLuaRuntimeInspector=false,m_LuaInspectorAuto=true,m_LuaInspectionCaptured=false;
+    scripting::LuaInstanceSnapshot m_LuaInspection;
+    std::string m_LuaVariableSearch;
+    double m_LuaInspectionTime=0;
+    std::uint64_t m_LuaInspectionRefreshes=0;
+    bool m_ShowSceneValidation=false;
+    SceneValidationReport m_SceneValidation;
+    std::string m_ValidationSearch;
+    int m_ValidationSeverity=0,m_SelectedValidation=-1;
     bool m_ShowGameplayEvents=false;
     scripting::GameplayEventFilter m_EventFilter;
     std::uint64_t m_SelectedGameplayEvent=0;
     bool m_EventFollow=false;
     bool m_ShowSceneSettings=true,m_ShowConsole=true,m_ShowGrid=true,m_Snapping=false;
+    EditorWorkspace m_Workspace=EditorWorkspace::LevelEditing,m_RequestedWorkspace=EditorWorkspace::LevelEditing;
+    std::map<std::string,WorkspaceLayout> m_Workspaces;
+    bool m_WorkspacePending=true,m_WorkspaceFirstApply=true;
     bool m_ResetLayout=true,m_FixedDiagnosticLayout=false,m_ViewportFocused=false,m_ToolActive=false,m_InputTextActive=false,m_ModalActive=false;
     bool m_CameraMouseDrain=false,m_CameraMouseWasSuppressed=false;
     bool m_ViewportMaximized=false,m_FocusViewportWindow=false;

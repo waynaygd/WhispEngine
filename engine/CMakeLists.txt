@@ -61,8 +61,12 @@ add_library(Engine
   editor/EditorSelection.cpp
   editor/EditorGroupTransform.cpp
   editor/EditorInspector.cpp
+  editor/SceneValidation.cpp
+  editor/EditorSceneValidation.cpp
+  editor/EditorLuaRuntimeInspector.cpp
   editor/EditorGameplayEvents.cpp
   editor/EditorBulkInspector.cpp
+  editor/EditorWorkspaces.cpp
   editor/EditorPreferences.cpp
   editor/EditorUi.cpp
   editor/EditorViewportCreate.cpp

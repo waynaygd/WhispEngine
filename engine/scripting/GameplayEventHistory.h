@@ -21,12 +21,12 @@ struct GameplayEvent {
     EventStatus status=EventStatus::Queued;
 };
 struct GameplayEventFilter {
-    std::string name,source,target;
+    std::string name,source,target,entity;
     int status=-1;
     bool errorsOnly=false;
     static bool Contains(const std::string& text,const std::string& query){return query.empty()||std::search(text.begin(),text.end(),query.begin(),query.end(),[](unsigned char a,unsigned char b){return std::tolower(a)==std::tolower(b);})!=text.end();}
     static std::string Identity(const EventEntity& e){return e.name+" "+e.stableId+" "+std::to_string(e.entity.world)+":"+std::to_string(e.entity.index)+":"+std::to_string(e.entity.generation);}
-    bool Matches(const GameplayEvent& e)const{return Contains(e.name,name)&&Contains(Identity(e.source),source)&&Contains(Identity(e.target),target)&&(status<0||int(e.status)==status)&&(!errorsOnly||e.status==EventStatus::Error);}
+    bool Matches(const GameplayEvent& e)const{return Contains(e.name,name)&&Contains(Identity(e.source),source)&&Contains(Identity(e.target),target)&&(entity.empty()||Contains(Identity(e.source),entity)||Contains(Identity(e.target),entity))&&(status<0||int(e.status)==status)&&(!errorsOnly||e.status==EventStatus::Error);}
 };
 class GameplayEventHistory {
     std::deque<GameplayEvent> rows;

@@ -26,8 +26,7 @@ const char* EntityKind(const ecs::World& w,ecs::Entity e){
 }
 }
 void EditorLayer::InitializePreferences(Application& app){
-    EditorPreferences p;std::string error;if(LoadPreferences(PreferencesPath(),p,&error))m_ResetLayout=false;else if(!error.empty())Logger::Get().Warn(error);
-    if(ImGui::GetCurrentContext()){static std::string layout=AssetPaths::ToUtf8String(AssetPaths::GetExecutableDirectory()/"imgui.ini");ImGui::GetIO().IniFilename=layout.c_str();}
+    EditorPreferences p;std::string error;if(!LoadPreferences(PreferencesPath(),p,&error)&&!error.empty())Logger::Get().Warn(error);
     m_RecentScenes=p.recentScenes;m_RecentProjects=p.recentProjects;
     m_Bookmarks=p.bookmarks;m_SelectionFilters=p.selectionFilters;
     m_ShowHierarchy=p.hierarchy;m_ShowInspector=p.inspector;m_ShowViewport=p.viewport;m_ShowAssetBrowser=p.assets;m_ShowMaterialEditor=p.material;m_ShowSceneSettings=p.settings;m_ShowConsole=p.console;m_ShowStatistics=p.diagnostics;
@@ -35,32 +34,17 @@ void EditorLayer::InitializePreferences(Application& app){
     m_SurfaceSnap=p.surfaceSnap;m_AlignToNormal=p.alignToNormal;m_SurfaceOffset=p.surfaceOffset;m_SurfaceRotationOffset=p.surfaceRotationOffset;
     m_ShowVisualSettings=p.visualPanel;m_VisualSettings=p.visuals;m_ShowGrid=p.grid;m_ShowLightGizmos=p.lightGizmos;m_LightXray=p.xray;m_LightXrayMode=p.lightXrayMode;m_TransformPrecision=p.transformPrecision;m_RotationSnapping=p.rotationSnapping;m_ShowPhysicsStress=p.physicsStress;m_Snapping=p.snapping;m_GizmoOperation=p.operation;m_GizmoMode=p.space;
     m_SnapTranslation=p.translationSnap;m_SnapRotation=p.rotationSnap;m_SnapScale=p.scaleSnap;app.SetCameraNavigation(p.cameraSpeed,p.cameraSensitivity);
+    InitializeWorkspaces(p);
 }
-void EditorLayer::PersistPreferences(Application& app){
-    EditorPreferences p;p.recentScenes=app.GetProject()?std::vector<std::string>{}:m_RecentScenes;p.recentProjects=m_RecentProjects;p.hierarchy=m_ShowHierarchy;p.inspector=m_ShowInspector;p.viewport=m_ShowViewport;p.assets=m_ShowAssetBrowser;p.material=m_ShowMaterialEditor;p.settings=m_ShowSceneSettings;p.console=m_ShowConsole;p.diagnostics=m_ShowStatistics;
+bool EditorLayer::PersistPreferences(Application& app){
+    // End-of-session persistence retains the last normal layout, never F11's temporary viewport.
+    if(ImGui::GetCurrentContext()&&!ImGui::GetCurrentContext()->WithinFrameScope)CaptureCurrentWorkspace();
+    EditorPreferences p;p.activeWorkspace=m_Workspace;p.workspaces=m_Workspaces;p.workspacesInitialized=true;p.recentScenes=app.GetProject()?std::vector<std::string>{}:m_RecentScenes;p.recentProjects=m_RecentProjects;p.hierarchy=m_ShowHierarchy;p.inspector=m_ShowInspector;p.viewport=m_ShowViewport;p.assets=m_ShowAssetBrowser;p.material=m_ShowMaterialEditor;p.settings=m_ShowSceneSettings;p.console=m_ShowConsole;p.diagnostics=m_ShowStatistics;
     p.assetGrid=m_AssetGrid;p.projectAssets=m_ProjectAssets;p.assetCardSize=m_AssetCardSize;p.backgroundOverride=m_BackgroundOverride;p.projectileTestInput=m_ProjectileTestInput;
     p.bookmarks=m_Bookmarks;p.selectionFilters=m_SelectionFilters;
     p.surfaceSnap=m_SurfaceSnap;p.alignToNormal=m_AlignToNormal;p.surfaceOffset=m_SurfaceOffset;p.surfaceRotationOffset=m_SurfaceRotationOffset;
     p.visualPanel=m_ShowVisualSettings;p.visuals=m_VisualSettings;p.grid=m_ShowGrid;p.lightGizmos=m_ShowLightGizmos;p.xray=m_LightXray;p.lightXrayMode=m_LightXrayMode;p.transformPrecision=m_TransformPrecision;p.rotationSnapping=m_RotationSnapping;p.physicsStress=m_ShowPhysicsStress;p.snapping=m_Snapping;p.operation=m_GizmoOperation;p.space=m_GizmoMode;
-    p.translationSnap=m_SnapTranslation;p.rotationSnap=m_SnapRotation;p.scaleSnap=m_SnapScale;p.cameraSpeed=app.GetCameraMoveSpeed();p.cameraSensitivity=app.GetCameraSensitivity();std::string error;if(!SavePreferences(PreferencesPath(),p,&error))Logger::Get().Warn(error);
-}
-void EditorLayer::ConfigureDocking(){
-    auto* viewport=ImGui::GetMainViewport();ImGuiViewport dock=*viewport;const float toolbar=ImGui::GetFrameHeightWithSpacing()+8;
-    dock.WorkPos.y+=toolbar;dock.WorkSize.y=std::max(1.f,dock.WorkSize.y-toolbar);
-    const auto root=ImHashStr("WhispEngine.Editor.Dockspace");
-    if(m_FixedDiagnosticLayout){ImGui::DockSpaceOverViewport(root,&dock,ImGuiDockNodeFlags_PassthruCentralNode);return;}
-    if(m_ResetLayout||!ImGui::DockBuilderGetNode(root)){
-        ImGui::DockBuilderRemoveNode(root);ImGui::DockBuilderAddNode(root,ImGuiDockNodeFlags_DockSpace);ImGui::DockBuilderSetNodeSize(root,dock.WorkSize);
-        ImGuiID center=root,left,right,bottom,settings;
-        ImGui::DockBuilderSplitNode(center,ImGuiDir_Left,.19f,&left,&center);
-        ImGui::DockBuilderSplitNode(center,ImGuiDir_Right,.29f,&right,&center);
-        ImGui::DockBuilderSplitNode(center,ImGuiDir_Down,.40f,&bottom,&center);
-        ImGui::DockBuilderSplitNode(right,ImGuiDir_Down,.42f,&settings,&right);
-        ImGui::DockBuilderDockWindow("Scene Hierarchy",left);ImGui::DockBuilderDockWindow("Inspector",right);ImGui::DockBuilderDockWindow("Scene Settings",settings);ImGui::DockBuilderDockWindow("Editor Visuals",settings);
-        ImGui::DockBuilderDockWindow("Viewport",center);ImGui::DockBuilderDockWindow("Asset Browser",bottom);ImGui::DockBuilderDockWindow("Console / Diagnostics",bottom);ImGui::DockBuilderDockWindow("Gameplay Events",bottom);ImGui::DockBuilderDockWindow("Material Editor",bottom);ImGui::DockBuilderDockWindow("Statistics",bottom);ImGui::DockBuilderDockWindow("Physics Stress Test",bottom);
-        ImGui::DockBuilderFinish(root);m_ResetLayout=false;
-    }
-    ImGui::DockSpaceOverViewport(root,&dock,ImGuiDockNodeFlags_PassthruCentralNode);
+    p.translationSnap=m_SnapTranslation;p.rotationSnap=m_SnapRotation;p.scaleSnap=m_SnapScale;p.cameraSpeed=app.GetCameraMoveSpeed();p.cameraSensitivity=app.GetCameraSensitivity();std::string error;if(!SavePreferences(PreferencesPath(),p,&error)){m_EditorError=error;Logger::Get().Warn(error);return false;}return true;
 }
 void EditorLayer::DrawToolbar(Application& app){
     auto* viewport=ImGui::GetMainViewport();ImGui::SetNextWindowPos(viewport->WorkPos);ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x,ImGui::GetFrameHeightWithSpacing()+8));
@@ -113,8 +97,9 @@ void EditorLayer::DrawMainMenu(Application& app){
     if(ImGui::BeginMenu("View")){
         ImGui::MenuItem("Editor Visuals",nullptr,&m_ShowVisualSettings);
         ImGui::MenuItem("Game View (shared viewport)","G",&m_GameView);
-        ImGui::MenuItem("Scene Hierarchy",nullptr,&m_ShowHierarchy);ImGui::MenuItem("Inspector",nullptr,&m_ShowInspector);ImGui::MenuItem("Viewport",nullptr,&m_ShowViewport);ImGui::MenuItem("Asset Browser",nullptr,&m_ShowAssetBrowser);ImGui::MenuItem("Material Editor",nullptr,&m_ShowMaterialEditor);ImGui::MenuItem("Scene Settings / Lighting",nullptr,&m_ShowSceneSettings);ImGui::MenuItem("Console / Diagnostics",nullptr,&m_ShowConsole);ImGui::MenuItem("Gameplay Events",nullptr,&m_ShowGameplayEvents);ImGui::MenuItem("Statistics",nullptr,&m_ShowStatistics);ImGui::MenuItem("Physics Stress Test",nullptr,&m_ShowPhysicsStress);
-        ImGui::Separator();if(ImGui::MenuItem("Reset Layout")){m_ResetLayout=true;m_ShowHierarchy=m_ShowInspector=m_ShowViewport=m_ShowAssetBrowser=m_ShowConsole=true;}
+        ImGui::MenuItem("Scene Hierarchy",nullptr,&m_ShowHierarchy);ImGui::MenuItem("Inspector",nullptr,&m_ShowInspector);ImGui::MenuItem("Viewport",nullptr,&m_ShowViewport);ImGui::MenuItem("Asset Browser",nullptr,&m_ShowAssetBrowser);ImGui::MenuItem("Material Editor",nullptr,&m_ShowMaterialEditor);ImGui::MenuItem("Scene Settings / Lighting",nullptr,&m_ShowSceneSettings);ImGui::MenuItem("Console / Diagnostics",nullptr,&m_ShowConsole);ImGui::MenuItem("Gameplay Events",nullptr,&m_ShowGameplayEvents);ImGui::MenuItem("Scene Validation",nullptr,&m_ShowSceneValidation);ImGui::MenuItem("Lua Runtime Inspector",nullptr,&m_ShowLuaRuntimeInspector);ImGui::MenuItem("Statistics",nullptr,&m_ShowStatistics);ImGui::MenuItem("Physics Stress Test",nullptr,&m_ShowPhysicsStress);
+        DrawWorkspaceMenu(app);
+        ImGui::Separator();if(ImGui::MenuItem("Reset Layout"))ResetCurrentWorkspace(app);
         if(ImGui::MenuItem("Navigation and snapping"))preferencesRequested=true;ImGui::MenuItem("ImGui Demo",nullptr,&m_ShowDemoWindow);ImGui::EndMenu();
     }
     if(ImGui::BeginMenu("Scene")){

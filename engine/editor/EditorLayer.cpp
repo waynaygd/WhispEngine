@@ -314,6 +314,7 @@ bool EditorLayer::IsPointInsideViewport(double x, double y) const
 void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
 {
     ZoneScopedN("EditorLayer");
+    UpdateLuaRuntimeInspector(app,ImGui::GetTime());
     // Keep prepared prefab data throughout one drag, but never render a stale
     // previous-frame ghost when the pointer leaves or the viewport is hidden.
     if(!m_ShowViewport||app.IsProjectBrowserActive()||ImGui::GetIO().AppFocusLost)m_BoxSelection.reset();
@@ -343,6 +344,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
         if(HasPendingTransaction())CancelTransaction(app);
         m_LightPointerCaptured=m_PlaneScaleCaptured=m_ToolActive=false;m_CancelGizmoUntilRelease=true;
         ImGuizmo::Enable(false);ImGuizmo::Enable(true);ImGui::ClearActiveID();
+        if(!m_ViewportMaximized)CaptureCurrentWorkspace();
         m_ViewportMaximized=!m_ViewportMaximized;m_FocusViewportWindow=true;
     }
     if(m_ViewportMaximized){
@@ -366,6 +368,8 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     PrepareEditorSky(app,renderer);
     if(m_ShowConsole)DrawConsole(app,renderer);
     if(m_ShowGameplayEvents)DrawGameplayEvents(app);
+    if(m_ShowSceneValidation)DrawSceneValidation(app);
+    if(m_ShowLuaRuntimeInspector)DrawLuaRuntimeInspector(app);
     ImGui::SetNextWindowSize(ImVec2(340, 330), ImGuiCond_FirstUseEver);
     if(m_ShowPhysicsStress){
     if (ImGui::Begin("Physics Stress Test",&m_ShowPhysicsStress)) {

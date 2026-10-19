@@ -7,6 +7,7 @@
 #include <map>
 #include <optional>
 #include "../render/EditorVisuals.h"
+#include "EditorWorkspaces.h"
 namespace editor {
 struct RecentProject {std::string name,descriptor;bool operator==(const RecentProject&)const=default;};
 std::filesystem::path PreferencesPath();
@@ -22,6 +23,9 @@ struct SelectionFilters {
     bool operator==(const SelectionFilters&)const=default;
 };
 struct EditorPreferences {
+    EditorWorkspace activeWorkspace=EditorWorkspace::LevelEditing;
+    std::map<std::string,WorkspaceLayout> workspaces;
+    bool workspacesInitialized=false;
     std::map<std::string,SceneBookmarks> bookmarks;
     SelectionFilters selectionFilters;
     bool hierarchy=true,inspector=true,viewport=true,assets=true,material=false,settings=true,console=true,diagnostics=false;

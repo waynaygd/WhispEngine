@@ -15,12 +15,25 @@ nlohmann::json PreferencesToJson(const EditorPreferences& p){
     auto bookmarks=nlohmann::json::object();
     for(const auto& [scene,slots]:p.bookmarks){auto values=nlohmann::json::array();for(const auto& slot:slots){if(slot)values.push_back({{"name",slot->name},{"position",slot->position},{"yaw",slot->yaw},{"pitch",slot->pitch}});else values.push_back(nullptr);}bookmarks[scene]=std::move(values);}
     result["bookmarks"]=std::move(bookmarks);
+    result["activeWorkspace"]=WorkspaceKeys[std::clamp(int(p.activeWorkspace),0,3)];
+    result["workspacesInitialized"]=p.workspacesInitialized;
+    auto layouts=nlohmann::json::object();for(const auto& [key,layout]:p.workspaces)layouts[key]={{"ini",layout.ini},{"visible",layout.visible}};
+    result["workspaces"]=std::move(layouts);
     const auto& f=p.selectionFilters;result["selectionFilters"]={{"meshes",f.meshes},{"lights",f.lights},{"playerStarts",f.playerStarts},{"fog",f.fog},{"physics",f.physics},{"other",f.other}};
     return result;
 }
 EditorPreferences PreferencesFromJson(const nlohmann::json& j){
     // Unavailable recent descriptors remain visible; they never prevent startup.
     if(!j.is_object()||j.value("version",0)!=1)throw std::runtime_error("Unsupported editor preferences schema");EditorPreferences p;
+    // A damaged workspace never discards other editor preferences.
+    p.workspacesInitialized=j.contains("workspacesInitialized")&&j["workspacesInitialized"].is_boolean()&&j["workspacesInitialized"].get<bool>();
+    if(j.contains("activeWorkspace")&&j["activeWorkspace"].is_string())for(int i=0;i<4;++i)if(j["activeWorkspace"]==WorkspaceKeys[i])p.activeWorkspace=EditorWorkspace(i);
+    if(j.contains("workspaces")&&j["workspaces"].is_object())for(const auto* key:WorkspaceKeys){
+        if(!j["workspaces"].contains(key))continue;
+        try{const auto& source=j["workspaces"][key];WorkspaceLayout layout;layout.ini=source.at("ini").get<std::string>();if(!ValidWorkspaceIni(layout.ini))continue;
+            if(source.contains("visible")){if(!source["visible"].is_object())continue;for(const auto* panel:WorkspacePanels)if(source["visible"].contains(panel)&&source["visible"][panel].is_boolean())layout.visible[panel]=source["visible"][panel].get<bool>();}
+            p.workspaces.emplace(key,std::move(layout));
+        }catch(...){}}
     if(j.contains("selectionFilters")){const auto& f=j.at("selectionFilters");auto& v=p.selectionFilters;v.meshes=f.value("meshes",true);v.lights=f.value("lights",true);v.playerStarts=f.value("playerStarts",true);v.fog=f.value("fog",true);v.physics=f.value("physics",true);v.other=f.value("other",true);}
     // One damaged bookmark must not discard other views or preferences.
     if(j.contains("bookmarks")&&j["bookmarks"].is_object())for(const auto& [scene,values]:j["bookmarks"].items()){

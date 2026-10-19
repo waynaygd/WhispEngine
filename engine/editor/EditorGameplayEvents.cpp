@@ -22,6 +22,7 @@ void EditorLayer::DrawGameplayEvents(Application& app){
     ImGui::SetNextItemWidth(180);ImGui::InputTextWithHint("##eventSearch","Event name",&m_EventFilter.name);ImGui::SameLine();
     ImGui::SetNextItemWidth(180);ImGui::InputTextWithHint("##sourceSearch","Source name or ID",&m_EventFilter.source);ImGui::SameLine();
     ImGui::SetNextItemWidth(180);ImGui::InputTextWithHint("##targetSearch","Target name or ID",&m_EventFilter.target);
+    ImGui::SetNextItemWidth(270);ImGui::InputTextWithHint("##eventEntitySearch","Entity (source or target)",&m_EventFilter.entity);
     ImGui::SetNextItemWidth(130);int status=m_EventFilter.status+1;if(ImGui::Combo("Status",&status,"All\0Queued\0Processing\0Success\0Error\0Skipped\0"))m_EventFilter.status=status-1;ImGui::SameLine();ImGui::Checkbox("Only errors",&m_EventFilter.errorsOnly);
     auto useSelection=[&](std::string& query){const auto e=m_Selection.active;if(!app.GetWorld().IsAlive(e))return;query=std::to_string(e.world)+":"+std::to_string(e.index)+":"+std::to_string(e.generation);};
     if(ImGui::Button("Selected as source"))useSelection(m_EventFilter.source);ImGui::SameLine();if(ImGui::Button("Selected as target"))useSelection(m_EventFilter.target);ImGui::SameLine();if(ImGui::Button("Reset filters"))m_EventFilter={};
@@ -52,7 +53,8 @@ void EditorLayer::DrawGameplayEvents(Application& app){
         ImGui::TextWrapped("Payload: %s",row->payload.c_str());if(!row->error.empty())ImGui::TextWrapped("Diagnostic: %s",row->error.c_str());
         auto entity=[&](const char* label,const EventEntity& item){ImGui::PushID(label);ImGui::TextWrapped("%s: %s",label,item.entity.IsValid()?(item.name.empty()?"Unnamed":item.name.c_str()):"Unknown / unavailable");if(item.entity.IsValid()){
             ImGui::TextWrapped("ID: %s | World %llu : %u : %u",item.stableId.empty()?"unavailable":item.stableId.c_str(),static_cast<unsigned long long>(item.entity.world),item.entity.index,item.entity.generation);
-            const bool alive=app.GetWorld().IsAlive(item.entity);ImGui::BeginDisabled(!alive);if(ImGui::SmallButton("Select in Hierarchy"))SelectGameplayEventEntity(app,item);ImGui::EndDisabled();if(!alive){ImGui::SameLine();ImGui::TextDisabled("Destroyed or session ended");}}
+            const bool alive=app.GetWorld().IsAlive(item.entity);ImGui::BeginDisabled(!alive);if(ImGui::SmallButton("Select in Hierarchy"))SelectGameplayEventEntity(app,item);ImGui::EndDisabled();
+            const auto runtime=app.GetLuaRuntime().InspectionInfo(item.entity);ImGui::SameLine();ImGui::BeginDisabled(!app.IsEditorPlayMode()||!alive||runtime.state==LuaInstanceState::NoScript);if(ImGui::SmallButton("Inspect Script"))InspectGameplayEventEntity(app,item);ImGui::EndDisabled();if(!alive){ImGui::SameLine();ImGui::TextDisabled("Destroyed or session ended");}}
             ImGui::PopID();};
         entity("Source",row->source);entity("Target",row->target);if(row->other.entity.IsValid())entity("Other participant",row->other);
         ImGui::EndChild();

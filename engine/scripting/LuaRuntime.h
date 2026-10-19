@@ -3,9 +3,11 @@
 #include "../ecs/events/EventBus.h"
 #include "GameplayServices.h"
 #include "GameplayEventHistory.h"
+#include "LuaInspection.h"
 #include <nlohmann/json.hpp>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 namespace scripting {
 class LuaRuntime {
@@ -25,7 +27,13 @@ public:
     void QueueCollision(const ecs::CollisionEvent&);
     bool ReloadScript(const std::string&);
     nlohmann::json Fields(const std::string&);
+    // Inspection only: never loads or executes a script. Source matching rejects stale schemas.
+    std::optional<nlohmann::json> CachedFields(const std::string& path,const std::string& source)const;
+    static bool ValidFieldValue(const nlohmann::json& schema,const nlohmann::json& value);
     std::string Error(const std::string&)const;
+    // Owner-thread inspection; Info never walks Lua tables, Inspect is strictly bounded.
+    LuaInstanceInfo InspectionInfo(ecs::Entity)const;
+    LuaInstanceSnapshot Inspect(ecs::Entity)const;
     std::size_t InstanceCount()const;
     bool HasCameraOwner()const;
 };
