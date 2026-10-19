@@ -598,7 +598,10 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     ImGui::Begin(ViewportWindowName(),maximized?nullptr:&m_ShowViewport,ImGuiWindowFlags_NoNavInputs|(maximized?(ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoBringToFrontOnFocus):0));
 
     const bool playMode = app.IsEditorPlayMode();
-    if(!maximized){
+    // Gameplay owns a clean image until its existing cursor capture is released.
+    // Fullscreen only changes layout; it never decides editor visibility.
+    const bool showEditorControls=!(playMode&&app.IsGameplayMouseCaptured());
+    if(!maximized&&showEditorControls){
     DrawViewportCreateMenu(app);
     ImGui::SameLine();DrawPlacementMenu(app);
     ImGui::SameLine();DrawViewportTools(app);
@@ -621,7 +624,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     ImGui::Separator();
     }
 
-    if(m_FixedDiagnosticLayout&&!maximized)ImGui::Dummy(ImVec2(1,ImGui::GetFrameHeightWithSpacing()*2-ImGui::GetStyle().ItemSpacing.y));
+    if(m_FixedDiagnosticLayout&&!maximized&&showEditorControls)ImGui::Dummy(ImVec2(1,ImGui::GetFrameHeightWithSpacing()*2-ImGui::GetStyle().ItemSpacing.y));
     const ImVec2 contentMin = ImGui::GetCursorScreenPos();
     const ImVec2 available = ImGui::GetContentRegionAvail();
     const ImVec2 viewportSize(std::max(available.x, 1.0f), std::max(available.y, 1.0f));
@@ -663,7 +666,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
 
     DrawPlacementTarget(app,contentMin,viewportSize);
     m_ViewportHovered=ImGui::IsItemHovered();
-    if(maximized){
+    if(maximized&&showEditorControls){
         // The image already registered the full content bounds. Create is the
         // final layout item; the remaining helpers only submit draw-list data.
         // Do not restore the post-image cursor (it includes ItemSpacing below

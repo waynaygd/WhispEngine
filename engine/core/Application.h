@@ -59,6 +59,7 @@ public:
     editor::EditorLayer& GetEditorLayer(){return m_EditorLayer;}
     void SetViewportUnlit(bool value){if(m_RenderSystem)m_RenderSystem->SetViewportUnlit(value);}
     bool IsViewportUnlit()const{return m_RenderSystem&&m_RenderSystem->IsViewportUnlit();}
+    bool IsGameplayMouseCaptured()const{return m_PlayerMouseCaptured;}
     bool IsViewportMouseCaptured()const{return m_Camera.controlsActive||m_PlayerMouseCaptured;}
     ecs::World& GetWorld() { return m_RuntimeWorld?*m_RuntimeWorld:(m_PrefabWorld?*m_PrefabWorld:m_World); }
     bool IsPrefabEditing()const{return bool(m_PrefabWorld);}

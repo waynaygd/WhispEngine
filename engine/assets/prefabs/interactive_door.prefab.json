@@ -1,0 +1,718 @@
+{
+  "version": 2,
+  "root": "DoorFrame",
+  "entities": [
+    {
+      "id": "DoorFrame",
+      "components": {
+        "Tag": {
+          "name": "DoorFrame"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "LeftPost",
+      "components": {
+        "Tag": {
+          "name": "LeftPost"
+        },
+        "Transform": {
+          "position": [
+            -1.16,
+            1.45,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.24,
+            2.9,
+            0.35
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.12,
+            1.45,
+            0.175
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "DoorFrame"
+    },
+    {
+      "id": "RightPost",
+      "components": {
+        "Tag": {
+          "name": "RightPost"
+        },
+        "Transform": {
+          "position": [
+            1.16,
+            1.45,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.24,
+            2.9,
+            0.35
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.12,
+            1.45,
+            0.175
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "DoorFrame"
+    },
+    {
+      "id": "Lintel",
+      "components": {
+        "Tag": {
+          "name": "Lintel"
+        },
+        "Transform": {
+          "position": [
+            0,
+            2.95,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2.56,
+            0.3,
+            0.35
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.28,
+            0.15,
+            0.175
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "DoorFrame"
+    },
+    {
+      "id": "DoorLeaf",
+      "components": {
+        "Tag": {
+          "name": "DoorLeaf"
+        },
+        "Transform": {
+          "position": [
+            -1.02,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/room_door.lua",
+          "properties": {
+            "normalLight": {
+              "$entity": "NormalLight"
+            },
+            "emergencyLight": {
+              "$entity": "IndicatorLight"
+            }
+          }
+        }
+      },
+      "parent": "DoorFrame"
+    },
+    {
+      "id": "DoorPanel",
+      "components": {
+        "Tag": {
+          "name": "DoorPanel"
+        },
+        "Transform": {
+          "position": [
+            1.02,
+            1.38,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2.02,
+            2.76,
+            0.16
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.3,
+            0.4,
+            0.44,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.01,
+            1.38,
+            0.08
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "DoorLeaf"
+    },
+    {
+      "id": "DoorInset",
+      "components": {
+        "Tag": {
+          "name": "DoorInset"
+        },
+        "Transform": {
+          "position": [
+            1.02,
+            1.7,
+            -0.086
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.65,
+            1.3,
+            0.025
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.04,
+            0.07,
+            0.09,
+            1
+          ]
+        }
+      },
+      "parent": "DoorLeaf"
+    },
+    {
+      "id": "DoorStripe",
+      "components": {
+        "Tag": {
+          "name": "DoorStripe"
+        },
+        "Transform": {
+          "position": [
+            1.02,
+            0.35,
+            -0.095
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.75,
+            0.12,
+            0.035
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.94,
+            0.58,
+            0.12,
+            1
+          ]
+        }
+      },
+      "parent": "DoorLeaf"
+    },
+    {
+      "id": "DoorHandle",
+      "components": {
+        "Tag": {
+          "name": "DoorHandle"
+        },
+        "Transform": {
+          "position": [
+            1.8,
+            1.2,
+            -0.18
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.09,
+            0.48,
+            0.18
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.94,
+            0.58,
+            0.12,
+            1
+          ]
+        }
+      },
+      "parent": "DoorLeaf"
+    },
+    {
+      "id": "ControlPanel",
+      "components": {
+        "Tag": {
+          "name": "ControlPanel"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            1.45,
+            -0.25
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.64,
+            0.8,
+            0.3
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.04,
+            0.07,
+            0.09,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.32,
+            0.4,
+            0.15
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/room_panel.lua",
+          "properties": {
+            "door": {
+              "$entity": "DoorLeaf"
+            }
+          }
+        }
+      },
+      "parent": "DoorFrame"
+    },
+    {
+      "id": "PanelScreen",
+      "components": {
+        "Tag": {
+          "name": "PanelScreen"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            1.62,
+            -0.412
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.48,
+            0.3,
+            0.025
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.1,
+            0.65,
+            0.55,
+            1
+          ]
+        }
+      },
+      "parent": "DoorFrame"
+    },
+    {
+      "id": "PanelButton",
+      "components": {
+        "Tag": {
+          "name": "PanelButton"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            1.27,
+            -0.42
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.24,
+            0.17,
+            0.04
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.94,
+            0.58,
+            0.12,
+            1
+          ]
+        }
+      },
+      "parent": "DoorFrame"
+    },
+    {
+      "id": "PanelBack",
+      "components": {
+        "Tag": {
+          "name": "PanelBack"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            1.45,
+            0.03
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.82,
+            1.1,
+            0.2
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.41,
+            0.55,
+            0.1
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "DoorFrame"
+    },
+    {
+      "id": "LampHousing",
+      "components": {
+        "Tag": {
+          "name": "LampHousing"
+        },
+        "Transform": {
+          "position": [
+            0,
+            3.2,
+            -0.18
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.8,
+            0.14,
+            0.3
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.04,
+            0.07,
+            0.09,
+            1
+          ]
+        }
+      },
+      "parent": "DoorFrame"
+    },
+    {
+      "id": "NormalLight",
+      "components": {
+        "Tag": {
+          "name": "NormalLight"
+        },
+        "Transform": {
+          "position": [
+            0,
+            2.65,
+            -1.7
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PointLight": {
+          "type": "point",
+          "enabled": true,
+          "color": [
+            0.65,
+            0.82,
+            1
+          ],
+          "intensity": 18,
+          "range": 9,
+          "attenuation": 0.5
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/room_light.lua",
+          "properties": {
+            "normalIntensity": 18,
+            "emergencyIntensity": 1
+          }
+        }
+      },
+      "parent": "DoorFrame"
+    },
+    {
+      "id": "IndicatorLight",
+      "components": {
+        "Tag": {
+          "name": "IndicatorLight"
+        },
+        "Transform": {
+          "position": [
+            0,
+            2.5,
+            -0.45
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PointLight": {
+          "type": "point",
+          "enabled": true,
+          "color": [
+            1,
+            0.035,
+            0.015
+          ],
+          "intensity": 0,
+          "range": 9,
+          "attenuation": 0.5
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/room_light.lua",
+          "properties": {
+            "normalIntensity": 0,
+            "emergencyIntensity": 24
+          }
+        }
+      },
+      "parent": "DoorFrame"
+    }
+  ]
+}

@@ -22,7 +22,7 @@ int main(int argc, char** argv)
 
     bool legacy=false,projectArgument=false;
     for(int i=1;i<argc;++i){
-        legacy|=std::strcmp(argv[i],"--legacy")==0;
+        legacy|=std::strcmp(argv[i],"--legacy")==0||std::strcmp(argv[i],"--interactive-room")==0;
         projectArgument|=std::strcmp(argv[i],"--project")==0;
     }
     if (!app.Initialize(legacy&&!projectArgument?Application::StartupMode::LegacyWorkspace:Application::StartupMode::ProjectBrowser))
@@ -51,6 +51,11 @@ int main(int argc, char** argv)
             Logger::Get().Error(error);app.GetEditorLayer().ShowProjectBrowser(error);
             continue;
         }
+        if(std::strcmp(argv[i],"--interactive-room")==0){
+            std::string error;if(!app.OpenScene("scenes/interactive_room.json",&error)){Logger::Get().Error(error);app.Shutdown();return 1;}
+            app.SetEditorCameraPose({-1.85f,1.65f,-5.4f},0,0);
+        }
+        else
         if(std::strcmp(argv[i],"--lua-demo")==0){
             std::string error;if(!app.OpenScene("scenes/lua_wave_demo.json",&error)){Logger::Get().Error(error);app.Shutdown();return 1;}
             app.SetEditorCameraPose({0,10,-14},0,-.55f);

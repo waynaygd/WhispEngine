@@ -1,0 +1,3389 @@
+{
+  "version": 4,
+  "settings": {
+    "ambient": {
+      "color": [
+        0.65,
+        0.75,
+        0.85
+      ],
+      "intensity": 0.13
+    },
+    "legacyDirectional": {
+      "enabled": false
+    },
+    "environment": {
+      "enabled": false,
+      "exposure": -1.5
+    },
+    "background": {
+      "mode": 0,
+      "solid": [
+        0.03,
+        0.045,
+        0.07
+      ]
+    }
+  },
+  "entities": [
+    {
+      "id": "RoomFloor",
+      "components": {
+        "Tag": {
+          "name": "RoomFloor"
+        },
+        "Transform": {
+          "position": [
+            0,
+            -0.2,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            10.4,
+            0.4,
+            12.4
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.24,
+            0.28,
+            0.3,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            5.2,
+            0.2,
+            6.2
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "EntryLanding",
+      "components": {
+        "Tag": {
+          "name": "EntryLanding"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            -0.2,
+            -7.4
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            3.1,
+            0.4,
+            2.5
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.19,
+            0.23,
+            0.25,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.55,
+            0.2,
+            1.25
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "ExitLanding",
+      "components": {
+        "Tag": {
+          "name": "ExitLanding"
+        },
+        "Transform": {
+          "position": [
+            0,
+            -0.2,
+            7.7
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            3,
+            0.4,
+            4
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.19,
+            0.23,
+            0.25,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.5,
+            0.2,
+            2.0
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "ServiceLanding",
+      "components": {
+        "Tag": {
+          "name": "ServiceLanding"
+        },
+        "Transform": {
+          "position": [
+            6,
+            -0.2,
+            -1
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2.2,
+            0.4,
+            3
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.19,
+            0.23,
+            0.25,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.1,
+            0.2,
+            1.5
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "Ceiling",
+      "components": {
+        "Tag": {
+          "name": "Ceiling"
+        },
+        "Transform": {
+          "position": [
+            0,
+            3.65,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            10.4,
+            0.3,
+            12.4
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.48,
+            0.53,
+            0.57,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            5.2,
+            0.15,
+            6.2
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "LeftWall",
+      "components": {
+        "Tag": {
+          "name": "LeftWall"
+        },
+        "Transform": {
+          "position": [
+            -5.1,
+            1.75,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.25,
+            3.5,
+            12.4
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.64,
+            0.69,
+            0.7,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.125,
+            1.75,
+            6.2
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "RightWallFront",
+      "components": {
+        "Tag": {
+          "name": "RightWallFront"
+        },
+        "Transform": {
+          "position": [
+            5.1,
+            1.75,
+            -4.2
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.25,
+            3.5,
+            3.8
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.64,
+            0.69,
+            0.7,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.125,
+            1.75,
+            1.9
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "RightWallBack",
+      "components": {
+        "Tag": {
+          "name": "RightWallBack"
+        },
+        "Transform": {
+          "position": [
+            5.1,
+            1.75,
+            3.2
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.25,
+            3.5,
+            6.3
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.64,
+            0.69,
+            0.7,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.125,
+            1.75,
+            3.15
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "EntryWallLeft",
+      "components": {
+        "Tag": {
+          "name": "EntryWallLeft"
+        },
+        "Transform": {
+          "position": [
+            -4.1,
+            1.75,
+            -6.1
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2.2,
+            3.5,
+            0.25
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.64,
+            0.69,
+            0.7,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.1,
+            1.75,
+            0.125
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "EntryWallRight",
+      "components": {
+        "Tag": {
+          "name": "EntryWallRight"
+        },
+        "Transform": {
+          "position": [
+            2.35,
+            1.75,
+            -6.1
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            5.6,
+            3.5,
+            0.25
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.64,
+            0.69,
+            0.7,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            2.8,
+            1.75,
+            0.125
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "EntryLintel",
+      "components": {
+        "Tag": {
+          "name": "EntryLintel"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            3.15,
+            -6.1
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2.3,
+            0.7,
+            0.25
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.15,
+            0.35,
+            0.125
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "BackWallLeft",
+      "components": {
+        "Tag": {
+          "name": "BackWallLeft"
+        },
+        "Transform": {
+          "position": [
+            -3.2,
+            1.75,
+            6.1
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            3.8,
+            3.5,
+            0.25
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.64,
+            0.69,
+            0.7,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.9,
+            1.75,
+            0.125
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "BackWallRight",
+      "components": {
+        "Tag": {
+          "name": "BackWallRight"
+        },
+        "Transform": {
+          "position": [
+            3.2,
+            1.75,
+            6.1
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            3.8,
+            3.5,
+            0.25
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.64,
+            0.69,
+            0.7,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.9,
+            1.75,
+            0.125
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "BackLintel",
+      "components": {
+        "Tag": {
+          "name": "BackLintel"
+        },
+        "Transform": {
+          "position": [
+            0,
+            3.35,
+            6.1
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2.6,
+            0.3,
+            0.25
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.3,
+            0.15,
+            0.125
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "WallTrim-4.92",
+      "components": {
+        "Tag": {
+          "name": "WallTrim-4.92"
+        },
+        "Transform": {
+          "position": [
+            -4.92,
+            0.23,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.06,
+            0.28,
+            11.8
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "WallTrim4.92",
+      "components": {
+        "Tag": {
+          "name": "WallTrim4.92"
+        },
+        "Transform": {
+          "position": [
+            4.92,
+            0.23,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.06,
+            0.28,
+            11.8
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "FloorGuide-4",
+      "components": {
+        "Tag": {
+          "name": "FloorGuide-4"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            0.008,
+            -4
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.13,
+            0.012,
+            0.65
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.94,
+            0.58,
+            0.12,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "FloorGuide-2",
+      "components": {
+        "Tag": {
+          "name": "FloorGuide-2"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            0.008,
+            -2
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.13,
+            0.012,
+            0.65
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.94,
+            0.58,
+            0.12,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "FloorGuide0",
+      "components": {
+        "Tag": {
+          "name": "FloorGuide0"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            0.008,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.13,
+            0.012,
+            0.65
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.94,
+            0.58,
+            0.12,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "FloorGuide2",
+      "components": {
+        "Tag": {
+          "name": "FloorGuide2"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            0.008,
+            2
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.13,
+            0.012,
+            0.65
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.94,
+            0.58,
+            0.12,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "FloorGuide4",
+      "components": {
+        "Tag": {
+          "name": "FloorGuide4"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            0.008,
+            4
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.13,
+            0.012,
+            0.65
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.94,
+            0.58,
+            0.12,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "CeilingFixture-3",
+      "components": {
+        "Tag": {
+          "name": "CeilingFixture-3"
+        },
+        "Transform": {
+          "position": [
+            0,
+            3.45,
+            -3
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2.2,
+            0.09,
+            0.25
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.04,
+            0.07,
+            0.09,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "CeilingFixture0",
+      "components": {
+        "Tag": {
+          "name": "CeilingFixture0"
+        },
+        "Transform": {
+          "position": [
+            0,
+            3.45,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2.2,
+            0.09,
+            0.25
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.04,
+            0.07,
+            0.09,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "CeilingFixture3",
+      "components": {
+        "Tag": {
+          "name": "CeilingFixture3"
+        },
+        "Transform": {
+          "position": [
+            0,
+            3.45,
+            3
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2.2,
+            0.09,
+            0.25
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.04,
+            0.07,
+            0.09,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "Exit-DoorFrame",
+      "components": {
+        "Tag": {
+          "name": "Exit DoorFrame"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0,
+            5.7
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PrefabInstance": {
+          "asset": "prefabs/interactive_door.prefab.json",
+          "members": {
+            "DoorFrame": {
+              "$entity": "Exit-DoorFrame"
+            },
+            "LeftPost": {
+              "$entity": "Exit-LeftPost"
+            },
+            "RightPost": {
+              "$entity": "Exit-RightPost"
+            },
+            "Lintel": {
+              "$entity": "Exit-Lintel"
+            },
+            "DoorLeaf": {
+              "$entity": "Exit-DoorLeaf"
+            },
+            "DoorPanel": {
+              "$entity": "Exit-DoorPanel"
+            },
+            "DoorInset": {
+              "$entity": "Exit-DoorInset"
+            },
+            "DoorStripe": {
+              "$entity": "Exit-DoorStripe"
+            },
+            "DoorHandle": {
+              "$entity": "Exit-DoorHandle"
+            },
+            "ControlPanel": {
+              "$entity": "Exit-ControlPanel"
+            },
+            "PanelScreen": {
+              "$entity": "Exit-PanelScreen"
+            },
+            "PanelButton": {
+              "$entity": "Exit-PanelButton"
+            },
+            "PanelBack": {
+              "$entity": "Exit-PanelBack"
+            },
+            "LampHousing": {
+              "$entity": "Exit-LampHousing"
+            },
+            "NormalLight": {
+              "$entity": "Exit-NormalLight"
+            },
+            "IndicatorLight": {
+              "$entity": "Exit-IndicatorLight"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "Exit-LeftPost",
+      "components": {
+        "Tag": {
+          "name": "LeftPost"
+        },
+        "Transform": {
+          "position": [
+            -1.16,
+            1.45,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.24,
+            2.9,
+            0.35
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.12,
+            1.45,
+            0.175
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "Exit-DoorFrame"
+    },
+    {
+      "id": "Exit-RightPost",
+      "components": {
+        "Tag": {
+          "name": "RightPost"
+        },
+        "Transform": {
+          "position": [
+            1.16,
+            1.45,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.24,
+            2.9,
+            0.35
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.12,
+            1.45,
+            0.175
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "Exit-DoorFrame"
+    },
+    {
+      "id": "Exit-Lintel",
+      "components": {
+        "Tag": {
+          "name": "Lintel"
+        },
+        "Transform": {
+          "position": [
+            0,
+            2.95,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2.56,
+            0.3,
+            0.35
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.28,
+            0.15,
+            0.175
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "Exit-DoorFrame"
+    },
+    {
+      "id": "Exit-DoorLeaf",
+      "components": {
+        "Tag": {
+          "name": "DoorLeaf"
+        },
+        "Transform": {
+          "position": [
+            -1.02,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/room_door.lua",
+          "properties": {
+            "normalLight": {
+              "$entity": "Exit-NormalLight"
+            },
+            "emergencyLight": {
+              "$entity": "Exit-IndicatorLight"
+            }
+          }
+        }
+      },
+      "parent": "Exit-DoorFrame"
+    },
+    {
+      "id": "Exit-DoorPanel",
+      "components": {
+        "Tag": {
+          "name": "DoorPanel"
+        },
+        "Transform": {
+          "position": [
+            1.02,
+            1.38,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2.02,
+            2.76,
+            0.16
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.3,
+            0.4,
+            0.44,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.01,
+            1.38,
+            0.08
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "Exit-DoorLeaf"
+    },
+    {
+      "id": "Exit-DoorInset",
+      "components": {
+        "Tag": {
+          "name": "DoorInset"
+        },
+        "Transform": {
+          "position": [
+            1.02,
+            1.7,
+            -0.086
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.65,
+            1.3,
+            0.025
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.04,
+            0.07,
+            0.09,
+            1
+          ]
+        }
+      },
+      "parent": "Exit-DoorLeaf"
+    },
+    {
+      "id": "Exit-DoorStripe",
+      "components": {
+        "Tag": {
+          "name": "DoorStripe"
+        },
+        "Transform": {
+          "position": [
+            1.02,
+            0.35,
+            -0.095
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.75,
+            0.12,
+            0.035
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.94,
+            0.58,
+            0.12,
+            1
+          ]
+        }
+      },
+      "parent": "Exit-DoorLeaf"
+    },
+    {
+      "id": "Exit-DoorHandle",
+      "components": {
+        "Tag": {
+          "name": "DoorHandle"
+        },
+        "Transform": {
+          "position": [
+            1.8,
+            1.2,
+            -0.18
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.09,
+            0.48,
+            0.18
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.94,
+            0.58,
+            0.12,
+            1
+          ]
+        }
+      },
+      "parent": "Exit-DoorLeaf"
+    },
+    {
+      "id": "Exit-ControlPanel",
+      "components": {
+        "Tag": {
+          "name": "ControlPanel"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            1.45,
+            -0.25
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.64,
+            0.8,
+            0.3
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.04,
+            0.07,
+            0.09,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.32,
+            0.4,
+            0.15
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/room_panel.lua",
+          "properties": {
+            "door": {
+              "$entity": "Exit-DoorLeaf"
+            }
+          }
+        }
+      },
+      "parent": "Exit-DoorFrame"
+    },
+    {
+      "id": "Exit-PanelScreen",
+      "components": {
+        "Tag": {
+          "name": "PanelScreen"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            1.62,
+            -0.412
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.48,
+            0.3,
+            0.025
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.1,
+            0.65,
+            0.55,
+            1
+          ]
+        }
+      },
+      "parent": "Exit-DoorFrame"
+    },
+    {
+      "id": "Exit-PanelButton",
+      "components": {
+        "Tag": {
+          "name": "PanelButton"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            1.27,
+            -0.42
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.24,
+            0.17,
+            0.04
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.94,
+            0.58,
+            0.12,
+            1
+          ]
+        }
+      },
+      "parent": "Exit-DoorFrame"
+    },
+    {
+      "id": "Exit-PanelBack",
+      "components": {
+        "Tag": {
+          "name": "PanelBack"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            1.45,
+            0.03
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.82,
+            1.1,
+            0.2
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.41,
+            0.55,
+            0.1
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "Exit-DoorFrame"
+    },
+    {
+      "id": "Exit-LampHousing",
+      "components": {
+        "Tag": {
+          "name": "LampHousing"
+        },
+        "Transform": {
+          "position": [
+            0,
+            3.2,
+            -0.18
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.8,
+            0.14,
+            0.3
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.04,
+            0.07,
+            0.09,
+            1
+          ]
+        }
+      },
+      "parent": "Exit-DoorFrame"
+    },
+    {
+      "id": "Exit-NormalLight",
+      "components": {
+        "Tag": {
+          "name": "NormalLight"
+        },
+        "Transform": {
+          "position": [
+            0,
+            2.65,
+            -1.7
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PointLight": {
+          "type": "point",
+          "enabled": true,
+          "color": [
+            0.65,
+            0.82,
+            1
+          ],
+          "intensity": 18,
+          "range": 9,
+          "attenuation": 0.5
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/room_light.lua",
+          "properties": {
+            "normalIntensity": 18,
+            "emergencyIntensity": 1
+          }
+        }
+      },
+      "parent": "Exit-DoorFrame"
+    },
+    {
+      "id": "Exit-IndicatorLight",
+      "components": {
+        "Tag": {
+          "name": "IndicatorLight"
+        },
+        "Transform": {
+          "position": [
+            0,
+            2.5,
+            -0.45
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PointLight": {
+          "type": "point",
+          "enabled": true,
+          "color": [
+            1,
+            0.035,
+            0.015
+          ],
+          "intensity": 0,
+          "range": 9,
+          "attenuation": 0.5
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/room_light.lua",
+          "properties": {
+            "normalIntensity": 0,
+            "emergencyIntensity": 24
+          }
+        }
+      },
+      "parent": "Exit-DoorFrame"
+    },
+    {
+      "id": "Service-DoorFrame",
+      "components": {
+        "Tag": {
+          "name": "Service DoorFrame"
+        },
+        "Transform": {
+          "position": [
+            4.9,
+            0,
+            -1
+          ],
+          "rotation": [
+            0,
+            1.5707963267948966,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PrefabInstance": {
+          "asset": "prefabs/interactive_door.prefab.json",
+          "members": {
+            "DoorFrame": {
+              "$entity": "Service-DoorFrame"
+            },
+            "LeftPost": {
+              "$entity": "Service-LeftPost"
+            },
+            "RightPost": {
+              "$entity": "Service-RightPost"
+            },
+            "Lintel": {
+              "$entity": "Service-Lintel"
+            },
+            "DoorLeaf": {
+              "$entity": "Service-DoorLeaf"
+            },
+            "DoorPanel": {
+              "$entity": "Service-DoorPanel"
+            },
+            "DoorInset": {
+              "$entity": "Service-DoorInset"
+            },
+            "DoorStripe": {
+              "$entity": "Service-DoorStripe"
+            },
+            "DoorHandle": {
+              "$entity": "Service-DoorHandle"
+            },
+            "ControlPanel": {
+              "$entity": "Service-ControlPanel"
+            },
+            "PanelScreen": {
+              "$entity": "Service-PanelScreen"
+            },
+            "PanelButton": {
+              "$entity": "Service-PanelButton"
+            },
+            "PanelBack": {
+              "$entity": "Service-PanelBack"
+            },
+            "LampHousing": {
+              "$entity": "Service-LampHousing"
+            },
+            "NormalLight": {
+              "$entity": "Service-NormalLight"
+            },
+            "IndicatorLight": {
+              "$entity": "Service-IndicatorLight"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "Service-LeftPost",
+      "components": {
+        "Tag": {
+          "name": "LeftPost"
+        },
+        "Transform": {
+          "position": [
+            -1.16,
+            1.45,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.24,
+            2.9,
+            0.35
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.12,
+            1.45,
+            0.175
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "Service-DoorFrame"
+    },
+    {
+      "id": "Service-RightPost",
+      "components": {
+        "Tag": {
+          "name": "RightPost"
+        },
+        "Transform": {
+          "position": [
+            1.16,
+            1.45,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.24,
+            2.9,
+            0.35
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.12,
+            1.45,
+            0.175
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "Service-DoorFrame"
+    },
+    {
+      "id": "Service-Lintel",
+      "components": {
+        "Tag": {
+          "name": "Lintel"
+        },
+        "Transform": {
+          "position": [
+            0,
+            2.95,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2.56,
+            0.3,
+            0.35
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.28,
+            0.15,
+            0.175
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "Service-DoorFrame"
+    },
+    {
+      "id": "Service-DoorLeaf",
+      "components": {
+        "Tag": {
+          "name": "DoorLeaf"
+        },
+        "Transform": {
+          "position": [
+            -1.02,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/room_door.lua",
+          "properties": {
+            "normalLight": {
+              "$entity": "Service-NormalLight"
+            },
+            "emergencyLight": {
+              "$entity": "Service-IndicatorLight"
+            }
+          }
+        }
+      },
+      "parent": "Service-DoorFrame"
+    },
+    {
+      "id": "Service-DoorPanel",
+      "components": {
+        "Tag": {
+          "name": "DoorPanel"
+        },
+        "Transform": {
+          "position": [
+            1.02,
+            1.38,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2.02,
+            2.76,
+            0.16
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.3,
+            0.4,
+            0.44,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.01,
+            1.38,
+            0.08
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "Service-DoorLeaf"
+    },
+    {
+      "id": "Service-DoorInset",
+      "components": {
+        "Tag": {
+          "name": "DoorInset"
+        },
+        "Transform": {
+          "position": [
+            1.02,
+            1.7,
+            -0.086
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.65,
+            1.3,
+            0.025
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.04,
+            0.07,
+            0.09,
+            1
+          ]
+        }
+      },
+      "parent": "Service-DoorLeaf"
+    },
+    {
+      "id": "Service-DoorStripe",
+      "components": {
+        "Tag": {
+          "name": "DoorStripe"
+        },
+        "Transform": {
+          "position": [
+            1.02,
+            0.35,
+            -0.095
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.75,
+            0.12,
+            0.035
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.94,
+            0.58,
+            0.12,
+            1
+          ]
+        }
+      },
+      "parent": "Service-DoorLeaf"
+    },
+    {
+      "id": "Service-DoorHandle",
+      "components": {
+        "Tag": {
+          "name": "DoorHandle"
+        },
+        "Transform": {
+          "position": [
+            1.8,
+            1.2,
+            -0.18
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.09,
+            0.48,
+            0.18
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.94,
+            0.58,
+            0.12,
+            1
+          ]
+        }
+      },
+      "parent": "Service-DoorLeaf"
+    },
+    {
+      "id": "Service-ControlPanel",
+      "components": {
+        "Tag": {
+          "name": "ControlPanel"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            1.45,
+            -0.25
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.64,
+            0.8,
+            0.3
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.04,
+            0.07,
+            0.09,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.32,
+            0.4,
+            0.15
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/room_panel.lua",
+          "properties": {
+            "door": {
+              "$entity": "Service-DoorLeaf"
+            }
+          }
+        }
+      },
+      "parent": "Service-DoorFrame"
+    },
+    {
+      "id": "Service-PanelScreen",
+      "components": {
+        "Tag": {
+          "name": "PanelScreen"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            1.62,
+            -0.412
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.48,
+            0.3,
+            0.025
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.1,
+            0.65,
+            0.55,
+            1
+          ]
+        }
+      },
+      "parent": "Service-DoorFrame"
+    },
+    {
+      "id": "Service-PanelButton",
+      "components": {
+        "Tag": {
+          "name": "PanelButton"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            1.27,
+            -0.42
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.24,
+            0.17,
+            0.04
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.94,
+            0.58,
+            0.12,
+            1
+          ]
+        }
+      },
+      "parent": "Service-DoorFrame"
+    },
+    {
+      "id": "Service-PanelBack",
+      "components": {
+        "Tag": {
+          "name": "PanelBack"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            1.45,
+            0.03
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.82,
+            1.1,
+            0.2
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.41,
+            0.55,
+            0.1
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "Service-DoorFrame"
+    },
+    {
+      "id": "Service-LampHousing",
+      "components": {
+        "Tag": {
+          "name": "LampHousing"
+        },
+        "Transform": {
+          "position": [
+            0,
+            3.2,
+            -0.18
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.8,
+            0.14,
+            0.3
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.04,
+            0.07,
+            0.09,
+            1
+          ]
+        }
+      },
+      "parent": "Service-DoorFrame"
+    },
+    {
+      "id": "Service-NormalLight",
+      "components": {
+        "Tag": {
+          "name": "NormalLight"
+        },
+        "Transform": {
+          "position": [
+            0,
+            2.65,
+            -1.7
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PointLight": {
+          "type": "point",
+          "enabled": true,
+          "color": [
+            0.65,
+            0.82,
+            1
+          ],
+          "intensity": 18,
+          "range": 9,
+          "attenuation": 0.5
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/room_light.lua",
+          "properties": {
+            "normalIntensity": 18,
+            "emergencyIntensity": 1
+          }
+        }
+      },
+      "parent": "Service-DoorFrame"
+    },
+    {
+      "id": "Service-IndicatorLight",
+      "components": {
+        "Tag": {
+          "name": "IndicatorLight"
+        },
+        "Transform": {
+          "position": [
+            0,
+            2.5,
+            -0.45
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PointLight": {
+          "type": "point",
+          "enabled": true,
+          "color": [
+            1,
+            0.035,
+            0.015
+          ],
+          "intensity": 0,
+          "range": 9,
+          "attenuation": 0.5
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/room_light.lua",
+          "properties": {
+            "normalIntensity": 0,
+            "emergencyIntensity": 24
+          }
+        }
+      },
+      "parent": "Service-DoorFrame"
+    },
+    {
+      "id": "Decor0-Cabinet",
+      "components": {
+        "Tag": {
+          "name": "Cabinet"
+        },
+        "Transform": {
+          "position": [
+            -4,
+            0,
+            -2
+          ],
+          "rotation": [
+            0,
+            1.5707963267948966,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PrefabInstance": {
+          "asset": "prefabs/cabinet.prefab.json",
+          "members": {
+            "Cabinet": {
+              "$entity": "Decor0-Cabinet"
+            },
+            "Body": {
+              "$entity": "Decor0-Body"
+            },
+            "DoorLeft": {
+              "$entity": "Decor0-DoorLeft"
+            },
+            "HandleLeft": {
+              "$entity": "Decor0-HandleLeft"
+            },
+            "DoorRight": {
+              "$entity": "Decor0-DoorRight"
+            },
+            "HandleRight": {
+              "$entity": "Decor0-HandleRight"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "Decor0-Body",
+      "components": {
+        "Tag": {
+          "name": "Body"
+        },
+        "Transform": {
+          "position": [
+            0,
+            1,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2,
+            2,
+            1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.65,
+            0.37,
+            0.16,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.0,
+            1.0,
+            0.5
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "Decor0-Cabinet"
+    },
+    {
+      "id": "Decor0-DoorLeft",
+      "components": {
+        "Tag": {
+          "name": "DoorLeft"
+        },
+        "Transform": {
+          "position": [
+            -0.51,
+            1,
+            -0.56
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.95,
+            1.9,
+            0.12
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.6,
+            0.3,
+            1
+          ]
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/cabinet_door.lua",
+          "enabled": true,
+          "properties": {
+            "handle": {
+              "$entity": "Decor0-HandleLeft"
+            },
+            "openAngle": 1.2
+          }
+        }
+      },
+      "parent": "Decor0-Cabinet"
+    },
+    {
+      "id": "Decor0-HandleLeft",
+      "components": {
+        "Tag": {
+          "name": "HandleLeft"
+        },
+        "Transform": {
+          "position": [
+            0.28,
+            0,
+            -0.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.084,
+            0.132,
+            0.667
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.65,
+            0.35,
+            1
+          ]
+        }
+      },
+      "parent": "Decor0-DoorLeft"
+    },
+    {
+      "id": "Decor0-DoorRight",
+      "components": {
+        "Tag": {
+          "name": "DoorRight"
+        },
+        "Transform": {
+          "position": [
+            0.51,
+            1,
+            -0.56
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.95,
+            1.9,
+            0.12
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.6,
+            0.3,
+            1
+          ]
+        }
+      },
+      "parent": "Decor0-Cabinet"
+    },
+    {
+      "id": "Decor0-HandleRight",
+      "components": {
+        "Tag": {
+          "name": "HandleRight"
+        },
+        "Transform": {
+          "position": [
+            -0.28,
+            0,
+            -0.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.084,
+            0.132,
+            0.667
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.65,
+            0.35,
+            1
+          ]
+        }
+      },
+      "parent": "Decor0-DoorRight"
+    },
+    {
+      "id": "Decor1-Cabinet",
+      "components": {
+        "Tag": {
+          "name": "Cabinet"
+        },
+        "Transform": {
+          "position": [
+            -4,
+            0,
+            1
+          ],
+          "rotation": [
+            0,
+            1.5707963267948966,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PrefabInstance": {
+          "asset": "prefabs/cabinet.prefab.json",
+          "members": {
+            "Cabinet": {
+              "$entity": "Decor1-Cabinet"
+            },
+            "Body": {
+              "$entity": "Decor1-Body"
+            },
+            "DoorLeft": {
+              "$entity": "Decor1-DoorLeft"
+            },
+            "HandleLeft": {
+              "$entity": "Decor1-HandleLeft"
+            },
+            "DoorRight": {
+              "$entity": "Decor1-DoorRight"
+            },
+            "HandleRight": {
+              "$entity": "Decor1-HandleRight"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "Decor1-Body",
+      "components": {
+        "Tag": {
+          "name": "Body"
+        },
+        "Transform": {
+          "position": [
+            0,
+            1,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2,
+            2,
+            1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.65,
+            0.37,
+            0.16,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.0,
+            1.0,
+            0.5
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      },
+      "parent": "Decor1-Cabinet"
+    },
+    {
+      "id": "Decor1-DoorLeft",
+      "components": {
+        "Tag": {
+          "name": "DoorLeft"
+        },
+        "Transform": {
+          "position": [
+            -0.51,
+            1,
+            -0.56
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.95,
+            1.9,
+            0.12
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.6,
+            0.3,
+            1
+          ]
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/cabinet_door.lua",
+          "enabled": true,
+          "properties": {
+            "handle": {
+              "$entity": "Decor1-HandleLeft"
+            },
+            "openAngle": 1.2
+          }
+        }
+      },
+      "parent": "Decor1-Cabinet"
+    },
+    {
+      "id": "Decor1-HandleLeft",
+      "components": {
+        "Tag": {
+          "name": "HandleLeft"
+        },
+        "Transform": {
+          "position": [
+            0.28,
+            0,
+            -0.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.084,
+            0.132,
+            0.667
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.65,
+            0.35,
+            1
+          ]
+        }
+      },
+      "parent": "Decor1-DoorLeft"
+    },
+    {
+      "id": "Decor1-DoorRight",
+      "components": {
+        "Tag": {
+          "name": "DoorRight"
+        },
+        "Transform": {
+          "position": [
+            0.51,
+            1,
+            -0.56
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.95,
+            1.9,
+            0.12
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.6,
+            0.3,
+            1
+          ]
+        }
+      },
+      "parent": "Decor1-Cabinet"
+    },
+    {
+      "id": "Decor1-HandleRight",
+      "components": {
+        "Tag": {
+          "name": "HandleRight"
+        },
+        "Transform": {
+          "position": [
+            -0.28,
+            0,
+            -0.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.084,
+            0.132,
+            0.667
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/default_primitive.material.json",
+          "tint": [
+            0.8,
+            0.65,
+            0.35,
+            1
+          ]
+        }
+      },
+      "parent": "Decor1-DoorRight"
+    },
+    {
+      "id": "DecorTable",
+      "components": {
+        "Tag": {
+          "name": "DecorTable"
+        },
+        "Transform": {
+          "position": [
+            2.8,
+            0.45,
+            3.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.6,
+            0.9,
+            1.2
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.2,
+            0.29,
+            0.34,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.8,
+            0.45,
+            0.6
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "Equipment2.5",
+      "components": {
+        "Tag": {
+          "name": "Equipment2.5"
+        },
+        "Transform": {
+          "position": [
+            2.5,
+            1.1,
+            3.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.45,
+            0.4,
+            0.6
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.94,
+            0.58,
+            0.12,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.225,
+            0.2,
+            0.3
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "Equipment3.1",
+      "components": {
+        "Tag": {
+          "name": "Equipment3.1"
+        },
+        "Transform": {
+          "position": [
+            3.1,
+            1.1,
+            3.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.45,
+            0.4,
+            0.6
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/white.material.json",
+          "tint": [
+            0.94,
+            0.58,
+            0.12,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.225,
+            0.2,
+            0.3
+          ],
+          "autoFitFromMesh": false,
+          "restitution": 0,
+          "friction": 0.8
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "PlayerStart",
+      "components": {
+        "Tag": {
+          "name": "Player Start - enter and follow yellow marks"
+        },
+        "Transform": {
+          "position": [
+            -1.85,
+            0.04,
+            -7.3
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PlayerStart": {
+          "enabled": true,
+          "controllerScript": "scripts/FirstPersonController.lua",
+          "characterHeight": 1.7,
+          "eyeHeight": 1.65
+        }
+      }
+    }
+  ]
+}

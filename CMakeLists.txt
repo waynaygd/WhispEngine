@@ -250,6 +250,17 @@ if (WHISP_BUILD_PHYSICS_TESTS)
     add_test(NAME LuaPhysicsEventsDx12Regression COMMAND LuaPhysicsEventsRegression --dx12)
     set_tests_properties(LuaPhysicsEventsDx12Regression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" RUN_SERIAL TRUE ENVIRONMENT "WHISP_DX12_DEBUG=1")
   endif()
+  if(ENABLE_DX12)
+    add_executable(InteractiveRoomRegression tests/InteractiveRoomRegression.cpp)
+    target_link_libraries(InteractiveRoomRegression PRIVATE Engine DearImGui ImGuizmo)
+    target_compile_definitions(InteractiveRoomRegression PRIVATE ENABLE_DX12=1)
+    add_dependencies(InteractiveRoomRegression LuaGameplayAssets MaterialShaderSources EditorPrimitiveFixtures)
+    if(TARGET Tracy::TracyClient)
+      target_link_libraries(InteractiveRoomRegression PRIVATE Tracy::TracyClient)
+    endif()
+    add_test(NAME InteractiveRoomRegression COMMAND InteractiveRoomRegression)
+    set_tests_properties(InteractiveRoomRegression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" RUN_SERIAL TRUE ENVIRONMENT "WHISP_DX12_DEBUG=1")
+  endif()
   add_executable(GameplayEventsRegression tests/GameplayEventsRegression.cpp)
   add_dependencies(GameplayEventsRegression LuaGameplayAssets)
   target_link_libraries(GameplayEventsRegression PRIVATE Engine DearImGui ImGuizmo)
@@ -365,6 +376,7 @@ add_custom_target(LuaGameplayAssets ALL
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/engine/assets/prefabs ${CMAKE_BINARY_DIR}/assets/prefabs
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets/scenes
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/lua_wave_demo.json ${CMAKE_BINARY_DIR}/assets/scenes/lua_wave_demo.json
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/interactive_room.json ${CMAKE_BINARY_DIR}/assets/scenes/interactive_room.json
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/prefab_cabinet_demo.json ${CMAKE_BINARY_DIR}/assets/scenes/prefab_cabinet_demo.json)
 add_dependencies(WhispEngine LuaGameplayAssets)
 option(WHISP_BUILD_LUA_TESTS "Build embedded Lua gameplay regressions" ON)
