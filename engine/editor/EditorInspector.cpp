@@ -74,6 +74,9 @@ void EditorLayer::DrawInspector(Application& app){
     if(m_Selection.items.size()>1){ImGui::Text("%zu entities selected",m_Selection.items.size());ImGui::TextWrapped("Properties below affect only the Active Entity. The shared gizmo transforms the group around its center; Local axes follow the Active Entity.");}
     const auto* tag=world.GetComponent<ecs::TagComponent>(e);if(m_Selection.items.size()>1)ImGui::TextUnformatted("Active Entity:");ImGui::SeparatorText(tag?tag->name.c_str():"Entity");
     if(app.IsEditorPlayMode())ImGui::TextWrapped("Runtime edits are discarded on Stop.");
+    if(auto parent=world.Parent(e);parent.IsValid()){auto* name=world.GetComponent<ecs::TagComponent>(parent);ImGui::Text("Parent: %s",name?name->name.c_str():"Entity");}
+    if(ImGui::Checkbox("World coordinates",&m_InspectorWorldTransform)){FinishTransaction(app);m_PropertyDrafts.clear();}
+    if(ImGui::IsItemHovered())ImGui::SetTooltip("Transform fields use World coordinates when enabled, otherwise Local coordinates relative to Parent.");
     ImGui::Combo("Transform precision",&m_TransformPrecision,"Compact\0Precise\0Full Precision (9 significant digits)\0");
     const auto& registry=ecs::ComponentRegistry::Builtins();ImGui::PushID(int(e.index));ImGui::PushID(int(e.generation));
     if(ImGui::Button("Add Component"))ImGui::OpenPopup("AddComponent");
@@ -89,12 +92,18 @@ void EditorLayer::DrawInspector(Application& app){
 
             ImGui::PushID(p.key.c_str());const auto id=ImGui::GetID("PropertyDraft");auto draft=m_PropertyDrafts.find(id);
             auto value=draft!=m_PropertyDrafts.end()?draft->second:p.get(world,e);
+            if(draft==m_PropertyDrafts.end()&&m_InspectorWorldTransform&&d.key=="Transform"){auto t=world.WorldTransform(e);if(p.key=="position")value=t.position;else if(p.key=="rotation")value=t.rotation;else if(p.key=="scale")value=t.scale;}
             const bool skyDriven=d.key=="Transform"&&p.key=="rotation"&&app.GetSceneBackground().sunSync==SunSyncMode::SkyDrivesLight&&app.GetSceneBackground().sunMetadata&&world.HasComponent<ecs::DirectionalLightComponent>(e)&&PrimarySun(world)==e;
             const bool readOnly=p.readOnly||skyDriven;
             ImGui::BeginDisabled(readOnly);bool changed=Drawer(p,value,d.key=="Transform"?TransformFormat(m_TransformPrecision):"%.6g",d.key=="Transform"&&p.key=="rotation");bool activated=ImGui::IsItemActivated();bool deactivated=ImGui::IsItemDeactivatedAfterEdit();ImGui::EndDisabled();
             if(skyDriven&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Sky Drives Light controls this orientation. Select Independent to edit it manually.");else if(p.readOnly&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Readonly: %s",p.tooltip.c_str());else if(ImGui::IsItemHovered()&&!p.tooltip.empty())ImGui::SetTooltip("%s",p.tooltip.c_str());
             if(activated||changed){if(!m_Transaction)PushUndoBeforeChange(app,"Edit "+d.label+" / "+p.label);m_PropertyDrafts[id]=value;}
-            if(changed){if(SetProperty(app,e,d.id,p.key,value,false))m_EditorError.clear();else ImGui::TextColored(ImVec4(1,.45f,.35f,1),"%s",m_EditorError.c_str());}
+            if(changed){
+                bool applied=false;
+                if(m_InspectorWorldTransform&&d.key=="Transform"){auto target=world.WorldTransform(e);if(p.key=="position")target.position=std::get<ecs::Vec3>(value);else if(p.key=="rotation")target.rotation=std::get<ecs::Vec3>(value);else if(p.key=="scale")target.scale=std::get<ecs::Vec3>(value);applied=world.SetWorldTransform(e,target,&m_EditorError);if(applied)app.NotifyEditorMutation(e);}
+                else applied=SetProperty(app,e,d.id,p.key,value,false);
+                if(applied)m_EditorError.clear();else ImGui::TextColored(ImVec4(1,.45f,.35f,1),"%s",m_EditorError.c_str());
+            }
             if(deactivated){FinishTransaction(app);m_PropertyDrafts.erase(id);}
             // Combo/checkbox/drop actions are discrete; numeric/text drag owns a pending transaction.
             if(changed&&!ImGui::IsAnyItemActive()){FinishTransaction(app);m_PropertyDrafts.erase(id);}

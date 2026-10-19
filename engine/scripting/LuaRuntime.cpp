@@ -165,8 +165,8 @@ struct LuaRuntime::Impl {
     }
     ecs::TransformComponent& Transform(ecs::Entity e){if(!Alive(e))throw std::runtime_error("Dead/stale/foreign entity");auto* t=world->GetComponent<ecs::TransformComponent>(e);if(!t)throw std::runtime_error("Entity has no Transform");return *t;}
     void SetTransform(ecs::Entity e,const char* field,ecs::Vec3 value){
-        Transform(e);std::string error;
-        if(!ecs::ComponentRegistry::Builtins().Set(*world,e,ecs::ComponentId("Transform"),field,value,&error))throw std::runtime_error("World.set_"+std::string(field)+": "+error);
+        Transform(e);auto t=world->WorldTransform(e);if(std::string(field)=="position")t.position=value;else if(std::string(field)=="rotation")t.rotation=value;else t.scale=value;
+        std::string error;if(!world->SetWorldTransform(e,t,&error))throw std::runtime_error("World.set_"+std::string(field)+": "+error);
     }
     std::string LightComponent(ecs::Entity e){
         if(!Alive(e))throw std::runtime_error("Light: dead/stale/foreign entity");
@@ -208,13 +208,20 @@ struct LuaRuntime::Impl {
         auto api=lua.create_table();
         api.set_function("is_alive",[this](ecs::Entity e){return Alive(e);});
         api.set_function("find_by_tag",[this](const std::string& tag){auto list=lua.create_table();int i=1;for(auto e:world->Entities())if(auto* t=world->GetComponent<ecs::TagComponent>(e);Alive(e)&&t&&t->name==tag)list[i++]=e;return list;});
-        api.set_function("get_position",[this](ecs::Entity e){return Transform(e).position;});
-        api.set_function("get_rotation",[this](ecs::Entity e){return Transform(e).rotation;});
-        api.set_function("get_scale",[this](ecs::Entity e){return Transform(e).scale;});
+        api.set_function("get_position",[this](ecs::Entity e){Transform(e);return world->WorldTransform(e).position;});
+        api.set_function("get_rotation",[this](ecs::Entity e){Transform(e);return world->WorldTransform(e).rotation;});
+        api.set_function("get_scale",[this](ecs::Entity e){Transform(e);return world->WorldTransform(e).scale;});
         api.set_function("find_in_radius",[this](ecs::Vec3 center,float radius){auto list=lua.create_table();int index=1;for(auto e:ecs::FindInRadius(*world,center,radius))if(Alive(e))list[index++]=e;return list;});
-        api.set_function("set_position",[this](ecs::Entity e,ecs::Vec3 p){if(!std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.z))throw std::runtime_error("Nonfinite position");Transform(e).position=p;});
+        api.set_function("set_position",[this](ecs::Entity e,ecs::Vec3 p){if(!std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.z))throw std::runtime_error("Nonfinite position");SetTransform(e,"position",p);});
         api.set_function("set_rotation",[this](ecs::Entity e,ecs::Vec3 v){SetTransform(e,"rotation",v);});
         api.set_function("set_scale",[this](ecs::Entity e,ecs::Vec3 v){SetTransform(e,"scale",v);});
+        api.set_function("get_local_position",[this](ecs::Entity e){return Transform(e).position;});
+        api.set_function("get_local_rotation",[this](ecs::Entity e){return Transform(e).rotation;});
+        api.set_function("get_local_scale",[this](ecs::Entity e){return Transform(e).scale;});
+        api.set_function("get_world_transform",[this](ecs::Entity e){Transform(e);auto t=world->WorldTransform(e);auto value=lua.create_table();value["position"]=t.position;value["rotation"]=t.rotation;value["scale"]=t.scale;return value;});
+        for(const char* field:{"position","rotation","scale"})api.set_function(std::string("set_local_")+field,[this,key=std::string(field)](ecs::Entity e,ecs::Vec3 value){Transform(e);std::string error;if(!ecs::ComponentRegistry::Builtins().Set(*world,e,ecs::ComponentId("Transform"),key,value,&error))throw std::runtime_error(error);});
+        api.set_function("get_parent",[this](ecs::Entity e){if(!Alive(e))throw std::runtime_error("Dead/stale/foreign entity");auto parent=world->Parent(e);return parent.IsValid()?sol::make_object(lua,parent):sol::make_object(lua,sol::nil);});
+        api.set_function("set_parent",[this](ecs::Entity e,sol::optional<ecs::Entity> parent,sol::optional<bool> keep){std::string error;if(!world->SetParent(e,parent.value_or(ecs::Entity{}),keep.value_or(true),&error))throw std::runtime_error(error);});
         api.set_function("spawn_prefab",[this](const std::string& key,ecs::Vec3 p){if(stopping)throw std::runtime_error("Spawn during Stop");if(world->GetAliveCount()>10000)throw std::runtime_error("Lua entity budget exceeded");return SpawnPrefab(*world,key,p);});
         api.set_function("destroy",[this](ecs::Entity e){if(Alive(e)){destroying.insert(e);mutations.Destroy(e);}});
         api.set_function("send_event",[this](ecs::Entity e,const std::string& type,float amount){if(Alive(e)&&events.size()<1024&&type.size()<128&&std::isfinite(amount))events.push_back({e,{},type,amount});});

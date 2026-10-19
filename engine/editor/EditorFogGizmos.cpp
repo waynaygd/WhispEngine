@@ -12,7 +12,7 @@ void EditorLayer::DrawFogGizmos(Application& app,const ImVec2& origin,const ImVe
     ecs::Entity hit{};float nearest=INFINITY;const auto mouse=ImGui::GetMousePos();const float dpi=ImGui::GetStyle().FontScaleDpi;
     app.GetWorld().ForEach<ecs::FogComponent,ecs::TransformComponent>([&](auto e,const auto& fog,const auto& transform){
         if(!EditorEntityVisible(app,e))return;
-        auto projected=ProjectGizmo(transform.position,camera);if(!projected)return;
+        auto projected=ProjectGizmo(app.GetWorld().WorldTransform(e).position,camera);if(!projected)return;
         ImVec2 p(origin.x+(*projected)[0]*size.x,origin.y+(*projected)[1]*size.y);
         if(p.x<origin.x-20*dpi||p.y<origin.y-20*dpi||p.x>origin.x+size.x+20*dpi||p.y>origin.y+size.y+20*dpi)return;
         const ImU32 ink=fog.enabled?IM_COL32(210,238,250,255):IM_COL32(145,150,155,255),outline=IM_COL32(10,16,24,255);

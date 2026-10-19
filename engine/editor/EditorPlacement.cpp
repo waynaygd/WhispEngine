@@ -71,26 +71,32 @@ bool EditorLayer::DropSelectionToFloor(Application& app){
     auto* resources=app.GetResourceManager();if(!resources||m_Selection.items.empty())return false;
     EntitySnapshot before;before.world=app.GetWorld().GetIdentity();before.selection=m_Selection;
     struct Change{ecs::Entity entity;ecs::TransformComponent target;};std::vector<Change> changes;unsigned loading=0;
-    for(auto e:m_Selection.items)if(auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(e)){
-        PlacementBounds bounds;
-        if(auto* renderer=app.GetWorld().GetComponent<ecs::MeshRendererComponent>(e)){
+    std::vector<ecs::Entity> ignored;for(auto root:app.GetWorld().HierarchyRoots(m_Selection.items)){auto subtree=app.GetWorld().Subtree(root);ignored.insert(ignored.end(),subtree.begin(),subtree.end());}
+    for(auto e:app.GetWorld().HierarchyRoots(m_Selection.items))if(app.GetWorld().HasComponent<ecs::TransformComponent>(e)){
+        auto absolute=app.GetWorld().WorldTransform(e);auto* t=&absolute;
+        std::vector<V> corners;bool unavailable=false;
+        for(auto descendant:app.GetWorld().Subtree(e))if(auto* renderer=app.GetWorld().GetComponent<ecs::MeshRendererComponent>(descendant)){
             auto mesh=resources->Get<MeshResource>(renderer->meshPath);
-            if(!mesh){(void)resources->LoadAsync<MeshResource>(renderer->meshPath);++loading;continue;}
-            if(!mesh->IsLoaded()||mesh->GetData().placeholder){++loading;continue;}bounds=Bounds(mesh);
+            if(!mesh){(void)resources->LoadAsync<MeshResource>(renderer->meshPath);unavailable=true;continue;}
+            if(!mesh->IsLoaded()||mesh->GetData().placeholder){unavailable=true;continue;}
+            auto values=PlacementCorners(Bounds(mesh),app.GetWorld().WorldTransform(descendant));corners.insert(corners.end(),values.begin(),values.end());
         }
+        if(unavailable){++loading;continue;}
+        if(corners.empty()){auto values=PlacementCorners(PlacementBounds{},*t);corners.insert(corners.end(),values.begin(),values.end());}
         V lo{INFINITY,INFINITY,INFINITY},hi{-INFINITY,-INFINITY,-INFINITY};
-        for(auto p:PlacementCorners(bounds,*t)){lo.x=std::min(lo.x,p.x);lo.y=std::min(lo.y,p.y);lo.z=std::min(lo.z,p.z);hi.x=std::max(hi.x,p.x);hi.y=std::max(hi.y,p.y);hi.z=std::max(hi.z,p.z);}
-        auto hit=RaycastPlacement(app,{(lo.x+hi.x)*.5f,lo.y+.001f,(lo.z+hi.z)*.5f},{0,-1,0},2000001.f,m_Selection.items);
+        for(auto p:corners){lo.x=std::min(lo.x,p.x);lo.y=std::min(lo.y,p.y);lo.z=std::min(lo.z,p.z);hi.x=std::max(hi.x,p.x);hi.y=std::max(hi.y,p.y);hi.z=std::max(hi.z,p.z);}
+        auto hit=RaycastPlacement(app,{(lo.x+hi.x)*.5f,lo.y+.001f,(lo.z+hi.z)*.5f},{0,-1,0},2000001.f,ignored);
         if(!hit||hit->normal.y<.05f)continue;
-        float support=INFINITY;for(auto p:PlacementCorners(bounds,*t))support=std::min(support,Dot(hit->normal,Add(p,Scale(hit->position,-1))));
+        float support=INFINITY;for(auto p:corners)support=std::min(support,Dot(hit->normal,Add(p,Scale(hit->position,-1))));
         const float drop=-support/hit->normal.y;if(drop>=-.0001f)continue;
         auto target=*t;target.position.y+=drop;
         if(!ValidGroupSource(target))continue;
-        EntitySnapshot item;item.entity=e;item.world=e.world;item.alive=true;item.transform=*t;before.related.push_back(std::move(item));changes.push_back({e,target});
+        EntitySnapshot item;item.entity=e;item.world=e.world;item.alive=true;item.transform=app.GetWorld().LocalTransform(e);item.parent=app.GetWorld().Parent(e);before.related.push_back(std::move(item));changes.push_back({e,target});
     }
     m_EditorError=loading?std::to_string(loading)+" model bounds unavailable; skipped. Wait for loading and retry.":"";
     if(changes.empty())return false;
-    for(auto& change:changes){*app.GetWorld().GetComponent<ecs::TransformComponent>(change.entity)=change.target;app.NotifyEditorMutation(change.entity);}
+    std::vector<std::pair<ecs::Entity,ecs::TransformComponent>> edits;for(auto& change:changes)edits.emplace_back(change.entity,change.target);
+    if(!app.GetWorld().SetWorldTransforms(edits,&m_EditorError))return false;for(auto& change:changes)app.NotifyEditorMutation(change.entity);
     CommitUndo(app,"Drop to Floor",std::move(before));return true;
 }
 bool EditorLayer::DrawPlacementMenu(Application& app){

@@ -15,16 +15,18 @@ bool Same(const nlohmann::json& a,const nlohmann::json& b){return a==b;}
 }
 EditorLayer::EntitySnapshot EditorLayer::CaptureSelectedEntity(Application& app,ecs::Entity entity)const{
     EntitySnapshot s;s.entity=entity.IsValid()?entity:m_Selection.active;s.world=app.GetWorld().GetIdentity();s.alive=app.GetWorld().IsAlive(s.entity);
+    if(s.alive)s.parent=app.GetWorld().Parent(s.entity);
     if(s.alive)s.components=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),s.entity);s.selection=m_Selection;return s;
 }
 EditorLayer::EntitySnapshot EditorLayer::CaptureLike(Application& app,const EntitySnapshot& sample)const{
     auto result=(sample.settings||sample.transform||(!sample.entity.IsValid()&&!sample.related.empty()))?EntitySnapshot{}:CaptureSelectedEntity(app,sample.entity);result.previousSelection=sample.previousSelection;result.world=app.GetWorld().GetIdentity();
     if(sample.transform){result.entity=sample.entity;result.alive=app.GetWorld().IsAlive(sample.entity);if(auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(sample.entity))result.transform=*t;}
+    if(sample.parent&&result.alive)result.parent=app.GetWorld().Parent(result.entity);
     result.selection=sample.selection?std::optional<SelectionSet>(m_Selection):std::nullopt;
     if(sample.settings)result.settings=app.GetSceneSettings();for(const auto& related:sample.related)result.related.push_back(CaptureLike(app,related));return result;
 }
 void EditorLayer::RemapHistory(ecs::Entity oldEntity,ecs::Entity replacement){
-    auto remap=[&](auto&& self,EntitySnapshot& s)->void{if(s.entity==oldEntity)s.entity=replacement;if(s.previousSelection==oldEntity)s.previousSelection=replacement;if(s.selection)s.selection->Remap(oldEntity,replacement);for(auto& item:s.related)self(self,item);};
+    auto remap=[&](auto&& self,EntitySnapshot& s)->void{if(s.entity==oldEntity)s.entity=replacement;if(s.previousSelection==oldEntity)s.previousSelection=replacement;if(s.parent&&*s.parent==oldEntity)s.parent=replacement;if(s.selection)s.selection->Remap(oldEntity,replacement);for(auto& item:s.related)self(self,item);};
     for(auto* stack:{&m_UndoStack,&m_RedoStack})for(auto& record:*stack)remap(remap,record.snapshot);
     if(m_Transaction)remap(remap,m_Transaction->before);
     m_Selection.Remap(oldEntity,replacement);
@@ -56,6 +58,12 @@ ecs::Entity EditorLayer::RestoreSnapshot(Application& app,const EntitySnapshot& 
     for(std::size_t i=0;i<snapshot.related.size();++i)RestoreSnapshot(app,snapshot.related[i],inverse?&inverse->related[i]:nullptr,remapped);
     if(!entity.IsValid()&&!snapshot.related.empty()&&std::all_of(snapshot.related.begin(),snapshot.related.end(),[](const auto& item){return !item.alive;}))m_Selection.active=world.IsAlive(snapshot.previousSelection)?snapshot.previousSelection:ecs::Entity{};
     if(root){
+        std::vector<std::pair<ecs::Entity,ecs::Entity>> parents;
+        auto relationships=[&](auto&& self,const EntitySnapshot& s)->void{
+            auto target=s.entity;if(auto it=remapped->find(target);it!=remapped->end())target=it->second;
+            if(s.alive&&s.parent&&world.IsAlive(target)){auto p=*s.parent;if(auto it=remapped->find(p);it!=remapped->end())p=it->second;parents.emplace_back(target,p);}
+            for(const auto& child:s.related)self(self,child);
+        };relationships(relationships,snapshot);std::string error;if(!world.SetParents(parents,false,&error))throw std::runtime_error(error);
         if(snapshot.selection){m_Selection=*snapshot.selection;for(auto [old,replacement]:*remapped)m_Selection.Remap(old,replacement);m_Selection.Prune(world);}
         else SelectEntity(m_Selection.active);
         if(inverse&&inverse->selection)for(auto [old,replacement]:*remapped)inverse->selection->Remap(old,replacement);
@@ -78,7 +86,7 @@ void EditorLayer::CommitUndo(Application& app,const std::string& label,EntitySna
     FinishTransaction(app);if(!before.world)before.world=before.entity.world;
     auto after=CaptureLike(app,before);
     auto equal=[&](auto&& self,const EntitySnapshot& a,const EntitySnapshot& b)->bool{
-        if(a.alive!=b.alive||!Same(a.components,b.components)||a.related.size()!=b.related.size()||a.settings.has_value()!=b.settings.has_value())return false;
+        if(a.alive!=b.alive||a.parent!=b.parent||!Same(a.components,b.components)||a.related.size()!=b.related.size()||a.settings.has_value()!=b.settings.has_value())return false;
         if(a.transform.has_value()!=b.transform.has_value()||(a.transform&&TransformMatrix(*a.transform)!=TransformMatrix(*b.transform)))return false;
         if(a.settings&&SceneSettingsToJson(*a.settings)!=SceneSettingsToJson(*b.settings))return false;
         for(std::size_t i=0;i<a.related.size();++i)if(!self(self,a.related[i],b.related[i]))return false;return true;
@@ -126,7 +134,7 @@ ecs::Entity EditorLayer::CreateFog(Application& app){
     EntitySnapshot before;before.entity=e;before.world=e.world;before.previousSelection=previous;CommitUndo(app,"Create Fog",before);return e;
 }
 bool EditorLayer::DeleteEntity(Application& app,ecs::Entity e){
-    FinishTransaction(app);if(!app.GetWorld().IsAlive(e))return false;auto before=CaptureSelectedEntity(app,e);app.DestroySceneEntity(e);CommitUndo(app,"Delete entity",std::move(before));return true;
+    FinishTransaction(app);if(!app.GetWorld().IsAlive(e))return false;auto before=CaptureSubtree(app,e);app.DestroySceneEntity(e);CommitUndo(app,"Delete entity",std::move(before));return true;
 }
 ecs::Entity EditorLayer::DuplicateEntity(Application& app,ecs::Entity source){
     if(app.IsEditorPlayMode())return {};
@@ -136,9 +144,14 @@ ecs::Entity EditorLayer::DuplicateEntity(Application& app,ecs::Entity source){
 nlohmann::json EditorLayer::CaptureCopies(Application& app,ecs::Entity source)const{
     if(app.IsEditorPlayMode()||!app.GetWorld().IsAlive(source))return {};
     auto entities=IsSelected(source)?m_Selection.items:std::vector<ecs::Entity>{source};
+    std::vector<ecs::Entity> expanded;for(auto root:app.GetWorld().HierarchyRoots(entities)){auto subtree=app.GetWorld().Subtree(root);expanded.insert(expanded.end(),subtree.begin(),subtree.end());}entities=std::move(expanded);
     auto values=nlohmann::json::array();std::size_t active=0;
     for(auto e:entities)if(app.GetWorld().IsAlive(e)){
         if(e==source)active=values.size();values.push_back(ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),e));
+        if(auto parent=app.GetWorld().Parent(e);parent.IsValid()){
+            values.back()["__parent"]={{"$entity",SceneSerializer::EntitySceneId(app.GetWorld(),parent)}};
+            auto t=app.GetWorld().WorldTransform(e);values.back()["__world"]={{"position",{t.position.x,t.position.y,t.position.z}},{"rotation",{t.rotation.x,t.rotation.y,t.rotation.z}},{"scale",{t.scale.x,t.scale.y,t.scale.z}}};
+        }
     }
     return {{"entities",std::move(values)},{"active",active}};
 }
@@ -169,10 +182,16 @@ ecs::Entity EditorLayer::CreateCopies(Application& app,nlohmann::json values,std
     };remap(remap,values);
     SelectionSet copies;
     try{
-        for(const auto& components:values){
-            const auto e=app.CreateEmptyEntity();EntitySnapshot absent;absent.entity=e;absent.world=e.world;before.related.push_back(std::move(absent));
-            ecs::ComponentRegistry::Builtins().Restore(app.GetWorld(),e,components);copies.Add(e);app.NotifyEditorMutation(e);
+        std::vector<ecs::Entity> created;for(std::size_t i=0;i<values.size();++i){auto e=app.CreateEmptyEntity();created.push_back(e);EntitySnapshot absent;absent.entity=e;absent.world=e.world;before.related.push_back(std::move(absent));}
+        for(std::size_t i=0;i<values.size();++i){auto components=values[i];components.erase("__parent");components.erase("__world");ecs::ComponentRegistry::Builtins().Restore(app.GetWorld(),created[i],components);copies.Add(created[i]);}
+        std::vector<std::pair<ecs::Entity,ecs::Entity>> parents;
+        for(std::size_t i=0;i<values.size();++i)if(values[i].contains("__parent")){
+            auto parent=scripting::ResolveEntityReference(app.GetWorld(),values[i]["__parent"]);
+            if(parent.IsValid())parents.emplace_back(created[i],parent);
+            else {auto components=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),created[i]);components["Transform"]=values[i]["__world"];ecs::ComponentRegistry::Builtins().Restore(app.GetWorld(),created[i],components);}
         }
+        if(!app.GetWorld().SetParents(parents,false,&m_EditorError))throw std::runtime_error(m_EditorError);
+        for(auto e:created)app.NotifyEditorMutation(e);
     }catch(const std::exception& ex){
         for(auto& item:before.related)app.DestroySceneEntity(item.entity);m_EditorError=ex.what();return {};
     }
@@ -187,7 +206,7 @@ ecs::Entity EditorLayer::BeginDuplicateDrag(Application& app){
     if(app.IsEditorPlayMode()||m_DuplicateDrag||!app.GetWorld().IsAlive(m_Selection.active))return {};
     FinishTransaction(app);auto copy=CaptureCopies(app,m_Selection.active);if(copy.is_null())return {};
     auto result=CreateCopies(app,std::move(copy["entities"]),copy["active"].get<std::size_t>(),"Duplicate and move",true);
-    if(result.IsValid()&&m_GroupTransform){m_GroupTransform->entities=m_Selection.items;m_GroupTransform->before=CaptureSelection(app,true);}
+    if(result.IsValid()&&m_GroupTransform){m_GroupTransform->entities=app.GetWorld().HierarchyRoots(m_Selection.items);m_GroupTransform->before=CaptureSelection(app,true);}
     return result;
 }
 ecs::Entity EditorLayer::CreatePrimitive(Application& app,const std::string& type){
@@ -223,7 +242,8 @@ bool EditorLayer::ResetComponent(Application& app,ecs::Entity e,ecs::ComponentTy
 bool EditorLayer::SetProperty(Application& app,ecs::Entity e,ecs::ComponentTypeId id,const std::string& key,const ecs::PropertyValue& value,bool transactional){
     if(transactional)FinishTransaction(app);if(!app.GetWorld().IsAlive(e))return false;auto before=transactional?CaptureSelectedEntity(app,e):EntitySnapshot{};
     const auto previousError=m_EditorError;
-    if(!ecs::ComponentRegistry::Builtins().Set(app.GetWorld(),e,id,key,value,&m_EditorError)){if(previousError!=m_EditorError)Logger::Get().Warn(m_EditorError);return false;}app.NotifyEditorMutation(e);
+    const bool applied=ecs::ComponentRegistry::Builtins().Set(app.GetWorld(),e,id,key,value,&m_EditorError);
+    if(!applied){if(previousError!=m_EditorError)Logger::Get().Warn(m_EditorError);return false;}app.NotifyEditorMutation(e);
     if(transactional)CommitUndo(app,"Edit property",std::move(before));return true;
 }
 void EditorLayer::EnterRuntime(const ecs::World::CloneMap& mapping){

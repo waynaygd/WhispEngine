@@ -154,7 +154,18 @@ if (WHISP_BUILD_PHYSICS_TESTS)
     set_tests_properties(FogDx12Regression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" RUN_SERIAL TRUE ENVIRONMENT "WHISP_DX12_DEBUG=1")
   endif()
   add_executable(MultiSelectionRegression tests/MultiSelectionRegression.cpp)
+  add_executable(HierarchyRegression tests/HierarchyRegression.cpp)
+  target_link_libraries(HierarchyRegression PRIVATE Engine DearImGui ImGuizmo)
+  if(TARGET Tracy::TracyClient)
+    target_link_libraries(HierarchyRegression PRIVATE Tracy::TracyClient)
+  endif()
+  add_test(NAME HierarchyRegression COMMAND HierarchyRegression)
+  set_tests_properties(HierarchyRegression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" RUN_SERIAL TRUE)
   if(ENABLE_DX12)
+    target_compile_definitions(HierarchyRegression PRIVATE ENABLE_DX12=1)
+    add_dependencies(HierarchyRegression HierarchyDemoAssets MaterialShaderSources EditorPrimitiveFixtures)
+    add_test(NAME HierarchyDx12Regression COMMAND HierarchyRegression --dx12)
+    set_tests_properties(HierarchyDx12Regression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" ENVIRONMENT "WHISP_DX12_DEBUG=1" RUN_SERIAL TRUE)
     add_executable(PlacementRegression tests/PlacementRegression.cpp)
     add_executable(EditorQualityOfLifeRegression tests/EditorQualityOfLifeRegression.cpp)
     target_link_libraries(EditorQualityOfLifeRegression PRIVATE Engine DearImGui ImGuizmo)
@@ -292,7 +303,12 @@ if (WHISP_BUILD_PHYSICS_TESTS)
 
 endif()
 
+add_custom_target(HierarchyDemoAssets
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets/scenes
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/parent_child_demo.json ${CMAKE_BINARY_DIR}/assets/scenes/parent_child_demo.json)
+
 add_executable(WhispEngine WhispEngine.cpp)
+add_dependencies(WhispEngine HierarchyDemoAssets)
 add_custom_target(LuaGameplayAssets ALL
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/engine/assets/scripts ${CMAKE_BINARY_DIR}/assets/scripts
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/engine/assets/prefabs ${CMAKE_BINARY_DIR}/assets/prefabs

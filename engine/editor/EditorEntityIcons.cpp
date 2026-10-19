@@ -14,7 +14,7 @@ void EditorLayer::DrawEntityIcons(Application& app, const ImVec2& origin, const 
     std::vector<EntityIconCandidate> icons;
     world.ForEach<ecs::TransformComponent>([&](ecs::Entity entity, const auto& transform) {
         if (!HasEntityIcon(world, entity)||!EditorEntityVisible(app,entity)) return;
-        if (auto projected = ProjectGizmo(transform.position, camera)) icons.push_back({entity, *projected});
+        if (auto projected = ProjectGizmo(world.WorldTransform(entity).position, camera)) icons.push_back({entity, *projected});
     });
     std::sort(icons.begin(), icons.end(), NearerEntityIcon);
     const float dpi = ImGui::GetStyle().FontScaleDpi, radius = 11 * dpi;

@@ -1,6 +1,7 @@
 #include "PhysicsSystem.h"
 #include "../PhysicsQueries.h"
 #include "../World.h"
+#include "../RenderPose.h"
 #include "../components/ColliderComponent.h"
 #include "../components/RigidbodyComponent.h"
 #include "../components/TransformComponent.h"
@@ -149,6 +150,23 @@ struct BodyRef{
     ecs::RigidbodyComponent* rigidbody = nullptr;
     BoxAxes axes{};
     Vec3 inverseInertia{};
+};
+
+// Static/trigger children are queried in World space; dynamic bodies stay roots.
+// Root colliders retain their existing sizing convention (including auto-fit).
+struct HierarchyPhysicsPoses {
+    std::vector<ecs::TransformComponent> transforms;
+    std::vector<ecs::ColliderComponent> colliders;
+    explicit HierarchyPhysicsPoses(std::size_t capacity){transforms.reserve(capacity);colliders.reserve(capacity);}
+    BodyRef Ref(const ecs::World& world,ecs::Entity e,ecs::TransformComponent& local,ecs::ColliderComponent& collider,ecs::RigidbodyComponent* rb=nullptr){
+        if(!world.Parent(e).IsValid())return {e,&local,&collider,rb,BuildBoxAxes(local.rotation)};
+        if(rb&&!rb->isStatic&&rb->simulatePhysics)throw std::runtime_error("Dynamic Rigidbody must remain a root entity");
+        auto absolute=world.WorldTransform(e);transforms.push_back(absolute);colliders.push_back(collider);auto& c=colliders.back();
+        c.halfExtents={c.halfExtents.x*std::abs(absolute.scale.x/local.scale.x),c.halfExtents.y*std::abs(absolute.scale.y/local.scale.y),c.halfExtents.z*std::abs(absolute.scale.z/local.scale.z)};
+        float matrix[16];ecs::BuildRenderModelMatrix(matrix,ecs::RenderPose::From(world.WorldTransform(world.Parent(e))));auto o=c.offset;
+        c.offset={matrix[0]*o.x+matrix[4]*o.y+matrix[8]*o.z,matrix[1]*o.x+matrix[5]*o.y+matrix[9]*o.z,matrix[2]*o.x+matrix[6]*o.y+matrix[10]*o.z};
+        return {e,&transforms.back(),&c,rb,BuildBoxAxes(absolute.rotation)};
+    }
 };
 
 static Vec3 InverseInertiaLocal(
@@ -685,9 +703,11 @@ std::optional<RaycastHit> Raycast(const World& world,Vec3 origin,Vec3 direction,
     if(!QueryVector(direction)||LengthSq(direction)<1e-12f)throw std::runtime_error("Raycast direction must be finite and nonzero");
     if(ignore.IsValid()&&!world.IsAlive(ignore))throw std::runtime_error("Raycast ignore is dead/stale/foreign");
     direction=Scale(direction,1/Length(direction));std::optional<RaycastHit> hit;
+    HierarchyPhysicsPoses poses(world.GetAliveCount());
     for(auto e:world.Entities()){
         if(e==ignore||(include&&!include(e))||world.HasComponent<PlayerStartComponent>(e))continue;
-        auto* t=world.GetComponent<TransformComponent>(e);auto* c=world.GetComponent<ColliderComponent>(e);if(!t||!c||!QueryShape(*t,*c))continue;
+        const auto* local=world.GetComponent<TransformComponent>(e);const auto* collider=world.GetComponent<ColliderComponent>(e);if(!local||!collider||!QueryShape(*local,*collider))continue;
+        auto queryTransform=*local;auto queryCollider=*collider;auto shape=poses.Ref(world,e,queryTransform,queryCollider);auto* t=shape.transform;auto* c=shape.collider;
         const Vec3 center=Add(t->position,c->offset);float near=0,far=hit?hit->distance:distance;Vec3 normal=Scale(direction,-1);bool valid=true;
         if(c->type==ColliderType::Sphere){
             auto offset=Sub(origin,center);double x=offset.x,y=offset.y,z=offset.z,r=SphereRadius(*c);
@@ -709,7 +729,7 @@ std::optional<RaycastHit> Raycast(const World& world,Vec3 origin,Vec3 direction,
 std::vector<Entity> FindInRadius(const World& world,Vec3 center,float radius){
     world.AssertOwnerThread();QueryDistance(center,radius);std::vector<Entity> result;
     for(auto e:world.Entities())if(auto* t=world.GetComponent<TransformComponent>(e);t&&QueryVector(t->position)){
-        double x=double(t->position.x)-center.x,y=double(t->position.y)-center.y,z=double(t->position.z)-center.z;
+        auto p=world.WorldTransform(e).position;double x=double(p.x)-center.x,y=double(p.y)-center.y,z=double(p.z)-center.z;
         if(x*x+y*y+z*z<=double(radius)*radius)result.push_back(e);
     }return result;
 }
@@ -717,7 +737,8 @@ void PhysicsSystem::UpdateTriggers(World& world){
     if(m_TriggerWorld!=world.GetIdentity()){m_TriggerPairs.clear();m_TriggerWorld=world.GetIdentity();}
     bool hasTriggers=false;world.ForEach<ColliderComponent>([&](Entity,const auto& c){hasTriggers|=c.isTrigger;});
     if(!hasTriggers&&m_TriggerPairs.empty())return;
-    std::vector<BodyRef> shapes;if(hasTriggers)world.ForEach<TransformComponent,ColliderComponent>([&](Entity e,auto& t,auto& c){if(!world.HasComponent<PlayerStartComponent>(e)&&QueryShape(t,c))shapes.push_back({e,&t,&c,nullptr,BuildBoxAxes(t.rotation)});});
+    HierarchyPhysicsPoses poses(world.GetAliveCount());
+    std::vector<BodyRef> shapes;if(hasTriggers)world.ForEach<TransformComponent,ColliderComponent>([&](Entity e,auto& t,auto& c){if(!world.HasComponent<PlayerStartComponent>(e)&&QueryShape(t,c))shapes.push_back(poses.Ref(world,e,t,c));});
     std::sort(shapes.begin(),shapes.end(),[](const auto& a,const auto& b){return a.entity.index<b.entity.index;});
     decltype(m_TriggerPairs) current;
     for(std::size_t i=0;i<shapes.size();++i){if(!shapes[i].collider->isTrigger)continue;for(std::size_t j=0;j<shapes.size();++j){
@@ -751,11 +772,12 @@ void PhysicsSystem::Update(World& world, float dt)
     }
     StageTimer totalTimer{m_Statistics.totalMs};
     dt = std::min(dt, 0.05f);
+    world.ValidateHierarchy();HierarchyPhysicsPoses poses(world.GetAliveCount());
     std::vector<BodyRef> bodies;
     world.ForEach<ColliderComponent, TransformComponent, RigidbodyComponent>(
         [&](Entity e, ColliderComponent& c, TransformComponent& t, RigidbodyComponent& rb)
         {
-            if (!world.HasComponent<PlayerStartComponent>(e) && (rb.simulatePhysics || rb.isStatic)) bodies.push_back({e, &t, &c, &rb});
+            if (!world.HasComponent<PlayerStartComponent>(e) && (rb.simulatePhysics || rb.isStatic)) bodies.push_back(poses.Ref(world,e,t,c,&rb));
         });
     std::sort(bodies.begin(), bodies.end(), [](const BodyRef& a, const BodyRef& b) { return a.entity.index < b.entity.index; });
     for (auto& b : bodies) {

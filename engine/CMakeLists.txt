@@ -35,6 +35,7 @@ add_library(Engine
   core/Time.cpp
   core/Logger.cpp
   ecs/World.cpp
+  ecs/Hierarchy.cpp
   ecs/ComponentRegistry.cpp
   ecs/systems/BoundsBounceSystem.cpp
   ecs/systems/MotionSystem.cpp

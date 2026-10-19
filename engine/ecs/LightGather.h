@@ -32,7 +32,7 @@ inline GatheredLights GatherSceneLights(World& world,const LightingSettings& leg
         if(type==LightType::Directional)++out.diagnostics.directional;
         else if(type==LightType::Point)++out.diagnostics.point;else ++out.diagnostics.spot;
         auto safe=SanitizeLight(p);if(!safe.enabled)return;
-        auto pose=interpolation?interpolation->Resolve(e,t):RenderPose::From(t);
+        auto pose=interpolation?interpolation->ResolveWorld(world,e):RenderPose::From(world.WorldTransform(e));
         if(!std::isfinite(pose.position.x)||!std::isfinite(pose.position.y)||!std::isfinite(pose.position.z))return;
         // Invalid Euler/quaternion data never reaches light buffers.
         if(!std::isfinite(pose.rotation.x)||!std::isfinite(pose.rotation.y)||!std::isfinite(pose.rotation.z)||!std::isfinite(pose.rotation.w))pose.rotation={};

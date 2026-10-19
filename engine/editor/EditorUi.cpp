@@ -115,7 +115,7 @@ void EditorLayer::DrawMainMenu(Application& app){
         if(ImGui::MenuItem("Drop to Floor",nullptr,false,!app.IsEditorPlayMode()&&!m_Selection.items.empty()))DropSelectionToFloor(app);
         ImGui::Separator();if(ImGui::MenuItem("Play",nullptr,false,!app.IsEditorPlayMode()))app.SetEditorPlayMode(true);if(ImGui::MenuItem("Pause / Resume",nullptr,false,app.IsEditorPlayMode()))app.SetEditorPaused(!app.IsEditorPaused());if(ImGui::MenuItem("Stop",nullptr,false,app.IsEditorPlayMode()))app.SetEditorPlayMode(false);ImGui::EndMenu();
     }
-    if(ImGui::BeginMenu("Help")){ImGui::TextUnformatted("WhispEngine Editor 2.5");ImGui::TextUnformatted("RMB + WASD: camera, F: focus, W/E/R: gizmo");ImGui::TextUnformatted("Play clones scene data; Stop discards Runtime edits.");ImGui::TextUnformatted("Ctrl-click: toggle selection; Shift-click: Hierarchy range / Viewport add.");ImGui::TextUnformatted("Multiple selection: shared W/E/R gizmo; Inspector edits Active Entity only.");ImGui::TextUnformatted("Hierarchy is flat; parent transforms are not implemented.");ImGui::EndMenu();}
+    if(ImGui::BeginMenu("Help")){ImGui::TextUnformatted("WhispEngine Editor 2.5");ImGui::TextUnformatted("RMB + WASD: camera, F: focus, W/E/R: gizmo");ImGui::TextUnformatted("Play clones scene data; Stop discards Runtime edits.");ImGui::TextUnformatted("Ctrl-click: toggle selection; Shift-click: Hierarchy range / Viewport add.");ImGui::TextUnformatted("Multiple selection: shared W/E/R gizmo; Inspector edits Active Entity only.");ImGui::TextUnformatted("Drag in Hierarchy to parent; drop on Scene Root to unparent.");ImGui::EndMenu();}
     if(preferencesRequested)ImGui::OpenPopup("EditorPreferences");
     if(ImGui::BeginPopup("EditorPreferences")){
         ImGui::Checkbox("Enable Projectile Test Input (Play / R)",&m_ProjectileTestInput);
@@ -168,28 +168,53 @@ void EditorLayer::DrawSceneHierarchy(Application& app){
     m_HierarchyFocused=ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     auto& world=app.GetWorld();
     ImGui::InputTextWithHint("##filter","Search entities",&m_HierarchyFilter);
-    auto entities=world.Entities();std::erase_if(entities,[&](auto e){auto* tag=world.GetComponent<ecs::TagComponent>(e);return !Matches(tag?tag->name:std::string(),m_HierarchyFilter);});
-    PruneSelection(app);m_HierarchyVisible=entities;
-    ImGuiListClipper clipper;clipper.Begin(int(entities.size()));while(clipper.Step())for(int row=clipper.DisplayStart;row<clipper.DisplayEnd;++row){
-        const auto e=entities[row];const auto* tag=world.GetComponent<ecs::TagComponent>(e);ImGui::PushID(int(e.index));ImGui::PushID(int(e.generation));
+    const auto entities=world.Entities();PruneSelection(app);
+    std::unordered_map<ecs::Entity,std::vector<ecs::Entity>,ecs::EntityHash> children;
+    std::unordered_set<ecs::Entity,ecs::EntityHash> matches;
+    for(auto e:entities){children[world.Parent(e)].push_back(e);auto* tag=world.GetComponent<ecs::TagComponent>(e);
+        if(Matches(tag?tag->name:std::string(),m_HierarchyFilter)){matches.insert(e);for(auto p=world.Parent(e);p.IsValid();p=world.Parent(p))matches.insert(p);}}
+    struct Row{ecs::Entity entity;int depth;bool branch;};std::vector<Row> rows;
+    auto flatten=[&](auto&& self,ecs::Entity e,int depth)->void{
+        if(!matches.contains(e))return;const bool branch=!children[e].empty();rows.push_back({e,depth,branch});
+        ImGui::PushID(int(e.index));ImGui::PushID(int(e.generation));const bool expanded=!m_HierarchyFilter.empty()||ImGui::GetStateStorage()->GetInt(ImGui::GetID("###EntityRow"),1);ImGui::PopID();ImGui::PopID();
+        if(expanded)for(auto child:children[e])self(self,child,depth+1);
+    };for(auto root:children[{}])flatten(flatten,root,0);
+    m_HierarchyVisible.clear();for(const auto& row:rows)m_HierarchyVisible.push_back(row.entity);
+    auto acceptParent=[&](ecs::Entity parent){if(ImGui::BeginDragDropTarget()){
+        if(const auto* payload=ImGui::AcceptDragDropPayload("WHISP_ENTITY"))if(payload->DataSize==sizeof(ecs::Entity)&&!app.IsEditorPlayMode())ReparentEntity(app,*static_cast<const ecs::Entity*>(payload->Data),parent,!m_HierarchyKeepLocal);
+        ImGui::EndDragDropTarget();}};
+    ImGuiListClipper clipper;clipper.Begin(int(rows.size()));while(clipper.Step())for(int index=clipper.DisplayStart;index<clipper.DisplayEnd;++index){
+        const auto& row=rows[index];const auto e=row.entity;const auto* tag=world.GetComponent<ecs::TagComponent>(e);
+        ImGui::PushID(int(e.index));ImGui::PushID(int(e.generation));if(row.depth)ImGui::Indent(row.depth*ImGui::GetStyle().IndentSpacing);
         const std::string label=std::string(EntityKind(world,e))+" "+(tag&&!tag->name.empty()?tag->name:"Entity "+std::to_string(e.index));
         const std::string rowLabel=label+(e==m_Selection.active?" [Active]":"")+"###EntityRow";
-        if(ImGui::Selectable(rowLabel.c_str(),IsSelected(e)))SelectHierarchyEntity(app,e,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift,entities);
+        if(!m_HierarchyFilter.empty())ImGui::SetNextItemOpen(true);
+        ImGui::TreeNodeEx(rowLabel.c_str(),ImGuiTreeNodeFlags_NoTreePushOnOpen|ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_SpanAvailWidth|ImGuiTreeNodeFlags_DefaultOpen|(row.branch?0:ImGuiTreeNodeFlags_Leaf)|(IsSelected(e)?ImGuiTreeNodeFlags_Selected:0));
+        if(ImGui::IsItemClicked(0)&&!ImGui::IsItemToggledOpen())SelectHierarchyEntity(app,e,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift,m_HierarchyVisible);
         if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0))app.FocusEntity(e);
-        if(ImGui::BeginDragDropSource()){ImGui::SetDragDropPayload("WHISP_ENTITY",&e,sizeof(e));ImGui::TextUnformatted(label.c_str());ImGui::EndDragDropSource();}
+        acceptParent(e);
+        if(ImGui::BeginDragDropSource()){ImGui::SetDragDropPayload("WHISP_ENTITY",&e,sizeof(e));ImGui::TextUnformatted(label.c_str());ImGui::TextDisabled(m_HierarchyKeepLocal?"Keep Local Transform":"Keep World Transform");ImGui::EndDragDropSource();}
         if(ImGui::BeginPopupContextItem("EntityActions")){
             if(ImGui::MenuItem("Focus")){if(IsSelected(e))FocusSelection(app);else app.FocusEntity(e);}if(ImGui::MenuItem("Rename")){m_RenameTarget=e;m_RenameBuffer=tag?tag->name:"Entity";m_RenameRequested=true;}
+            ImGui::BeginDisabled(app.IsEditorPlayMode());
+            if(ImGui::MenuItem("Create Child"))CreateChild(app,e);
+            if(ImGui::MenuItem("Unparent",nullptr,false,world.Parent(e).IsValid()))ReparentEntity(app,e,{},!m_HierarchyKeepLocal);
+            ImGui::Checkbox("Keep Local Transform",&m_HierarchyKeepLocal);
+            if(ImGui::BeginMenu("Reparent...")){for(auto candidate:entities)if(candidate!=e){auto* name=world.GetComponent<ecs::TagComponent>(candidate);ImGui::PushID(int(candidate.index));if(ImGui::MenuItem(name?name->name.c_str():"Entity"))ReparentEntity(app,e,candidate,!m_HierarchyKeepLocal);ImGui::PopID();}ImGui::EndMenu();}
             if(ImGui::MenuItem(IsSelected(e)&&m_Selection.items.size()>1?"Duplicate selection":"Duplicate entity"))DuplicateEntity(app,e);
-            if(ImGui::MenuItem("Drop to Floor",nullptr,false,!app.IsEditorPlayMode())){if(!IsSelected(e))SelectEntity(e);DropSelectionToFloor(app);}
-            if(ImGui::MenuItem("Delete selection")){if(!IsSelected(e))SelectEntity(e);DeleteSelection(app);}ImGui::EndPopup();
-        }ImGui::PopID();ImGui::PopID();
+            if(ImGui::MenuItem("Drop to Floor")){if(!IsSelected(e))SelectEntity(e);DropSelectionToFloor(app);}
+            if(ImGui::MenuItem("Delete selection")){if(!IsSelected(e))SelectEntity(e);DeleteSelection(app);}ImGui::EndDisabled();ImGui::EndPopup();
+        }
+        if(row.depth)ImGui::Unindent(row.depth*ImGui::GetStyle().IndentSpacing);ImGui::PopID();ImGui::PopID();
     }
+    ImGui::Selectable("Scene Root",false);if(ImGui::IsItemHovered())ImGui::SetTooltip("Drop an Entity here to remove its Parent (Keep World by default).");acceptParent({});
+    if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());
     if(ImGui::IsWindowHovered()&&ImGui::IsMouseClicked(0)&&!ImGui::IsAnyItemHovered()&&!m_LightPointerCaptured&&!ImGuizmo::IsUsing()&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)){FinishTransaction(app);ClearSelection();ImGui::ClearActiveID();}
     if(m_RenameRequested){ImGui::OpenPopup("Rename entity");m_RenameRequested=false;}
     if(ImGui::BeginPopupModal("Rename entity",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
         ImGui::InputText("Name",&m_RenameBuffer);if(ImGui::Button("Rename")){if(RenameEntity(app,m_RenameTarget,m_RenameBuffer))ImGui::CloseCurrentPopup();}ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();ImGui::EndPopup();
     }
-    ImGui::TextDisabled("%zu entities (flat hierarchy)",world.GetAliveCount());ImGui::End();m_Statistics.hierarchyMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+    ImGui::TextDisabled("%zu entities",world.GetAliveCount());ImGui::End();m_Statistics.hierarchyMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
 }
 void EditorLayer::DrawConsole(Application& app,IRenderAdapter* renderer){
     ImGui::SetNextWindowSizeConstraints(ImVec2(240,130),ImVec2(FLT_MAX,FLT_MAX));

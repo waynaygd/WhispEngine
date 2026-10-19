@@ -46,7 +46,8 @@ bool EditorLayer::IsolateSelected(Application& app){
     if(m_Selection.items.empty())return false;m_Isolation=m_Selection.items;return true;
 }
 bool EditorLayer::EditorEntityVisible(const Application& app,ecs::Entity entity)const{
-    return app.IsEditorPlayMode()||m_Isolation.empty()||std::find(m_Isolation.begin(),m_Isolation.end(),entity)!=m_Isolation.end();
+    if(app.IsEditorPlayMode()||m_Isolation.empty())return true;
+    for(auto e=entity;e.IsValid();e=app.GetWorld().Parent(e))if(std::find(m_Isolation.begin(),m_Isolation.end(),e)!=m_Isolation.end())return true;return false;
 }
 bool EditorLayer::CanViewportSelect(const Application& app,ecs::Entity entity)const{
     const auto& world=app.GetWorld();if(!world.IsAlive(entity)||!EditorEntityVisible(app,entity))return false;

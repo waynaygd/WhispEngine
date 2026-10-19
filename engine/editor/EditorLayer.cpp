@@ -817,13 +817,14 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
         app.GetCameraNearPlane(),
         app.GetCameraFarPlane());
 
-    float translation[3] = { transform->position.x, transform->position.y, transform->position.z };
+    const auto absolute=world.WorldTransform(m_Selection.active);
+    float translation[3] = { absolute.position.x, absolute.position.y, absolute.position.z };
     float rotation[3] = {
-        RadiansToDegrees(transform->rotation.x),
-        RadiansToDegrees(transform->rotation.y),
-        RadiansToDegrees(transform->rotation.z)
+        RadiansToDegrees(absolute.rotation.x),
+        RadiansToDegrees(absolute.rotation.y),
+        RadiansToDegrees(absolute.rotation.z)
     };
-    float scale[3] = { transform->scale.x, transform->scale.y, transform->scale.z };
+    float scale[3] = { absolute.scale.x, absolute.scale.y, absolute.scale.z };
     float matrix[16];
     ImGuizmo::RecomposeMatrixFromComponents(translation, rotation, scale, matrix);
 
@@ -859,7 +860,7 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
         }
 
         ImportMatrix result;std::copy(matrix,matrix+16,result.begin());
-        if(auto decomposed=DecomposeTransform(result,transform->scale)){*transform=*decomposed;app.NotifyEditorMutation(m_Selection.active);}else m_EditorError="Transform requires shear/singular scale; use Local scale handles";
+        if(auto decomposed=DecomposeTransform(result,absolute.scale)){if(world.SetWorldTransform(m_Selection.active,*decomposed,&m_EditorError))app.NotifyEditorMutation(m_Selection.active);}else m_EditorError="Transform requires shear/singular scale; use Local scale handles";
     }
     else if (!ImGuizmo::IsUsing())
     {

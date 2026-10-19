@@ -1539,7 +1539,7 @@ int Application::Run()
         if(m_EditorPlayMode&&m_LuaRuntime.HasCameraOwner()){
             if(m_GameplayCamera.following){
                 auto* t=GetWorld().GetComponent<ecs::TransformComponent>(m_GameplayCamera.target);
-                if(t){auto p=m_RenderInterpolation.Resolve(m_GameplayCamera.target,*t).position;m_GameplayCamera.position=Add(p,m_GameplayCamera.offset);}
+                if(t){auto p=m_RenderInterpolation.ResolveWorld(GetWorld(),m_GameplayCamera.target).position;m_GameplayCamera.position=Add(p,m_GameplayCamera.offset);}
                 else m_GameplayCamera.following=false;
             }
             m_Camera.position=m_GameplayCamera.position;m_Camera.yaw=m_GameplayCamera.yaw;m_Camera.pitch=m_GameplayCamera.pitch;
@@ -2118,7 +2118,7 @@ ecs::Entity Application::CreateLightEntity(LightType type){
     c.light=SceneLightDescription{};c.light->type=type;c.light->parameters.castShadows=type==LightType::Directional;
     c.simulatePhysics=false;c.bounce=false;auto e=SpawnEcsDemoEntity(c);m_EcsDebugEntities.push_back(e);return e;
 }
-bool Application::DestroySceneEntity(ecs::Entity e){bool result=GetWorld().DestroyEntity(e);std::erase(m_EcsDebugEntities,e);std::erase(m_StressEntities,e);return result;}
+bool Application::DestroySceneEntity(ecs::Entity e){bool result=GetWorld().DestroyEntity(e);std::erase_if(m_EcsDebugEntities,[&](auto entity){return !GetWorld().IsAlive(entity);});std::erase_if(m_StressEntities,[&](auto entity){return !GetWorld().IsAlive(entity);});return result;}
 void Application::SetupIblDemoScene(){SetupPbrTexturesDemoScene();m_EnvironmentSettings.enabled=true;m_EnvironmentSettings.toneMapping=true;m_LightingSettings.directional.enabled=false;m_LightingSettings.ambientIntensity=0;SetEditorPlayMode(false);}
 
 void Application::SetupIblBenchmarkScene(int count){SetupPbrTexturesBenchmarkScene(count);m_EnvironmentSettings.enabled=true;SetShadingModelOverride(1);m_ResourceManager->LoadAsync<EnvironmentResource>(m_EnvironmentSettings.assetPath);}
@@ -2212,7 +2212,9 @@ void Application::FocusEntities(const std::vector<ecs::Entity>& entities){
         low.x=std::min(low.x,p.x);low.y=std::min(low.y,p.y);low.z=std::min(low.z,p.z);
         high.x=std::max(high.x,p.x);high.y=std::max(high.y,p.y);high.z=std::max(high.z,p.z);valid=true;
     };
-    for(auto entity:entities)if(auto* t=GetWorld().GetComponent<ecs::TransformComponent>(entity)){
+    std::vector<ecs::Entity> expanded;for(auto root:GetWorld().HierarchyRoots(entities)){auto subtree=GetWorld().Subtree(root);expanded.insert(expanded.end(),subtree.begin(),subtree.end());}
+    for(auto entity:expanded)if(GetWorld().HasComponent<ecs::TransformComponent>(entity)){
+        auto absolute=GetWorld().WorldTransform(entity);auto* t=&absolute;
         bool geometry=false;
         if(m_ResourceManager)if(auto* mr=GetWorld().GetComponent<ecs::MeshRendererComponent>(entity)){
             auto mesh=m_ResourceManager->Get<MeshResource>(mr->meshPath);
@@ -2226,7 +2228,7 @@ void Application::FocusEntities(const std::vector<ecs::Entity>& entities){
         }
         if(!geometry){
             ecs::Vec3 extent{std::max(.5f,std::abs(t->scale.x)*.5f),std::max(.5f,std::abs(t->scale.y)*.5f),std::max(.5f,std::abs(t->scale.z)*.5f)};
-            if(auto* light=ecs::GetLightParameters(GetWorld(),entity)){float r=std::clamp(light->range,1.f,30.f);extent={r,r,r};}
+            if(expanded.size()==1)if(auto* light=ecs::GetLightParameters(GetWorld(),entity)){float r=std::clamp(light->range,1.f,30.f);extent={r,r,r};}
             include({t->position.x-extent.x,t->position.y-extent.y,t->position.z-extent.z});include({t->position.x+extent.x,t->position.y+extent.y,t->position.z+extent.z});
         }
     }

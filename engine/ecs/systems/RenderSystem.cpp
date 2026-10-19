@@ -350,7 +350,7 @@ namespace ecs {
                         if(resource==m_MeshResources.end())return;
                         const auto& mesh=resource->second->GetData().meshData;
                         const auto count=std::max(std::size_t(1),mesh.submeshes.size());
-                        const auto pose=m_Interpolation?m_Interpolation->Resolve(entity,transform):RenderPose::From(transform);
+                        const auto pose=m_Interpolation?m_Interpolation->ResolveWorld(world,entity):RenderPose::From(world.WorldTransform(entity));
                         bool visible=false,casts=false;
                         for(std::size_t slot=0;slot<count;++slot) {
                             RenderSnapshot snapshot{};
@@ -496,7 +496,7 @@ namespace ecs {
                 {
                     if(!m_EditorIsolated.empty()&&!m_EditorIsolated.contains(entity))return;
                     float mvp[16];
-                    RenderPose debugTransform = m_Interpolation && !m_PhysicsDebugPose ? m_Interpolation->Resolve(entity, transform) : RenderPose::From(transform);
+                    RenderPose debugTransform = m_Interpolation && !m_PhysicsDebugPose ? m_Interpolation->ResolveWorld(world,entity) : RenderPose::From(world.WorldTransform(entity));
                     debugTransform.position.x += collider.offset.x;
                     debugTransform.position.y += collider.offset.y;
                     debugTransform.position.z += collider.offset.z;

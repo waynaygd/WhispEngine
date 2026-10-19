@@ -143,6 +143,8 @@ public:
     void SelectHierarchyEntity(Application&,ecs::Entity,bool ctrl,bool shift,const std::vector<ecs::Entity>& order);
     void SelectAllEntities(Application&,const std::vector<ecs::Entity>& order);
     bool DeleteSelection(Application&);
+    bool ReparentEntity(Application&,ecs::Entity child,ecs::Entity parent,bool keepWorld=true);
+    ecs::Entity CreateChild(Application&,ecs::Entity parent);
     void FocusSelection(Application&);
     bool BeginGroupTransform(Application&,bool local);
     bool UpdateGroupTransform(Application&,const ImportMatrix&);
@@ -237,6 +239,7 @@ private:
         ecs::Entity entity{},previousSelection{};
         std::uint64_t world=0;
         bool alive=false;
+        std::optional<ecs::Entity> parent;
         nlohmann::json components=nlohmann::json::object();
         std::optional<SceneSettings> settings;
         std::optional<ecs::TransformComponent> transform;
@@ -255,10 +258,12 @@ private:
     };
     std::optional<GroupSession> m_GroupTransform;
     EntitySnapshot CaptureSelection(Application&,bool transformsOnly=false)const;
+    EntitySnapshot CaptureSubtree(Application&,ecs::Entity)const;
     ecs::Entity CreateCopies(Application&,nlohmann::json entities,std::size_t active,const std::string& label,bool dragging=false);
     nlohmann::json CaptureCopies(Application&,ecs::Entity)const;
     void DrawGroupGizmo(Application&,const float* view,const float* projection);
     std::vector<ecs::Entity> m_HierarchyVisible;
+    bool m_InspectorWorldTransform=false,m_HierarchyKeepLocal=false;
     std::uint64_t m_Revision=0,m_SavedRevision=0,m_NextRevision=0;
     bool m_ExternalDirty=false;
     EntitySnapshot CaptureLike(Application&,const EntitySnapshot&)const;

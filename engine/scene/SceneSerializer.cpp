@@ -148,7 +148,7 @@ bool SceneSerializer::LoadEntityConfigs(
         std::vector<EcsDemoEntityConfig> loaded;
         for(auto entity:world.Entities()){
             EcsDemoEntityConfig c;c.scale={1,1,1};c.bounce=false;c.simulatePhysics=false;c.useGravity=false;
-            if(auto* t=world.GetComponent<ecs::TransformComponent>(entity)){c.position=t->position;c.rotation=t->rotation;c.scale=t->scale;}
+            if(auto* t=world.GetComponent<ecs::TransformComponent>(entity)){auto absolute=world.WorldTransform(entity);c.position=absolute.position;c.rotation=absolute.rotation;c.scale=absolute.scale;}
             if(auto* tag=world.GetComponent<ecs::TagComponent>(entity))c.tag=tag->name;
             if(auto* m=world.GetComponent<ecs::MeshRendererComponent>(entity)){c.meshPath=m->meshPath;c.texturePath=m->texturePath;c.shaderPath=m->shaderPath;c.visible=m->visible;}
             if(auto* m=world.GetComponent<ecs::MaterialComponent>(entity)){c.materialPath=m->materialPath;c.slotMaterials=m->slotMaterials;c.materialOverrides=m->overrides;std::copy(m->tint,m->tint+4,c.materialTint.begin());if(!m->shaderPath.empty())c.shaderPath=m->shaderPath;if(!m->texturePath.empty())c.texturePath=m->texturePath;}
@@ -214,6 +214,7 @@ std::string SceneSerializer::PrimaryDirectionalId(ecs::World& world){
     return selected.IsValid()?EntitySceneId(world,selected):std::string();
 }
 nlohmann::json SceneSerializer::CaptureWorld(ecs::World& world,const SceneSettings& settings){
+    world.ValidateHierarchy();
     auto resolved=settings;resolved.primaryDirectional=PrimaryDirectionalId(world);
     nlohmann::json scene={{"version",4},{"settings",SceneSettingsToJson(resolved)},{"entities",nlohmann::json::array()}};
     std::set<std::string> ids;const auto& registry=ecs::ComponentRegistry::Builtins();
@@ -224,6 +225,7 @@ nlohmann::json SceneSerializer::CaptureWorld(ecs::World& world,const SceneSettin
         // Validate a value copy before writing. No changes to the source scene.
         registry.Restore(check,test,components);
         scene["entities"].push_back({{"id",id},{"components",std::move(components)}});
+        if(auto parent=world.Parent(e);parent.IsValid())scene["entities"].back()["parent"]=EntitySceneId(world,parent);
     }
     return scene;
 }
@@ -238,6 +240,13 @@ bool SceneSerializer::RestoreWorld(const nlohmann::json& scene,ecs::World& world
             if(staged.HasComponent<ecs::SceneIdentityComponent>(e))throw std::runtime_error("SceneIdentity belongs in entity.id, not components");
             staged.AddComponent<ecs::SceneIdentityComponent>(e).value=id;
         }
+        std::unordered_map<std::string,ecs::Entity> identities;for(auto e:staged.Entities())identities.emplace(EntitySceneId(staged,e),e);
+        std::vector<std::pair<ecs::Entity,ecs::Entity>> parents;
+        for(const auto& node:scene.at("entities"))if(node.contains("parent")){
+            const auto id=node.at("parent").get<std::string>();auto it=identities.find(id);if(it==identities.end())throw std::runtime_error("Unknown Parent ID: "+id);
+            parents.emplace_back(identities.at(node.at("id").get<std::string>()),it->second);
+        }
+        std::string hierarchyError;if(!staged.SetParents(parents,false,&hierarchyError))throw std::runtime_error(hierarchyError);
         if(!next.primaryDirectional.empty()&&next.primaryDirectional!=PrimaryDirectionalId(staged))throw std::runtime_error("Primary directional reference conflicts with ECS preferences/order");
         world.ReplaceData(staged);settings=std::move(next);return true;
     }catch(const std::exception& e){SetError(error,std::string("Scene load: ")+e.what());return false;}
