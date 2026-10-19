@@ -316,6 +316,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     ZoneScopedN("EditorLayer");
     // Keep prepared prefab data throughout one drag, but never render a stale
     // previous-frame ghost when the pointer leaves or the viewport is hidden.
+    if(!m_ShowViewport||app.IsProjectBrowserActive()||ImGui::GetIO().AppFocusLost)m_BoxSelection.reset();
     const auto* placementDrag=ImGui::GetDragDropPayload();
     if(!placementDrag||!placementDrag->IsDataType("WHISP_ASSET")||!m_ShowViewport||app.IsProjectBrowserActive())CancelPlacement();
     else {m_PlacementPreview.active=false;m_PlacementPreview.items.clear();}
@@ -493,7 +494,8 @@ void EditorLayer::HandleEditorShortcuts(Application& app){
     // let a Delete intended for that window reach the entity command path.
     if(AssetBrowserOwnsKeyboard()&&(ImGui::IsKeyPressed(ImGuiKey_Delete,false)||ImGui::IsKeyPressed(ImGuiKey_F2,false)))return;
     if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)&&!app.IsEditorPlayMode()){
-        if(HasPendingTransaction()){CancelTransaction(app);m_LightPointerCaptured=false;m_CancelGizmoUntilRelease=true;}else if((m_ViewportFocused||m_HierarchyFocused)&&!m_InputTextActive&&!app.IsCameraControlActive())ClearSelection();return;
+        if(m_BoxSelection){m_BoxSelection.reset();return;}
+        if(HasPendingTransaction()){CancelTransaction(app);m_LightPointerCaptured=false;m_CancelGizmoUntilRelease=true;}else if(!m_SelectionLocked&&(m_ViewportFocused||m_HierarchyFocused)&&!m_InputTextActive&&!app.IsCameraControlActive())ClearSelection();return;
     }
     const bool entityKeys=!app.IsEditorPlayMode()&&(m_ViewportFocused||m_HierarchyFocused)&&!m_InputTextActive&&!m_ToolActive&&!app.IsCameraControlActive();
     if(entityKeys){if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_C,false))CopyEntity(app,m_Selection.active);if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_V,false))PasteEntity(app);if(ImGui::IsKeyPressed(ImGuiKey_Delete,false))DeleteSelection(app);if(m_HierarchyFocused&&io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_A,false))SelectAllEntities(app,m_HierarchyVisible);}

@@ -7,6 +7,7 @@
 #include "../render/ColorPipeline.h"
 #include "../resources/ResourceManager.h"
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <ImGuizmo.h>
 #include <cmath>
 #include <chrono>
@@ -142,7 +143,7 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
         if(type==LightType::Spot){for(int which=1;which<=2;++which){float a=(which==1?p.innerAngle:p.outerAngle)*.0174532925f;V tip=Add(pose.position,Scale(d,p.range*std::cos(a)));handle(tip,right,p.range*std::sin(a),which);}}
     });
     m_SpecialIconHovered |= hit.IsValid();
-    if(hit.IsValid()&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&(!ImGuizmo::IsOver()||ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){FinishTransaction(app);SelectViewportEntity(app,hit,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift);m_LightIconClicked=true;}
+    if(hit.IsValid()&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&(!m_Selection.active.IsValid()||!ImGuizmo::IsOver()||ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){FinishTransaction(app);SelectViewportEntity(app,hit,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift);m_LightIconClicked=true;}
     draw->PopClipRect();
 }
 }
@@ -183,24 +184,49 @@ void EditorLayer::DrawPlayerStartGizmos(Application& app,const ImVec2& origin,co
         if(auto eyes=project(eye)){draw->AddCircleFilled(*eyes,5,IM_COL32(10,15,20,240));draw->AddCircleFilled(*eyes,3,IM_COL32(255,220,90,255));draw->AddText(ImVec2(eyes->x+7,eyes->y),IM_COL32(255,220,90,255),"Eyes");}
     });
     m_SpecialIconHovered |= hit.IsValid();
-    if(hit.IsValid()&&!m_LightIconClicked&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&!m_LightPointerCaptured&&ImGui::IsMouseClicked(0)&&(!ImGuizmo::IsOver()||ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
+    if(hit.IsValid()&&!m_LightIconClicked&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&!m_LightPointerCaptured&&ImGui::IsMouseClicked(0)&&(!m_Selection.active.IsValid()||!ImGuizmo::IsOver()||ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
         FinishTransaction(app);SelectViewportEntity(app,hit,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift);m_LightIconClicked=true;
     }
     draw->PopClipRect();
 }
 void EditorLayer::DrawViewportOverlays(Application& app,const ImVec2& origin,const ImVec2& size){
     if(m_LightPointerCaptured&&!ImGui::IsMouseDown(0)){FinishTransaction(app);m_LightPointerCaptured=false;}
-    if(app.IsEditorPlayMode())return;
-    if(size.x<=1||size.y<=1)return;const auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),size.x/size.y,app.GetCameraNearPlane(),app.GetCameraFarPlane());
+    if(app.IsEditorPlayMode()){m_BoxSelection.reset();return;}
+    if(size.x<=1||size.y<=1){m_BoxSelection.reset();return;}const auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),size.x/size.y,app.GetCameraNearPlane(),app.GetCameraFarPlane());
     auto* draw=ImGui::GetWindowDrawList();draw->PushClipRect(origin,ImVec2(origin.x+size.x,origin.y+size.y),true);
     auto project=[&](V p)->std::optional<ImVec2>{auto v=ProjectGizmo(p,camera);if(!v)return {};return ImVec2(origin.x+(*v)[0]*size.x,origin.y+(*v)[1]*size.y);};
     auto line=[&](V a,V b,ImU32 color){auto q=ProjectEditorLine(a,b,camera);if(q)draw->AddLine(ImVec2(origin.x+(*q)[0]*size.x,origin.y+(*q)[1]*size.y),ImVec2(origin.x+(*q)[2]*size.x,origin.y+(*q)[3]*size.y),color);};
     auto& world=app.GetWorld();auto* resources=app.GetResourceManager();
-    if(resources&&!m_PlaneScaleCaptured&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&!m_LightHandleHovered&&!m_LightPointerCaptured&&!m_LightIconClicked&&m_ViewportHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&(!ImGuizmo::IsOver()||ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&!ImGuizmo::IsUsing()&&!ImGui::IsAnyItemActive()){
+    const auto gestureId=ImGui::GetCurrentWindow()->GetID("ViewportBoxSelection");
+    const bool otherInput=m_InputTextActive&&ImGui::GetActiveID()!=gestureId;
+    if(m_BoxSelection&&(m_SelectionLocked||m_BoxSelection->viewport!=GetViewportBounds()||app.IsCameraControlActive()||otherInput||m_ModalActive||ImGui::GetDragDropPayload()||ImGuizmo::IsUsing()||ImGui::IsMouseDown(1)))m_BoxSelection.reset();
+    const bool canvasHovered=m_ViewportHovered||(!BlocksGameplayInput()&&ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)&&ImGui::IsMouseHoveringRect(origin,ImVec2(origin.x+size.x,origin.y+size.y)));
+    if(!m_BoxSelection&&resources&&!m_SelectionLocked&&!ImGui::GetDragDropPayload()&&!m_PlaneScaleCaptured&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&!m_LightHandleHovered&&!m_LightPointerCaptured&&!m_LightIconClicked&&canvasHovered&&!m_InputTextActive&&!m_ModalActive&&ImGui::IsMouseClicked(0)&&(!m_Selection.active.IsValid()||!ImGuizmo::IsOver()||ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&!ImGuizmo::IsUsing()&&!BlocksGameplayInput()){
         auto mouse=ImGui::GetMousePos();float x=((mouse.x-origin.x)/size.x*2-1)/camera.projection[0],y=(1-(mouse.y-origin.y)/size.y*2)/camera.projection[5];
         V ray{camera.view[0]*x+camera.view[1]*y+camera.view[2],camera.view[4]*x+camera.view[5]*y+camera.view[6],camera.view[8]*x+camera.view[9]*y+camera.view[10]};ray=Scale(ray,1/std::sqrt(Dot(ray,ray)));
         const auto hit=PickViewportMesh(app,app.GetCameraPosition(),ray,app.GetCameraFarPlane());
-        FinishTransaction(app);SelectViewportEntity(app,hit,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift);
+        if(hit.IsValid())SelectViewportEntity(app,hit,ImGui::GetIO().KeyCtrl,ImGui::GetIO().KeyShift);
+        else {
+            const auto& io=ImGui::GetIO();
+            // Own this gesture instead of ImGui's background window MoveId.
+            // This also keeps a floating Viewport stationary while boxing.
+            auto* window=ImGui::GetCurrentWindow();ImGui::SetActiveID(window->GetID("ViewportBoxSelection"),window);ImGui::GetCurrentContext()->MovingWindow=nullptr;
+            m_BoxSelection=BoxSelection{{mouse.x,mouse.y},GetViewportBounds(),world.GetIdentity(),io.KeyAlt?SelectionOperation::Subtract:((io.KeyCtrl||io.KeyShift)?SelectionOperation::Add:SelectionOperation::Replace)};
+        }
+    }
+    if(m_BoxSelection){
+        ImGui::KeepAliveID(gestureId);
+        auto& box=*m_BoxSelection;const auto mouse=ImGui::GetMousePos();
+        const float dx=mouse.x-box.start[0],dy=mouse.y-box.start[1],threshold=ImGui::GetIO().MouseDragThreshold;
+        box.dragging|=dx*dx+dy*dy>=threshold*threshold;
+        const ImVec2 start{box.start[0],box.start[1]},end{std::clamp(mouse.x,origin.x,origin.x+size.x),std::clamp(mouse.y,origin.y,origin.y+size.y)};
+        const ImVec2 lo{std::min(start.x,end.x),std::min(start.y,end.y)},hi{std::max(start.x,end.x),std::max(start.y,end.y)};
+        if(box.dragging){draw->AddRectFilled(lo,hi,IM_COL32(65,165,240,35));draw->AddRect(lo,hi,IM_COL32(90,190,255,235),0,0,ImGui::GetStyle().FontScaleDpi);}
+        if(ImGui::IsMouseReleased(0)){
+            const auto operation=box.operation;const bool dragging=box.dragging;m_BoxSelection.reset();if(ImGui::GetActiveID()==gestureId)ImGui::ClearActiveID();
+            if(dragging)SelectViewportRectangle(app,{(lo.x-origin.x)/size.x,(lo.y-origin.y)/size.y,(hi.x-origin.x)/size.x,(hi.y-origin.y)/size.y},operation);
+            else if(operation==SelectionOperation::Replace)SelectViewportEntity(app,{},false,false);
+        }else if(!ImGui::IsMouseDown(0))m_BoxSelection.reset();
     }
     if(m_GameView){draw->PopClipRect();return;}
     for(auto selected:m_Selection.items)if(resources&&world.IsAlive(selected)&&EditorEntityVisible(app,selected))if(auto* m=world.GetComponent<ecs::MeshRendererComponent>(selected))if(auto* t=world.GetComponent<ecs::TransformComponent>(selected)){
@@ -258,5 +284,62 @@ ecs::Entity EditorLayer::PlaceModel(Application& app,const std::string& key,ecs:
     auto entity=CreateModelEntity(app,key,std::filesystem::u8path(key).stem().string());if(!entity.IsValid())return {};
     app.GetWorld().GetComponent<ecs::TransformComponent>(entity)->position=point;app.NotifyEditorMutation(entity);
     if(auto* resources=app.GetResourceManager())resources->LoadAsync<MeshResource>(key);return entity;
+}
+}
+
+namespace editor {
+void EditorLayer::SelectViewportRectangle(Application& app,std::array<float,4> rectangle,SelectionOperation operation){
+    PruneSelection(app);if(m_SelectionLocked||app.IsEditorPlayMode())return;
+    for(float v:rectangle)if(!std::isfinite(v))return;
+    if(rectangle[0]>rectangle[2])std::swap(rectangle[0],rectangle[2]);
+    if(rectangle[1]>rectangle[3])std::swap(rectangle[1],rectangle[3]);
+    const auto viewport=GetViewportBounds();const float width=viewport[2]-viewport[0],height=viewport[3]-viewport[1];
+    if(width<=1||height<=1)return;
+    const auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),width/height,app.GetCameraNearPlane(),app.GetCameraFarPlane());
+    auto& world=app.GetWorld();auto* resources=app.GetResourceManager();std::vector<ecs::Entity> hits;
+    // Clip the twelve bounds edges against depth before perspective division.
+    // Unlike point projection this also handles offscreen pivots and bounds
+    // crossing the near plane, without selecting objects behind the camera.
+    auto projectedBounds=[&](const std::array<V,8>& corners)->std::optional<std::array<float,4>>{
+        std::array<V,8> points;const auto& m=camera.view;
+        for(int i=0;i<8;++i){auto p=corners[i];points[i]={m[0]*p.x+m[4]*p.y+m[8]*p.z+m[12],m[1]*p.x+m[5]*p.y+m[9]*p.z+m[13],m[2]*p.x+m[6]*p.y+m[10]*p.z+m[14]};}
+        std::array<float,4> result{INFINITY,INFINITY,-INFINITY,-INFINITY};
+        for(int i=0;i<8;++i)for(int bit:{1,2,4})if(!(i&bit)){
+            const auto a=points[i],b=points[i|bit];double lo=0,hi=1,dz=double(b.z)-a.z;
+            if(std::abs(dz)<1e-10){if(a.z<camera.nearPlane||a.z>camera.farPlane)continue;}
+            else {double l=(camera.nearPlane-a.z)/dz,h=(camera.farPlane-a.z)/dz;if(l>h)std::swap(l,h);lo=std::max(lo,l);hi=std::min(hi,h);if(lo>hi)continue;}
+            for(double t:{lo,hi}){const double z=a.z+dz*t;const float u=float(.5+.5*camera.projection[0]*(a.x+(b.x-a.x)*t)/z),v=float(.5-.5*camera.projection[5]*(a.y+(b.y-a.y)*t)/z);
+                if(!std::isfinite(u)||!std::isfinite(v))continue;result[0]=std::min(result[0],u);result[1]=std::min(result[1],v);result[2]=std::max(result[2],u);result[3]=std::max(result[3],v);}
+        }
+        if(result[0]>result[2])return {};return result;
+    };
+    world.ForEach<ecs::TransformComponent>([&](ecs::Entity e,const auto&){
+        if(!CanViewportSelect(app,e))return;
+        const auto pose=app.GetRenderInterpolation().ResolveWorld(world,e);std::array<V,8> corners;std::optional<std::array<float,4>> projected;
+        if(auto* renderer=world.GetComponent<ecs::MeshRendererComponent>(e)){
+            if(!renderer->visible||!resources)return;auto mesh=resources->Get<MeshResource>(renderer->meshPath);
+            if(!mesh||!mesh->IsLoaded()||mesh->GetData().meshData.vertices.empty())return;
+            const auto bounds=Bounds(mesh,pose);std::array<float,16> model;ecs::BuildRenderModelMatrix(model.data(),pose);
+            for(int i=0;i<8;++i){V p{i&1?bounds.max.x:bounds.min.x,i&2?bounds.max.y:bounds.min.y,i&4?bounds.max.z:bounds.min.z};corners[i]={model[0]*p.x+model[4]*p.y+model[8]*p.z+model[12],model[1]*p.x+model[5]*p.y+model[9]*p.z+model[13],model[2]*p.x+model[6]*p.y+model[10]*p.z+model[14]};}
+            projected=projectedBounds(corners);
+        }else if(auto* collider=world.GetComponent<ecs::ColliderComponent>(e)){
+            const auto center=Add(pose.position,collider->offset),half=collider->halfExtents;
+            for(int i=0;i<8;++i)corners[i]=Add(center,V{(i&1?1:-1)*half.x,(i&2?1:-1)*half.y,(i&4?1:-1)*half.z});projected=projectedBounds(corners);
+        }else if(auto* start=world.GetComponent<ecs::PlayerStartComponent>(e)){
+            std::array<float,16> model;ecs::BuildRenderModelMatrix(model.data(),pose);
+            for(int i=0;i<8;++i){V p{(i&1?1.f:-1.f)*.3f,i&2?start->characterHeight:0.f,(i&4?1.f:-1.f)*.3f};corners[i]={model[0]*p.x+model[4]*p.y+model[8]*p.z+model[12],model[1]*p.x+model[5]*p.y+model[9]*p.z+model[13],model[2]*p.x+model[6]*p.y+model[10]*p.z+model[14]};}projected=projectedBounds(corners);
+        }else if(auto point=ProjectGizmo(pose.position,camera)){
+            // Global lights/fog and empty entities have no geometry bounds;
+            // use their existing editor marker's screen footprint.
+            const float radius=12*ImGui::GetStyle().FontScaleDpi;projected=std::array<float,4>{(*point)[0]-radius/width,(*point)[1]-radius/height,(*point)[0]+radius/width,(*point)[1]+radius/height};
+        }
+        if(projected&&(*projected)[0]<=rectangle[2]&&(*projected)[2]>=rectangle[0]&&(*projected)[1]<=rectangle[3]&&(*projected)[3]>=rectangle[1])hits.push_back(e);
+    });
+    // World iteration order gives deterministic Active; subtraction keeps it
+    // when possible and otherwise falls back to the last remaining entity.
+    EndGroupTransform(app);FinishTransaction(app);
+    if(operation==SelectionOperation::Replace)m_Selection.Clear();
+    for(auto e:hits)if(operation==SelectionOperation::Subtract){if(m_Selection.Contains(e))m_Selection.Toggle(e);}else m_Selection.Add(e);
+    m_Selection.Prune(world);m_PropertyDrafts.clear();m_GameView=false;
 }
 }

@@ -106,7 +106,7 @@ void EditorLayer::DrawMainMenu(Application& app){
         if(ImGui::MenuItem("Redo","Ctrl+Y",false,CanRedo()))Redo(app);
         if(ImGui::MenuItem("Copy","Ctrl+C",false,!app.IsEditorPlayMode()))CopyEntity(app,m_Selection.active);
         if(ImGui::MenuItem("Paste","Ctrl+V",false,!app.IsEditorPlayMode()&&m_Clipboard.is_object()))PasteEntity(app);
-        if(ImGui::MenuItem("Clear Selection")){FinishTransaction(app);ClearSelection();}
+        if(ImGui::MenuItem("Clear Selection",nullptr,false,!m_SelectionLocked)){FinishTransaction(app);ClearSelection();}
         if(ImGui::MenuItem("Duplicate","Ctrl+D",false,app.GetWorld().IsAlive(m_Selection.active)))DuplicateEntity(app,m_Selection.active);
         if(ImGui::MenuItem("Delete selection","Delete",false,!m_Selection.items.empty()))DeleteSelection(app);ImGui::EndMenu();
     }
@@ -222,7 +222,7 @@ void EditorLayer::DrawSceneHierarchy(Application& app){
     }
     ImGui::Selectable("Scene Root",false);if(ImGui::IsItemHovered())ImGui::SetTooltip("Drop an Entity here to remove its Parent (Keep World by default).");acceptParent({});
     if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());
-    if(ImGui::IsWindowHovered()&&ImGui::IsMouseClicked(0)&&!ImGui::IsAnyItemHovered()&&!m_LightPointerCaptured&&!ImGuizmo::IsUsing()&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)){FinishTransaction(app);ClearSelection();ImGui::ClearActiveID();}
+    if(!m_SelectionLocked&&ImGui::IsWindowHovered()&&ImGui::IsMouseClicked(0)&&!ImGui::IsAnyItemHovered()&&!m_LightPointerCaptured&&!ImGuizmo::IsUsing()&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)){FinishTransaction(app);ClearSelection();ImGui::ClearActiveID();}
     if(m_RenameRequested){ImGui::OpenPopup("Rename entity");m_RenameRequested=false;}
     if(ImGui::BeginPopupModal("Rename entity",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
         ImGui::InputText("Name",&m_RenameBuffer);if(ImGui::Button("Rename")){if(RenameEntity(app,m_RenameTarget,m_RenameBuffer))ImGui::CloseCurrentPopup();}ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();ImGui::EndPopup();

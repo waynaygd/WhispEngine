@@ -111,7 +111,7 @@ public:
     void SetLightGizmosVisible(bool v){m_ShowLightGizmos=v;}
     void EnterRuntime(const ecs::World::CloneMap&);
     void LeaveRuntime();
-    void ResetHistory(){m_BulkSession.reset();m_BulkUiSelection.clear();m_BulkText.clear();ExitIsolation();CancelPlacement();m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
+    void ResetHistory(){m_BoxSelection.reset();m_SelectionLocked=false;m_BulkSession.reset();m_BulkUiSelection.clear();m_BulkText.clear();ExitIsolation();CancelPlacement();m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
     void FinishTransaction(Application&);
     void CancelTransaction(Application&);
     bool HasPendingTransaction()const{return m_Transaction.has_value();}
@@ -131,6 +131,11 @@ public:
     void ClearSelection(){m_Selection.Clear();m_PropertyDrafts.clear();}
     const std::vector<ecs::Entity>& GetSelectedEntities()const{return m_Selection.items;}
     bool IsSelected(ecs::Entity e)const{return m_Selection.Contains(e);}
+    bool IsSelectionLocked()const{return m_SelectionLocked;}
+    void SetSelectionLocked(bool value){m_SelectionLocked=value;if(value)m_BoxSelection.reset();}
+    enum class SelectionOperation { Replace, Add, Subtract };
+    void SelectViewportRectangle(Application&,std::array<float,4> rectangle,SelectionOperation);
+    bool IsBoxSelecting()const{return m_BoxSelection&&m_BoxSelection->dragging;}
     void PruneSelection(Application&);
     void SelectViewportEntity(Application&,ecs::Entity,bool ctrl,bool shift);
     bool SaveBookmark(Application&,int slot);
@@ -409,6 +414,15 @@ private:
     bool CanUndo() const { return !m_UndoStack.empty(); }
     bool CanRedo() const { return !m_RedoStack.empty(); }
 
+    struct BoxSelection {
+        std::array<float,2> start;
+        std::array<float,4> viewport;
+        std::uint64_t world;
+        SelectionOperation operation;
+        bool dragging=false;
+    };
+    std::optional<BoxSelection> m_BoxSelection;
+    bool m_SelectionLocked=false;
     SelectionSet m_Selection;
     int m_GizmoOperation = 0;
     int m_GizmoMode = 0;

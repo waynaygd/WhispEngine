@@ -63,7 +63,7 @@ bool EditorLayer::CanViewportSelect(const Application& app,ecs::Entity entity)co
 bool EditorLayer::DrawViewportTools(Application& app){
     const bool isolation=IsIsolationActive();
     if(isolation)ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.48f,.29f,.07f,1));
-    if(ImGui::Button(isolation?"View [ISOLATED]":"View"))ImGui::OpenPopup("ViewportTools");
+    if(ImGui::Button(m_SelectionLocked?"View [LOCKED]":(isolation?"View [ISOLATED]":"View")))ImGui::OpenPopup("ViewportTools");
     if(isolation)ImGui::PopStyleColor();
     bool owns=ImGui::IsItemHovered()||ImGui::IsPopupOpen("ViewportTools");
     if(isolation){ImGui::SameLine();if(ImGui::SmallButton("Exit Isolation"))ExitIsolation();owns|=ImGui::IsItemHovered();}
@@ -91,6 +91,15 @@ bool EditorLayer::DrawViewportTools(Application& app){
         ImGui::EndDisabled();
         if(ImGui::MenuItem("Exit Isolation",nullptr,false,isolation))ExitIsolation();
         if(isolation){ImGui::TextDisabled("Selection changes keep the isolated set.");ImGui::TextDisabled("New objects created here are included; lighting stays active.");}
+        if(ImGui::MenuItem("    Selection Lock",nullptr,m_SelectionLocked))SetSelectionLocked(!m_SelectionLocked);
+        // Draw the lock rather than depending on a particular font's glyphs.
+        {auto p=ImGui::GetItemRectMin();const float d=ImGui::GetStyle().FontScaleDpi;
+         auto* draw=ImGui::GetWindowDrawList();const auto ink=ImGui::GetColorU32(ImGuiCol_Text);
+         draw->AddRect({p.x+6*d,p.y+8*d},{p.x+15*d,p.y+15*d},ink,1*d);
+         draw->AddRect({p.x+8*d,p.y+3*d},{p.x+13*d,p.y+10*d},ink,2*d);}
+        if(ImGui::IsItemHovered())ImGui::SetTooltip("Protect selection from clicks and box selection. Gizmo and Inspector stay available.");
+        ImGui::TextDisabled("Box: drag empty space; Ctrl adds; Alt subtracts.");
+        ImGui::TextDisabled("Intersecting bounds are selected, including occluded objects.");
         if(ImGui::BeginMenu("Selection Filters")){
             bool changed=false;auto& f=m_SelectionFilters;
             if(ImGui::MenuItem("Enable All")){f={};changed=true;}

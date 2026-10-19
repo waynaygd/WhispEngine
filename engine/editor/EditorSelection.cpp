@@ -4,6 +4,7 @@ namespace editor {
 void EditorLayer::FocusSelection(Application& app){PruneSelection(app);app.FocusEntities(m_Selection.items);}
 void EditorLayer::PruneSelection(Application& app){
     auto& world=app.GetWorld();
+    if(m_BoxSelection&&(app.IsEditorPlayMode()||m_BoxSelection->world!=world.GetIdentity()))m_BoxSelection.reset();
     if(app.IsEditorPlayMode())ExitIsolation();
     else std::erase_if(m_Isolation,[&](auto e){return !world.IsAlive(e);});
     if(m_GroupTransform){
@@ -22,17 +23,18 @@ void EditorLayer::PruneSelection(Application& app){
     m_Selection.Prune(world);
 }
 void EditorLayer::SelectViewportEntity(Application& app,ecs::Entity e,bool ctrl,bool shift){
-    PruneSelection(app);EndGroupTransform(app);FinishTransaction(app);
+    PruneSelection(app);if(m_SelectionLocked)return;EndGroupTransform(app);FinishTransaction(app);
     if(!app.GetWorld().IsAlive(e)){if(!ctrl&&!shift)ClearSelection();return;}
     if(ctrl)m_Selection.Toggle(e);else if(shift)m_Selection.Add(e);else m_Selection.Replace(e);
     m_PropertyDrafts.clear();if(!app.IsEditorPlayMode())m_GameView=false;
 }
 void EditorLayer::SelectHierarchyEntity(Application& app,ecs::Entity e,bool ctrl,bool shift,const std::vector<ecs::Entity>& order){
-    if(!app.GetWorld().IsAlive(e))return;
+    if(m_SelectionLocked||!app.GetWorld().IsAlive(e))return;
     if(!shift){SelectViewportEntity(app,e,ctrl,false);return;}
     PruneSelection(app);EndGroupTransform(app);FinishTransaction(app);m_Selection.Range(order,e,ctrl);m_Selection.Prune(app.GetWorld());m_PropertyDrafts.clear();if(!app.IsEditorPlayMode())m_GameView=false;
 }
 void EditorLayer::SelectAllEntities(Application& app,const std::vector<ecs::Entity>& order){
+    if(m_SelectionLocked)return;
     PruneSelection(app);EndGroupTransform(app);FinishTransaction(app);m_Selection.Clear();for(auto e:order)if(app.GetWorld().IsAlive(e))m_Selection.Add(e);m_PropertyDrafts.clear();if(!app.IsEditorPlayMode())m_GameView=false;
 }
 EditorLayer::EntitySnapshot EditorLayer::CaptureSelection(Application& app,bool transformsOnly)const{
