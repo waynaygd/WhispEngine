@@ -275,8 +275,14 @@ namespace ecs {
         lightCamera.nearPlane=m_CameraNearPlane;lightCamera.farPlane=m_CameraFarPlane;
         auto lights=GatherSceneLights(world,m_LightingSettings?*m_LightingSettings:m_DefaultLighting,lightCamera,m_Interpolation);
         if(m_ViewportUnlit)lights.lighting.enabled=false;
+        auto fog=GatherFog(world,lightCamera);
+        PostProcessSettings postBase;postBase.fog=fog.settings;postBase.fog.enabled=fog.active;
+        if(m_EnvironmentSettings)postBase.environment=*m_EnvironmentSettings;
+        if(m_AtmosphereSettings)postBase.atmosphere=*m_AtmosphereSettings;
+        m_EvaluatedPostProcess=EvaluatePostProcess(m_CameraPosition,world,postBase);
+        fog.settings=m_EvaluatedPostProcess.fog;fog.active=fog.settings.enabled;
         if(m_Renderer){
-            auto fog=GatherFog(world,lightCamera);std::string warning;
+            std::string warning;
             if(fog.activeCount>1)warning="Multiple enabled global Fog components: lowest Entity index wins";
             if(fog.invalidCount)warning="Invalid Fog component ignored at render boundary";
             if(fog.active&&!m_Renderer->GetFogDiagnostics().supported)warning="Fog is not supported by this render backend";
@@ -290,7 +296,7 @@ namespace ecs {
         if (m_Renderer == nullptr)
             return;
         if(m_EnvironmentSettings){
-            auto environment=*m_EnvironmentSettings;if(m_ViewportUnlit)environment.diffuse=environment.specular=false;
+            auto environment=m_EvaluatedPostProcess.environment;if(m_ViewportUnlit)environment.diffuse=environment.specular=false;
             m_Renderer->SetEnvironmentSettings(environment);
             if(m_ResourceManager&&m_EnvironmentSettings->enabled){
                 const auto& key=m_EnvironmentSettings->assetPath;
@@ -635,7 +641,7 @@ namespace ecs {
         if (m_Renderer == nullptr)
             return;
         if(m_EnvironmentSettings){
-            auto environment=*m_EnvironmentSettings;if(m_ViewportUnlit)environment.diffuse=environment.specular=false;
+            auto environment=m_EvaluatedPostProcess.environment;if(m_ViewportUnlit)environment.diffuse=environment.specular=false;
             m_Renderer->SetEnvironmentSettings(environment);
             if(m_ResourceManager&&m_EnvironmentSettings->enabled){
                 const auto& key=m_EnvironmentSettings->assetPath;

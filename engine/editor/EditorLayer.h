@@ -140,6 +140,7 @@ public:
     ecs::Entity CreateEntity(Application&,const std::string& name="Entity");
     ecs::Entity CreatePlayerStart(Application&);
     ecs::Entity CreateFog(Application&);
+    ecs::Entity CreatePostProcessVolume(Application&,bool global);
     bool DeleteEntity(Application&,ecs::Entity);
     ecs::Entity DuplicateEntity(Application&,ecs::Entity);
     bool CopyEntity(Application&,ecs::Entity);
@@ -451,6 +452,7 @@ private:
     std::string m_VertexSnapStatus="Hold V + click a vertex of the selection, then drag Move Gizmo.";
     float m_SurfaceOffset=0,m_SurfaceRotationOffset=0;
     bool m_SurfaceSnap=true,m_AlignToNormal=false,m_PlacementCancelled=false;
+    void DrawPostProcessGizmos(Application&,const ImVec2&,const ImVec2&);
     void DrawFogGizmos(Application&,const ImVec2&,const ImVec2&);
     void DrawEntityIcons(Application&,const ImVec2&,const ImVec2&);
     bool m_SpecialIconHovered=false;

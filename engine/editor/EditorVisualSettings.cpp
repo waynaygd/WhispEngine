@@ -3,6 +3,7 @@
 #include "EditorWidgets.h"
 #include "LightGizmoMath.h"
 #include "SunSynchronization.h"
+#include "../ecs/PostProcessEvaluation.h"
 #include "../platform/GlfwWindow.h"
 #include <GLFW/glfw3.h>
 #include "../core/Application.h"
@@ -14,6 +15,9 @@ EditorVisualFrame EditorLayer::BuildVisualFrame(const Application& app)const{
     if(!viewport)if(auto* window=dynamic_cast<const GlfwWindow*>(app.GetWindow()))glfwGetFramebufferSize(window->GetGlfwHandle(),&width,&height);
     f.active=width>1&&height>1;f.play=app.IsEditorPlayMode();f.game=m_GameView;f.showGrid=viewport&&m_ShowGrid;f.settings=m_VisualSettings;f.backgroundEnabled=m_SkyDiagnosticEnabled;
     if(f.play||f.game||!m_BackgroundOverride){static_cast<SceneBackground&>(f.settings)=app.GetSceneBackground();if(f.settings.useIblEnvironment){f.settings.cubemap=app.GetEnvironmentSettings().assetPath;f.settings.skyRotation=app.GetEnvironmentSettings().rotationDegrees;}}
+    PostProcessSettings postBase;postBase.atmosphere=static_cast<const SceneBackground&>(f.settings);postBase.environment=app.GetEnvironmentSettings();
+    auto post=ecs::EvaluatePostProcess(app.GetCameraPosition(),app.GetWorld(),postBase);static_cast<SceneBackground&>(f.settings)=post.atmosphere;
+    if(f.settings.useIblEnvironment)f.settings.skyRotation=post.environment.rotationDegrees;
     if(f.settings.sunSync!=SunSyncMode::Independent||f.settings.background==EditorBackground::DayNight){auto& world=const_cast<ecs::World&>(app.GetWorld());auto primary=PrimarySun(world);if(primary.IsValid()){
         auto rays=ecs::LightDirection(ecs::RenderPose::From(*world.GetComponent<ecs::TransformComponent>(primary)));f.sunDirection={-rays.x,-rays.y,-rays.z};f.sunColor=SanitizeLight(*world.GetComponent<ecs::DirectionalLightComponent>(primary)).color;f.sunVisible=f.settings.visibleSunDisc;
     }}

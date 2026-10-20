@@ -455,6 +455,7 @@ void Application::SetupEcsRuntimeDemo(bool populate)
     m_RenderSystem->SetShadingModelOverride(m_ShadingModelOverride);m_RenderSystem->SetTextureMapMask(m_PbrTextureMask);
     m_RenderSystem->SetLightingSettings(&m_LightingSettings);m_RenderSystem->SetLightRenderingMode(m_LightMode);
     m_RenderSystem->SetEnvironmentSettings(&m_EnvironmentSettings);
+    m_RenderSystem->SetAtmosphereSettings(&m_Background);
     m_RenderSystem->SetShadowSettings(&m_ShadowSettings);
     m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled);
 

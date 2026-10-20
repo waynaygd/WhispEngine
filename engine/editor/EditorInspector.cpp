@@ -1,4 +1,5 @@
 #include "../ecs/FogGather.h"
+#include "../ecs/PostProcessEvaluation.h"
 #include "../render/IRenderAdapter.h"
 #include "PrecisionInputs.h"
 #include "SunSynchronization.h"
@@ -39,11 +40,20 @@ bool EditorLayer::SetLuaEntityReference(Application& app,ecs::Entity owner,const
 namespace {
 ecs::PropertyValue Initial(const ecs::PropertyDescriptor& p){
     using K=ecs::PropertyKind;
+    const PostProcessSettings postDefaults;
+#define PP_INITIAL(name,target,lo,hi,section,label) if(p.key==#name)return postDefaults.target;
+    WHISP_PP_FLOATS(PP_INITIAL)
+#undef PP_INITIAL
+    if(p.key=="fogEnabled"||p.key=="sceneLighting"||p.key=="toneMapping")return true;
+    if(p.key=="fogMode")return int(postDefaults.fog.mode);
+    if(p.key=="fogQuality")return int(postDefaults.fog.quality);
+    if(p.key=="fogColor")return postDefaults.fog.color;
+    if(p.key=="scatteringColor")return postDefaults.fog.scatteringColor;
     switch(p.kind){case K::Boolean:return false;case K::Integer:return 0;case K::Number:return p.key.find("roughness")!=std::string::npos?.5f:p.key.find("Scale")!=std::string::npos||p.key.find("Strength")!=std::string::npos?1.f:std::max(p.minimum,0.f);case K::String:case K::Asset:return std::string();case K::Vector:return ecs::Vec3{};case K::Color:return std::array<float,4>{1,1,1,1};case K::AssetList:return std::vector<std::string>{};}return {};
 }
 bool Drawer(const ecs::PropertyDescriptor& p,ecs::PropertyValue& v,const char* vectorFormat="%.3g",bool degrees=false){
     using K=ecs::PropertyKind;bool changed=false;
-    if(p.nullable){bool enabled=!std::holds_alternative<std::monostate>(v);if(ImGui::Checkbox("##override",&enabled)){v=enabled?Initial(p):ecs::PropertyValue{};changed=true;}if(ImGui::IsItemHovered())ImGui::SetTooltip("Override this property for the selected entity; unchecked inherits the material asset.");if(!enabled){ImGui::SameLine();ImGui::TextDisabled("Inherit");return changed;}ImGui::SameLine();}
+    if(p.nullable){bool enabled=!std::holds_alternative<std::monostate>(v);if(ImGui::Checkbox("##override",&enabled)){v=enabled?Initial(p):ecs::PropertyValue{};changed=true;}if(ImGui::IsItemHovered())ImGui::SetTooltip("Override this property for the selected entity; unchecked inherits the underlying asset or evaluated scene state.");if(!enabled){ImGui::SameLine();ImGui::TextDisabled("Inherit");return changed;}ImGui::SameLine();}
     switch(p.kind){
     case K::Boolean:changed|=ImGui::Checkbox("##value",&std::get<bool>(v));break;
     case K::Integer:{auto& x=std::get<int>(v);if(p.choices.empty())changed|=PrecisionDragInt("##value",&x,1,int(p.minimum),int(p.maximum));else if(ImGui::BeginCombo("##value",x>=0&&x<int(p.choices.size())?p.choices[x].c_str():"Invalid")){for(int i=0;i<int(p.choices.size());++i)if(ImGui::Selectable(p.choices[i].c_str(),x==i)){x=i;changed=true;}ImGui::EndCombo();}break;}
@@ -241,6 +251,9 @@ void EditorLayer::DrawInspector(Application& app){
                 bool primary=std::string(section)=="Surface"||std::string(section)=="Base Color"||std::string(section)=="Metallic / Roughness";
                 if(ImGui::TreeNodeEx(section,primary?ImGuiTreeNodeFlags_DefaultOpen:0)){drawSection(section,false);ImGui::TreePop();}
             }
+        }else if(d.key=="PostProcessVolume"){
+            ImGui::TextWrapped("Unchecked parameters inherit the current scene/volume stack. Half extents use World Transform; blend radius is outside the box in world units.");
+            for(const char* section:{"Volume","Fog","Height Fog","Volumetric Fog","Environment","Atmosphere"})if(ImGui::TreeNodeEx(section,ImGuiTreeNodeFlags_DefaultOpen)){drawSection(section,false);ImGui::TreePop();}
         }else if(d.key=="Fog"){
             drawSection("",false);auto mode=world.GetComponent<ecs::FogComponent>(e)->mode;
             if(mode!=FogMode::Distance){ImGui::SeparatorText("Height profile (world space)");drawSection("Medium",false);}

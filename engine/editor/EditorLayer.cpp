@@ -696,6 +696,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     DrawLightGizmos(app,renderer,contentMin,viewportSize);
     DrawPlayerStartGizmos(app,contentMin,viewportSize);
     DrawFogGizmos(app,contentMin,viewportSize);
+    DrawPostProcessGizmos(app,contentMin,viewportSize);
     iconLayers.SetCurrentChannel(iconDraw,0);
     DrawEntityIcons(app,contentMin,viewportSize);
     iconLayers.Merge(iconDraw);

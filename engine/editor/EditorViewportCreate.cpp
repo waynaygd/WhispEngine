@@ -14,7 +14,7 @@ bool EditorLayer::DrawViewportCreateMenu(Application& app){
         if(ImGui::MenuItem("Empty Entity"))CreateEntity(app);
         if(ImGui::BeginMenu("Player")){if(ImGui::MenuItem("Player Start"))CreatePlayerStart(app);ImGui::EndMenu();}
         if(ImGui::BeginMenu("Light")){if(ImGui::MenuItem("Directional"))CreateLight(app,LightType::Directional);if(ImGui::MenuItem("Point"))CreateLight(app,LightType::Point);if(ImGui::MenuItem("Spot"))CreateLight(app,LightType::Spot);ImGui::EndMenu();}
-        if(ImGui::BeginMenu("Environment")){if(ImGui::MenuItem("Fog"))CreateFog(app);ImGui::EndMenu();}
+        if(ImGui::BeginMenu("Environment")){if(ImGui::MenuItem("Fog"))CreateFog(app);if(ImGui::MenuItem("Global Post Process Volume"))CreatePostProcessVolume(app,true);if(ImGui::MenuItem("Local Post Process Volume"))CreatePostProcessVolume(app,false);ImGui::EndMenu();}
         ImGui::EndPopup();
     }
     ImGui::EndDisabled();return hovered||open;

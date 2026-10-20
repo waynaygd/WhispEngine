@@ -15,6 +15,7 @@ struct ApplicationTestAccess {
         if(!capture)return app.CaptureGameplayCursor(false);
         app.m_PlayerMouseCaptured=true;app.m_InputManager.ResetMouseDelta();return true;
     }
+    static const ecs::EvaluatedPostProcess& PostProcess(const Application& app){return app.m_RenderSystem->GetEvaluatedPostProcess();}
     static void FrameDelta(Application& app,float seconds){
         if(!std::isfinite(seconds)||seconds<=0||seconds>.1f)throw std::runtime_error("Invalid test frame delta");
         app.m_Time.m_TestFrameDelta=seconds;

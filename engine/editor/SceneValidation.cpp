@@ -5,6 +5,7 @@
 #include "../ecs/components/TagComponent.h"
 #include "../ecs/components/PrefabInstanceComponent.h"
 #include "../ecs/components/LuaScriptComponent.h"
+#include "../ecs/PostProcessEvaluation.h"
 #include "../ecs/components/PlayerStartComponent.h"
 #include "../scripting/EntityReference.h"
 #include "../scripting/LuaRuntime.h"
@@ -204,6 +205,10 @@ struct Validator {
                     if(component=="PrefabInstance")serialized.erase("members"); // Specialized local-to-scene mapping check below.
                     std::size_t remaining=8192;References(serialized,"",0,remaining);
                 }catch(const std::exception& error){Error("Invalid Component Data",error.what());}
+            }
+            if(auto* volume=world.GetComponent<PostProcessVolumeComponent>(e)){
+                component="PostProcessVolume";auto error=ValidatePostProcessVolume(*volume);if(!error.empty())Error("Invalid Post Process Volume",error);
+                else if(!volume->global&&!GetPostProcessBox(world,e,*volume))Error("Invalid Volume Transform","Local volume requires a valid nonsingular World Transform.");
             }
             if(auto* script=world.GetComponent<LuaScriptComponent>(e)){
                 component="LuaScript";try{Script(*script);}catch(const std::exception& error){Error("Invalid Lua Fields",error.what());}

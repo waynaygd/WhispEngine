@@ -1,6 +1,7 @@
 #pragma once
 #include <nlohmann/json.hpp>
 #include "../../render/Environment.h"
+#include "../PostProcessEvaluation.h"
 #include "../../render/SceneLights.h"
 #include "../../resources/EnvironmentResource.h"
 #include "../../resources/Resource.h"
@@ -61,6 +62,8 @@ public:
     void SetInterpolation(RenderInterpolation* interpolation) { m_Interpolation = interpolation; }
     void SetPhysicsDebugPose(bool enabled) { m_PhysicsDebugPose = enabled; }
     void SetShadowSettings(const ShadowSettings* settings) { m_ShadowSettings=settings; }
+    const EvaluatedPostProcess& GetEvaluatedPostProcess()const{return m_EvaluatedPostProcess;}
+    void SetAtmosphereSettings(const SceneBackground* settings){m_AtmosphereSettings=settings;}
     void SetEnvironmentSettings(const EnvironmentSettings* settings){m_EnvironmentSettings=settings;}
     void SetLightRenderingMode(LightRenderingMode mode){m_LightRenderingMode=mode;}
     void SetLightingSettings(const LightingSettings* settings) { m_LightingSettings=settings; }
@@ -177,6 +180,8 @@ private:
     bool m_InstancingEnabled=true;
     bool m_ViewportUnlit=false;
     std::string m_FogWarning;
+    EvaluatedPostProcess m_EvaluatedPostProcess;
+    const SceneBackground* m_AtmosphereSettings=nullptr;
     const EnvironmentSettings* m_EnvironmentSettings=nullptr;
     std::string m_EnvironmentKey,m_RequestedEnvironment;
     ResourceHandle<EnvironmentResource> m_EnvironmentAsset;

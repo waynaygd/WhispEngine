@@ -37,6 +37,7 @@ add_library(Engine
   ecs/World.cpp
   ecs/Hierarchy.cpp
   ecs/ComponentRegistry.cpp
+  ecs/PostProcessEvaluation.cpp
   ecs/systems/BoundsBounceSystem.cpp
   ecs/systems/MotionSystem.cpp
   ecs/systems/PhysicsSystem.cpp
@@ -74,6 +75,7 @@ add_library(Engine
   editor/EditorVertexSnap.cpp
   editor/EditorPlacement.cpp
   editor/EditorFogGizmos.cpp
+  editor/EditorPostProcess.cpp
   editor/EditorEntityIcons.cpp
   editor/EditorVisualSettings.cpp
   editor/AssetCatalog.cpp

@@ -3,6 +3,7 @@
 #include "../core/AssetPaths.h"
 #include "../ecs/components/PlayerStartComponent.h"
 #include "../ecs/components/FogComponent.h"
+#include "../ecs/components/PostProcessVolumeComponent.h"
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
 #include <algorithm>
@@ -56,7 +57,7 @@ bool EditorLayer::CanViewportSelect(const Application& app,ecs::Entity entity)co
     if(!category(world.HasComponent<ecs::MeshRendererComponent>(entity),f.meshes))return false;
     if(!category(world.HasComponent<ecs::DirectionalLightComponent>(entity)||world.HasComponent<ecs::PointLightComponent>(entity)||world.HasComponent<ecs::SpotLightComponent>(entity),f.lights))return false;
     if(!category(world.HasComponent<ecs::PlayerStartComponent>(entity),f.playerStarts))return false;
-    if(!category(world.HasComponent<ecs::FogComponent>(entity),f.fog))return false;
+    if(!category((world.HasComponent<ecs::FogComponent>(entity)||world.HasComponent<ecs::PostProcessVolumeComponent>(entity)),f.fog))return false;
     if(!category(world.HasComponent<ecs::ColliderComponent>(entity)||world.HasComponent<ecs::RigidbodyComponent>(entity),f.physics))return false;
     return known||f.other;
 }
