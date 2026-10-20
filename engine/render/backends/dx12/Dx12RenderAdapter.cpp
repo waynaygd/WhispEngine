@@ -2132,6 +2132,7 @@ void Dx12RenderAdapter::Shutdown()
 
     m_FrameRecording=false;
     ReleaseSceneLights();
+    m_RuntimeUIPso.Reset();m_RuntimeUIRoot.Reset();for(auto& buffer:m_RuntimeUIVertices)buffer.Reset();std::fill(std::begin(m_RuntimeUICapacity),std::end(m_RuntimeUICapacity),0);
     ReleaseCustomPostFx();ReleaseFog();ReleaseEditorVisuals();ReleaseEnvironment();m_CachedBrdfGpu.Reset();ReleaseHdrTargets();m_OutputPso.Reset();m_OutputRoot.Reset();
     ReleaseShadowResources();m_ShadowVs.Reset();m_ShadowInstanceVs.Reset();m_ShadowPso.Reset();m_ShadowInstancePso.Reset();m_ShadowDoublePso.Reset();m_ShadowDoubleInstancePso.Reset();m_ShadowMirrorPso.Reset();m_ShadowMirrorInstancePso.Reset();m_ShadowRoot.Reset();
     m_TimeHeap.Reset();for(auto& resource:m_TimeReadback)resource.Reset();m_TimeFrequency=0;

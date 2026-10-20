@@ -344,6 +344,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
         if(HasPendingTransaction())CancelTransaction(app);
         m_LightPointerCaptured=m_PlaneScaleCaptured=m_ToolActive=false;m_CancelGizmoUntilRelease=true;
         ImGuizmo::Enable(false);ImGuizmo::Enable(true);ImGui::ClearActiveID();
+        if(m_UIWidgetDrag){CancelUIDocumentEdit(app,m_UIWidgetDrag->key);m_UIWidgetDrag.reset();}
         if(!m_ViewportMaximized)CaptureCurrentWorkspace();
         m_ViewportMaximized=!m_ViewportMaximized;m_FocusViewportWindow=true;
     }
@@ -362,6 +363,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     m_ViewportFocused=false;m_HierarchyFocused=false;
     DrawMainMenu(app);DrawPrefabWorkflow(app);DrawSceneDialogs(app);DrawProjectBrowser(app);
     if(app.IsProjectBrowserActive())return;
+    DrawUIDesigner(app);
     if(m_ShowProjectSettings)DrawProjectSettings(app);
     if(m_ShowSceneSettings)DrawSceneSettings(app,renderer,dt);
     if(m_ShowVisualSettings)DrawEditorVisualSettings(app,renderer);
@@ -493,6 +495,7 @@ bool EditorLayer::BlocksGameplayInput()const{
 
 void EditorLayer::HandleEditorShortcuts(Application& app){
     const auto& io=ImGui::GetIO();if(io.WantTextInput||m_ModalActive||m_EscapeConsumed)return;
+    if(UIDesignerOwnsKeyboard())return;
     HandleViewportToolShortcuts(app);
     // Asset file shortcuts are handled by the browser after its widgets. Never
     // let a Delete intended for that window reach the entity command path.
@@ -625,6 +628,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     if(!playMode){
         ImGui::SameLine();if(ImGui::GetContentRegionAvail().x<ImGui::CalcTextSize("Game View (G)").x+ImGui::GetFrameHeight()+ImGui::GetStyle().ItemSpacing.x)ImGui::NewLine();
         ImGui::Checkbox("Game View (G)",&m_GameView);
+        ImGui::SameLine();ImGui::Checkbox("UI Preview",&m_ShowRuntimeUI);
     }
 
     ImGui::Separator();

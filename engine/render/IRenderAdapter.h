@@ -12,6 +12,7 @@
 #include "Fog.h"
 #include "ScreenEffects.h"
 #include "../resources/PostFxResource.h"
+namespace ui {struct DrawList;}
 struct EnvironmentResource;
 #include <span>
 
@@ -43,6 +44,8 @@ public:
         return false;
     }
     virtual void EndViewportRender() {}
+    virtual std::array<unsigned,2> RenderAreaSize()const{return {0,0};}
+    virtual void DrawRuntimeUI(const ui::DrawList&) {}
     virtual std::uint64_t GetViewportTextureId() const { return 0; }
     virtual std::uint64_t GetTexturePreviewId(RenderTextureHandle)const{return 0;}
     // Called before scene rendering. The caller owns the returned cached texture.

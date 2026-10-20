@@ -1628,6 +1628,7 @@ int Application::Run()
                     if(m_ShadowBenchmark){m_LightingSettings.enabled=true;m_ShadowSettings.enabled=block%6>=2;m_ShadowSettings.pcf=block%6>=4;}
                 }
 
+                if(m_RenderSystem)m_RenderSystem->SetUIPreview(m_EditorPlayMode||m_EditorLayer.IsUIPreviewVisible());
                 wc.renderer->SetAntiAliasing(m_AntiAliasing);
                 wc.renderer->SetEditorVisuals(m_EditorLayer.BuildVisualFrame(*this));
                 const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();

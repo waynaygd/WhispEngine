@@ -11,8 +11,8 @@
 namespace editor {
 namespace {
 ImGuiID WorkspaceRoot(){return ImHashStr("WhispEngine.Editor.Dockspace");}
-std::array<bool*,14> Panels(bool& hierarchy,bool& inspector,bool& viewport,bool& assets,bool& console,bool& material,bool& settings,bool& statistics,bool& events,bool& validation,bool& lua,bool& visuals,bool& physics,bool& project){
-    return {&hierarchy,&inspector,&viewport,&assets,&console,&material,&settings,&statistics,&events,&validation,&lua,&visuals,&physics,&project};
+std::array<bool*,17> Panels(bool& hierarchy,bool& inspector,bool& viewport,bool& assets,bool& console,bool& material,bool& settings,bool& statistics,bool& events,bool& validation,bool& lua,bool& visuals,bool& physics,bool& project,bool& widgetHierarchy,bool& canvas,bool& widgetInspector){
+    return {&hierarchy,&inspector,&viewport,&assets,&console,&material,&settings,&statistics,&events,&validation,&lua,&visuals,&physics,&project,&widgetHierarchy,&canvas,&widgetInspector};
 }
 }
 bool ValidWorkspaceIni(const std::string& ini){
@@ -44,7 +44,8 @@ bool ValidWorkspaceIni(const std::string& ini){
             nodes.emplace(id,Node{parent,0,split!=std::string::npos,space,text.find("CentralNode=1")!=std::string::npos});
         }
     }
-    const auto root=nodes.find(WorkspaceRoot());if(!viewport||root==nodes.end()||!root->second.space||root->second.parent)return false;
+    const auto root=nodes.find(WorkspaceRoot());if(!viewport&&ini.find("[Window][Canvas Designer]")==std::string::npos)return false;
+    if(root==nodes.end()||!root->second.space||root->second.parent)return false;
     std::map<unsigned,unsigned> centers;
     for(const auto& [id,node]:nodes){if(node.central&&node.children)return false;if((node.children!=0&&node.children!=2)||(node.children==2&&!node.split)||(node.split&&node.children!=2))return false;unsigned n=id,depth=0;while(nodes.at(n).parent){if(++depth>32)return false;n=nodes.at(n).parent;}if(node.central&&++centers[n]>1)return false;}
     // ImGui keeps hidden windows attached to a split ancestor after merging an empty leaf.
@@ -52,11 +53,11 @@ bool ValidWorkspaceIni(const std::string& ini){
     return true;
 }
 std::map<std::string,bool> EditorLayer::CaptureWorkspaceVisibility(){
-    auto fields=Panels(m_ShowHierarchy,m_ShowInspector,m_ShowViewport,m_ShowAssetBrowser,m_ShowConsole,m_ShowMaterialEditor,m_ShowSceneSettings,m_ShowStatistics,m_ShowGameplayEvents,m_ShowSceneValidation,m_ShowLuaRuntimeInspector,m_ShowVisualSettings,m_ShowPhysicsStress,m_ShowProjectSettings);
+    auto fields=Panels(m_ShowHierarchy,m_ShowInspector,m_ShowViewport,m_ShowAssetBrowser,m_ShowConsole,m_ShowMaterialEditor,m_ShowSceneSettings,m_ShowStatistics,m_ShowGameplayEvents,m_ShowSceneValidation,m_ShowLuaRuntimeInspector,m_ShowVisualSettings,m_ShowPhysicsStress,m_ShowProjectSettings,m_ShowWidgetHierarchy,m_ShowCanvasDesigner,m_ShowWidgetInspector);
     std::map<std::string,bool> result;for(std::size_t i=0;i<fields.size();++i)result[WorkspacePanels[i]]=*fields[i];return result;
 }
 void EditorLayer::ApplyWorkspaceVisibility(const std::map<std::string,bool>& values){
-    auto fields=Panels(m_ShowHierarchy,m_ShowInspector,m_ShowViewport,m_ShowAssetBrowser,m_ShowConsole,m_ShowMaterialEditor,m_ShowSceneSettings,m_ShowStatistics,m_ShowGameplayEvents,m_ShowSceneValidation,m_ShowLuaRuntimeInspector,m_ShowVisualSettings,m_ShowPhysicsStress,m_ShowProjectSettings);
+    auto fields=Panels(m_ShowHierarchy,m_ShowInspector,m_ShowViewport,m_ShowAssetBrowser,m_ShowConsole,m_ShowMaterialEditor,m_ShowSceneSettings,m_ShowStatistics,m_ShowGameplayEvents,m_ShowSceneValidation,m_ShowLuaRuntimeInspector,m_ShowVisualSettings,m_ShowPhysicsStress,m_ShowProjectSettings,m_ShowWidgetHierarchy,m_ShowCanvasDesigner,m_ShowWidgetInspector);
     for(std::size_t i=0;i<fields.size();++i)if(auto found=values.find(WorkspacePanels[i]);found!=values.end())*fields[i]=found->second;
 }
 void EditorLayer::WorkspaceDefaults(){
@@ -66,6 +67,7 @@ void EditorLayer::WorkspaceDefaults(){
     if(m_Workspace==EditorWorkspace::Scripting){visible["Console / Diagnostics"]=visible["Lua Runtime Inspector"]=visible["Gameplay Events"]=true;}
     if(m_Workspace==EditorWorkspace::AssetManagement){visible["Asset Browser"]=true;}
     if(m_Workspace==EditorWorkspace::GameplayDebugging){visible["Gameplay Events"]=visible["Lua Runtime Inspector"]=visible["Scene Validation"]=visible["Console / Diagnostics"]=true;}
+    if(m_Workspace==EditorWorkspace::UIDesigner){for(auto& [name,value]:visible)value=false;for(const auto* name:{"Widget Hierarchy","Canvas Designer","Widget Inspector","Asset Browser"})visible[name]=true;}
     ApplyWorkspaceVisibility(visible);
 }
 void EditorLayer::InitializeWorkspaces(const EditorPreferences& preferences){
@@ -106,7 +108,8 @@ void EditorLayer::BuildWorkspaceDocking(unsigned root,const ImVec2& size){
         ImGui::DockBuilderSplitNode(center,ImGuiDir_Left,.18f,&left,&center);
         ImGui::DockBuilderSplitNode(center,ImGuiDir_Right,.28f,&right,&center);
         ImGui::DockBuilderSplitNode(center,ImGuiDir_Down,m_Workspace==EditorWorkspace::LevelEditing?.25f:.32f,&bottom,&center);
-        ImGui::DockBuilderDockWindow("Viewport",center);ImGui::DockBuilderDockWindow("Scene Hierarchy",left);ImGui::DockBuilderDockWindow("Inspector",right);ImGui::DockBuilderDockWindow("Asset Browser",bottom);
+        ImGui::DockBuilderDockWindow("Viewport",center);ImGui::DockBuilderDockWindow("Scene Hierarchy",left);ImGui::DockBuilderDockWindow("Inspector",right);
+        ImGui::DockBuilderDockWindow("Widget Hierarchy",left);ImGui::DockBuilderDockWindow("Canvas Designer",center);ImGui::DockBuilderDockWindow("Widget Inspector",right);ImGui::DockBuilderDockWindow("Asset Browser",bottom);
     }
     for(const auto* name:{"Scene Settings","Editor Visuals","Lua Runtime Inspector","Project Settings"})ImGui::DockBuilderDockWindow(name,right);
     for(const auto* name:{"Console / Diagnostics","Gameplay Events","Scene Validation","Material Editor","Statistics","Physics Stress Test"})ImGui::DockBuilderDockWindow(name,bottom);
@@ -140,7 +143,7 @@ void EditorLayer::ConfigureDocking(){
 }
 void EditorLayer::DrawWorkspaceMenu(Application& app){
     if(!ImGui::BeginMenu("Workspaces"))return;
-    for(int i=0;i<4;++i)if(ImGui::MenuItem(WorkspaceNames[i],nullptr,m_Workspace==EditorWorkspace(i)))SwitchWorkspace(EditorWorkspace(i));
+    for(int i=0;i<int(WorkspaceKeys.size());++i)if(ImGui::MenuItem(WorkspaceNames[i],nullptr,m_Workspace==EditorWorkspace(i)))SwitchWorkspace(EditorWorkspace(i));
     ImGui::Separator();ImGui::BeginDisabled(m_WorkspacePending||m_ViewportMaximized);
     if(ImGui::MenuItem("Save Current Layout"))SaveCurrentWorkspace(app);ImGui::EndDisabled();
     if(ImGui::MenuItem("Reset Current Layout"))ResetCurrentWorkspace(app);

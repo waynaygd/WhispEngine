@@ -55,6 +55,7 @@ public:
 
     IWindow* GetWindow() { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
     const IWindow* GetWindow()const { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
+    ui::DrawList BuildUIDesignerPreview(const ui::Document& document,ui::Pair preview){return m_RenderSystem?m_RenderSystem->BuildUIDesignerPreview(document,preview,GetRenderAdapter()):ui::DrawList{};}
     IRenderAdapter* GetRenderAdapter(){return m_Windows.empty()?nullptr:m_Windows.front().renderer.get();}
     editor::EditorLayer& GetEditorLayer(){return m_EditorLayer;}
     void SetViewportUnlit(bool value){if(m_RenderSystem)m_RenderSystem->SetViewportUnlit(value);}

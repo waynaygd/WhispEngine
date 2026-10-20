@@ -6,6 +6,7 @@
 #include "../ecs/components/PrefabInstanceComponent.h"
 #include "../ecs/components/LuaScriptComponent.h"
 #include "../ecs/PostProcessEvaluation.h"
+#include "../ecs/components/UICanvasComponent.h"
 #include "../ecs/components/PlayerStartComponent.h"
 #include "../scripting/EntityReference.h"
 #include "../scripting/LuaRuntime.h"
@@ -218,6 +219,13 @@ struct Validator {
                     if(!std::isfinite(effect.weight)||effect.weight<0||effect.weight>1)Error("Invalid Custom PostFX Weight",effect.id,"customEffects");
                     if(!effect.parameters.is_object()){Error("Invalid Custom PostFX Overrides",effect.id,"customEffects");continue;}
                     for(auto it=effect.parameters.begin();it!=effect.parameters.end();++it){auto p=std::find_if(d->parameters.begin(),d->parameters.end(),[&](auto& p){return p.name==it.key();});if(p==d->parameters.end()||!p->Valid(it.value()))Error("Incompatible Custom PostFX Parameter",effect.id+" / "+it.key(),"customEffects");}
+                }
+            }
+            if(auto* canvas=world.GetComponent<UICanvasComponent>(e)){
+                component="UICanvas";auto loaded=UILoader::Load(canvas->document,{});
+                if(!loaded.success)Error("Missing or Invalid UI Document",loaded.errorMessage,"document");
+                else for(auto& widget:loaded.data.document->widgets)if(widget.type=="Image"){
+                    if(widget.texture.empty())Error("Missing UI Image Texture",widget.id,"document");else Asset(AssetKind::Texture,widget.texture,"document / "+widget.id+" / texture",true);
                 }
             }
             if(auto* script=world.GetComponent<LuaScriptComponent>(e)){

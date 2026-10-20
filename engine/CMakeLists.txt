@@ -48,6 +48,12 @@ add_library(Engine
   jobs/JobSystem.h
   resources/ResourceManager.cpp
   resources/PostFxResource.cpp
+  ui/UIDocument.cpp
+  ui/RuntimeUI.cpp
+  ui/UIFont.cpp
+  editor/EditorRuntimeUI.cpp
+  editor/WidgetDesignerTools.cpp
+  editor/EditorWidgetDesigner.cpp
   resources/loaders/MeshLoader.cpp
   resources/loaders/MaterialLoader.cpp
   resources/loaders/TextureLoader.cpp
@@ -133,9 +139,10 @@ if (WIN32 AND ENABLE_DX12)
     render/backends/dx12/Dx12Fog.cpp
     render/backends/dx12/Dx12Environment.cpp
     render/backends/dx12/Dx12PostFx.cpp
+    render/backends/dx12/Dx12RuntimeUI.cpp
     render/backends/dx12/Dx12SceneLights.cpp
   )
-  target_link_libraries(Engine PRIVATE d3d12 dxgi dxguid d3dcompiler)
+  target_link_libraries(Engine PRIVATE d3d12 dxgi dxguid gdi32 d3dcompiler)
   target_include_directories(Engine PRIVATE ${CMAKE_SOURCE_DIR}/external/dxc/include)
   target_link_libraries(Engine PRIVATE ${CMAKE_SOURCE_DIR}/external/dxc/lib/x64/dxcompiler.lib)
 endif()
@@ -152,4 +159,10 @@ endif()
 if(WIN32)
   target_link_libraries(Engine PRIVATE shell32 version)
   target_link_libraries(Engine PRIVATE comdlg32)
+endif()
+
+if(MSVC)
+  set_source_files_properties(ui/UIDocument.cpp editor/EditorRuntimeUI.cpp
+  editor/WidgetDesignerTools.cpp
+  editor/EditorWidgetDesigner.cpp PROPERTIES COMPILE_OPTIONS "/utf-8")
 endif()

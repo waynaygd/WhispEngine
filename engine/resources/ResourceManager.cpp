@@ -26,6 +26,7 @@ void ResourceManager::ClearAll()
     const std::size_t shaderCount = m_ShaderCache.size();
     const std::size_t materialCount = m_MaterialCache.size();
 
+    m_UICache.clear();m_DirtyUI.clear();
     m_PostFxCache.clear();m_PostFxKeys.clear();m_PostFxScanned=false;
     m_MeshCache.clear();
     m_TextureCache.clear();
@@ -100,6 +101,7 @@ void ResourceManager::PollHotReload()
         watch.fileSize = currentFileSize;
         switch (watch.kind)
         {
+        case ResourceKind::UI:(void)Reload<UIResource>(watch.key);break;
         case ResourceKind::PostFx:(void)Reload<PostFxResource>(watch.key);changedPostFx.push_back(watch.key);break;
         case ResourceKind::Mesh:
             (void)Reload<MeshResource>(watch.key);

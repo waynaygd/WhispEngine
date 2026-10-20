@@ -48,6 +48,8 @@ public:
 	void BindShader(RenderShaderHandle handle) override;
 	void BindTexture(std::uint32_t slot, RenderTextureHandle handle) override;
 	void DrawMesh(RenderMeshHandle handle) override;
+    std::array<unsigned,2> RenderAreaSize()const override{return m_ViewportTarget.rendering?std::array<unsigned,2>{m_ViewportTarget.width,m_ViewportTarget.height}:std::array<unsigned,2>{m_Width,m_Height};}
+    void DrawRuntimeUI(const ui::DrawList&)override;
     void SetCustomPostFx(const PostFxFrame& frame)override{m_CustomPostFx=frame;}
     std::string CustomPostFxStatus(const std::string& key)const override;
     void SetScreenEffects(const ScreenEffects& value)override{m_ScreenEffects=SanitizeScreenEffects(value);}
@@ -345,6 +347,10 @@ private:
     struct PostFxCompile {std::vector<unsigned char> vs,ps;std::string error;std::shared_ptr<const PostFxDefinition> definition;};
     struct PostFxGpu {std::shared_ptr<const PostFxDefinition> requested,active;std::future<PostFxCompile> pending;Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;std::string error;};
     std::map<std::string,PostFxGpu> m_PostFxGpu;
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_RuntimeUIRoot;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_RuntimeUIPso;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_RuntimeUIVertices[FrameCount];
+    UINT64 m_RuntimeUICapacity[FrameCount]{};
     PostFxFrame m_CustomPostFx;
     HdrTarget m_PostFxTargets[FrameCount][2];
     Microsoft::WRL::ComPtr<ID3D12Resource> m_PostFxConstants[FrameCount];

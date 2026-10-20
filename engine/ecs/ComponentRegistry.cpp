@@ -13,6 +13,7 @@
 #include "components/PlayerStartComponent.h"
 #include "components/FogComponent.h"
 #include "components/PostProcessVolumeComponent.h"
+#include "components/UICanvasComponent.h"
 #include "components/TransformComponent.h"
 #include "components/VelocityComponent.h"
 #include "components/PlayerComponent.h"
@@ -156,6 +157,11 @@ ComponentRegistry Build(){
     Complete(material);auto materialSave=material.serialize;auto materialLoad=material.deserialize;auto materialProperties=material.properties;
     material.serialize=[materialSave](const World& w,Entity e){auto j=materialSave(w,e);for(auto i=j.begin();i!=j.end();)if(i.key().starts_with("override."))i=j.erase(i);else ++i;j["overrides"]=MaterialOverridesToJson(w.GetComponent<MaterialComponent>(e)->overrides);return j;};
     material.deserialize=[materialLoad,materialProperties](World& w,Entity e,const Json& j){materialLoad(w,e,j);if(j.contains("overrides"))w.GetComponent<MaterialComponent>(e)->overrides=MaterialOverridesFromJson(j.at("overrides"));for(const auto& p:materialProperties)Validate(p,p.get(w,e));};r.Register(material);
+    auto canvas=Descriptor<UICanvasComponent>("UICanvas","UI Canvas");
+    Field<UICanvasComponent>(canvas,"enabled","Enabled",&UICanvasComponent::enabled,PropertyKind::Boolean);
+    Field<UICanvasComponent>(canvas,"document","UI Document",&UICanvasComponent::document,PropertyKind::Asset,0,1,AssetKind::UIDocument);
+    Field<UICanvasComponent>(canvas,"sortOrder","Sort Order Offset",&UICanvasComponent::sortOrder,PropertyKind::Integer,-1000000,1000000);
+    Complete(canvas);r.Register(canvas);
     auto post=Descriptor<PostProcessVolumeComponent>("PostProcessVolume","Post Process Volume");
     Field<PostProcessVolumeComponent>(post,"enabled","Enabled",&PostProcessVolumeComponent::enabled,PropertyKind::Boolean).section="Volume";
     Field<PostProcessVolumeComponent>(post,"global","Global / Unbound",&PostProcessVolumeComponent::global,PropertyKind::Boolean).section="Volume";
@@ -317,7 +323,7 @@ void ComponentRegistry::Restore(World& w,Entity e,const nlohmann::json& j)const{
 bool ComponentRegistry::ValidateAssetKey(const std::string& key,AssetKind kind,std::string* error){return Checked([&]{if(key.empty())return;
     const auto path=std::filesystem::u8path(key);if(key.size()>1024||path.is_absolute()||path.has_root_name()||key.find(':')!=std::string::npos||key.find('\\')!=std::string::npos)Fail("Use a portable relative resource key");for(auto& part:path)if(part=="..")Fail("Resource key cannot escape project root");
     std::string ext=path.extension().string();std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});
-    bool valid=kind==AssetKind::None||(kind==AssetKind::PostFx&&key.ends_with(".postfx.json"))||(kind==AssetKind::LuaScript&&ext==".lua")||(kind==AssetKind::Prefab&&key.ends_with(".prefab.json"))||(kind==AssetKind::Mesh&&(ext==".obj"||ext==".gltf"||ext==".glb"||ext==".fbx"))||(kind==AssetKind::Texture&&(ext==".png"||ext==".dds"||ext==".jpg"||ext==".jpeg"||ext==".bmp"||ext==".tga"))||(kind==AssetKind::Material&&(ext==".json"||ext==".material"))||(kind==AssetKind::Shader&&ext==".hlsl")||(kind==AssetKind::Environment&&ext==".hdr")||key.starts_with("defaults/");if(!valid)Fail("Resource type does not match property");
+    bool valid=kind==AssetKind::None||(kind==AssetKind::UIDocument&&key.ends_with(".ui.json"))||(kind==AssetKind::PostFx&&key.ends_with(".postfx.json"))||(kind==AssetKind::LuaScript&&ext==".lua")||(kind==AssetKind::Prefab&&key.ends_with(".prefab.json"))||(kind==AssetKind::Mesh&&(ext==".obj"||ext==".gltf"||ext==".glb"||ext==".fbx"))||(kind==AssetKind::Texture&&(ext==".png"||ext==".dds"||ext==".jpg"||ext==".jpeg"||ext==".bmp"||ext==".tga"))||(kind==AssetKind::Material&&(ext==".json"||ext==".material"))||(kind==AssetKind::Shader&&ext==".hlsl")||(kind==AssetKind::Environment&&ext==".hdr")||key.starts_with("defaults/");if(!valid)Fail("Resource type does not match property");
 },error);}
 }
 

@@ -3,6 +3,7 @@
 #include "../scripting/LuaInspection.h"
 
 #include "../ecs/Entity.h"
+#include "../ui/RuntimeUI.h"
 #include "../ecs/ComponentRegistry.h"
 #include "../scene/SceneSettings.h"
 #include "../render/RenderResourceHandles.h"
@@ -118,7 +119,7 @@ public:
     void ShowGameplayEvents(){m_ShowGameplayEvents=true;}
     bool SelectGameplayEventEntity(Application&,const scripting::EventEntity&);
     EditorWorkspace GetWorkspace()const{return m_Workspace;}
-    void SwitchWorkspace(EditorWorkspace value){if(int(value)>=0&&int(value)<4){m_RequestedWorkspace=value;m_WorkspacePending=true;m_WorkspaceFirstApply=false;}}
+    void SwitchWorkspace(EditorWorkspace value){if(int(value)>=0&&int(value)<int(WorkspaceKeys.size())){m_RequestedWorkspace=value;m_WorkspacePending=true;m_WorkspaceFirstApply=false;}}
     bool SaveCurrentWorkspace(Application&);
     bool ResetCurrentWorkspace(Application&);
     void ResetLayout(){m_ResetLayout=true;}
@@ -240,6 +241,22 @@ public:
     bool AddComponent(Application&,ecs::Entity,ecs::ComponentTypeId);
     bool RemoveComponent(Application&,ecs::Entity,ecs::ComponentTypeId);
     bool ResetComponent(Application&,ecs::Entity,ecs::ComponentTypeId);
+    bool IsUIPreviewVisible()const{return m_ShowRuntimeUI;}
+    void SetUIPreviewVisible(bool value){m_ShowRuntimeUI=value;}
+    ecs::Entity CreateUICanvas(Application&,const std::string& document="");
+    bool EditUIDocument(Application&,const std::string&,const ui::Document&,bool finish=true);
+    bool SaveUIDocument(Application&,const std::string&);
+    bool ReloadUIDocument(Application&,const std::string&);
+    bool UndoUIDocument(Application&,const std::string&,bool redo=false);
+    void DrawUICanvasInspector(Application&,ecs::Entity);
+    bool OpenUIDesigner(Application&,const std::string&);
+    const ui::Document& GetUIDraft(Application&,const std::string&);
+    bool CancelUIDocumentEdit(Application&,const std::string&);
+    bool WidgetCommand(Application&,const std::string& command,const std::string& argument="");
+    void DrawUIDesigner(Application&);
+    friend struct WidgetDesignerTestAccess;
+    void DrawUIDocumentProperties(Application&,const std::string&,bool hierarchy);
+    bool UIDesignerOwnsKeyboard()const;
     bool AddCustomPostFx(Application&,ecs::Entity,const std::string&);
     void DrawCustomPostFxInspector(Application&,ecs::Entity);
     bool AssignAsset(Application&,ecs::Entity,ecs::AssetKind,const std::string&);
@@ -493,6 +510,17 @@ private:
     int m_GizmoMode = 0;
     bool m_GameView=false,m_ProjectAssets=true,m_PlaneScaleCaptured=false;
     float m_AssetCardSize=180;
+    struct UIDocumentEdit {ui::Document draft;nlohmann::json disk;std::vector<nlohmann::json> undo,redo;std::optional<nlohmann::json> pending;std::string selected;bool initialized=false,dirty=false;};
+    std::map<std::string,UIDocumentEdit> m_UIDocuments;
+    UIDocumentEdit& UIDocumentSession(Application&,const std::string&);
+    bool m_ShowRuntimeUI=true;
+    bool m_ShowWidgetHierarchy=false,m_ShowCanvasDesigner=false,m_ShowWidgetInspector=false;
+    std::string m_DesignDocument,m_WidgetSearch,m_WidgetRename,m_WidgetRenameId;std::vector<std::string> m_UIDesignerKeys;
+    ui::Pair m_UIPreviewSize{1920,1080};float m_UIZoom=.35f,m_UIGridSize=16;
+    struct UIDesignerPoint {float x=0,y=0;};
+    UIDesignerPoint m_UIPan{},m_UICanvasOrigin{};bool m_UIFit=true,m_UIGrid=true,m_UISnap=false;
+    struct UIWidgetDrag {std::string key,id;ui::Widget initial;ui::Rect start,parent;UIDesignerPoint mouse;int handle=-1;float screenScale=1;};
+    std::optional<UIWidgetDrag> m_UIWidgetDrag;
     bool m_ShowHierarchy = true;
     bool m_ShowInspector = true;
     bool m_ShowStatistics = true;

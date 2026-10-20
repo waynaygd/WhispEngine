@@ -6,6 +6,7 @@
 #include "../resources/ResourceManager.h"
 #include "../ecs/components/PlayerStartComponent.h"
 #include "../ecs/components/FogComponent.h"
+#include "../ecs/components/UICanvasComponent.h"
 #include "../ecs/components/PostProcessVolumeComponent.h"
 #include "../ecs/components/PrefabInstanceComponent.h"
 #include <imgui.h>
@@ -21,6 +22,7 @@ bool Matches(const std::string& text,const std::string& filter){
     return std::search(text.begin(),text.end(),filter.begin(),filter.end(),[](unsigned char a,unsigned char b){return std::tolower(a)==std::tolower(b);})!=text.end();
 }
 const char* EntityKind(const ecs::World& w,ecs::Entity e){
+    if(w.HasComponent<ecs::UICanvasComponent>(e))return "[UI]";
     if(w.HasComponent<ecs::PostProcessVolumeComponent>(e))return "[PPV]";
     if(w.HasComponent<ecs::PrefabInstanceComponent>(e))return "[PF]";
     if(w.HasComponent<ecs::PlayerStartComponent>(e))return "[PlayerStart]";
@@ -100,6 +102,7 @@ void EditorLayer::DrawMainMenu(Application& app){
         ImGui::MenuItem("Editor Visuals",nullptr,&m_ShowVisualSettings);
         ImGui::MenuItem("Game View (shared viewport)","G",&m_GameView);
         ImGui::MenuItem("Scene Hierarchy",nullptr,&m_ShowHierarchy);ImGui::MenuItem("Inspector",nullptr,&m_ShowInspector);ImGui::MenuItem("Viewport",nullptr,&m_ShowViewport);ImGui::MenuItem("Asset Browser",nullptr,&m_ShowAssetBrowser);ImGui::MenuItem("Material Editor",nullptr,&m_ShowMaterialEditor);ImGui::MenuItem("Scene Settings / Lighting",nullptr,&m_ShowSceneSettings);ImGui::MenuItem("Console / Diagnostics",nullptr,&m_ShowConsole);ImGui::MenuItem("Gameplay Events",nullptr,&m_ShowGameplayEvents);ImGui::MenuItem("Scene Validation",nullptr,&m_ShowSceneValidation);ImGui::MenuItem("Lua Runtime Inspector",nullptr,&m_ShowLuaRuntimeInspector);ImGui::MenuItem("Statistics",nullptr,&m_ShowStatistics);ImGui::MenuItem("Physics Stress Test",nullptr,&m_ShowPhysicsStress);
+        ImGui::MenuItem("Canvas Designer",nullptr,&m_ShowCanvasDesigner);ImGui::MenuItem("Widget Hierarchy",nullptr,&m_ShowWidgetHierarchy);ImGui::MenuItem("Widget Inspector",nullptr,&m_ShowWidgetInspector);
         DrawWorkspaceMenu(app);
         ImGui::Separator();if(ImGui::MenuItem("Reset Layout"))ResetCurrentWorkspace(app);
         if(ImGui::MenuItem("Navigation and snapping"))preferencesRequested=true;ImGui::MenuItem("ImGui Demo",nullptr,&m_ShowDemoWindow);ImGui::EndMenu();

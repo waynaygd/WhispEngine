@@ -1,5 +1,6 @@
 #pragma once
 #include <nlohmann/json.hpp>
+#include "../../ui/RuntimeUI.h"
 #include "../../render/Environment.h"
 #include "../PostProcessEvaluation.h"
 #include "../../render/SceneLights.h"
@@ -62,6 +63,10 @@ public:
     void SetInterpolation(RenderInterpolation* interpolation) { m_Interpolation = interpolation; }
     void SetPhysicsDebugPose(bool enabled) { m_PhysicsDebugPose = enabled; }
     void SetShadowSettings(const ShadowSettings* settings) { m_ShadowSettings=settings; }
+    ui::DrawList BuildUIDesignerPreview(const ui::Document&,ui::Pair preview,IRenderAdapter* renderer);
+    void SetUIPreview(bool value){m_UIPreview=value;}
+    const ui::DrawList& GetUIDrawList()const{return m_UIDrawList;}
+    std::size_t UIInstanceCount()const{return m_RuntimeUI.Instances().size();}
     void SetPostFxOverrides(const PostFxRuntimeOverrides* value){m_PostFxOverrides=value;}
     const EvaluatedPostProcess& GetEvaluatedPostProcess()const{return m_EvaluatedPostProcess;}
     void SetAtmosphereSettings(const SceneBackground* settings){m_AtmosphereSettings=settings;}
@@ -89,6 +94,8 @@ private:
     std::unordered_set<Entity,EntityHash> m_EditorIsolated;
     std::vector<PlacementRenderItem> m_PlacementItems;
     const PostFxRuntimeOverrides* m_PostFxOverrides=nullptr;float m_PostFxTime=0;
+    ui::RuntimeUI m_RuntimeUI;ui::DrawList m_UIDrawList;
+    std::optional<ui::FontAtlas> m_UIFont;RenderTextureHandle m_UIFontTexture;bool m_UIPreview=true;
     bool m_TraceMaterials=false;
     std::uint64_t m_ResourceCacheEpoch=0;
     std::vector<nlohmann::json> m_MaterialDiagnostics;

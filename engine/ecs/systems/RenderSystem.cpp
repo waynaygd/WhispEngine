@@ -1,5 +1,6 @@
 #include "../FogGather.h"
 #include "RenderSystem.h"
+#include "../components/UICanvasComponent.h"
 #include "../LightGather.h"
 
 #include "../World.h"
@@ -208,6 +209,7 @@ namespace ecs {
         IRenderAdapter* renderer = m_ResourceOwnerRenderer != nullptr ? m_ResourceOwnerRenderer : m_Renderer;
         if (renderer != nullptr)
         {
+            if(m_UIFontTexture.IsValid())renderer->DestroyTexture(m_UIFontTexture);m_UIFontTexture={};m_RuntimeUI.Clear();m_UIDrawList={};
             for (auto& [key, resource] : m_ShaderResources)
             {
                 (void)key;
@@ -480,6 +482,7 @@ namespace ecs {
                 m_Statistics.submitMs=elapsed(start);
             }
             m_Renderer->EndMainPass();
+
         }
 
         const auto finishStatistics = [&] {
@@ -496,7 +499,17 @@ namespace ecs {
         m_Statistics.submitted.shadowCasters-=submittedBefore.shadowCasters;
         m_Statistics.submitted.instanceBufferGrowths-=submittedBefore.instanceBufferGrowths;
         };
-        if (!m_DebugCollidersEnabled) { finishStatistics(); return; }
+        auto renderUI=[&](){
+            m_UIDrawList={};bool hasUI=false;if(m_UIPreview)for(auto e:world.Entities())if(auto* c=world.GetComponent<UICanvasComponent>(e);c&&c->enabled&&!c->document.empty()){hasUI=true;break;}
+            if(hasUI&&m_ResourceManager){
+                if(!m_UIFont)m_UIFont=ui::RasterizeFont();
+                if(!m_UIFontTexture.IsValid())m_UIFontTexture=m_Renderer->CreateTexture2D(m_UIFont->texture);
+                auto area=m_Renderer->RenderAreaSize();
+                m_UIDrawList=m_RuntimeUI.Build(world,*m_ResourceManager,float(area[0]),float(area[1]),*m_UIFont,m_UIFontTexture,[&](const std::string& key){return key.empty()?RenderTextureHandle{}:GetOrCreateTexture(key,true);});
+                m_Renderer->DrawRuntimeUI(m_UIDrawList);
+            }else m_RuntimeUI.Clear();
+        };
+        if (!m_DebugCollidersEnabled) { renderUI();finishStatistics(); return; }
         {
             ZoneScopedN("DebugColliders");
 
@@ -539,7 +552,7 @@ namespace ecs {
                     m_Renderer->DrawTestCube();
                 });
         }
-        finishStatistics();
+        renderUI();finishStatistics();
     }
 
     bool RenderSystem::TryBuildRenderSnapshot(const MeshRendererComponent& meshRenderer,
@@ -1154,4 +1167,18 @@ namespace ecs {
             "RenderSystem: GPU finalized shader key=" +
             key);
     }
+}
+
+ui::DrawList ecs::RenderSystem::BuildUIDesignerPreview(const ui::Document& document,ui::Pair preview,IRenderAdapter* renderer){
+ struct RestoreAdapter {IRenderAdapter*& field;IRenderAdapter* previous;~RestoreAdapter(){field=previous;}} restore{m_Renderer,m_Renderer};
+ SetRenderAdapter(renderer);
+ if(!m_Renderer||!m_ResourceManager)return {};
+ if(!m_UIFont)m_UIFont=ui::RasterizeFont();
+ if(!m_UIFontTexture.IsValid())m_UIFontTexture=m_Renderer->CreateTexture2D(m_UIFont->texture);
+ PumpGpuFinalization(1);
+ return ui::LayoutDocument(document,preview[0],preview[1],*m_UIFont,m_UIFontTexture,[&](const std::string& key){
+  if(key.empty())return RenderTextureHandle{};
+  auto cached=m_TextureResources.find(key);if(cached!=m_TextureResources.end()&&cached->second!=m_ResourceManager->Get<TextureResource>(key)){auto& data=cached->second->GetData();if(data.gpuHandle.IsValid()){m_Renderer->DestroyTexture(data.gpuHandle);data.gpuHandle={};data.gpuHandleVersion=0;}m_TextureResources.erase(cached);m_FailedTextureGpuVersions.erase(key);}
+  return GetOrCreateTexture(key,true);
+ });
 }

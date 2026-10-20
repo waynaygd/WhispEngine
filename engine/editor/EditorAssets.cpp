@@ -25,6 +25,7 @@ bool EditorLayer::OpenMaterial(Application& app,const std::string& key){
     m_EditingMaterial=key;m_SelectedAsset=key;m_SelectedAssetKind="Material";if(auto* r=app.GetResourceManager())r->LoadAsync<MaterialResource>(std::filesystem::u8path(key));return true;
 }
 bool EditorLayer::AssignAsset(Application& app,ecs::Entity e,ecs::AssetKind kind,const std::string& key){
+    if(kind==ecs::AssetKind::UIDocument)return SetProperty(app,e,ecs::ComponentId("UICanvas"),"document",key);
     if(kind==ecs::AssetKind::PostFx)return AddCustomPostFx(app,e,key);
     if(!ecs::ComponentRegistry::ValidateAssetKey(key,kind,&m_EditorError))return false;
     FinishTransaction(app);
@@ -135,13 +136,13 @@ template<class T>const char* LoadState(ResourceManager* resources,const std::str
     auto asset=resources?resources->Get<T>(std::filesystem::u8path(key)):nullptr;if(!asset)return "Not requested";if(asset->IsLoading())return "Loading";if(asset->IsFailed())return "Failed";return "Ready";
 }
 const char* AssetLoadState(ResourceManager* resources,ecs::AssetKind kind,const std::string& key){
-    switch(kind){case ecs::AssetKind::PostFx:return LoadState<PostFxResource>(resources,key);case ecs::AssetKind::Mesh:return LoadState<MeshResource>(resources,key);case ecs::AssetKind::Texture:return LoadState<TextureResource>(resources,key);case ecs::AssetKind::Material:return LoadState<MaterialResource>(resources,key);case ecs::AssetKind::Shader:return LoadState<ShaderResource>(resources,key);case ecs::AssetKind::Environment:return LoadState<EnvironmentResource>(resources,key);default:return "Indexed";}
+    switch(kind){case ecs::AssetKind::UIDocument:return LoadState<UIResource>(resources,key);case ecs::AssetKind::PostFx:return LoadState<PostFxResource>(resources,key);case ecs::AssetKind::Mesh:return LoadState<MeshResource>(resources,key);case ecs::AssetKind::Texture:return LoadState<TextureResource>(resources,key);case ecs::AssetKind::Material:return LoadState<MaterialResource>(resources,key);case ecs::AssetKind::Shader:return LoadState<ShaderResource>(resources,key);case ecs::AssetKind::Environment:return LoadState<EnvironmentResource>(resources,key);default:return "Indexed";}
 }
 template<class T>std::string LoadError(ResourceManager* resources,const std::string& key){
     auto asset=resources?resources->Get<T>(std::filesystem::u8path(key)):nullptr;return asset&&asset->IsFailed()?asset->GetErrorMessage():"";
 }
 std::string AssetLoadError(ResourceManager* resources,ecs::AssetKind kind,const std::string& key){
-    switch(kind){case ecs::AssetKind::PostFx:return LoadError<PostFxResource>(resources,key);case ecs::AssetKind::Mesh:return LoadError<MeshResource>(resources,key);case ecs::AssetKind::Texture:return LoadError<TextureResource>(resources,key);case ecs::AssetKind::Material:return LoadError<MaterialResource>(resources,key);case ecs::AssetKind::Shader:return LoadError<ShaderResource>(resources,key);case ecs::AssetKind::Environment:return LoadError<EnvironmentResource>(resources,key);default:return {};}
+    switch(kind){case ecs::AssetKind::UIDocument:return LoadError<UIResource>(resources,key);case ecs::AssetKind::PostFx:return LoadError<PostFxResource>(resources,key);case ecs::AssetKind::Mesh:return LoadError<MeshResource>(resources,key);case ecs::AssetKind::Texture:return LoadError<TextureResource>(resources,key);case ecs::AssetKind::Material:return LoadError<MaterialResource>(resources,key);case ecs::AssetKind::Shader:return LoadError<ShaderResource>(resources,key);case ecs::AssetKind::Environment:return LoadError<EnvironmentResource>(resources,key);default:return {};}
 }
 }
 std::string EditorLayer::CreateLuaScriptAsset(Application& app,const std::string& directory){
@@ -186,6 +187,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
             };
             if(item("Lua Script","scripts"))CreateLuaScriptAsset(app,directory);
             if(item("Prefab","prefabs",app.GetWorld().IsAlive(m_Selection.active))){m_PrefabNewKey=(directory.empty()?"prefabs":directory)+"/new.prefab.json";m_PrefabCreatePopup=true;}
+            if(item("UI Document","ui")){auto key=directory+"/Canvas-"+ecs::NewSceneIdentity()+".ui.json";if(UILoader::Save(key,ui::EmptyDocument(),&m_EditorError)){m_AssetListsDirty=true;OpenUIDesigner(app,key);}}
             if(item("Material","materials"))action(1,directory+"/new.material.json");
             ImGui::EndMenu();
         }
@@ -279,7 +281,9 @@ void EditorLayer::DrawAssetBrowser(Application& app){
             if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::Prefab)m_PrefabDoubleClick=key;
             if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::Material)openMaterial(key);
             if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::LuaScript)OpenLuaScriptInVisualStudio(key,&m_EditorError);
+            if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::UIDocument)OpenUIDesigner(app,key);
             if(ImGui::BeginPopupContextItem("AssetActions")){
+                if(type.kind==ecs::AssetKind::UIDocument&&ImGui::MenuItem("Open in Widget Designer"))OpenUIDesigner(app,key);
                 if(thumbnail&&thumbnail->state=="Failed"&&ImGui::MenuItem("Retry thumbnail")){
                     if(thumbnail->texture.IsValid()&&app.GetRenderAdapter())app.GetRenderAdapter()->DestroyTexture(thumbnail->texture);
                     m_AssetThumbnails.erase(key);
