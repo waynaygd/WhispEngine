@@ -25,6 +25,9 @@ target_include_directories(ImGuizmo PUBLIC
 target_link_libraries(ImGuizmo PUBLIC DearImGui)
 
 add_library(Engine
+  ui/UILayout.cpp
+  ui/UIEffects.cpp
+  editor/EditorUI4.cpp
   scripting/LuaRuntime.cpp
   scripting/Prefab.cpp
   core/Application.cpp

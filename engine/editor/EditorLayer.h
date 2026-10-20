@@ -91,7 +91,8 @@ public:
     bool ResolveProjectEdits(Application&,int decision,std::string* error);
     void ResetProjectState(IRenderAdapter*);
     void ProjectOpened(Application&);
-    bool HasProjectEdits()const{return m_PrefabHistory.has_value()||ProjectSettingsDirty()||m_MaterialDirty||(m_EditHistory?(m_EditHistory->external||m_EditHistory->revision!=m_EditHistory->saved):IsSceneDirty());}
+    bool UIDraftsDirty()const{if(!m_DirtyUIStyles.empty())return true;for(auto& [key,s]:m_UIDocuments)if(s.dirty)return true;return false;}
+    bool HasProjectEdits()const{return UIDraftsDirty()||m_PrefabHistory.has_value()||ProjectSettingsDirty()||m_MaterialDirty||(m_EditHistory?(m_EditHistory->external||m_EditHistory->revision!=m_EditHistory->saved):IsSceneDirty());}
     void ShowProjectSettings(Application&);
     void RevertProjectSettings(Application&);
     bool SaveProjectSettingsDraft(Application&);
@@ -256,6 +257,10 @@ public:
     void DrawUIDesigner(Application&);
     friend struct WidgetDesignerTestAccess;
     void DrawUIDocumentProperties(Application&,const std::string&,bool hierarchy);
+    void DrawUI4Properties(Application&,const std::string&,ui::Document&,ui::Widget&,bool&);
+    bool EditUIStyle(Application&,const std::string&,const ui::StyleSheet&,bool finish=true);
+    bool SaveUIStyle(Application&,const std::string&);
+    bool UndoUIStyle(Application&,const std::string&,bool redo=false);
     bool UIDesignerOwnsKeyboard()const;
     bool AddCustomPostFx(Application&,ecs::Entity,const std::string&);
     void DrawCustomPostFxInspector(Application&,ecs::Entity);
@@ -510,8 +515,13 @@ private:
     int m_GizmoMode = 0;
     bool m_GameView=false,m_ProjectAssets=true,m_PlaneScaleCaptured=false;
     float m_AssetCardSize=180;
-    struct UIDocumentEdit {ui::Document draft;nlohmann::json disk;std::vector<nlohmann::json> undo,redo;std::optional<nlohmann::json> pending;std::string selected;bool initialized=false,dirty=false;};
+    struct UIDocumentEdit {std::string resourceKey;ui::Document draft;nlohmann::json disk;std::vector<nlohmann::json> undo,redo;std::optional<nlohmann::json> pending;std::string selected;bool initialized=false,dirty=false;};
     std::map<std::string,UIDocumentEdit> m_UIDocuments;
+    struct UIStyleEdit {ui::StyleSheet draft;nlohmann::json disk;std::vector<nlohmann::json> undo,redo;std::optional<nlohmann::json> pending;};
+    std::map<std::string,UIStyleEdit> m_UIStyles;std::set<std::string> m_DirtyUIStyles;
+    UIStyleEdit& UIStyleSession(Application&,const std::string&);
+    std::string m_UI4Selection,m_UIStyleKey,m_UIStyleId,m_UIClipId,m_UIClipNameDraft,m_UIClipNameSource;
+
     UIDocumentEdit& UIDocumentSession(Application&,const std::string&);
     bool m_ShowRuntimeUI=true;
     bool m_ShowWidgetHierarchy=false,m_ShowCanvasDesigner=false,m_ShowWidgetInspector=false;

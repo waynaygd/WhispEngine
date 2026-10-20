@@ -1497,7 +1497,7 @@ int Application::Run()
         {
             ZoneScopedN("GameUpdate");
 
-            if(m_EditorPlayMode)UpdateGameplayInput();
+            if(m_EditorPlayMode)UpdateGameplayInput(dt);
             if(m_EditorPlayMode)m_LuaRuntime.DispatchUIEvents();
             const auto luaStart=std::chrono::steady_clock::now();
             if(IsSimulationRunning())m_LuaRuntime.Update(dt);
@@ -1766,10 +1766,11 @@ void Application::SetUIInputMode(const std::string& value){
     m_InputManager.ResetMouseDelta();
 }
 bool Application::GameplayActionAllowed(const std::string& action)const{return GameplayInputAllowed()&&!(m_UIPointerConsumed&&m_InputManager.IsMouseAction(action));}
-void Application::UpdateGameplayInput()
+void Application::UpdateGameplayInput(float uiDelta)
 {
     m_InputManager.BeginFrame();m_UIPointerConsumed=false;
     if(m_RenderSystem&&m_ResourceManager)GetRuntimeUI().Sync(GetWorld(),*m_ResourceManager);
+    if(m_RenderSystem)GetRuntimeUI().Advance(uiDelta);
     auto* primary=dynamic_cast<GlfwWindow*>(GetWindow());auto* window=primary?primary->GetGlfwHandle():nullptr;
     if(!window)return;
     const bool focused=glfwGetWindowAttrib(window,GLFW_FOCUSED)==GLFW_TRUE;

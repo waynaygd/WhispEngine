@@ -207,7 +207,7 @@ private:
     ecs::Entity SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg);
     void UpdateEcs(float dt);
     void UpdateCameraController(float dt);
-    void UpdateGameplayInput();
+    void UpdateGameplayInput(float uiDelta);
     bool GameplayInputAllowed() const;
     bool GameplayActionAllowed(const std::string&)const;
     bool CaptureGameplayCursor(bool);

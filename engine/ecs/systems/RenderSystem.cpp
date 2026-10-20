@@ -1203,7 +1203,7 @@ ui::DrawList ecs::RenderSystem::BuildUIDesignerPreview(const ui::Document& docum
  if(!m_UIFont)m_UIFont=ui::RasterizeFont();
  if(!m_UIFontTexture.IsValid())m_UIFontTexture=m_Renderer->CreateTexture2D(m_UIFont->texture);
  PumpGpuFinalization(1);
- return ui::LayoutDocument(document,preview[0],preview[1],*m_UIFont,m_UIFontTexture,[&](const std::string& key){
+ return ui::LayoutDocument(m_RuntimeUI.Preview(document,*m_ResourceManager),preview[0],preview[1],*m_UIFont,m_UIFontTexture,[&](const std::string& key){
   if(key.empty())return RenderTextureHandle{};
   auto cached=m_TextureResources.find(key);if(cached!=m_TextureResources.end()&&cached->second!=m_ResourceManager->Get<TextureResource>(key)){auto& data=cached->second->GetData();if(data.gpuHandle.IsValid()){m_Renderer->DestroyTexture(data.gpuHandle);data.gpuHandle={};data.gpuHandleVersion=0;}m_TextureResources.erase(cached);m_FailedTextureGpuVersions.erase(key);}
   return GetOrCreateTexture(key,true);

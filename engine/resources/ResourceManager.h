@@ -250,16 +250,18 @@ public:
             return;
 
         const std::filesystem::path resolvedPath = ResolvePathFromKey<T>(key);
-        if (resolvedPath.empty() || !std::filesystem::exists(resolvedPath))
-            return;
+        if (resolvedPath.empty())return;
+        const bool exists=std::filesystem::exists(resolvedPath);
+        // UI documents and style sheets can be repaired/created after a scene opens.
+        if (!exists&&!std::is_same_v<T,UIResource>)return;
 
         HotReloadWatch watch;
         watch.key = key;
         watch.path = resolvedPath;
         watch.kind = ResourceKindFor<T>();
-        watch.lastWriteTime = std::filesystem::last_write_time(resolvedPath);
+        watch.lastWriteTime = exists?std::filesystem::last_write_time(resolvedPath):std::filesystem::file_time_type::min();
         watch.fileSize =
-            std::filesystem::is_regular_file(resolvedPath)
+            exists&&std::filesystem::is_regular_file(resolvedPath)
                 ? std::filesystem::file_size(resolvedPath)
                 : 0;
         m_HotReloadWatches[key + "#" + std::to_string(static_cast<int>(watch.kind))] = watch;
@@ -564,7 +566,7 @@ private:
         return static_cast<std::uint64_t>(resource.vertexSource.size() + resource.fragmentSource.size());
     }
 
-    std::uint64_t EstimateResourceBytes(const UIResource& r)const{return r.document?nlohmann::json(*r.document).dump().size():0;}
+    std::uint64_t EstimateResourceBytes(const UIResource& r)const{return r.document?nlohmann::json(*r.document).dump().size():r.styles?nlohmann::json(*r.styles).dump().size():0;}
     std::uint64_t EstimateResourceBytes(const PostFxResource& r)const{return r.definition?r.definition->source.size()+sizeof(PostFxDefinition):0;}
     std::uint64_t EstimateResourceBytes(const MaterialResource& resource) const
     {

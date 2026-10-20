@@ -125,6 +125,9 @@ struct LuaRuntime::Impl {
         lua.open_libraries(sol::lib::base,sol::lib::math,sol::lib::string,sol::lib::table,sol::lib::utf8);
         lua.new_usertype<ecs::Entity>("Entity",sol::no_constructor);
         auto canvas=lua.new_usertype<ui::CanvasHandle>("CanvasHandle",sol::no_constructor);
+        canvas["play_animation"]=[this](const ui::CanvasHandle& h,const std::string& id,sol::optional<sol::table> options){bool restart=true;float speed=1;if(options){restart=options->get_or("restart",true);speed=options->get_or("speed",1.f);}UI().Play(h,id,restart,speed);};
+        canvas["stop_animation"]=[this](const ui::CanvasHandle& h,const std::string& id){UI().Stop(h,id);};
+        canvas["is_animation_playing"]=[this](const ui::CanvasHandle& h,const std::string& id){return UI().Playing(h,id);};
         canvas["valid"]=[this](const ui::CanvasHandle& h){return world&&services.runtimeUI&&services.runtimeUI->Valid(h);};
         canvas["set_text"]=[this](const ui::CanvasHandle& h,const std::string& id,const std::string& v){UI().Set(h,id,"text",v);};
         canvas["set_visible"]=[this](const ui::CanvasHandle& h,const std::string& id,bool v){UI().Set(h,id,"visible",v);};
@@ -210,7 +213,7 @@ struct LuaRuntime::Impl {
         if(event.uiEvent){row.canvas=event.uiEvent->canvas.document;row.widget=event.uiEvent->widget;}
         row.source=Snapshot(event.source);row.target=Snapshot(event.target);row.other=Snapshot(event.other);
         row.payload="amount = "+std::to_string(event.amount)+extra;
-        if(event.uiEvent)row.payload+="; canvas = "+event.uiEvent->canvas.document+"; widget = "+event.uiEvent->widget;
+        if(event.uiEvent)row.payload+="; canvas = "+event.uiEvent->canvas.document+"; widget = "+event.uiEvent->widget+"; animation = "+event.uiEvent->animation;
         return history.Add(std::move(row));
     }
     void Enqueue(Event event){if(history.Active())event.trace=Trace(event);events.push_back(std::move(event));}
@@ -440,7 +443,7 @@ void LuaRuntime::DispatchUIEvents(){
     for(auto& event:pending){if(!event.uiEvent){retained.push_back(std::move(event));continue;}
         if(!impl->services.runtimeUI->Valid(event.uiEvent->canvas)){impl->history.Update(event.trace,EventStatus::Skipped,impl->gameTime,{},"Stale UI Canvas");continue;}
         auto data=impl->lua.create_table();data["type"]=event.type;data["widget"]=event.uiEvent->widget;data["canvas"]=event.uiEvent->canvas;
-        data["canvas_key"]=event.uiEvent->canvas.document;data["source"]=event.source;data["owner"]=event.target;data["session"]=impl->history.Session();
+        data["animation"]=event.uiEvent->animation;data["canvas_key"]=event.uiEvent->canvas.document;data["source"]=event.source;data["owner"]=event.target;data["session"]=impl->history.Session();
         impl->Deliver(event,data);
     }
     impl->events.insert(impl->events.begin(),std::make_move_iterator(retained.begin()),std::make_move_iterator(retained.end()));

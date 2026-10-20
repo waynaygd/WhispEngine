@@ -223,10 +223,13 @@ struct Validator {
             }
             if(auto* canvas=world.GetComponent<UICanvasComponent>(e)){
                 component="UICanvas";auto loaded=UILoader::Load(canvas->document,{});
-                if(!loaded.success)Error("Missing or Invalid UI Document",loaded.errorMessage,"document");
-                else for(auto& widget:loaded.data.document->widgets)if(widget.type=="Image"){
+                if(!loaded.success||!loaded.data.document)Error("Missing or Invalid UI Document",loaded.errorMessage,"document");
+                else for(auto& widget:loaded.data.document->widgets){
+                 if(!widget.styleAsset.empty()){auto style=UILoader::Load(widget.styleAsset,{});if(!style.success||!style.data.styles)Error("Missing/Invalid UI Style",widget.styleAsset,"document");else{auto at=style.data.styles->styles.find(widget.styleId);if(at==style.data.styles->styles.end())Error("Missing UI Style ID",widget.styleId,"document");else if(at->second.type!=widget.type)Error("Incompatible UI Style",widget.id,"document");}}
+                 if(widget.type=="Image"){
                     if(widget.texture.empty())Error("Missing UI Image Texture",widget.id,"document");else Asset(AssetKind::Texture,widget.texture,"document / "+widget.id+" / texture",true);
                 }
+            }
             }
             if(auto* script=world.GetComponent<LuaScriptComponent>(e)){
                 component="LuaScript";try{Script(*script);}catch(const std::exception& error){Error("Invalid Lua Fields",error.what());}

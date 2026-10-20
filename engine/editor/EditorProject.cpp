@@ -21,6 +21,13 @@ bool EditorLayer::ResolveProjectEdits(Application& app,int decision,std::string*
     }
     if(decision==int(Application::ProjectDecision::Cancel))return false;
     if(decision!=int(Application::ProjectDecision::Save))return true;
+    if(UIDraftsDirty()){
+        if(app.IsEditorPlayMode()){if(error)*error="Stop Play before saving UI Documents and Styles";return false;}
+        std::vector<std::string> documents,styles(m_DirtyUIStyles.begin(),m_DirtyUIStyles.end());
+        for(auto& [origin,s]:m_UIDocuments)if(s.dirty)documents.push_back(s.resourceKey);
+        for(auto& key:documents)if(!SaveUIDocument(app,key)){if(error)*error=m_EditorError;return false;}
+        for(auto& key:styles)if(!SaveUIStyle(app,key)){if(error)*error=m_EditorError;return false;}
+    }
     const bool sceneDirty=m_EditHistory?(m_EditHistory->external||m_EditHistory->revision!=m_EditHistory->saved):IsSceneDirty();
     if(sceneDirty&&!app.SaveAuthoringSceneForTransition(error))return false;
     if(sceneDirty&&m_EditHistory){m_EditHistory->saved=m_EditHistory->revision;m_EditHistory->external=false;}
@@ -35,6 +42,7 @@ bool EditorLayer::ResolveProjectEdits(Application& app,int decision,std::string*
     return true;
 }
 void EditorLayer::ResetProjectState(IRenderAdapter* renderer){
+    m_UIDocuments.clear();m_UIStyles.clear();m_DirtyUIStyles.clear();m_DesignDocument.clear();m_UIDesignerKeys.clear();m_UIWidgetDrag.reset();m_UI4Selection.clear();m_UIStyleKey.clear();m_UIStyleId.clear();m_UIClipId.clear();
     m_EventFilter={};m_SelectedGameplayEvent=0;
     m_ShowProjectSettings=m_FocusProjectSettings=false;m_ProjectSettingsBase.reset();m_ProjectSettingsDraft={};m_ProjectSettingsScenes={};m_ProjectSettingsError.clear();m_ProjectSettingsNotice.clear();
     CancelPlacement();m_PlacementCancelled=false;

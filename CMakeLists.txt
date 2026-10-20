@@ -286,6 +286,18 @@ if (WHISP_BUILD_PHYSICS_TESTS)
     if(TARGET Tracy::TracyClient)
       target_link_libraries(SpotLightRegression PRIVATE Tracy::TracyClient)
     endif()
+    add_executable(UI4Regression tests/UI4Regression.cpp)
+    target_link_libraries(UI4Regression PRIVATE Engine DearImGui ImGuizmo)
+    target_compile_definitions(UI4Regression PRIVATE ENABLE_DX12=1)
+    add_dependencies(UI4Regression LuaGameplayAssets MaterialShaderSources EditorPrimitiveFixtures IblFixtures)
+    if(TARGET Tracy::TracyClient)
+      target_link_libraries(UI4Regression PRIVATE Tracy::TracyClient)
+    endif()
+    if(MSVC)
+      target_compile_options(UI4Regression PRIVATE /utf-8)
+    endif()
+    add_test(NAME UI4Regression COMMAND UI4Regression)
+    set_tests_properties(UI4Regression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" RUN_SERIAL TRUE ENVIRONMENT "WHISP_DX12_DEBUG=1")
     add_executable(InteractiveUIRegression tests/InteractiveUIRegression.cpp)
     target_link_libraries(InteractiveUIRegression PRIVATE Engine DearImGui ImGuizmo)
     target_compile_definitions(InteractiveUIRegression PRIVATE ENABLE_DX12=1)
@@ -485,6 +497,7 @@ add_custom_target(HierarchyDemoAssets
 add_executable(WhispEngine WhispEngine.cpp)
 add_dependencies(WhispEngine HierarchyDemoAssets)
 add_custom_target(LuaGameplayAssets ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/interactive_room_ui4.json ${CMAKE_BINARY_DIR}/assets/scenes/interactive_room_ui4.json
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets/scenes
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/interactive_room_interactive_ui.json ${CMAKE_BINARY_DIR}/assets/scenes/interactive_room_interactive_ui.json
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/engine/assets/ui ${CMAKE_BINARY_DIR}/assets/ui

@@ -85,6 +85,7 @@ void ResourceManager::PollHotReload()
     {
         (void)watchKey;
         if (watch.path.empty() || !std::filesystem::exists(watch.path)){
+            if(watch.kind==ResourceKind::UI&&watch.fileSize>0){watch.fileSize=0;(void)Reload<UIResource>(watch.key);}
             if(watch.kind==ResourceKind::PostFx&&watch.fileSize>0){watch.fileSize=0;(void)Reload<PostFxResource>(watch.key);}
             continue;
         }

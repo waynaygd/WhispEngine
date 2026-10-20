@@ -13,10 +13,11 @@ namespace {
 void Walk(const Document& document,float width,float height,const std::function<void(const Widget&,Rect,Rect,float)>& draw){
  if(!document.enabled||document.widgets.empty()||width<1||height<1)return;
  const float scale=std::min(width/document.referenceResolution[0],height/document.referenceResolution[1]);
+ auto rectangles=ComputeLayout(document,{0,0,width/scale,height/scale});if(rectangles.empty())return;
  std::map<std::string,const Widget*> widgets;std::map<std::string,std::vector<const Widget*>> children;
  for(auto& w:document.widgets){widgets[w.id]=&w;children[w.parent].push_back(&w);}for(auto& [id,list]:children)std::sort(list.begin(),list.end(),[](auto a,auto b){return std::tie(a->zOrder,a->id)<std::tie(b->zOrder,b->id);});
  auto visit=[&](auto&& self,const Widget& w,Rect parent,Rect clip,float opacity)->void{
-  if(!w.visible)return;Rect logical=LayoutRect(w,parent);Rect r{logical.x*scale,logical.y*scale,logical.w*scale,logical.h*scale};opacity*=w.opacity;
+  if(!w.visible)return;Rect logical=rectangles.at(w.id);Rect r{logical.x*scale,logical.y*scale,logical.w*scale,logical.h*scale};opacity*=w.visualOpacity.value_or(w.opacity);
   draw(w,r,clip,opacity);auto childClip=w.clipChildren?Intersect(clip,r):clip;
   for(auto* child:children[w.id])self(self,*child,logical,childClip,opacity);
  };
@@ -31,9 +32,10 @@ DrawList LayoutDocument(const Document& document,float width,float height,const 
  auto quad=[&](Rect r,const std::array<float,4>& uv,Color color,Rect clip,RenderTextureHandle texture){if(r.w<=0||r.h<=0||clip.w<=0||clip.h<=0||color[3]<=0||out.vertices.size()+6>131072)return;if(Intersect(r,clip).w<=0||Intersect(r,clip).h<=0)return;unsigned first=unsigned(out.vertices.size());out.vertices.insert(out.vertices.end(),{{r.x,r.y,uv[0],uv[1],color},{r.x+r.w,r.y,uv[2],uv[1],color},{r.x+r.w,r.y+r.h,uv[2],uv[3],color},{r.x,r.y,uv[0],uv[1],color},{r.x+r.w,r.y+r.h,uv[2],uv[3],color},{r.x,r.y+r.h,uv[0],uv[3],color}});out.commands.push_back({first,6,clip,texture});};
  Walk(document,width,height,[&](const Widget& w,Rect r,Rect clip,float opacity){
   auto color=w.type=="Button"?((!w.enabled||w.interaction==3)?w.disabledColor:w.interaction==2?w.pressedColor:w.interaction==1?w.hoverColor:w.color):w.color;color[3]*=opacity;
+  if(w.visualColor)color=*w.visualColor; color[3]*=w.visualColor?opacity:1;
   const unsigned firstCommand=unsigned(out.commands.size());
   if(w.type=="Panel"||w.type=="Button")quad(r,solid,color,clip,font);
-  else if(w.type=="ProgressBar"){quad(r,solid,color,clip,font);auto fill=w.fillColor;fill[3]*=opacity;Rect bar=r;bar.w*=w.value;quad(bar,solid,fill,clip,font);}
+  else if(w.type=="ProgressBar"){quad(r,solid,color,clip,font);auto fill=w.fillColor;fill[3]*=opacity;Rect bar=r;bar.w*=w.visualValue.value_or(w.value);quad(bar,solid,fill,clip,font);}
   else if(w.type=="Image"){auto texture=resolve(w.texture);if(texture.IsValid())quad(r,w.uv,color,clip,texture);else {auto fallback=Color{1,0,1,opacity};quad(r,solid,fallback,clip,font);out.errors.push_back("Missing or loading Image texture: "+w.texture);}}
   else if(w.type=="Text"){
    auto codepoints=DecodeUTF8(w.text);float unit=w.fontSize/atlas.height*scale;float lineY=r.y;
@@ -50,7 +52,7 @@ void RuntimeUI::CancelPointer(){
  hovered={};pressed={};hoverWidget.clear();pressWidget.clear();
  for(auto& [e,i]:instances)for(auto& w:i.state.widgets)w.interaction=0;
 }
-void RuntimeUI::Clear(){CancelPointer();pointerDown=gestureOwned=false;events.clear();instances.clear();documents.clear();order.clear();world=nullptr;manager=nullptr;++session;}
+void RuntimeUI::Clear(){CancelPointer();pointerDown=gestureOwned=false;events.clear();previewStyles.Clear();previewInitialized=false;previewAnimation={};instances.clear();documents.clear();order.clear();world=nullptr;manager=nullptr;++session;}
 void RuntimeUI::Sync(const ecs::World& source,ResourceManager& resources){
  if(world!=&source||manager!=&resources){Clear();world=&source;manager=&resources;epoch=resources.GetCacheEpoch();}
  const auto current=resources.GetCacheEpoch();if(epoch!=current){documents.clear();epoch=current;}
@@ -69,8 +71,9 @@ void RuntimeUI::Sync(const ecs::World& source,ResourceManager& resources){
     auto mask=it->second;if(mask&1)to->text=old->text;if(mask&2)to->visible=old->visible;if(mask&4)to->opacity=old->opacity;
     if(mask&8)to->value=old->value;if(mask&16)to->texture=old->texture;if(mask&32)to->color=old->color;if(mask&64)to->enabled=old->enabled;++it;
    }else i.overrides.clear();
-   i.state=std::move(next);i.resource=c->document;i.version=asset->GetVersion();i.asset=asset;i.serial=nextSerial++;
+   i.animation={};i.styleDirty=true;i.state=std::move(next);i.resource=c->document;i.version=asset->GetVersion();i.asset=asset;i.serial=nextSerial++;
   }
+  if(i.styles.Changed(*asset->GetData().document,resources,i.styleDirty)||i.styleDirty){for(size_t n=0;n<i.state.widgets.size();++n){auto& w=i.state.widgets[n];i.styles.Resolve(w,asset->GetData().document->widgets[n],i.overrides[w.id]);}i.styleDirty=false;}
   if(c->enabled&&i.state.enabled)order.push_back(e);
  }
  std::erase_if(instances,[&](auto& p){return !live.contains(p.first);});
@@ -139,6 +142,6 @@ bool RuntimeUI::Pointer(float x,float y,float width,float height,bool down,bool 
 }
 DrawList RuntimeUI::Build(const ecs::World& source,ResourceManager& resources,float width,float height,const FontAtlas& atlas,RenderTextureHandle font,const TextureResolver& textures){
  Sync(source,resources);DrawList out;out.width=width;out.height=height;
- for(auto e:order){auto draw=LayoutDocument(instances.at(e).state,width,height,atlas,font,textures);unsigned offset=unsigned(out.vertices.size());if(offset+draw.vertices.size()>131072){out.errors.push_back("UI vertex budget exceeded");break;}out.vertices.insert(out.vertices.end(),draw.vertices.begin(),draw.vertices.end());for(auto command:draw.commands){command.first+=offset;out.commands.push_back(command);}out.errors.insert(out.errors.end(),draw.errors.begin(),draw.errors.end());}return out;
+ for(auto e:order){out.errors.insert(out.errors.end(),instances.at(e).styles.errors.begin(),instances.at(e).styles.errors.end());auto draw=LayoutDocument(instances.at(e).state,width,height,atlas,font,textures);unsigned offset=unsigned(out.vertices.size());if(offset+draw.vertices.size()>131072){out.errors.push_back("UI vertex budget exceeded");break;}out.vertices.insert(out.vertices.end(),draw.vertices.begin(),draw.vertices.end());for(auto command:draw.commands){command.first+=offset;out.commands.push_back(command);}out.errors.insert(out.errors.end(),draw.errors.begin(),draw.errors.end());}return out;
 }
 }

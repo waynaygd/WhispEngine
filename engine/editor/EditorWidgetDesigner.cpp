@@ -48,7 +48,7 @@ bool EditorLayer::WidgetCommand(Application& app,const std::string& command,cons
   else if(command=="Duplicate")selected=widgets::Duplicate(next,id);
   else if(command=="Rename"){widgets::Rename(next,id,argument);selected=argument;}
   else if(command=="Reparent")widgets::Reparent(next,id,argument,widgets::Canvas(next,m_UIPreviewSize));
-  else if(command=="Anchor"||command=="Pivot")widgets::Preset(next,id,command=="Anchor"?std::stoi(argument):-1,command=="Pivot"?std::stoi(argument):-1,widgets::Canvas(next,m_UIPreviewSize));
+  else if(command=="Anchor"||command=="Pivot"){if(ui::ManagedByLayout(next,widgets::Find(next,id)))throw std::runtime_error("Parent Layout controls this Widget; enable Ignore Parent Layout first");widgets::Preset(next,id,command=="Anchor"?std::stoi(argument):-1,command=="Pivot"?std::stoi(argument):-1,widgets::Canvas(next,m_UIPreviewSize));}
   else if(command=="Earlier"||command=="Later"){
    auto parent=widgets::Find(next,id).parent;std::vector<ui::Widget*> siblings;for(auto& w:next.widgets)if(w.parent==parent)siblings.push_back(&w);
    std::sort(siblings.begin(),siblings.end(),[](auto a,auto b){return std::tie(a->zOrder,a->id)<std::tie(b->zOrder,b->id);});auto it=std::find_if(siblings.begin(),siblings.end(),[&](auto* w){return w->id==id;});auto index=int(it-siblings.begin()),target=index+(command=="Earlier"?-1:1);if(target<0||target>=int(siblings.size()))return false;std::swap(siblings[index],siblings[target]);for(int i=0;i<int(siblings.size());++i)siblings[i]->zOrder=i;
@@ -92,7 +92,7 @@ void EditorLayer::DrawUIDesigner(Application& app){
     ImGui::InvisibleButton("UI Canvas",area,ImGuiButtonFlags_MouseButtonLeft|ImGuiButtonFlags_MouseButtonMiddle);auto& io=ImGui::GetIO();bool hovered=ImGui::IsItemHovered();
     if(hovered&&!m_UIWidgetDrag){if(io.MouseWheel!=0){float old=m_UIZoom;m_UIZoom=std::clamp(old*std::pow(1.15f,io.MouseWheel),.02f,4.f);float ratio=m_UIZoom/old;m_UIPan={io.MousePos.x-start.x-(io.MousePos.x-start.x-m_UIPan.x)*ratio,io.MousePos.y-start.y-(io.MousePos.y-start.y-m_UIPan.y)*ratio};}if(ImGui::IsMouseDragging(ImGuiMouseButton_Middle,0)){m_UIPan.x+=io.MouseDelta.x;m_UIPan.y+=io.MouseDelta.y;}}
     m_UICanvasOrigin={start.x+m_UIPan.x,start.y+m_UIPan.y};auto toScreen=[&](float x,float y){return ImVec2{m_UICanvasOrigin.x+x*m_UIZoom,m_UICanvasOrigin.y+y*m_UIZoom};};
-    auto draw=app.BuildUIDesignerPreview(s.draft,m_UIPreviewSize);auto* list=ImGui::GetWindowDrawList();list->PushClipRect(start,{start.x+area.x,start.y+area.y},true);
+    app.GetRuntimeUI().PreviewAdvance(io.DeltaTime);auto draw=app.BuildUIDesignerPreview(s.draft,m_UIPreviewSize);const auto& displayed=app.GetRuntimeUI().Preview(s.draft,*app.GetResourceManager());auto* list=ImGui::GetWindowDrawList();list->PushClipRect(start,{start.x+area.x,start.y+area.y},true);
     auto end=toScreen(m_UIPreviewSize[0],m_UIPreviewSize[1]);list->AddRectFilled({m_UICanvasOrigin.x,m_UICanvasOrigin.y},end,IM_COL32(35,37,41,255));
     // Present the exact runtime quads/UVs/clip rects with the editor's existing GPU backend.
     // No widgets, text layout, font rasterization or shaders are implemented here.
@@ -101,12 +101,12 @@ void EditorLayer::DrawUIDesigner(Application& app){
      list->AddImageQuad((ImTextureID)texture,toScreen(a.x,a.y),toScreen(b.x,b.y),toScreen(c.x,c.y),toScreen(d.x,d.y),{a.u,a.v},{b.u,b.v},{c.u,c.v},{d.u,d.v},Tint(a.color));list->PopClipRect();
     }
     const float runtimeScale=std::min(m_UIPreviewSize[0]/s.draft.referenceResolution[0],m_UIPreviewSize[1]/s.draft.referenceResolution[1]);const float logicalScale=runtimeScale*m_UIZoom;
-    auto logicalScreen=[&](float x,float y){return toScreen(x*runtimeScale,y*runtimeScale);};auto canvas=widgets::Canvas(s.draft,m_UIPreviewSize);
+    auto logicalScreen=[&](float x,float y){return toScreen(x*runtimeScale,y*runtimeScale);};auto canvas=widgets::Canvas(displayed,m_UIPreviewSize);
     if(m_UIGrid&&m_UIGridSize*logicalScale>=5){for(float x=0;x<=canvas.w;x+=m_UIGridSize)list->AddLine(logicalScreen(x,0),logicalScreen(x,canvas.h),IM_COL32(160,170,180,35));for(float y=0;y<=canvas.h;y+=m_UIGridSize)list->AddLine(logicalScreen(0,y),logicalScreen(canvas.w,y),IM_COL32(160,170,180,35));}
     list->AddRect({m_UICanvasOrigin.x,m_UICanvasOrigin.y},end,IM_COL32(160,170,180,255));list->AddRect({m_UICanvasOrigin.x,m_UICanvasOrigin.y},logicalScreen(s.draft.referenceResolution[0],s.draft.referenceResolution[1]),IM_COL32(90,140,210,130));
     auto selected=std::find_if(s.draft.widgets.begin(),s.draft.widgets.end(),[&](auto& w){return w.id==s.selected;});int hoveredHandle=-1;
     if(selected!=s.draft.widgets.end()){
-     auto r=widgets::Rectangle(s.draft,selected->id,canvas);auto p=widgets::ParentRectangle(s.draft,*selected,canvas);auto lo=logicalScreen(r.x,r.y),hi=logicalScreen(r.x+r.w,r.y+r.h);list->AddRect(lo,hi,IM_COL32(255,190,50,255),0.f,ImDrawFlags_None,2.f);
+     auto r=widgets::Rectangle(displayed,selected->id,canvas);auto p=widgets::ParentRectangle(displayed,*selected,canvas);auto lo=logicalScreen(r.x,r.y),hi=logicalScreen(r.x+r.w,r.y+r.h);list->AddRect(lo,hi,IM_COL32(255,190,50,255),0.f,ImDrawFlags_None,2.f);
      float hx[]{0,.5f,1,1,1,.5f,0,0},hy[]{0,0,0,.5f,1,1,1,.5f};
      for(int i=0;i<8;++i){auto point=logicalScreen(r.x+r.w*hx[i],r.y+r.h*hy[i]);list->AddRectFilled({point.x-4,point.y-4},{point.x+4,point.y+4},IM_COL32(255,190,50,255));if(Contains({point.x-6,point.y-6,12,12},io.MousePos))hoveredHandle=i;}
      auto pivot=logicalScreen(r.x+r.w*selected->pivot[0],r.y+r.h*selected->pivot[1]);list->AddCircle(pivot,5,IM_COL32(255,80,130,255),12,2);
@@ -115,7 +115,8 @@ void EditorLayer::DrawUIDesigner(Application& app){
     list->PopClipRect();
     if(hovered&&ImGui::IsMouseClicked(0)&&!app.IsEditorPlayMode()){
      if(hoveredHandle<0)s.selected=widgets::Pick(draw,(io.MousePos.x-m_UICanvasOrigin.x)/m_UIZoom,(io.MousePos.y-m_UICanvasOrigin.y)/m_UIZoom);
-     if(!s.selected.empty()){if(s.pending)EditUIDocument(app,m_DesignDocument,s.draft,true);auto w=widgets::Find(s.draft,s.selected);m_UIWidgetDrag=UIWidgetDrag{m_DesignDocument,s.selected,w,widgets::Rectangle(s.draft,s.selected,canvas),widgets::ParentRectangle(s.draft,w,canvas),{io.MousePos.x,io.MousePos.y},hoveredHandle,logicalScale};}
+     app.GetRuntimeUI().PreviewStop();app.GetRuntimeUI().Preview(s.draft,*app.GetResourceManager());
+     if(!s.selected.empty()&&!ui::ManagedByLayout(s.draft,widgets::Find(s.draft,s.selected))){if(s.pending)EditUIDocument(app,m_DesignDocument,s.draft,true);auto w=widgets::Find(s.draft,s.selected);m_UIWidgetDrag=UIWidgetDrag{m_DesignDocument,s.selected,w,widgets::Rectangle(displayed,s.selected,canvas),widgets::ParentRectangle(displayed,w,canvas),{io.MousePos.x,io.MousePos.y},hoveredHandle,logicalScale};}
     }
     if(m_UIWidgetDrag){
      if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)){CancelUIDocumentEdit(app,m_UIWidgetDrag->key);m_UIWidgetDrag.reset();m_EscapeConsumed=true;}
