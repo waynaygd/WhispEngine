@@ -116,7 +116,7 @@ inline ShadowFrame BuildCameraDirectionalShadowFrame(const LightingConstants& li
 }
 struct RenderGpuTimings {
     bool valid=false;
-    double shadowMs=0,mainMs=0,frameMs=0,outputMs=0;
+    double shadowMs=0,mainMs=0,frameMs=0,outputMs=0,customPostFxMs=0,runtimeUIMs=0;
 };
 
 // Include upstream opaque casters whose light-space XY bounds overlap the receiver map.

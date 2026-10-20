@@ -87,8 +87,14 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
     if(!m_ShowLightGizmos||size.x<=1||size.y<=1)return;
     auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),size.x/size.y,app.GetCameraNearPlane(),app.GetCameraFarPlane());
     auto& world=app.GetWorld();std::vector<Occluder> occluders;
+    // One resource lookup per distinct mesh in this draw, not per instance.
+    // Frame-local ownership observes unload, project switches and hot reload.
+    std::unordered_map<std::string,ResourceHandle<MeshResource>> frameMeshes;
     if(app.GetResourceManager())world.ForEach<ecs::TransformComponent,ecs::MeshRendererComponent>([&](ecs::Entity e,auto& t,auto& m){
-        if(!m.visible||!EditorEntityVisible(app,e))return;auto mesh=app.GetResourceManager()->Get<MeshResource>(m.meshPath);if(!mesh||!mesh->IsLoaded()||mesh->GetData().meshData.vertices.empty())return;
+        if(!m.visible||!EditorEntityVisible(app,e))return;
+        auto [it,inserted]=frameMeshes.try_emplace(m.meshPath);
+        if(inserted)it->second=app.GetResourceManager()->Get<MeshResource>(m.meshPath);
+        auto mesh=it->second;if(!mesh||!mesh->IsLoaded()||mesh->GetData().meshData.vertices.empty())return;
         auto pose=app.GetRenderInterpolation().ResolveWorld(world,e);auto bounds=Bounds(mesh,pose,true);
         if(bounds.inverse!=std::array<float,12>{})occluders.push_back(std::move(bounds));
     });

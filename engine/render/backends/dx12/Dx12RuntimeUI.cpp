@@ -10,6 +10,7 @@ using Microsoft::WRL::ComPtr;
 namespace {void Check(HRESULT h,const char* text){if(FAILED(h))throw std::runtime_error(text);}}
 void Dx12RenderAdapter::DrawRuntimeUI(const ui::DrawList& draw){
  if(draw.vertices.empty()||draw.width<1||draw.height<1)return;
+ ShadowTimestamp(8);
  if(!m_RuntimeUIPso){
   const char* source=R"(
 Texture2D<float4> Image:register(t0);SamplerState ImageSampler:register(s0);cbuffer Canvas:register(b0){float2 Size;float2 Padding;};
@@ -27,6 +28,6 @@ float4 PS(Pixel p):SV_Target{return Image.Sample(ImageSampler,p.uv)*p.color;}
  auto rtv=m_ViewportTarget.rendering?m_ViewportTarget.rtv:m_RtvHeap->GetCPUDescriptorHandleForHeapStart();if(!m_ViewportTarget.rendering)rtv.ptr+=SIZE_T(m_FrameIndex)*m_RtvSize;m_CmdList->OMSetRenderTargets(1,&rtv,FALSE,nullptr);
  D3D12_VIEWPORT viewport{0,0,draw.width,draw.height,0,1};m_CmdList->RSSetViewports(1,&viewport);ID3D12DescriptorHeap* heaps[]{m_SrvHeap.Get()};m_CmdList->SetDescriptorHeaps(1,heaps);m_CmdList->SetGraphicsRootSignature(m_RuntimeUIRoot.Get());m_CmdList->SetPipelineState(m_RuntimeUIPso.Get());float size[]{draw.width,draw.height,0,0};m_CmdList->SetGraphicsRoot32BitConstants(0,4,size,0);D3D12_VERTEX_BUFFER_VIEW view{buffer->GetGPUVirtualAddress(),UINT(bytes),sizeof(ui::Vertex)};m_CmdList->IASetVertexBuffers(0,1,&view);m_CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
  for(auto& command:draw.commands){auto texture=m_UploadedTextures.find(command.texture.value);if(texture==m_UploadedTextures.end()||command.first+command.count>draw.vertices.size())continue;D3D12_RECT clip{LONG(std::max(0.f,std::floor(command.clip.x))),LONG(std::max(0.f,std::floor(command.clip.y))),LONG(std::min(draw.width,std::ceil(command.clip.x+command.clip.w))),LONG(std::min(draw.height,std::ceil(command.clip.y+command.clip.h)))};if(clip.right<=clip.left||clip.bottom<=clip.top)continue;m_CmdList->RSSetScissorRects(1,&clip);m_CmdList->SetGraphicsRootDescriptorTable(1,texture->second.gpuSrvHandle);m_CmdList->DrawInstanced(command.count,1,command.first,0);}
- D3D12_RECT full{0,0,LONG(draw.width),LONG(draw.height)};m_CmdList->RSSetScissorRects(1,&full);
+ D3D12_RECT full{0,0,LONG(draw.width),LONG(draw.height)};m_CmdList->RSSetScissorRects(1,&full);ShadowTimestamp(9);
 }
 #endif

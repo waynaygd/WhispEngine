@@ -1455,6 +1455,7 @@ int Application::Run()
 
         {
             ZoneScopedN("ResourceUpdate");
+            const auto resourceStart=std::chrono::steady_clock::now();
 
             if (m_ResourceManager != nullptr)
             {
@@ -1490,13 +1491,16 @@ int Application::Run()
             }
 
             PollConfigHotReload();
+            if(m_FrameObserver)m_FrameCpuMs[0]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-resourceStart).count();
         }
 
         {
             ZoneScopedN("GameUpdate");
 
             if(m_EditorPlayMode)UpdateGameplayInput();
+            const auto luaStart=std::chrono::steady_clock::now();
             if(IsSimulationRunning())m_LuaRuntime.Update(dt);
+            if(m_FrameObserver)m_FrameCpuMs[1]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-luaStart).count();
             UpdateCameraController(dt);
 
             if (IsSimulationRunning() && m_UpdateMode == UpdateMode::Variable) {
@@ -1506,6 +1510,7 @@ int Application::Run()
         }
         {
             ZoneScopedN("PhysicsFixedFrame");
+            const auto physicsStart=std::chrono::steady_clock::now();
             m_ActiveCollisionPairs.clear();
             m_PhysicsFrame = {};
             const double physicsDelta = m_ResetPhysicsDelta ? 0.0 : m_Time.GetFrameDeltaTime();
@@ -1537,9 +1542,12 @@ int Application::Run()
             m_PhysicsFrame.accumulatorSeconds = m_FixedClock.Accumulator();
             m_PhysicsFrame.totalDroppedSeconds = m_FixedClock.DroppedSeconds();
             m_PhysicsFrame.simulationSeconds = m_FixedSimulationSeconds;
+            if(m_FrameObserver)m_FrameCpuMs[2]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-physicsStart).count();
         }
+        const auto ecsStart=std::chrono::steady_clock::now();
         ApplyStructuralCommands();
         UpdateEcs(dt);
+        if(m_FrameObserver){m_FrameCpuMs[3]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-ecsStart).count();m_FrameCpuMs[4]=0;}
         m_RenderInterpolation.SetFrame(GetWorld(),IsSimulationRunning(),m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
         if(m_EditorPlayMode&&m_LuaRuntime.HasCameraOwner()){
             if(m_GameplayCamera.following){
@@ -1652,7 +1660,9 @@ int Application::Run()
                         m_RenderInterpolation.SetFrame(GetWorld(), IsSimulationRunning(),
                             m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
                         editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);
+                        const auto renderStart=std::chrono::steady_clock::now();
                         m_World.UpdateFrameSystemsOn(GetWorld(),dt);
+                        if(m_FrameObserver)m_FrameCpuMs[4]+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-renderStart).count();
                     }
                     m_StateMachine.Render(*this, *wc.renderer);
                     wc.renderer->EndViewportRender();
@@ -1673,14 +1683,18 @@ int Application::Run()
                         m_RenderInterpolation.SetFrame(GetWorld(), IsSimulationRunning(),
                             m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
                         editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);
+                        const auto renderStart=std::chrono::steady_clock::now();
                         m_World.UpdateFrameSystemsOn(GetWorld(),dt);
+                        if(m_FrameObserver)m_FrameCpuMs[4]+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-renderStart).count();
                     }
 
                     m_StateMachine.Render(*this, *wc.renderer);
                 }
 
+                const auto imguiStart=std::chrono::steady_clock::now();
                 if (wc.editorUiAvailable)
                     wc.renderer->RenderEditorUiFrame();
+                if(m_FrameObserver)m_FrameCpuMs[5]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-imguiStart).count();
 
                 wc.renderer->EndFrame();
                 if(!m_FrameCaptureOutput.empty()&&m_FrameLimit&&currentFrame+1==m_FrameLimit)
@@ -1697,6 +1711,7 @@ int Application::Run()
             }
         }
 
+        if(m_FrameObserver){m_FrameCpuMs[6]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-frameStart).count();m_FrameObserver();}
         if (!m_DiagnosticOutput.empty() && m_PhysicsSystem) {
             const double frameMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frameStart).count();
             samples.push_back({diagnosticPhase, m_PhysicsSystem->IsParallel(), currentFrame, frameMs, m_PhysicsFrame.physics, m_PhysicsFrame});

@@ -82,7 +82,8 @@ public:
     struct Statistics {
         std::size_t visibleObjects=0;
         std::size_t materialCacheHits=0,materialCacheMisses=0,visibleSubmeshes=0;
-        double materialResolveMs=0;
+        double materialResolveMs=0,materialPathMs=0,materialTextureMs=0,materialShaderMs=0,runtimeUILayoutMs=0,runtimeUISubmitMs=0,gpuFinalizationMs=0;
+        std::size_t materialResolves=0,materialPathChecks=0;
         double gatherMs=0,prepareMs=0,batchMs=0,submitMs=0,shadowPrepareMs=0,shadowMs=0;
         RenderSubmissionStatistics submitted;
     };

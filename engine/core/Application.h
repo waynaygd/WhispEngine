@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <vector>
 #include <string>
@@ -181,6 +182,10 @@ private:
     bool m_ProjectBrowserActive=false;
     std::string m_LegacyStartupScene;
     friend struct ApplicationTestAccess;
+    // Optional frame observer for short integration diagnostics; called after Present.
+    std::function<void()> m_FrameObserver;
+    // resource update, Lua update, fixed simulation, ECS, world render, ImGui submit, wall.
+    std::array<double,7> m_FrameCpuMs{};
     bool CommitProject(std::shared_ptr<const ProjectContext>,ecs::World&,const SceneSettings&,ProjectDecision,std::string*);
     void ResetPhysicsClock() {
         m_FixedClock.Reset(); m_FixedSimulationSeconds = 0;

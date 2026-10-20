@@ -1188,7 +1188,10 @@ bool Dx12RenderAdapter::InitializeEditorUi(IWindow* window)
 
     // Keep the bundled editor face; fill its missing Cyrillic glyphs from the
     // Windows monospace font. No new redistributable font dependency.
-    io.Fonts->AddFontDefault();
+    // The Cyrillic merge below uses an explicit reference size. ImGui 1.92
+    // requires the destination to have one too (13px is its existing default).
+    ImFontConfig defaultFont;defaultFont.SizePixels=13.f;
+    io.Fonts->AddFontDefault(&defaultFont);
     wchar_t windowsDirectory[MAX_PATH]{};
     if(GetWindowsDirectoryW(windowsDirectory,MAX_PATH)){
         const auto font=std::filesystem::path(windowsDirectory)/"Fonts"/"consola.ttf";
@@ -1442,7 +1445,14 @@ bool Dx12RenderAdapter::CreateDevice(HWND)
 {
     if(GetEnvironmentVariableA("WHISP_DX12_DEBUG",nullptr,0)) {
         Microsoft::WRL::ComPtr<ID3D12Debug> debug;
-        if(SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))debug->EnableDebugLayer();
+        if(SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)))) {
+            debug->EnableDebugLayer();
+            if(GetEnvironmentVariableA("WHISP_DX12_GBV",nullptr,0)) {
+                Microsoft::WRL::ComPtr<ID3D12Debug1> validation;
+                if(SUCCEEDED(debug.As(&validation)))validation->SetEnableGPUBasedValidation(TRUE);
+                else Logger::Get().Warn("DX12 GPU based validation unavailable");
+            }
+        }
         else Logger::Get().Warn("DX12 debug layer unavailable");
     }
     Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
@@ -1838,7 +1848,7 @@ void Dx12RenderAdapter::BeginFrame()
     m_FrameRecording=true;
     CollectGpuTiming(m_FrameIndex);
     CollectSceneLights(m_FrameIndex);m_LightPassCursor=0;m_ActiveLightPass=UINT_MAX;
-    m_TimePassCount=0;m_TimeCurrentPass=UINT_MAX;m_TimeOverflow=false;
+    m_TimePassCount=0;m_TimeCurrentPass=UINT_MAX;m_TimeOverflow=false;m_TimeExtras.fill(0);
     if(!m_TimeHeap)InitializeGpuTiming();
     if(m_TimeHeap)m_CmdList->EndQuery(m_TimeHeap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_FrameIndex*TimingQueries);
     m_CachedInstances.clear();m_PreparedScene=false;m_ShadowConstants={};
@@ -1983,7 +1993,11 @@ void Dx12RenderAdapter::EndFrame()
 {
     if(m_TimeHeap) {
         m_CmdList->EndQuery(m_TimeHeap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_FrameIndex*TimingQueries+1);
-        m_TimePending[m_FrameIndex]=2+6*m_TimePassCount;
+        // Resolve only initialized queries, including optional UI/custom stages.
+        m_TimeSlotExtras[m_FrameIndex]=m_TimeExtras;
+        for(UINT pass=0;pass<m_TimePassCount;++pass)for(UINT phase=6;phase<TimingStages;++phase)
+            if(!(m_TimeExtras[pass]&(1u<<(phase-6))))m_CmdList->EndQuery(m_TimeHeap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_FrameIndex*TimingQueries+2+TimingStages*pass+phase);
+        m_TimePending[m_FrameIndex]=2+TimingStages*m_TimePassCount;
         m_TimeComplete[m_FrameIndex]=!m_TimeOverflow;
         m_CmdList->ResolveQueryData(m_TimeHeap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_FrameIndex*TimingQueries,
             m_TimePending[m_FrameIndex],m_TimeReadback[m_FrameIndex].Get(),0);

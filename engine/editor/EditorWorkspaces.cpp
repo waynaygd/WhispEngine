@@ -120,7 +120,9 @@ void EditorLayer::BuildWorkspaceDocking(unsigned root,const ImVec2& size){
     }else if(auto* node=ImGui::DockBuilderGetNode(bottom))node->SelectedTabId=ImHashStr("Asset Browser");
 }
 void EditorLayer::ConfigureDocking(){
-    auto* viewport=ImGui::GetMainViewport();ImGuiViewport dock=*viewport;const float toolbar=ImGui::GetFrameHeightWithSpacing()+8;
+    auto* viewport=ImGui::GetMainViewport();ImGuiViewport dock=*viewport;
+    // This is a geometry-only copy for the dockspace, not a backend owner.
+    dock.PlatformUserData=nullptr;dock.RendererUserData=nullptr;const float toolbar=ImGui::GetFrameHeightWithSpacing()+8;
     dock.WorkPos.y+=toolbar;dock.WorkSize.y=std::max(1.f,dock.WorkSize.y-toolbar);const auto root=WorkspaceRoot();
     if(m_FixedDiagnosticLayout){ImGui::DockSpaceOverViewport(root,&dock,ImGuiDockNodeFlags_PassthruCentralNode);return;}
     if(m_WorkspacePending){

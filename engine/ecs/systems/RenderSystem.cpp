@@ -332,8 +332,9 @@ namespace ecs {
             refresh(m_ShaderResources,[&](auto handle){m_Renderer->DestroyShader(handle);},m_FailedShaderGpuVersions);
             for(auto it=m_MaterialResources.begin();it!=m_MaterialResources.end();)if(m_ResourceManager->Get<MaterialResource>(it->first)!=it->second)it=m_MaterialResources.erase(it);else ++it;
         }
-        PumpGpuFinalization(
-            maxGpuFinalizationsPerFrame);
+        const auto uploadStart=std::chrono::steady_clock::now();
+        PumpGpuFinalization(maxGpuFinalizationsPerFrame);
+        m_Statistics.gpuFinalizationMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-uploadStart).count();
 
         const auto submittedBefore = m_Renderer->GetSubmissionStatistics();
         const auto elapsed = [](auto start) { return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count(); };
@@ -355,7 +356,7 @@ namespace ecs {
                         if (!meshRenderer.visible||(!m_EditorIsolated.empty()&&!m_EditorIsolated.contains(entity)))
                             return;
 
-                        const auto key=AssetPaths::NormalizeAssetKey(meshRenderer.meshPath);
+                        const auto key=m_MeshResources.contains(meshRenderer.meshPath)?meshRenderer.meshPath:AssetPaths::NormalizeAssetKey(meshRenderer.meshPath);
                         const auto meshHandle=GetOrUploadMesh(key);if(!meshHandle.IsValid())return;
                         const auto resource=m_MeshResources.find(key);
                         if(resource==m_MeshResources.end())return;
@@ -505,8 +506,12 @@ namespace ecs {
                 if(!m_UIFont)m_UIFont=ui::RasterizeFont();
                 if(!m_UIFontTexture.IsValid())m_UIFontTexture=m_Renderer->CreateTexture2D(m_UIFont->texture);
                 auto area=m_Renderer->RenderAreaSize();
+                const auto layoutStart=std::chrono::steady_clock::now();
                 m_UIDrawList=m_RuntimeUI.Build(world,*m_ResourceManager,float(area[0]),float(area[1]),*m_UIFont,m_UIFontTexture,[&](const std::string& key){return key.empty()?RenderTextureHandle{}:GetOrCreateTexture(key,true);});
+                m_Statistics.runtimeUILayoutMs=elapsed(layoutStart);
+                const auto uiSubmitStart=std::chrono::steady_clock::now();
                 m_Renderer->DrawRuntimeUI(m_UIDrawList);
+                m_Statistics.runtimeUISubmitMs=elapsed(uiSubmitStart);
             }else m_RuntimeUI.Clear();
         };
         if (!m_DebugCollidersEnabled) { renderUI();finishStatistics(); return; }
@@ -559,6 +564,7 @@ namespace ecs {
         const MaterialComponent* component,RenderSnapshot& snapshot,const MeshData& mesh,RenderMeshHandle meshHandle,std::size_t submeshIndex)
     {
         ZoneScopedN("MaterialResolve");
+        ++m_Statistics.materialResolves;
         const auto start=std::chrono::steady_clock::now();
         const auto finish=[&](bool result) {m_Statistics.materialResolveMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();return result;};
         if(!m_Renderer||!m_ResourceManager||meshRenderer.meshPath.empty())return finish(false);
@@ -576,7 +582,10 @@ namespace ecs {
             if(slot<component->slotMaterials.size()&&!component->slotMaterials[slot].empty())asset=component->slotMaterials[slot];
         }
         if(!asset.empty()) {
-            const auto key=AssetPaths::NormalizeAssetKey(asset);
+            const auto pathStart=std::chrono::steady_clock::now();
+            std::string key=asset;
+            if(!m_MaterialResources.contains(asset)){++m_Statistics.materialPathChecks;key=AssetPaths::NormalizeAssetKey(asset);}
+            m_Statistics.materialPathMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-pathStart).count();
             if(m_MaterialResources.count(key))++m_Statistics.materialCacheHits;else ++m_Statistics.materialCacheMisses;
             const auto resource=key.empty()?nullptr:GetOrLoadMaterial(key);
             if(!resource||resource->IsLoading())return finish(false);
@@ -596,16 +605,31 @@ namespace ecs {
             return finish(false);
         }
         const bool hasUV0=submeshIndex>=mesh.submeshes.size()||mesh.submeshes[submeshIndex].hasUV0;
-        snapshot.texture=GetOrCreateTexture(material.texturePath.empty()||material.textureTexCoords[0]!=0||!hasUV0?"defaults/texture":AssetPaths::NormalizeAssetKey(material.texturePath));
+        auto textureStart=std::chrono::steady_clock::now();
+        std::string textureKey="defaults/texture";
+        if(!material.texturePath.empty()&&material.textureTexCoords[0]==0&&hasUV0) {
+            auto pathStart=std::chrono::steady_clock::now();
+            // Imported texture paths are already canonical resource keys. Reuse
+            // the renderer-owned resource, just as the optional maps do below.
+            // GetOrCreateTexture still checks usability and GPU resource version;
+            // cache-epoch refresh and ReleaseGpuResources retire stale owners.
+            if(m_TextureResources.contains(material.texturePath))textureKey=material.texturePath;
+            else {++m_Statistics.materialPathChecks;textureKey=AssetPaths::NormalizeAssetKey(material.texturePath);}
+            m_Statistics.materialPathMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-pathStart).count();
+        }
+        snapshot.texture=GetOrCreateTexture(textureKey);
         snapshot.textureParameters={material.normalScale,material.occlusionStrength,0,1};
         const std::string* paths[3]={&material.normalTexturePath,&material.metallicRoughnessTexturePath,&material.occlusionTexturePath};
         for(int i=0;i<3;++i)if(hasUV0 && !paths[i]->empty() && material.textureTexCoords[i+1]==0) {
             snapshot.maps[i]=GetOrCreateTexture(m_TextureResources.count(*paths[i])?*paths[i]:AssetPaths::NormalizeAssetKey(*paths[i]),true);
             if(snapshot.maps[i].IsValid()&&(m_TextureMapMask&(1<<i)))snapshot.textureParameters[2]+=float(1<<i);
         }
+        m_Statistics.materialTextureMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-textureStart).count();
+        const auto shaderStart=std::chrono::steady_clock::now();
         const auto shaderKey=AssetPaths::NormalizeShaderKey(material.shaderPath);
         snapshot.shader=GetOrCreateShader(shaderKey);
         const auto shaderSource=m_ResourceManager->Get<ShaderResource>(shaderKey);
+        m_Statistics.materialShaderMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-shaderStart).count();
         const bool colorPipeline=shaderSource && shaderSource->GetData().fragmentSource.find("PBR_COLOR_PIPELINE_V1")!=std::string::npos;
         for(int i=0;i<4;++i) {
             snapshot.tint[i]=(colorPipeline?1.f:material.baseColor[i])*(component?component->tint[i]:1.f);

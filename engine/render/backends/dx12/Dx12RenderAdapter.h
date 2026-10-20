@@ -209,7 +209,8 @@ private:
     std::array<float,16> m_Model{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
     struct CachedInstances { const RenderInstanceData* data; std::size_t count; D3D12_VERTEX_BUFFER_VIEW view; };
     std::vector<CachedInstances> m_CachedInstances;
-    static constexpr UINT TimingQueries=98;
+    static constexpr UINT TimingStages=10,TimingPasses=16,TimingQueries=2+TimingStages*TimingPasses;
+    std::array<unsigned char,TimingPasses> m_TimeExtras{},m_TimeSlotExtras[FrameCount]{};
     Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_TimeHeap;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_TimeReadback[FrameCount];
     UINT64 m_TimeFrequency=0;

@@ -110,6 +110,7 @@ void Dx12RenderAdapter::EnsurePostFxTarget(HdrTarget& target,UINT width,UINT hei
 void Dx12RenderAdapter::DrawCustomPostFx(const std::vector<const PostFxPass*>& passes,D3D12_CPU_DESCRIPTOR_HANDLE finalRtv){
  auto& constants=m_PostFxConstants[m_FrameIndex];if(!constants){auto heap=CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);auto desc=CD3DX12_RESOURCE_DESC::Buffer(512*32);Check(m_Device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&desc,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&constants)),"PostFX constants failed");}
  float* mapped=nullptr;D3D12_RANGE empty{0,0};Check(constants->Map(0,&empty,reinterpret_cast<void**>(&mapped)),"PostFX constants mapping failed");
+ ShadowTimestamp(6);
  for(size_t index=0;index<passes.size();++index){
     auto& pass=*passes[index];auto& program=m_PostFxGpu.at(pass.definition->key);auto& source=m_PostFxTargets[m_FrameIndex][index%2];auto destination=finalRtv;
     HdrTarget* target=nullptr;if(index+1<passes.size()){target=&m_PostFxTargets[m_FrameIndex][(index+1)%2];EnsurePostFxTarget(*target,source.width,source.height);auto barrier=CD3DX12_RESOURCE_BARRIER::Transition(target->color.Get(),D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);m_CmdList->ResourceBarrier(1,&barrier);destination=target->rtv;}
@@ -122,7 +123,7 @@ void Dx12RenderAdapter::DrawCustomPostFx(const std::vector<const PostFxPass*>& p
     m_CmdList->OMSetRenderTargets(1,&destination,FALSE,nullptr);m_CmdList->SetGraphicsRootSignature(m_PostFxRoot.Get());m_CmdList->SetPipelineState(program.pso.Get());m_CmdList->SetGraphicsRootDescriptorTable(0,gpu);m_CmdList->SetGraphicsRootConstantBufferView(1,constants->GetGPUVirtualAddress()+index*512);m_CmdList->DrawInstanced(3,1,0,0);++m_SubmissionStatistics.outputDrawCalls;
     if(target){auto barrier=CD3DX12_RESOURCE_BARRIER::Transition(target->color.Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);m_CmdList->ResourceBarrier(1,&barrier);}
  }
- constants->Unmap(0,nullptr);
+ constants->Unmap(0,nullptr);ShadowTimestamp(7);
 }
 void Dx12RenderAdapter::ReleaseCustomPostFx(){
  m_PostFxGpu.clear();m_CustomPostFx={};for(auto& frame:m_PostFxTargets)for(auto& target:frame)target={};for(auto& buffer:m_PostFxConstants)buffer.Reset();m_PostFxRoot.Reset();

@@ -55,6 +55,11 @@ static void Schema() {
     Check(a==resources.Load<MaterialResource>(key),"material cache sharing");Passed("shared material cache identity");
     m.baseColor[0]=.71f;Check(MaterialLoader::Save(key,m,&error),"replace save");const auto version=a->GetVersion();Check(resources.Reload<MaterialResource>(key)==a&&a->GetVersion()>version&&a->GetData().baseColor[0]==.71f,"reload sharing");Passed("shared asset reload updates existing handles");
     resources.SetMaterialDirty(key,true);m.baseColor[0]=.12f;Check(MaterialLoader::Save(key,m,&error),"conflict save");resources.Reload<MaterialResource>(key);Check(a->GetData().baseColor[0]==.71f,"unsaved material discarded");resources.SetMaterialDirty(key,false);resources.Reload<MaterialResource>(key);Check(a->GetData().baseColor[0]==.12f,"revert blocked");Passed("unsaved edit guard and revert");
+    resources.WatchForHotReload<MaterialResource>(key);const auto hotVersion=a->GetVersion();
+    m.baseColor[0]=.6251f;Check(MaterialLoader::Save(key,m,&error),"external owned material edit");resources.PollHotReload();
+    Check(a->GetVersion()>hotVersion&&a->GetData().baseColor[0]==.6251f,"file watcher updates shared material data");
+    m.baseColor[0]=.12f;Check(MaterialLoader::Save(key,m,&error),"restore owned material");resources.Reload<MaterialResource>(key);
+    Passed("real file edit and material hot reload");
     auto path=AssetPaths::ResolveAssetPath(key);std::ofstream(path)<<"invalid JSON";resources.Reload<MaterialResource>(key);Check(a->HasError()&&a->IsUsable()&&a->GetData().baseColor[0]==.12f,"failed reload discards last good asset");Passed("failed reload retains last good values with diagnostic");
     m.baseColor[0]=2;Check(!MaterialLoader::Save(key,m,&error),"invalid asset saved");std::ifstream in(path);std::string contents;std::getline(in,contents);Check(contents=="invalid JSON","failed save clobbered file");in.close();std::filesystem::remove(path);Passed("failed save preserves destination");
     const std::string nested="materials/material-regression-directory/test.material.json";
@@ -151,7 +156,21 @@ static void Gpu() {
         world.Clear();auto mesh=resources.Load<MeshResource>(key);for(const auto& material:mesh->GetData().meshData.materials)if(!material.texturePath.empty())resources.Load<TextureResource>(material.texturePath);
         std::vector<Entity> entities;
         for(int i=0;i<2;++i){auto e=world.CreateEntity();entities.push_back(e);world.AddComponent<TransformComponent>(e).scale={1,1,1};world.AddComponent<MeshRendererComponent>(e).meshPath=key;auto& c=world.AddComponent<MaterialComponent>(e);c.tint[0]=.5f;c.tint[1]=.8f;c.tint[2]=.6f;}
-        auto ordinary=frame(false,12);auto instanced=frame(true);Check(ordinary==instanced,"import ordinary/instance pixels differ");Check(adapter.GetSubmissionStatistics().drawCalls==2&&adapter.GetSubmissionStatistics().instancedDrawCalls==2,"GPU submesh batching");
+        auto ordinary=frame(false,12);auto instanced=frame(true);
+        Check(render.GetStatistics().materialResolves==4,"each imported instance/submesh resolves its own material");
+        Check(render.GetStatistics().materialPathChecks==0,"warm imported texture bindings must not revalidate filesystem paths");
+        auto texture=resources.Get<TextureResource>(mesh->GetData().meshData.materials[mesh->GetData().meshData.submeshes.front().materialSlot].texturePath);
+        Check(bool(texture),"import texture cached");auto textureData=texture->GetData();const auto textureVersion=texture->GetVersion();
+        texture->ReplaceData(textureData,ResourceLoadState::Loaded,false);frame(true,4);
+        Check(texture->GetVersion()>textureVersion&&frame(true)==instanced,"warm key reuse must honor texture version changes");
+        const auto textureKey=texture->GetKey();resources.Unload<TextureResource>(textureKey);resources.Load<TextureResource>(textureKey);
+        Check(frame(true,6)==instanced,"cache epoch replaces retired texture owner without stale descriptors");
+        Check(render.GetStatistics().materialPathChecks==0,"replacement texture reaches warm path cache again");
+        const std::string missingKey="materials/p31-deliberately-missing.material.json";
+        auto missing=resources.Load<MaterialResource>(missingKey);Check(missing&&missing->HasError(),"missing material diagnostic");
+        world.GetComponent<MaterialComponent>(entities[0])->materialPath=missingKey;frame(true,6);
+        world.GetComponent<MaterialComponent>(entities[0])->materialPath.clear();
+        Check(frame(true,4)==instanced,"missing material can be replaced without stale bindings");Check(ordinary==instanced,"import ordinary/instance pixels differ");Check(adapter.GetSubmissionStatistics().drawCalls==2&&adapter.GetSubmissionStatistics().instancedDrawCalls==2,"GPU submesh batching");
         const float factors[2][3]={{1,.25f,.125f},{.125f,1,.25f}};const float base[3]={128*.5f,192*.8f,64*.6f};
         for(int slot=0;slot<2;++slot)for(int channel=0;channel<3;++channel)Check(std::abs(int(instanced[(120*320+(slot?240:80))*4+channel])-int(std::lround(255*LinearToSrgb(SrgbToLinear((channel==0?128.f:channel==1?192.f:64.f)/255)*SrgbToLinear(channel==0?.5f:channel==1?.8f:.6f)*factors[slot][channel]))))<=2,"import material/texture/tint color oracle");
         save(std::string(key).ends_with("obj")?"material-readback/obj.ppm":"material-readback/gltf.ppm",instanced);
