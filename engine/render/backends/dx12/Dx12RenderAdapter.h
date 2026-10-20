@@ -47,6 +47,7 @@ public:
 	void BindShader(RenderShaderHandle handle) override;
 	void BindTexture(std::uint32_t slot, RenderTextureHandle handle) override;
 	void DrawMesh(RenderMeshHandle handle) override;
+    void SetScreenEffects(const ScreenEffects& value)override{m_ScreenEffects=SanitizeScreenEffects(value);}
     void SetFog(const FogFrame& frame)override{m_Fog=frame;}
     FogDiagnostics GetFogDiagnostics()const override{return m_FogDiagnostics;}
     void SetAntiAliasing(AntiAliasingMode mode) override {m_AntiAliasing=AntiAliasingMode(std::clamp(int(mode),0,2));}
@@ -353,6 +354,8 @@ private:
     void CollectFogTiming(UINT);
     void ReleaseFog();
     bool m_HdrActive=false,m_HdrNative=false;
+    ScreenEffects m_ScreenEffects;
+    unsigned m_PostFxFrame=0;
     AntiAliasingMode m_AntiAliasing=AntiAliasingMode::Off;
     float m_SceneClear[4]={.08f,.08f,.12f,1};
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_OutputRoot;

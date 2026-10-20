@@ -174,6 +174,7 @@ ComponentRegistry Build(){
     Field<PostProcessVolumeComponent>(post,"fogQuality","Fog Quality",&PostProcessVolumeComponent::fogQuality,PropertyKind::Integer,0,2).choices={"Low","Medium","High"};post.properties.back().section="Volumetric Fog";
     Field<PostProcessVolumeComponent>(post,"sceneLighting","Scene Lighting",&PostProcessVolumeComponent::sceneLighting,PropertyKind::Boolean).section="Volumetric Fog";
     Field<PostProcessVolumeComponent>(post,"toneMapping","Tone Mapping",&PostProcessVolumeComponent::toneMapping,PropertyKind::Boolean).section="Environment";
+    Field<PostProcessVolumeComponent>(post,"tint","Color Tint",&PostProcessVolumeComponent::tint,PropertyKind::Color,0,1).section="Color Grading";post.properties.back().colorComponents=3;
     Complete(post);auto loadPost=post.deserialize;post.deserialize=[loadPost](World& w,Entity e,const Json& j){loadPost(w,e,j);auto error=ValidatePostProcessVolume(*w.GetComponent<PostProcessVolumeComponent>(e));if(!error.empty())Fail(error);};
     for(auto& property:post.properties){auto set=property.set;property.set=[set](World& w,Entity e,const PropertyValue& value){auto& volume=*w.GetComponent<PostProcessVolumeComponent>(e);auto previous=volume;set(w,e,value);auto error=ValidatePostProcessVolume(volume);if(!error.empty()){volume=previous;Fail(error);}};}
     r.Register(post);

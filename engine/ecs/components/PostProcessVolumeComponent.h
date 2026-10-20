@@ -14,7 +14,7 @@ struct PostProcessVolumeComponent {
     std::optional<bool> fogEnabled,sceneLighting,toneMapping;
     std::optional<FogMode> fogMode;
     std::optional<FogQuality> fogQuality;
-    std::optional<std::array<float,4>> fogColor,scatteringColor;
+    std::optional<std::array<float,4>> fogColor,scatteringColor,tint;
 };
 std::string ValidatePostProcessVolume(const PostProcessVolumeComponent&);
 }

@@ -18,6 +18,7 @@ std::string ValidatePostProcessVolume(const PostProcessVolumeComponent& volume){
     if(volume.fogMode&&(int(*volume.fogMode)<0||int(*volume.fogMode)>2))return "Invalid Fog Mode.";
     if(volume.fogQuality&&(int(*volume.fogQuality)<0||int(*volume.fogQuality)>2))return "Invalid Fog Quality.";
     for(const auto* color:{&volume.fogColor,&volume.scatteringColor})if(*color)for(float channel:**color)if(!range(channel,0,1))return "Fog colors must be finite in [0, 1].";
+    if(volume.tint)for(float channel:*volume.tint)if(!range(channel,0,1))return "Color Tint must be finite in [0, 1].";
     return {};
 }
 std::optional<PostProcessBox> GetPostProcessBox(const World& world,Entity entity,const PostProcessVolumeComponent& volume){
@@ -55,7 +56,7 @@ EvaluatedPostProcess EvaluatePostProcess(Vec3 camera,const World& world,const Po
         WHISP_PP_FLOATS(PP_BLEND)
 #undef PP_BLEND
         if(volume.fogEnabled){blend(activation,*volume.fogEnabled?1.f:0.f);activationOverride=true;}
-        auto color=[&](auto& target,const auto& value){if(value)for(int c=0;c<4;++c)blend(target[c],(*value)[c]);};color(result.fog.color,volume.fogColor);color(result.fog.scatteringColor,volume.scatteringColor);
+        auto color=[&](auto& target,const auto& value){if(value)for(int c=0;c<4;++c)blend(target[c],(*value)[c]);};color(result.fog.color,volume.fogColor);color(result.fog.scatteringColor,volume.scatteringColor);color(result.screenEffects.tint,volume.tint);
         if(weight>=.5f){if(volume.fogMode)result.fog.mode=*volume.fogMode;if(volume.fogQuality)result.fog.quality=*volume.fogQuality;if(volume.sceneLighting)result.fog.sceneLighting=*volume.sceneLighting;if(volume.toneMapping)result.environment.toneMapping=*volume.toneMapping;}
     }
     if(activationOverride){result.fog.enabled=activation>0;result.fog.density*=activation;}

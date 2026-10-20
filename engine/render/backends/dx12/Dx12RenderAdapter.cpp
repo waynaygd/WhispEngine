@@ -1825,7 +1825,7 @@ void Dx12RenderAdapter::BeginFrame()
     m_SubmissionStatistics={}; m_InstancePageIndex=0;
     m_MaterialBindingTrace.clear();m_MaterialTables.clear();m_MaterialTableCount=0;m_EnvironmentTable={};m_LastMaterialTable={};m_FrameConstantsDirty=true;
     for(auto& page:m_InstancePages[m_FrameIndex])page.used=0;
-    CollectFogTiming(m_FrameIndex);m_FogPassCursor=0;
+    CollectFogTiming(m_FrameIndex);m_FogPassCursor=0;++m_PostFxFrame;
     m_FrameConstantPageIndex=0;m_FrameConstantAddress=0;
     for(auto& page:m_FrameConstantPages[m_FrameIndex])page.used=0;
 

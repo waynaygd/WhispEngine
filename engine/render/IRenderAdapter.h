@@ -10,6 +10,7 @@
 #include "EditorVisuals.h"
 #include "SceneLights.h"
 #include "Fog.h"
+#include "ScreenEffects.h"
 struct EnvironmentResource;
 #include <span>
 
@@ -125,6 +126,7 @@ public:
     virtual void SetSceneLights(std::span<const GpuSceneLight>,LightRenderingMode,const SceneLightDiagnostics& = {}) {}
     virtual SceneLightDiagnostics GetSceneLightDiagnostics() const {return {};}
 
+    virtual void SetScreenEffects(const ScreenEffects&) {}
     virtual void SetFog(const FogFrame&) {}
     virtual FogDiagnostics GetFogDiagnostics()const{return {};}
     virtual void SetAntiAliasing(AntiAliasingMode) {}

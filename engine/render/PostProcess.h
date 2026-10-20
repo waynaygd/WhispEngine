@@ -1,10 +1,11 @@
 #pragma once
 #include "Fog.h"
+#include "ScreenEffects.h"
 #include "Environment.h"
 #include "EditorVisuals.h"
 // Evaluated values are ordinary copies. Neither the renderer nor evaluation writes authoring data.
-struct PostProcessSettings {FogSettings fog;EnvironmentSettings environment;SceneBackground atmosphere;};
-// Explicit supported fields: extend this list/state for PPV.2 rather than adding another volume evaluator.
+struct PostProcessSettings {FogSettings fog;EnvironmentSettings environment;SceneBackground atmosphere;ScreenEffects screenEffects;};
+// One field list drives overrides, metadata, validation and the shared volume blend.
 #define WHISP_PP_FLOATS(X) \
  X(fogDensity,fog.density,0,1,"Fog","Intensity") \
  X(fogStart,fog.startDistance,0,10000,"Fog","Start Distance") \
@@ -23,4 +24,14 @@ struct PostProcessSettings {FogSettings fog;EnvironmentSettings environment;Scen
  X(sunsetWarmth,atmosphere.sunsetWarmth,0,4,"Atmosphere","Sunset Warmth") \
  X(nightIntensity,atmosphere.nightIntensity,0,4,"Atmosphere","Night Intensity") \
  X(sunIntensity,atmosphere.sunIntensity,0,32,"Atmosphere","Sun Disc Intensity") \
- X(sunGlowIntensity,atmosphere.sunGlowIntensity,0,4,"Atmosphere","Sun Glow Intensity")
+ X(sunGlowIntensity,atmosphere.sunGlowIntensity,0,4,"Atmosphere","Sun Glow Intensity") \
+ X(saturation,screenEffects.saturation,0,2,"Color Grading","Saturation") \
+ X(contrast,screenEffects.contrast,0,2,"Color Grading","Contrast") \
+ X(brightness,screenEffects.brightness,-1,1,"Color Grading","Brightness") \
+ X(vignetteIntensity,screenEffects.vignetteIntensity,0,1,"Vignette","Intensity") \
+ X(vignetteSmoothness,screenEffects.vignetteSmoothness,.01f,1,"Vignette","Smoothness") \
+ X(vignetteRoundness,screenEffects.vignetteRoundness,0,1,"Vignette","Roundness") \
+ X(grainIntensity,screenEffects.grainIntensity,0,1,"Film Grain","Intensity") \
+ X(grainScale,screenEffects.grainScale,.5f,4,"Film Grain","Scale (pixels)") \
+ X(aberrationIntensity,screenEffects.aberrationIntensity,0,1,"Chromatic Aberration","Intensity") \
+ X(aberrationFalloff,screenEffects.aberrationFalloff,.1f,8,"Chromatic Aberration","Radial Falloff")

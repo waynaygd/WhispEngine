@@ -47,6 +47,7 @@ ecs::PropertyValue Initial(const ecs::PropertyDescriptor& p){
     if(p.key=="fogEnabled"||p.key=="sceneLighting"||p.key=="toneMapping")return true;
     if(p.key=="fogMode")return int(postDefaults.fog.mode);
     if(p.key=="fogQuality")return int(postDefaults.fog.quality);
+    if(p.key=="tint")return postDefaults.screenEffects.tint;
     if(p.key=="fogColor")return postDefaults.fog.color;
     if(p.key=="scatteringColor")return postDefaults.fog.scatteringColor;
     switch(p.kind){case K::Boolean:return false;case K::Integer:return 0;case K::Number:return p.key.find("roughness")!=std::string::npos?.5f:p.key.find("Scale")!=std::string::npos||p.key.find("Strength")!=std::string::npos?1.f:std::max(p.minimum,0.f);case K::String:case K::Asset:return std::string();case K::Vector:return ecs::Vec3{};case K::Color:return std::array<float,4>{1,1,1,1};case K::AssetList:return std::vector<std::string>{};}return {};
@@ -66,7 +67,7 @@ bool Drawer(const ecs::PropertyDescriptor& p,ecs::PropertyValue& v,const char* v
         for(int i=0;i<3;++i){ImGui::PushID(i);if(i&&!stacked)ImGui::SameLine();ImGui::BeginGroup();ImGui::AlignTextToFramePadding();ImGui::TextColored(colors[i],"%s",axes[i]);const float axisWidth=ImGui::CalcTextSize(axes[i]).x;ImGui::SameLine(0,2);ImGui::SetNextItemWidth(std::max(20.f,width-axisWidth-2));changed|=PrecisionDragFloat("##axis",values[i],p.speed,p.minimum,p.maximum,vectorFormat,ImGuiSliderFlags_NoRoundToFormat);ImGui::EndGroup();ImGui::PopID();}ImGui::PopStyleVar();ImGui::EndGroup();if(changed){
         if(degrees){x=old;if(display.x!=initialDisplay.x)x.x=Radians(display.x);if(display.y!=initialDisplay.y)x.y=Radians(display.y);if(display.z!=initialDisplay.z)x.z=Radians(display.z);}else x=display;
     }break;}
-    case K::Color:{auto& color=std::get<std::array<float,4>>(v);if(p.key=="tint")changed|=ImGui::ColorEdit4("##value",color.data(),ImGuiColorEditFlags_NoInputs);else changed|=LinearColorEdit("##value",color.data(),p.colorComponents,ImGuiColorEditFlags_NoInputs);break;}
+    case K::Color:{auto& color=std::get<std::array<float,4>>(v);if(p.key=="tint"){if(p.colorComponents==3)changed|=ImGui::ColorEdit3("##value",color.data(),ImGuiColorEditFlags_NoInputs);else changed|=ImGui::ColorEdit4("##value",color.data(),ImGuiColorEditFlags_NoInputs);}else changed|=LinearColorEdit("##value",color.data(),p.colorComponents,ImGuiColorEditFlags_NoInputs);break;}
     case K::String:case K::Asset:changed|=ImGui::InputText("##value",&std::get<std::string>(v));break;
     case K::AssetList:{auto& list=std::get<std::vector<std::string>>(v);for(int i=0;i<int(list.size());++i){ImGui::PushID(i);changed|=ImGui::InputText("Slot",&list[i]);if(ImGui::BeginDragDropTarget()){if(auto* payload=ImGui::AcceptDragDropPayload("WHISP_ASSET"))if(payload->DataSize==sizeof(AssetPayload)){auto* data=static_cast<const AssetPayload*>(payload->Data);if(data->kind==p.asset){list[i]=data->key;changed=true;}}ImGui::EndDragDropTarget();}ImGui::SameLine();if(ImGui::SmallButton("X")){list.erase(list.begin()+i);changed=true;ImGui::PopID();break;}ImGui::PopID();}if(ImGui::SmallButton("Add slot")){list.emplace_back();changed=true;}break;}
     }
@@ -253,7 +254,7 @@ void EditorLayer::DrawInspector(Application& app){
             }
         }else if(d.key=="PostProcessVolume"){
             ImGui::TextWrapped("Unchecked parameters inherit the current scene/volume stack. Half extents use World Transform; blend radius is outside the box in world units.");
-            for(const char* section:{"Volume","Fog","Height Fog","Volumetric Fog","Environment","Atmosphere"})if(ImGui::TreeNodeEx(section,ImGuiTreeNodeFlags_DefaultOpen)){drawSection(section,false);ImGui::TreePop();}
+            for(const char* section:{"Volume","Fog","Height Fog","Volumetric Fog","Environment","Atmosphere","Color Grading","Vignette","Film Grain","Chromatic Aberration"})if(ImGui::TreeNodeEx(section,ImGuiTreeNodeFlags_DefaultOpen)){drawSection(section,false);ImGui::TreePop();}
         }else if(d.key=="Fog"){
             drawSection("",false);auto mode=world.GetComponent<ecs::FogComponent>(e)->mode;
             if(mode!=FogMode::Distance){ImGui::SeparatorText("Height profile (world space)");drawSection("Medium",false);}
