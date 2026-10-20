@@ -19,6 +19,7 @@ namespace {
 template<class F>bool Guard(F fn,std::string* error){try{fn();if(error)error->clear();return true;}catch(const std::exception& e){if(error)*error=e.what();return false;}}
 }
 AssetCatalog::AssetCatalog(){
+    Register({"Custom PostFX","[FX]","",ecs::AssetKind::PostFx,{".json"}});
     Register({"Lua Script","[Lua]","scripts",ecs::AssetKind::LuaScript,{".lua"}});
     Register({"Prefab","[PF]","prefabs",ecs::AssetKind::Prefab,{".json"}});
     Register({"Mesh","[M]","models",ecs::AssetKind::Mesh,{".obj",".fbx",".gltf",".glb"}});
@@ -44,6 +45,7 @@ void AssetCatalog::Refresh(){
             if(item.is_directory()&&!std::filesystem::is_symlink(item.symlink_status()))dirs.insert(DirectoryKey(item.path().lexically_relative(root)));
             if(!item.is_regular_file()||std::filesystem::is_symlink(item.symlink_status()))continue;
             if(type.kind==ecs::AssetKind::Prefab&&!item.path().filename().string().ends_with(".prefab.json"))continue;
+            if(type.kind==ecs::AssetKind::PostFx&&!item.path().filename().string().ends_with(".postfx.json"))continue;
             auto ext=item.path().extension().string();std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});
             if(std::find(type.extensions.begin(),type.extensions.end(),ext)==type.extensions.end())continue;
             auto key=AssetPaths::ToUtf8String(item.path().lexically_relative(root));std::replace(key.begin(),key.end(),'\\','/');ready.push_back({key,i});

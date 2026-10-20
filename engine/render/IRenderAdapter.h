@@ -11,6 +11,7 @@
 #include "SceneLights.h"
 #include "Fog.h"
 #include "ScreenEffects.h"
+#include "../resources/PostFxResource.h"
 struct EnvironmentResource;
 #include <span>
 
@@ -126,6 +127,8 @@ public:
     virtual void SetSceneLights(std::span<const GpuSceneLight>,LightRenderingMode,const SceneLightDiagnostics& = {}) {}
     virtual SceneLightDiagnostics GetSceneLightDiagnostics() const {return {};}
 
+    virtual void SetCustomPostFx(const PostFxFrame&) {}
+    virtual std::string CustomPostFxStatus(const std::string&)const{return "Not requested";}
     virtual void SetScreenEffects(const ScreenEffects&) {}
     virtual void SetFog(const FogFrame&) {}
     virtual FogDiagnostics GetFogDiagnostics()const{return {};}

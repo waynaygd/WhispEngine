@@ -1,10 +1,11 @@
 #pragma once
 #include "Fog.h"
 #include "ScreenEffects.h"
+#include "../resources/PostFxResource.h"
 #include "Environment.h"
 #include "EditorVisuals.h"
 // Evaluated values are ordinary copies. Neither the renderer nor evaluation writes authoring data.
-struct PostProcessSettings {FogSettings fog;EnvironmentSettings environment;SceneBackground atmosphere;ScreenEffects screenEffects;};
+struct PostProcessSettings {FogSettings fog;EnvironmentSettings environment;SceneBackground atmosphere;ScreenEffects screenEffects;std::vector<PostFxLayer> customEffects;};
 // One field list drives overrides, metadata, validation and the shared volume blend.
 #define WHISP_PP_FLOATS(X) \
  X(fogDensity,fog.density,0,1,"Fog","Intensity") \

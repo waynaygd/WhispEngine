@@ -449,6 +449,7 @@ void Application::SetupEcsRuntimeDemo(bool populate)
     m_PhysicsSystem->SetEnabled(m_EditorPlayMode);
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
+    m_RenderSystem->SetPostFxOverrides(&m_LuaRuntime.PostFxOverrides());
     m_RenderSystem->SetInterpolation(&m_RenderInterpolation);
     m_RenderSystem->SetPhysicsDebugPose(m_PhysicsDebugPose);
     m_RenderSystem->SetInstancingEnabled(m_GpuInstancing);
@@ -1762,7 +1763,7 @@ scripting::GameplayServices Application::GameplayCapabilities()
     host.captureCursor=[this](bool capture){return CaptureGameplayCursor(capture);};
     host.bindAction=[this](const std::string& action,const std::string& key){return m_InputManager.BindNamedAction(action,key);};
     host.actions=[this]{return m_InputManager.Actions();};
-    host.camera=&m_GameplayCamera;return host;
+    host.postfxResources=m_ResourceManager.get();host.camera=&m_GameplayCamera;return host;
 }
 void Application::Shutdown()
 {

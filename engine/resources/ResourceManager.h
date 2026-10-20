@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MaterialResource.h"
+#include "PostFxResource.h"
 #include "MeshResource.h"
 #include "Resource.h"
 #include "ShaderResource.h"
@@ -259,8 +260,13 @@ public:
                 ? std::filesystem::file_size(resolvedPath)
                 : 0;
         m_HotReloadWatches[key + "#" + std::to_string(static_cast<int>(watch.kind))] = watch;
+        if constexpr(std::is_same_v<T,PostFxResource>){auto resource=Get<T>(key);if(resource&&resource->GetData().definition){watch.path=PostFxLoader::SafePath(resource->GetData().definition->shader);if(std::filesystem::exists(watch.path)){watch.lastWriteTime=std::filesystem::last_write_time(watch.path);watch.fileSize=std::filesystem::file_size(watch.path);m_HotReloadWatches[key+"#hlsl"]=watch;}}}
     }
 
+    const std::vector<std::string>& PostFxAssets(bool refresh=false);
+    std::string FindPostFx(const std::string& id);
+    bool PostFxDuplicate(const std::string& id);
+    void ReloadPostFx(const std::string& key);
     void PollHotReload();
     void PollAsyncLoads();
 
@@ -278,7 +284,7 @@ public:
         CollectResourceStats(m_TextureCache, stats);
         CollectResourceStats(m_ShaderCache, stats);
         CollectResourceStats(m_MaterialCache, stats);
-        CollectResourceStats(m_EnvironmentCache, stats);
+        CollectResourceStats(m_EnvironmentCache, stats);CollectResourceStats(m_PostFxCache,stats);
         return stats;
     }
 
@@ -300,7 +306,7 @@ private:
         Texture,
         Shader,
         Material,
-        Environment
+        Environment,PostFx
     };
 
     struct HotReloadWatch
@@ -321,7 +327,8 @@ private:
     template <typename T>
     CacheMap<T>& GetCache()
     {
-        if constexpr (std::is_same_v<T, MeshResource>)
+        if constexpr (std::is_same_v<T, PostFxResource>)return m_PostFxCache;
+        else if constexpr (std::is_same_v<T, MeshResource>)
             return m_MeshCache;
         else if constexpr (std::is_same_v<T, TextureResource>)
             return m_TextureCache;
@@ -338,7 +345,8 @@ private:
     template <typename T>
     ResourceHandle<T> GetDefaultStorage() const
     {
-        if constexpr (std::is_same_v<T, MeshResource>)
+        if constexpr (std::is_same_v<T, PostFxResource>)return ResourceHandle<PostFxResource>{};
+        else if constexpr (std::is_same_v<T, MeshResource>)
             return m_DefaultMesh;
         else if constexpr (std::is_same_v<T, TextureResource>)
             return m_DefaultTexture;
@@ -355,7 +363,8 @@ private:
     template <typename T>
     std::string NormalizeKey(const std::filesystem::path& path) const
     {
-        if constexpr (std::is_same_v<T, EnvironmentResource>) {
+        if constexpr (std::is_same_v<T, PostFxResource>){try{auto key=AssetPaths::ToUtf8String(path);PostFxLoader::SafePath(key);return key;}catch(...){return {};}}
+        else if constexpr (std::is_same_v<T, EnvironmentResource>) {
             if(path.empty()||path.is_absolute()||path.has_root_name())return {};
             const auto raw=AssetPaths::ToUtf8String(path);if(raw.find(':')!=std::string::npos||raw.find('#')!=std::string::npos)return {};
             for(const auto& part:path)if(part=="..")return {};
@@ -372,7 +381,8 @@ private:
     template <typename T>
     std::filesystem::path ResolvePathFromKey(const std::string& key) const
     {
-        if constexpr (std::is_same_v<T, ShaderResource>)
+        if constexpr (std::is_same_v<T, PostFxResource>)return PostFxLoader::SafePath(key);
+        else if constexpr (std::is_same_v<T, ShaderResource>)
             return AssetPaths::ResolveShaderPath(std::filesystem::u8path(key));
         else if constexpr (std::is_same_v<T, TextureResource>)
             return AssetPaths::ResolveAssetPath(std::filesystem::u8path(key.substr(0,key.find("#embedded/"))));
@@ -387,7 +397,8 @@ private:
     {
         const std::filesystem::path resolvedPath = ResolvePathFromKey<T>(key);
 
-        if constexpr (std::is_same_v<T, MeshResource>)
+        if constexpr (std::is_same_v<T, PostFxResource>)return PostFxLoader::Load(key,resolvedPath);
+        else if constexpr (std::is_same_v<T, MeshResource>)
             return MeshLoader::Load(key, resolvedPath);
         else if constexpr (std::is_same_v<T, TextureResource>)
             return TextureLoader::Load(key, resolvedPath);
@@ -469,7 +480,8 @@ private:
     template <typename T>
     std::string ResourceTypeName() const
     {
-        if constexpr (std::is_same_v<T, MeshResource>)
+        if constexpr (std::is_same_v<T, PostFxResource>)return "Custom PostFX";
+        else if constexpr (std::is_same_v<T, MeshResource>)
             return "Mesh";
         else if constexpr (std::is_same_v<T, TextureResource>)
             return "Texture";
@@ -486,7 +498,8 @@ private:
     template <typename T>
     ResourceKind ResourceKindFor() const
     {
-        if constexpr (std::is_same_v<T, MeshResource>)
+        if constexpr (std::is_same_v<T, PostFxResource>)return ResourceKind::PostFx;
+        else if constexpr (std::is_same_v<T, MeshResource>)
             return ResourceKind::Mesh;
         else if constexpr (std::is_same_v<T, TextureResource>)
             return ResourceKind::Texture;
@@ -541,6 +554,7 @@ private:
         return static_cast<std::uint64_t>(resource.vertexSource.size() + resource.fragmentSource.size());
     }
 
+    std::uint64_t EstimateResourceBytes(const PostFxResource& r)const{return r.definition?r.definition->source.size()+sizeof(PostFxDefinition):0;}
     std::uint64_t EstimateResourceBytes(const MaterialResource& resource) const
     {
         return static_cast<std::uint64_t>(
@@ -701,6 +715,8 @@ private:
     }
 
     mutable std::recursive_mutex m_Mutex;
+    CacheMap<PostFxResource> m_PostFxCache;
+    std::vector<std::string> m_PostFxKeys;bool m_PostFxScanned=false;
     CacheMap<MeshResource> m_MeshCache;
     CacheMap<TextureResource> m_TextureCache;
     CacheMap<EnvironmentResource> m_EnvironmentCache;

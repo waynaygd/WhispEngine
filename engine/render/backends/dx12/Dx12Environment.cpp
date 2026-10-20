@@ -279,7 +279,7 @@ void Dx12RenderAdapter::BeginHdrScene()
 {
     const bool hdrSky=m_EditorVisualFrame.active&&m_EditorVisualFrame.backgroundEnabled&&m_EditorVisualFrame.settings.background==EditorBackground::Cubemap;
     m_HdrNative=m_EnvironmentSettings.enabled||hdrSky;
-    if (!m_HdrNative&&m_AntiAliasing==AntiAliasingMode::Off&&!m_Fog.active&&!m_ScreenEffects.Active())
+    if (!m_HdrNative&&m_AntiAliasing==AntiAliasingMode::Off&&!m_Fog.active&&!m_ScreenEffects.Active()&&m_CustomPostFx.passes.empty())
         return;
     ZoneScopedN("HdrSceneBegin");
     UINT w = m_ViewportTarget.rendering ? m_ViewportTarget.width : m_Width,
@@ -340,6 +340,8 @@ void Dx12RenderAdapter::EndHdrScene()
     if (!m_HdrActive)
         return;
     ZoneScopedN("HdrOutput");
+    auto custom=PrepareCustomPostFx();
+    if(m_MaterialTableCount+custom.size()+1>MaterialTablesPerFrame)custom.clear();
     auto &target = m_HdrTargets[m_FrameIndex];
     auto barrier =
         CD3DX12_RESOURCE_BARRIER::Transition(target.color.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
@@ -474,6 +476,11 @@ float4 PS(Out i):SV_Target{
                                           : m_RtvHeap->GetCPUDescriptorHandleForHeapStart();
     if (!m_ViewportTarget.rendering)
         rtv.ptr += SIZE_T(m_FrameIndex) * m_RtvSize;
+    auto finalRtv=rtv;
+    if(!custom.empty()){
+        auto& intermediate=m_PostFxTargets[m_FrameIndex][0];EnsurePostFxTarget(intermediate,target.width,target.height);
+        auto transition=CD3DX12_RESOURCE_BARRIER::Transition(intermediate.color.Get(),D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);m_CmdList->ResourceBarrier(1,&transition);rtv=intermediate.rtv;
+    }
     m_CmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
     ID3D12DescriptorHeap *heaps[]{m_SrvHeap.Get()};
     m_CmdList->SetDescriptorHeaps(1, heaps);
@@ -496,6 +503,10 @@ float4 PS(Out i):SV_Target{
     m_CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_CmdList->DrawInstanced(3, 1, 0, 0);
     ++m_SubmissionStatistics.outputDrawCalls;
+    if(!custom.empty()){
+        auto transition=CD3DX12_RESOURCE_BARRIER::Transition(m_PostFxTargets[m_FrameIndex][0].color.Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);m_CmdList->ResourceBarrier(1,&transition);
+        DrawCustomPostFx(custom,finalRtv);
+    }
     m_HdrActive = false;
 }
 std::vector<float> Dx12RenderAdapter::ReadBackFloatTexture(ID3D12Resource *texture, unsigned sub,

@@ -240,6 +240,8 @@ public:
     bool AddComponent(Application&,ecs::Entity,ecs::ComponentTypeId);
     bool RemoveComponent(Application&,ecs::Entity,ecs::ComponentTypeId);
     bool ResetComponent(Application&,ecs::Entity,ecs::ComponentTypeId);
+    bool AddCustomPostFx(Application&,ecs::Entity,const std::string&);
+    void DrawCustomPostFxInspector(Application&,ecs::Entity);
     bool AssignAsset(Application&,ecs::Entity,ecs::AssetKind,const std::string&);
     bool CreateMaterialAsset(Application&,const std::string&,std::string* error=nullptr);
     std::string CreateLuaScriptAsset(Application&,const std::string& directory);

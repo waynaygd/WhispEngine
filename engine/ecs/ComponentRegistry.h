@@ -12,7 +12,7 @@ constexpr ComponentTypeId ComponentId(const char* text){
     ComponentTypeId h=14695981039346656037ull;while(*text){h^=static_cast<unsigned char>(*text++);h*=1099511628211ull;}return h;
 }
 enum class PropertyKind { Boolean,Integer,Number,String,Vector,Color,Asset,AssetList };
-enum class AssetKind { None,Mesh,Texture,Material,Shader,Environment,LuaScript,Prefab };
+enum class AssetKind { None,Mesh,Texture,Material,Shader,Environment,LuaScript,Prefab,PostFx };
 using PropertyValue=std::variant<std::monostate,bool,int,float,std::string,Vec3,std::array<float,4>,std::vector<std::string>>;
 struct PropertyDescriptor {
     std::string key,label,tooltip;

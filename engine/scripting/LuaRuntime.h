@@ -2,6 +2,7 @@
 #include "../ecs/World.h"
 #include "../ecs/events/EventBus.h"
 #include "GameplayServices.h"
+#include "../resources/PostFxResource.h"
 #include "GameplayEventHistory.h"
 #include "LuaInspection.h"
 #include <nlohmann/json.hpp>
@@ -20,6 +21,10 @@ public:
     LuaRuntime& operator=(const LuaRuntime&)=delete;
     void Start(ecs::World&,std::function<bool(const std::string&)> input={},GameplayServices services={});
     void Stop();
+    bool SetPostFx(const std::string&,const std::string&,const nlohmann::json&);
+    bool SetPostFxWeight(const std::string&,float);
+    bool ClearPostFx(const std::string&);
+    const PostFxRuntimeOverrides& PostFxOverrides()const;
     GameplayEventHistory& Events();
     void Update(float dt);
     void FixedUpdate(float dt);

@@ -55,6 +55,7 @@ EvaluatedPostProcess EvaluatePostProcess(Vec3 camera,const World& world,const Po
 #define PP_BLEND(name,target,lo,hi,section,label) if(volume.name)blend(result.target,*volume.name);
         WHISP_PP_FLOATS(PP_BLEND)
 #undef PP_BLEND
+        for(const auto& effect:volume.customEffects)result.customEffects.push_back({effect,weight});
         if(volume.fogEnabled){blend(activation,*volume.fogEnabled?1.f:0.f);activationOverride=true;}
         auto color=[&](auto& target,const auto& value){if(value)for(int c=0;c<4;++c)blend(target[c],(*value)[c]);};color(result.fog.color,volume.fogColor);color(result.fog.scatteringColor,volume.scatteringColor);color(result.screenEffects.tint,volume.tint);
         if(weight>=.5f){if(volume.fogMode)result.fog.mode=*volume.fogMode;if(volume.fogQuality)result.fog.quality=*volume.fogQuality;if(volume.sceneLighting)result.fog.sceneLighting=*volume.sceneLighting;if(volume.toneMapping)result.environment.toneMapping=*volume.toneMapping;}

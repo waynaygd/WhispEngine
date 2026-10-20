@@ -4,6 +4,7 @@
 #include <optional>
 namespace ecs {
 struct PostProcessVolumeComponent {
+    std::vector<PostFxOverride> customEffects;
     bool enabled=true,global=true;
     int priority=0,shape=0; // Box only in PPV.1.
     float weight=1,blendRadius=2;

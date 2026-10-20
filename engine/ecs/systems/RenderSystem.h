@@ -62,6 +62,7 @@ public:
     void SetInterpolation(RenderInterpolation* interpolation) { m_Interpolation = interpolation; }
     void SetPhysicsDebugPose(bool enabled) { m_PhysicsDebugPose = enabled; }
     void SetShadowSettings(const ShadowSettings* settings) { m_ShadowSettings=settings; }
+    void SetPostFxOverrides(const PostFxRuntimeOverrides* value){m_PostFxOverrides=value;}
     const EvaluatedPostProcess& GetEvaluatedPostProcess()const{return m_EvaluatedPostProcess;}
     void SetAtmosphereSettings(const SceneBackground* settings){m_AtmosphereSettings=settings;}
     void SetEnvironmentSettings(const EnvironmentSettings* settings){m_EnvironmentSettings=settings;}
@@ -87,6 +88,7 @@ private:
     std::vector<Entity> m_EditorIsolation;
     std::unordered_set<Entity,EntityHash> m_EditorIsolated;
     std::vector<PlacementRenderItem> m_PlacementItems;
+    const PostFxRuntimeOverrides* m_PostFxOverrides=nullptr;float m_PostFxTime=0;
     bool m_TraceMaterials=false;
     std::uint64_t m_ResourceCacheEpoch=0;
     std::vector<nlohmann::json> m_MaterialDiagnostics;

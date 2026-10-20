@@ -255,6 +255,7 @@ void EditorLayer::DrawInspector(Application& app){
         }else if(d.key=="PostProcessVolume"){
             ImGui::TextWrapped("Unchecked parameters inherit the current scene/volume stack. Half extents use World Transform; blend radius is outside the box in world units.");
             for(const char* section:{"Volume","Fog","Height Fog","Volumetric Fog","Environment","Atmosphere","Color Grading","Vignette","Film Grain","Chromatic Aberration"})if(ImGui::TreeNodeEx(section,ImGuiTreeNodeFlags_DefaultOpen)){drawSection(section,false);ImGui::TreePop();}
+            DrawCustomPostFxInspector(app,e);
         }else if(d.key=="Fog"){
             drawSection("",false);auto mode=world.GetComponent<ecs::FogComponent>(e)->mode;
             if(mode!=FogMode::Distance){ImGui::SeparatorText("Height profile (world space)");drawSection("Medium",false);}

@@ -1,4 +1,5 @@
 #include "LuaRuntime.h"
+#include "../resources/ResourceManager.h"
 #include "Prefab.h"
 #include "EntityReference.h"
 #include "../ecs/ComponentRegistry.h"
@@ -85,6 +86,8 @@ Json Schema(sol::table definition){
 struct LuaRuntime::Impl {
     // State is declared first, so all Lua references die before the VM.
     sol::state lua;
+    PostFxRuntimeOverrides postfx;
+    LuaRuntime* facade=nullptr;
     struct Program {std::string source;Json fields;std::uint64_t revision=0;};
     struct Instance {std::string path;std::uint64_t revision;sol::environment env;sol::table definition,self;Json overrides;bool failed=false;ecs::Entity entity{};
         std::uint64_t serial=0;
@@ -274,6 +277,13 @@ struct LuaRuntime::Impl {
         light.set_function("get_intensity",[this](ecs::Entity e){ecs::PropertyValue value;std::string error;auto key=LightComponent(e);if(!ecs::ComponentRegistry::Builtins().Get(*world,e,ecs::ComponentId(key.c_str()),"intensity",value,&error))throw std::runtime_error(error);return std::get<float>(value);});
         light.set_function("set_intensity",[this](ecs::Entity e,float value){std::string error;auto key=LightComponent(e);if(!ecs::ComponentRegistry::Builtins().Set(*world,e,ecs::ComponentId(key.c_str()),"intensity",value,&error))throw std::runtime_error("Light.set_intensity: "+error);});
         env["Light"]=light;
+        auto postfxApi=lua.create_table();
+        postfxApi.set_function("set",[this](const std::string& id,const std::string& parameter,sol::object value){
+            Json j;if(value.get_type()==sol::type::boolean)j=value.as<bool>();else if(value.get_type()==sol::type::number){double number=value.as<double>();if(std::isfinite(number)&&std::floor(number)==number&&std::abs(number)<=1000000)j=int(number);else j=number;}else if(value.get_type()==sol::type::table){j=Json::array();auto table=value.as<sol::table>();if(table.size()<2||table.size()>4)return facade->SetPostFx(id,parameter,Json());for(size_t i=1;i<=table.size();++i){sol::object item=table[i];if(item.get_type()!=sol::type::number)return facade->SetPostFx(id,parameter,Json());j.push_back(item.as<double>());}}else return facade->SetPostFx(id,parameter,Json());
+            return facade->SetPostFx(id,parameter,j);
+        });
+        postfxApi.set_function("set_weight",[this](const std::string& id,float weight){return facade->SetPostFxWeight(id,weight);});
+        postfxApi.set_function("clear",[this](const std::string& id){return facade->ClearPostFx(id);});env["postfx"]=postfxApi;
         auto log=lua.create_table();log.set_function("info",[](const std::string& s){Logger::Get().Info("Lua: "+s);});log.set_function("warning",[](const std::string& s){Logger::Get().Warn("Lua: "+s);});log.set_function("error",[](const std::string& s){Logger::Get().Error("Lua: "+s);});env["Log"]=log;
         auto controls=lua.create_table();
         controls.set_function("is_down",[this,owner](const std::string& s){if(!InputAllowed(owner))return false;DiscoverInput(s);return held[s];});
@@ -355,12 +365,13 @@ struct LuaRuntime::Impl {
         std::erase_if(rejected,[this](const auto& pair){return !world->IsAlive(pair.first);});
     }
 };
-LuaRuntime::LuaRuntime():impl(std::make_unique<Impl>()){}
+LuaRuntime::LuaRuntime():impl(std::make_unique<Impl>()){impl->facade=this;}
 LuaRuntime::~LuaRuntime(){Stop();}
 void LuaRuntime::Start(ecs::World& world,std::function<bool(const std::string&)> input,GameplayServices services){Stop();impl->Check();world.AssertOwnerThread();impl->programs.clear();impl->errors.clear();impl->loadFailures.clear();impl->world=&world;impl->input=std::move(input);impl->services=std::move(services);impl->history.BeginSession();}
 void LuaRuntime::Stop(){
     impl->Check();impl->stopping=true;
     for(auto& [e,i]:impl->instances)impl->Retire(e,i);
+    impl->postfx.clear();
     impl->history.EndSession();impl->instances.clear();impl->rejected.clear();impl->events.clear();
     impl->programs.clear();impl->errors.clear();impl->loadFailures.clear();
     impl->timers.clear();impl->gameTime=0;
@@ -548,3 +559,14 @@ bool LuaRuntime::HasCameraOwner()const{
     return script&&script->enabled&&script->cameraEnabled;
 }
 }
+
+const PostFxRuntimeOverrides& scripting::LuaRuntime::PostFxOverrides()const{return impl->postfx;}
+bool scripting::LuaRuntime::SetPostFx(const std::string& id,const std::string& name,const nlohmann::json& value){
+    impl->Check();auto* resources=impl->services.postfxResources;
+    if(impl->world&&!impl->stopping&&resources){auto key=resources->FindPostFx(id);auto asset=key.empty()?nullptr:resources->Get<PostFxResource>(key);if(asset&&asset->GetData().definition)for(auto& p:asset->GetData().definition->parameters)if(p.name==name&&p.Valid(value)){impl->postfx[id].parameters[name]=value;return true;}}
+    Logger::Get().Warn("Lua postfx.set: unknown effect/parameter or invalid value: "+id+" / "+name);return false;
+}
+bool scripting::LuaRuntime::SetPostFxWeight(const std::string& id,float weight){
+    impl->Check();auto* r=impl->services.postfxResources;if(impl->world&&!impl->stopping&&r&&std::isfinite(weight)&&weight>=0&&weight<=1&&!r->FindPostFx(id).empty()){impl->postfx[id].weight=weight;return true;}Logger::Get().Warn("Lua postfx.set_weight: unknown effect or invalid weight: "+id);return false;
+}
+bool scripting::LuaRuntime::ClearPostFx(const std::string& id){impl->Check();auto* r=impl->services.postfxResources;if(!impl->world||impl->stopping||!r||r->FindPostFx(id).empty()){Logger::Get().Warn("Lua postfx.clear: unknown effect: "+id);return false;}impl->postfx.erase(id);return true;}

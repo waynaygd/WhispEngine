@@ -25,6 +25,7 @@ bool EditorLayer::OpenMaterial(Application& app,const std::string& key){
     m_EditingMaterial=key;m_SelectedAsset=key;m_SelectedAssetKind="Material";if(auto* r=app.GetResourceManager())r->LoadAsync<MaterialResource>(std::filesystem::u8path(key));return true;
 }
 bool EditorLayer::AssignAsset(Application& app,ecs::Entity e,ecs::AssetKind kind,const std::string& key){
+    if(kind==ecs::AssetKind::PostFx)return AddCustomPostFx(app,e,key);
     if(!ecs::ComponentRegistry::ValidateAssetKey(key,kind,&m_EditorError))return false;
     FinishTransaction(app);
     if(kind==ecs::AssetKind::Environment){BeginSceneTransaction(app,"Assign environment");app.GetEnvironmentSettings().assetPath=key;app.GetEnvironmentSettings().enabled=true;FinishTransaction(app);return true;}
@@ -134,13 +135,13 @@ template<class T>const char* LoadState(ResourceManager* resources,const std::str
     auto asset=resources?resources->Get<T>(std::filesystem::u8path(key)):nullptr;if(!asset)return "Not requested";if(asset->IsLoading())return "Loading";if(asset->IsFailed())return "Failed";return "Ready";
 }
 const char* AssetLoadState(ResourceManager* resources,ecs::AssetKind kind,const std::string& key){
-    switch(kind){case ecs::AssetKind::Mesh:return LoadState<MeshResource>(resources,key);case ecs::AssetKind::Texture:return LoadState<TextureResource>(resources,key);case ecs::AssetKind::Material:return LoadState<MaterialResource>(resources,key);case ecs::AssetKind::Shader:return LoadState<ShaderResource>(resources,key);case ecs::AssetKind::Environment:return LoadState<EnvironmentResource>(resources,key);default:return "Indexed";}
+    switch(kind){case ecs::AssetKind::PostFx:return LoadState<PostFxResource>(resources,key);case ecs::AssetKind::Mesh:return LoadState<MeshResource>(resources,key);case ecs::AssetKind::Texture:return LoadState<TextureResource>(resources,key);case ecs::AssetKind::Material:return LoadState<MaterialResource>(resources,key);case ecs::AssetKind::Shader:return LoadState<ShaderResource>(resources,key);case ecs::AssetKind::Environment:return LoadState<EnvironmentResource>(resources,key);default:return "Indexed";}
 }
 template<class T>std::string LoadError(ResourceManager* resources,const std::string& key){
     auto asset=resources?resources->Get<T>(std::filesystem::u8path(key)):nullptr;return asset&&asset->IsFailed()?asset->GetErrorMessage():"";
 }
 std::string AssetLoadError(ResourceManager* resources,ecs::AssetKind kind,const std::string& key){
-    switch(kind){case ecs::AssetKind::Mesh:return LoadError<MeshResource>(resources,key);case ecs::AssetKind::Texture:return LoadError<TextureResource>(resources,key);case ecs::AssetKind::Material:return LoadError<MaterialResource>(resources,key);case ecs::AssetKind::Shader:return LoadError<ShaderResource>(resources,key);case ecs::AssetKind::Environment:return LoadError<EnvironmentResource>(resources,key);default:return {};}
+    switch(kind){case ecs::AssetKind::PostFx:return LoadError<PostFxResource>(resources,key);case ecs::AssetKind::Mesh:return LoadError<MeshResource>(resources,key);case ecs::AssetKind::Texture:return LoadError<TextureResource>(resources,key);case ecs::AssetKind::Material:return LoadError<MaterialResource>(resources,key);case ecs::AssetKind::Shader:return LoadError<ShaderResource>(resources,key);case ecs::AssetKind::Environment:return LoadError<EnvironmentResource>(resources,key);default:return {};}
 }
 }
 std::string EditorLayer::CreateLuaScriptAsset(Application& app,const std::string& directory){
@@ -249,6 +250,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
     if(ImGui::BeginTable("ContentItems",columns,ImGuiTableFlags_SizingStretchSame)){
         ImGuiListClipper clipper;clipper.Begin(int((rows.size()+columns-1)/columns),m_AssetGrid?cardHeight+ImGui::GetStyle().CellPadding.y*2:ImGui::GetFrameHeightWithSpacing());
         while(clipper.Step())for(int rowIndex=clipper.DisplayStart;rowIndex<clipper.DisplayEnd;++rowIndex){ImGui::TableNextRow();for(int col=0;col<columns;++col){auto index=rowIndex*columns+col;if(index>=int(rows.size()))break;ImGui::TableSetColumnIndex(col);const auto& entry=*rows[index];const auto& type=types[entry.type];const auto& key=entry.key;auto name=AssetPaths::ToUtf8String(std::filesystem::u8path(key).filename());ImGui::PushID(key.c_str());
+            if(type.kind==ecs::AssetKind::PostFx&&resources){auto r=resources->Get<PostFxResource>(key);if(!r)r=resources->Load<PostFxResource>(key);if(r->GetData().definition)name=r->GetData().definition->name;}
             const AssetThumbnail* thumbnail=nullptr;
             if(m_AssetGrid&&(type.kind==ecs::AssetKind::Texture||type.kind==ecs::AssetKind::Mesh))thumbnail=&RequestAssetThumbnail(app,type.kind,key);
             const char* state=thumbnail?thumbnail->state.c_str():AssetLoadState(resources,type.kind,key);

@@ -47,6 +47,7 @@ add_library(Engine
   jobs/JobSystem.cpp
   jobs/JobSystem.h
   resources/ResourceManager.cpp
+  resources/PostFxResource.cpp
   resources/loaders/MeshLoader.cpp
   resources/loaders/MaterialLoader.cpp
   resources/loaders/TextureLoader.cpp
@@ -131,6 +132,7 @@ if (WIN32 AND ENABLE_DX12)
     render/backends/dx12/Dx12EditorVisuals.cpp
     render/backends/dx12/Dx12Fog.cpp
     render/backends/dx12/Dx12Environment.cpp
+    render/backends/dx12/Dx12PostFx.cpp
     render/backends/dx12/Dx12SceneLights.cpp
   )
   target_link_libraries(Engine PRIVATE d3d12 dxgi dxguid d3dcompiler)

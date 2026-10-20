@@ -289,6 +289,8 @@ namespace ecs {
             if(warning!=m_FogWarning){m_FogWarning=warning;if(!warning.empty())Logger::Get().Warn(warning);}
             m_Renderer->SetFog(fog);
             m_Renderer->SetScreenEffects(m_EvaluatedPostProcess.screenEffects);
+            m_PostFxTime+=std::isfinite(dt)?std::max(dt,0.f):0;
+            if(m_ResourceManager)m_Renderer->SetCustomPostFx(ResolvePostFx(m_EvaluatedPostProcess.customEffects,*m_ResourceManager,m_PostFxOverrides,m_PostFxTime,dt));
         }
         if(m_Renderer){m_Renderer->SetCameraPosition({m_CameraPosition.x,m_CameraPosition.y,m_CameraPosition.z,0});
             m_Renderer->SetLighting(BuildLightingConstants(lights.lighting));

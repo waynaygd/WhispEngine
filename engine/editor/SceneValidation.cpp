@@ -209,6 +209,16 @@ struct Validator {
             if(auto* volume=world.GetComponent<PostProcessVolumeComponent>(e)){
                 component="PostProcessVolume";auto error=ValidatePostProcessVolume(*volume);if(!error.empty())Error("Invalid Post Process Volume",error);
                 else if(!volume->global&&!GetPostProcessBox(world,e,*volume))Error("Invalid Volume Transform","Local volume requires a valid nonsingular World Transform.");
+                std::set<std::string> effectIds;
+                for(auto& effect:volume->customEffects){
+                    auto loaded=PostFxLoader::Load(effect.resource,{});auto d=loaded.data.definition;
+                    if(!loaded.success){Error("Missing or Invalid Custom PostFX",loaded.errorMessage,"customEffects");continue;}
+                    if(effect.id!=d->id||!effectIds.insert(effect.id).second)Error("Unknown or Duplicate Effect ID",effect.id,"customEffects");
+                    if(resources&&resources->PostFxDuplicate(effect.id))Error("Duplicate effect ID",effect.id,"customEffects");
+                    if(!std::isfinite(effect.weight)||effect.weight<0||effect.weight>1)Error("Invalid Custom PostFX Weight",effect.id,"customEffects");
+                    if(!effect.parameters.is_object()){Error("Invalid Custom PostFX Overrides",effect.id,"customEffects");continue;}
+                    for(auto it=effect.parameters.begin();it!=effect.parameters.end();++it){auto p=std::find_if(d->parameters.begin(),d->parameters.end(),[&](auto& p){return p.name==it.key();});if(p==d->parameters.end()||!p->Valid(it.value()))Error("Incompatible Custom PostFX Parameter",effect.id+" / "+it.key(),"customEffects");}
+                }
             }
             if(auto* script=world.GetComponent<LuaScriptComponent>(e)){
                 component="LuaScript";try{Script(*script);}catch(const std::exception& error){Error("Invalid Lua Fields",error.what());}

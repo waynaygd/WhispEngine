@@ -269,6 +269,15 @@ if (WHISP_BUILD_PHYSICS_TESTS)
     endif()
     add_test(NAME ScreenEffectsRegression COMMAND ScreenEffectsRegression)
     set_tests_properties(ScreenEffectsRegression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" RUN_SERIAL TRUE ENVIRONMENT "WHISP_DX12_DEBUG=1")
+    add_executable(CustomPostFxRegression tests/CustomPostFxRegression.cpp)
+    target_link_libraries(CustomPostFxRegression PRIVATE Engine DearImGui ImGuizmo)
+    target_compile_definitions(CustomPostFxRegression PRIVATE ENABLE_DX12=1)
+    add_dependencies(CustomPostFxRegression LuaGameplayAssets MaterialShaderSources EditorPrimitiveFixtures IblFixtures)
+    if(TARGET Tracy::TracyClient)
+      target_link_libraries(CustomPostFxRegression PRIVATE Tracy::TracyClient)
+    endif()
+    add_test(NAME CustomPostFxRegression COMMAND CustomPostFxRegression)
+    set_tests_properties(CustomPostFxRegression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" RUN_SERIAL TRUE ENVIRONMENT "WHISP_DX12_DEBUG=1")
     add_executable(WorkspaceRegression tests/WorkspaceRegression.cpp)
     target_link_libraries(WorkspaceRegression PRIVATE Engine DearImGui ImGuizmo)
     target_compile_definitions(WorkspaceRegression PRIVATE ENABLE_DX12=1)
@@ -424,6 +433,7 @@ add_custom_target(HierarchyDemoAssets
 add_executable(WhispEngine WhispEngine.cpp)
 add_dependencies(WhispEngine HierarchyDemoAssets)
 add_custom_target(LuaGameplayAssets ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/engine/assets/postfx ${CMAKE_BINARY_DIR}/assets/postfx
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/engine/assets/scripts ${CMAKE_BINARY_DIR}/assets/scripts
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/engine/assets/prefabs ${CMAKE_BINARY_DIR}/assets/prefabs
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets/scenes
