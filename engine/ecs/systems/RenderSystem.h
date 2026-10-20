@@ -155,8 +155,8 @@ private:
     float m_CameraPitch = 0.0f;
     float m_CameraVerticalFovRadians = 1.04719755f;
     float m_CameraAspectRatio = 16.0f / 9.0f;
-    float m_CameraNearPlane = 0.01f;
-    float m_CameraFarPlane = 100.0f;
+    float m_CameraNearPlane = 0.1f;
+    float m_CameraFarPlane = 2000.0f;
     std::unordered_map<std::string, ResourceHandle<MeshResource>> m_MeshResources;
     std::unordered_map<std::string, ResourceHandle<TextureResource>> m_TextureResources;
     std::unordered_map<std::string, ResourceHandle<ShaderResource>> m_ShaderResources;

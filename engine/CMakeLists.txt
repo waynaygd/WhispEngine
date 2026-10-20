@@ -96,6 +96,7 @@ add_library(Engine
   editor/AssetImport.cpp
   editor/EditorImportUi.cpp
   editor/LightGizmos.cpp
+  editor/MeshOcclusion.cpp
   render/RenderFactory.cpp
   platform/GlfwWindow.cpp
   platform/InputManager.cpp

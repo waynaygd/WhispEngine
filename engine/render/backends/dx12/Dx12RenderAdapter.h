@@ -97,6 +97,8 @@ public:
     std::uint64_t GetShadowPreviewTextureId() const override;
     std::array<unsigned,2> ProbeMsaaSupport(unsigned samples)const {std::array<unsigned,2> result{};int index=0;for(auto format:{DXGI_FORMAT_R32G32B32A32_FLOAT,DXGI_FORMAT_D32_FLOAT}){D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS data{format,samples,D3D12_MULTISAMPLE_QUALITY_LEVELS_FLAG_NONE,0};if(m_Device&&SUCCEEDED(m_Device->CheckFeatureSupport(D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS,&data,sizeof(data))))result[index]=data.NumQualityLevels;++index;}return result;}
     RenderGpuTimings GetGpuTimings() const override { return m_GpuTimings; }
+    // CPU waits only: begin-frame slot fence, swapchain Present, submitted-frame fence.
+    std::array<double,3> GetCpuWaitMs()const{return m_CpuWaitMs;}
     std::vector<float> ReadBackShadowDepth();
     unsigned GetValidationErrorCount() const;
     struct MaterialBindingRecord {unsigned frameSlot=0;std::array<std::uint64_t,5> textures{};std::uint64_t descriptor=0;unsigned availableMaps=0;};
@@ -214,7 +216,7 @@ private:
     UINT m_TimePassCount=0,m_TimeCurrentPass=UINT_MAX;
     UINT m_TimePending[FrameCount]{};
     bool m_TimeOverflow=false,m_TimeComplete[FrameCount]{};
-    RenderGpuTimings m_GpuTimings{};
+    RenderGpuTimings m_GpuTimings{};std::array<double,3> m_CpuWaitMs{};
 
 	struct UploadedMesh
 	{

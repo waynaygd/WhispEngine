@@ -1,6 +1,7 @@
 #define NOMINMAX
 #include "EditorLayer.h"
 #include "LightGizmoMath.h"
+#include "MeshOcclusion.h"
 #include "../core/Application.h"
 #include "../ecs/LightGather.h"
 #include "../ecs/PlayerSpawn.h"
@@ -33,7 +34,7 @@ V Sub(V a,V b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
 V Scale(V a,float b){return {a.x*b,a.y*b,a.z*b};}
 float Dot(V a,V b){return a.x*b.x+a.y*b.y+a.z*b.z;}
 V Cross(V a,V b){return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};}
-struct Occluder {ResourceHandle<MeshResource> mesh;std::array<float,12> inverse;V translation,min,max;};
+struct Occluder {ResourceHandle<MeshResource> mesh;std::array<float,12> inverse;V translation,min,max;std::shared_ptr<const MeshOcclusion> occlusion;};
 V Inverse(V p,const std::array<float,12>& n){return {n[0]*p.x+n[4]*p.y+n[8]*p.z,n[1]*p.x+n[5]*p.y+n[9]*p.z,n[2]*p.x+n[6]*p.y+n[10]*p.z};}
 float HitDistance(V eye,V direction,const Occluder& o,float maximum,V* normal=nullptr)
 {
@@ -56,18 +57,23 @@ float HitDistance(V eye,V direction,const Occluder& o,float maximum,V* normal=nu
 }
 bool Occluded(V eye,V target,const std::vector<Occluder>& objects){
     V delta=Sub(target,eye);float distance=std::sqrt(Dot(delta,delta));if(distance<1e-5f)return false;
-    V direction=Scale(delta,1/distance);for(const auto& o:objects)if(HitDistance(eye,direction,o,distance-.03f)<distance-.03f)return true;return false;
+    V direction=Scale(delta,1/distance);for(const auto& o:objects){
+        const float maximum=distance-.03f;
+        if(o.occlusion){if(o.occlusion->AnyHit(o.mesh->GetData().meshData,Inverse(Sub(eye,o.translation),o.inverse),Inverse(direction,o.inverse),maximum))return true;}
+        else if(HitDistance(eye,direction,o,maximum)<maximum)return true;
+    }return false;
 }
-Occluder Bounds(ResourceHandle<MeshResource> mesh,const ecs::RenderPose& pose){
+Occluder Bounds(ResourceHandle<MeshResource> mesh,const ecs::RenderPose& pose,bool accelerate=false){
     std::array<float,16> model;ecs::BuildRenderModelMatrix(model.data(),pose);auto inv=BuildNormalMatrix(model);
-    struct CachedBounds {std::weak_ptr<Resource<MeshResource>> owner;std::uint64_t version=0;V lo,hi;};
+    struct CachedBounds {std::weak_ptr<Resource<MeshResource>> owner;std::uint64_t version=0;V lo,hi;std::shared_ptr<const MeshOcclusion> occlusion;};
     static thread_local std::unordered_map<const void*,CachedBounds> cache;
+    if(cache.size()>64)std::erase_if(cache,[](auto& entry){return entry.second.owner.expired();});
     if(cache.size()>4096)cache.clear();auto& c=cache[mesh.get()];
     if(c.owner.lock()!=mesh||c.version!=mesh->GetVersion()){
-        c.owner=mesh;c.version=mesh->GetVersion();c.lo={INFINITY,INFINITY,INFINITY};c.hi={-INFINITY,-INFINITY,-INFINITY};
+        c.owner=mesh;c.version=mesh->GetVersion();c.occlusion.reset();c.lo={INFINITY,INFINITY,INFINITY};c.hi={-INFINITY,-INFINITY,-INFINITY};
         for(const auto& v:mesh->GetData().meshData.vertices){c.lo.x=std::min(c.lo.x,v.position[0]);c.lo.y=std::min(c.lo.y,v.position[1]);c.lo.z=std::min(c.lo.z,v.position[2]);c.hi.x=std::max(c.hi.x,v.position[0]);c.hi.y=std::max(c.hi.y,v.position[1]);c.hi.z=std::max(c.hi.z,v.position[2]);}
-    }V lo=c.lo,hi=c.hi;
-    return {mesh,inv,pose.position,lo,hi};
+    }if(accelerate&&!c.occlusion)c.occlusion=std::make_shared<MeshOcclusion>(mesh->GetData().meshData);V lo=c.lo,hi=c.hi;
+    return {mesh,inv,pose.position,lo,hi,c.occlusion};
 }
 
 }
@@ -83,7 +89,7 @@ void EditorLayer::DrawLightGizmos(Application& app,IRenderAdapter*,const ImVec2&
     auto& world=app.GetWorld();std::vector<Occluder> occluders;
     if(app.GetResourceManager())world.ForEach<ecs::TransformComponent,ecs::MeshRendererComponent>([&](ecs::Entity e,auto& t,auto& m){
         if(!m.visible||!EditorEntityVisible(app,e))return;auto mesh=app.GetResourceManager()->Get<MeshResource>(m.meshPath);if(!mesh||!mesh->IsLoaded()||mesh->GetData().meshData.vertices.empty())return;
-        auto pose=app.GetRenderInterpolation().ResolveWorld(world,e);auto bounds=Bounds(mesh,pose);
+        auto pose=app.GetRenderInterpolation().ResolveWorld(world,e);auto bounds=Bounds(mesh,pose,true);
         if(bounds.inverse!=std::array<float,12>{})occluders.push_back(std::move(bounds));
     });
     auto* draw=ImGui::GetWindowDrawList();draw->PushClipRect(origin,ImVec2(origin.x+size.x,origin.y+size.y),true);

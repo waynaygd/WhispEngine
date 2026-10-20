@@ -229,8 +229,8 @@ private:
         float yaw = 0.0f;
         float pitch = 0.0f;
         float verticalFovRadians = 1.04719755f;
-        float nearPlane = 0.01f;
-        float farPlane = 100.0f;
+        float nearPlane = 0.1f;
+        float farPlane = 2000.0f;
         float moveSpeed = 1.8f;
         float minMoveSpeed = 0.2f;
         float maxMoveSpeed = 25.0f;

@@ -1,3 +1,4 @@
+#include <chrono>
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -1813,12 +1814,14 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
 void Dx12RenderAdapter::BeginFrame()
 {
     ZoneScopedN("DX12BeginFrame");
-    ResizeBackBufferIfNeeded();
+    m_CpuWaitMs={};ResizeBackBufferIfNeeded();
+    const auto slotWaitStart=std::chrono::steady_clock::now();
     // Never reset/write a slot until its submitted GPU work has completed.
     if(m_Fence->GetCompletedValue()<m_InstanceFrameFence[m_FrameIndex]) {
         ThrowIfFailed(m_Fence->SetEventOnCompletion(m_InstanceFrameFence[m_FrameIndex],m_FenceEvent),"Instance slot fence failed");
         WaitForSingleObject(m_FenceEvent,INFINITE);
     }
+    m_CpuWaitMs[0]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-slotWaitStart).count();
     m_RetiredResources[m_FrameIndex].clear();
     for(auto descriptor:m_RetiredTextureDescriptors[m_FrameIndex])m_FreeTextureDescriptorIndices.push_back(descriptor);
     m_RetiredTextureDescriptors[m_FrameIndex].clear();
@@ -2001,7 +2004,9 @@ void Dx12RenderAdapter::EndFrame()
 void Dx12RenderAdapter::Present()
 {
     ZoneScopedN("DX12Present");
+    const auto presentStart=std::chrono::steady_clock::now();
     ThrowIfFailed(m_Swapchain->Present(0, 0), "Present failed");
+    m_CpuWaitMs[1]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-presentStart).count();
     const UINT submitted=m_FrameIndex;
     MoveToNextFrame();
     CollectGpuTiming(submitted);
@@ -2016,12 +2021,14 @@ void Dx12RenderAdapter::MoveToNextFrame()
     m_InstanceFrameFence[m_FrameIndex]=fenceToWait;
     m_FrameIndex = m_Swapchain->GetCurrentBackBufferIndex();
 
+    const auto frameWaitStart=std::chrono::steady_clock::now();
     if (m_Fence->GetCompletedValue() < fenceToWait)
     {
         ThrowIfFailed(m_Fence->SetEventOnCompletion(fenceToWait, m_FenceEvent), "Fence SetEventOnCompletion failed");
         ZoneScopedN("DX12FrameFenceWait");
         WaitForSingleObject(m_FenceEvent, INFINITE);
     }
+    m_CpuWaitMs[2]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-frameWaitStart).count();
 }
 
 void Dx12RenderAdapter::WaitForGpu()
