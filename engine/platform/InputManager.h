@@ -19,6 +19,7 @@ public:
     void BeginFrame();
     void SampleFrame(const std::function<bool(int)>& keys,const std::function<bool(int)>& buttons,double x,double y);
     bool FrameDown(const std::string&)const;
+    bool IsMouseAction(const std::string& action)const{auto it=m_ActionMap.find(action);return it!=m_ActionMap.end()&&it->second<=-2;}
     bool FramePressed(const std::string&)const;
     bool FrameReleased(const std::string&)const;
     std::vector<std::string> Actions()const{std::vector<std::string> names;for(const auto& [name,key]:m_ActionMap)names.push_back(name);return names;}

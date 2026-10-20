@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 class ResourceManager;
+namespace ui {class RuntimeUI;}
 namespace scripting {
 // Host capabilities; no Lua or renderer ownership. Follow is resolved by the
 // host after physics using the same interpolated pose as scene rendering.
@@ -24,5 +25,9 @@ struct GameplayServices {
     std::function<std::vector<std::string>()> actions;
     ResourceManager* postfxResources=nullptr;
     GameplayCamera* camera=nullptr;
+    ui::RuntimeUI* runtimeUI=nullptr;
+    std::function<void(const std::string&)> setUIInputMode;
+    std::function<std::string()> getUIInputMode;
+    std::function<void()> resetUIInput;
 };
 }

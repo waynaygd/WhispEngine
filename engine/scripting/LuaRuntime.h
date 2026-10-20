@@ -27,6 +27,7 @@ public:
     const PostFxRuntimeOverrides& PostFxOverrides()const;
     GameplayEventHistory& Events();
     void Update(float dt);
+    void DispatchUIEvents();
     void FixedUpdate(float dt);
     void SuspendInput();
     void QueueCollision(const ecs::CollisionEvent&);

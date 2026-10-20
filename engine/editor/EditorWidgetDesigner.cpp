@@ -42,7 +42,8 @@ bool EditorLayer::WidgetCommand(Application& app,const std::string& command,cons
   if(command=="Add"){
    if(next.widgets.empty()){auto root=ui::EmptyDocument().widgets[0];next.root=root.id;next.widgets.push_back(root);}ui::Widget w;w.id=argument;w.type=argument;w.position={16,16};w.text=argument=="Text"?"Text":"";
    while(std::any_of(next.widgets.begin(),next.widgets.end(),[&](auto& n){return n.id==w.id;}))w.id+="_";
-   auto p=std::find_if(next.widgets.begin(),next.widgets.end(),[&](auto& n){return n.id==id&&n.type=="Panel";});w.parent=p==next.widgets.end()?next.root:p->id;selected=w.id;next.widgets.push_back(w);
+   auto p=std::find_if(next.widgets.begin(),next.widgets.end(),[&](auto& n){return n.id==id&&(n.type=="Panel"||n.type=="Button");});w.parent=p==next.widgets.end()?next.root:p->id;selected=w.id;if(w.type=="Button")w.color={.15f,.25f,.4f,1};next.widgets.push_back(w);
+   if(w.type=="Button"){ui::Widget text;text.id=w.id+"_Label";while(std::any_of(next.widgets.begin(),next.widgets.end(),[&](auto& n){return n.id==text.id;}))text.id+="_";text.type="Text";text.parent=w.id;text.anchorMax={1,0};text.position={0,16};text.size={0,36};text.text="Button";text.textAlignment=1;next.widgets.push_back(text);}
   }else if(command=="Delete"){widgets::Delete(next,id);selected=next.root;}
   else if(command=="Duplicate")selected=widgets::Duplicate(next,id);
   else if(command=="Rename"){widgets::Rename(next,id,argument);selected=argument;}
@@ -130,7 +131,7 @@ void EditorLayer::DrawUIDesigner(Application& app){
  if(m_ShowWidgetHierarchy){
   if(ImGui::Begin("Widget Hierarchy",&m_ShowWidgetHierarchy)&&!m_DesignDocument.empty())try{
    auto& s=UIDocumentSession(app,m_DesignDocument);ImGui::SetNextItemWidth(-FLT_MIN);ImGui::InputTextWithHint("##Widget Search","Search ID / type",&m_WidgetSearch);
-   ImGui::BeginDisabled(app.IsEditorPlayMode()||bool(m_UIWidgetDrag));ImGui::SetNextItemWidth(-FLT_MIN);if(ImGui::BeginCombo("##Add Widget","Add Widget...")){for(auto* type:{"Panel","Text","Image","ProgressBar"})if(ImGui::Selectable(type))WidgetCommand(app,"Add",type);ImGui::EndCombo();}
+   ImGui::BeginDisabled(app.IsEditorPlayMode()||bool(m_UIWidgetDrag));ImGui::SetNextItemWidth(-FLT_MIN);if(ImGui::BeginCombo("##Add Widget","Add Widget...")){for(auto* type:{"Panel","Text","Image","ProgressBar","Button"})if(ImGui::Selectable(type))WidgetCommand(app,"Add",type);ImGui::EndCombo();}
    if(ImGui::Button("Duplicate"))WidgetCommand(app,"Duplicate");ImGui::SameLine();if(ImGui::Button("Delete"))WidgetCommand(app,"Delete");
    if(ImGui::Button("Earlier"))WidgetCommand(app,"Earlier");ImGui::SameLine();if(ImGui::Button("Later"))WidgetCommand(app,"Later");
    // Traverse a stable copy: commands can replace the draft while a tree is being drawn.

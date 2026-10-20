@@ -7,32 +7,39 @@
 #include <set>
 namespace ui {
 using Json=nlohmann::json;
-void to_json(Json& j,const Widget& v){j={{"id",v.id},{"parent",v.parent},{"type",v.type},{"text",v.text},{"texture",v.texture},{"anchorMin",v.anchorMin},{"anchorMax",v.anchorMax},{"pivot",v.pivot},{"position",v.position},{"size",v.size},{"color",v.color},{"fillColor",v.fillColor},{"opacity",v.opacity},{"fontSize",v.fontSize},{"value",v.value},{"zOrder",v.zOrder},{"textAlignment",v.textAlignment},{"visible",v.visible},{"clipChildren",v.clipChildren},{"uv",v.uv}};}
+void to_json(Json& j,const Widget& v){j={{"id",v.id},{"parent",v.parent},{"type",v.type},{"text",v.text},{"texture",v.texture},{"anchorMin",v.anchorMin},{"anchorMax",v.anchorMax},{"pivot",v.pivot},{"position",v.position},{"size",v.size},{"color",v.color},{"fillColor",v.fillColor},{"opacity",v.opacity},{"fontSize",v.fontSize},{"value",v.value},{"zOrder",v.zOrder},{"textAlignment",v.textAlignment},{"visible",v.visible},{"clipChildren",v.clipChildren},{"uv",v.uv}};if(v.type=="Button"){j["enabled"]=v.enabled;j["hoverColor"]=v.hoverColor;j["pressedColor"]=v.pressedColor;j["disabledColor"]=v.disabledColor;}}
 void from_json(const Json& j,Widget& v){v.id=j.at("id").get<std::string>();v.type=j.at("type").get<std::string>();
 #define UI_READ(field) if(j.contains(#field))j.at(#field).get_to(v.field);
- UI_READ(parent) UI_READ(text) UI_READ(texture) UI_READ(anchorMin) UI_READ(anchorMax) UI_READ(pivot) UI_READ(position) UI_READ(size) UI_READ(color) UI_READ(fillColor) UI_READ(opacity) UI_READ(fontSize) UI_READ(value) UI_READ(zOrder) UI_READ(textAlignment) UI_READ(visible) UI_READ(clipChildren) UI_READ(uv)
+ UI_READ(parent) UI_READ(text) UI_READ(texture) UI_READ(anchorMin) UI_READ(anchorMax) UI_READ(pivot) UI_READ(position) UI_READ(size) UI_READ(color) UI_READ(fillColor) UI_READ(opacity) UI_READ(fontSize) UI_READ(value) UI_READ(zOrder) UI_READ(textAlignment) UI_READ(visible) UI_READ(clipChildren) UI_READ(uv) UI_READ(enabled) UI_READ(hoverColor) UI_READ(pressedColor) UI_READ(disabledColor)
 #undef UI_READ
 }
-void to_json(Json& j,const Document& d){j={{"version",1},{"name",d.name},{"enabled",d.enabled},{"referenceResolution",d.referenceResolution},{"scaleMode",d.scaleMode},{"sortOrder",d.sortOrder},{"root",d.root},{"widgets",d.widgets}};}
-void from_json(const Json& j,Document& d){if(j.at("version")!=1)throw std::runtime_error("Unsupported UI document version");d.name=j.value("name",std::string("Canvas"));d.enabled=j.value("enabled",true);d.referenceResolution=j.value("referenceResolution",Pair{1920,1080});d.scaleMode=j.value("scaleMode",0);d.sortOrder=j.value("sortOrder",0);d.root=j.at("root").get<std::string>();if(!j.at("widgets").is_array()||j.at("widgets").size()>2048)throw std::runtime_error("UI document supports at most 2048 widgets");d.widgets=j.at("widgets").get<std::vector<Widget>>();auto error=Validate(d);if(!error.empty())throw std::runtime_error(error);}
+void to_json(Json& j,const Document& d){j={{"version",1},{"name",d.name},{"enabled",d.enabled},{"referenceResolution",d.referenceResolution},{"scaleMode",d.scaleMode},{"sortOrder",d.sortOrder},{"root",d.root},{"widgets",d.widgets}};if(!d.requiredWidgets.empty())j["requiredWidgets"]=d.requiredWidgets;}
+void from_json(const Json& j,Document& d){if(j.at("version")!=1)throw std::runtime_error("Unsupported UI document version");d.name=j.value("name",std::string("Canvas"));d.enabled=j.value("enabled",true);d.referenceResolution=j.value("referenceResolution",Pair{1920,1080});d.scaleMode=j.value("scaleMode",0);d.sortOrder=j.value("sortOrder",0);d.root=j.at("root").get<std::string>();if(!j.at("widgets").is_array()||j.at("widgets").size()>2048)throw std::runtime_error("UI document supports at most 2048 widgets");d.widgets=j.at("widgets").get<std::vector<Widget>>();if(j.contains("requiredWidgets"))d.requiredWidgets=j.at("requiredWidgets").get<std::vector<std::string>>();auto error=Validate(d);if(!error.empty())throw std::runtime_error(error);}
+bool ValidUTF8(const std::string& text){
+ for(size_t i=0;i<text.size();){unsigned c=(unsigned char)text[i++];if(c<128){if(c==0)return false;continue;}unsigned n=0,value=0,minimum=0;
+  if(c>=0xc2&&c<=0xdf){n=1;value=c&31;minimum=128;}else if(c>=0xe0&&c<=0xef){n=2;value=c&15;minimum=2048;}else if(c>=0xf0&&c<=0xf4){n=3;value=c&7;minimum=65536;}else return false;
+  if(i+n>text.size())return false;while(n--){unsigned b=(unsigned char)text[i++];if((b&192)!=128)return false;value=(value<<6)|(b&63);}if(value<minimum||value>0x10ffff||(value>=0xd800&&value<=0xdfff))return false;
+ }return true;
+}
 std::string Validate(const Document& d){
  auto range=[](float x,float lo,float hi){return std::isfinite(x)&&x>=lo&&x<=hi;};
- if(d.scaleMode!=0||d.name.size()>256||d.widgets.size()>2048)return "Unsupported UI scale mode or document size";
+ if(d.scaleMode!=0||(!ValidUTF8(d.name)||d.name.size()>256)||d.widgets.size()>2048||d.requiredWidgets.size()>2048)return "Unsupported UI scale mode or document size";
  for(float n:d.referenceResolution)if(!range(n,1,16384))return "Invalid Canvas reference resolution";
  if(d.sortOrder<-1000000||d.sortOrder>1000000)return "Invalid Canvas Sort Order";
  std::map<std::string,const Widget*> index;
- for(auto& w:d.widgets){if(w.id.empty()||w.id.size()>128||!index.emplace(w.id,&w).second)return "Invalid or duplicate Widget ID";
-  if(w.type!="Panel"&&w.type!="Text"&&w.type!="Image"&&w.type!="ProgressBar")return "Unknown Widget Type: "+w.type;
+ for(auto& w:d.widgets){if(w.id.empty()||!ValidUTF8(w.id)||!ValidUTF8(w.text)||w.id.size()>128||!index.emplace(w.id,&w).second)return "Invalid or duplicate Widget ID";
+  if(w.type!="Panel"&&w.type!="Text"&&w.type!="Image"&&w.type!="ProgressBar"&&w.type!="Button")return "Unknown Widget Type: "+w.type;
   if(w.text.size()>16384||!range(w.opacity,0,1)||!range(w.fontSize,1,256)||!range(w.value,0,1)||w.textAlignment<0||w.textAlignment>2||w.zOrder<-1000000||w.zOrder>1000000)return "Invalid widget opacity/font/progress/alignment/order: "+w.id;
   for(int axis=0;axis<2;++axis){if(!range(w.anchorMin[axis],0,1)||!range(w.anchorMax[axis],0,1)||w.anchorMin[axis]>w.anchorMax[axis]||!range(w.pivot[axis],0,1)||!range(w.position[axis],-100000,100000)||!range(w.size[axis],-100000,100000)||(w.anchorMin[axis]==w.anchorMax[axis]&&w.size[axis]<0))return "Invalid widget anchors/position/size: "+w.id;}
-  for(auto& color:{w.color,w.fillColor})for(float n:color)if(!range(n,0,1))return "Invalid widget color: "+w.id;
+  for(auto& color:{w.color,w.fillColor,w.hoverColor,w.pressedColor,w.disabledColor})for(float n:color)if(!range(n,0,1))return "Invalid widget color: "+w.id;
   for(float n:w.uv)if(!range(n,0,1))return "Invalid image UV rectangle: "+w.id;
   if(w.uv[0]>w.uv[2]||w.uv[1]>w.uv[3])return "Reversed image UV rectangle: "+w.id;
   if(!w.texture.empty()&&!ecs::ComponentRegistry::ValidateAssetKey(w.texture,ecs::AssetKind::Texture))return "Invalid Image texture path: "+w.id;
  }
+ for(const auto& id:d.requiredWidgets)if(!index.contains(id))return "Missing required Widget ID: "+id;
  if(d.widgets.empty())return d.root.empty()?std::string():"Empty Canvas must have an empty root";
  if(!index.contains(d.root)||!index[d.root]->parent.empty()||index[d.root]->type!="Panel")return "UI root must be a parentless Panel";
- for(auto& w:d.widgets){const Widget* node=&w;std::set<std::string> seen;while(node->id!=d.root){if(!seen.insert(node->id).second||seen.size()>64)return "Cycle or excessive UI nesting";auto parent=index.find(node->parent);if(parent==index.end()||parent->second->type!="Panel")return "Widget requires a Panel parent: "+node->id;node=parent->second;}}
+ for(auto& w:d.widgets){const Widget* node=&w;std::set<std::string> seen;while(node->id!=d.root){if(!seen.insert(node->id).second||seen.size()>64)return "Cycle or excessive UI nesting";auto parent=index.find(node->parent);if(parent==index.end()||(parent->second->type!="Panel"&&parent->second->type!="Button"))return "Widget requires a Panel parent: "+node->id;node=parent->second;}}
  return {};
 }
 std::filesystem::path SafeDocumentPath(const std::string& key){if(!key.ends_with(".ui.json"))throw std::runtime_error("Expected .ui.json document");return PostFxLoader::SafePath(key);}

@@ -675,7 +675,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     }
 
     DrawPlacementTarget(app,contentMin,viewportSize);
-    m_ViewportHovered=ImGui::IsItemHovered();
+    m_ViewportHovered=ImGui::IsItemHovered(playMode?ImGuiHoveredFlags_AllowWhenBlockedByActiveItem:ImGuiHoveredFlags_None);
     if(maximized&&showEditorControls){
         // The image already registered the full content bounds. Create is the
         // final layout item; the remaining helpers only submit draw-list data.
@@ -685,6 +685,13 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
         if(DrawViewportCreateMenu(app))m_ViewportHovered=false;
         ImGui::SameLine();if(DrawPlacementMenu(app))m_ViewportHovered=false;
         ImGui::SameLine();if(DrawViewportTools(app))m_ViewportHovered=false;
+    }
+    // A Play click belongs to the viewport content. Keeping its existing input
+    // ID active prevents ImGui from dragging the window behind a held UI Button.
+    if(playMode){
+        auto* viewport=ImGui::GetCurrentWindow();const auto id=viewport->GetID("ViewportCanvas");
+        if(m_ViewportHovered&&ImGui::IsMouseClicked(0)&&!BlocksGameplayInput())ImGui::SetActiveID(id,viewport);
+        if(ImGui::GetActiveID()==id){ImGui::KeepAliveID(id);if(!ImGui::IsMouseDown(0))ImGui::ClearActiveID();}
     }
     if(m_ViewportHovered&&ImGui::IsMouseClicked(1))ImGui::SetWindowFocus();
     if(m_ViewportHovered&&ImGui::IsMouseClicked(0))ImGui::SetWindowFocus();

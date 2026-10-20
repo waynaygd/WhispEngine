@@ -1126,7 +1126,7 @@ void Application::SetEditorPlayMode(bool enabled)
             m_Camera.yaw=t.rotation.y;m_Camera.pitch=std::clamp(spawnPoint.rotation.x,-kMaxCameraPitch,kMaxCameraPitch);
         }
         m_GameplayCamera={};m_GameplayCamera.position=m_Camera.position;m_GameplayCamera.yaw=m_Camera.yaw;m_GameplayCamera.pitch=m_Camera.pitch;
-        m_LuaRuntime.Start(*m_RuntimeWorld,[this](const std::string& action){return GameplayInputAllowed()&&m_InputManager.FrameDown(action);},GameplayCapabilities());
+        m_LuaRuntime.Start(*m_RuntimeWorld,[this](const std::string& action){return GameplayActionAllowed(action)&&m_InputManager.FrameDown(action);},GameplayCapabilities());
         m_StateMachine.Clear(*this);RequestStateChange(std::make_unique<LoadingState>());m_StateMachine.ApplyPending(*this);
         m_LastCloneMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
     }else{
@@ -1498,6 +1498,7 @@ int Application::Run()
             ZoneScopedN("GameUpdate");
 
             if(m_EditorPlayMode)UpdateGameplayInput();
+            if(m_EditorPlayMode)m_LuaRuntime.DispatchUIEvents();
             const auto luaStart=std::chrono::steady_clock::now();
             if(IsSimulationRunning())m_LuaRuntime.Update(dt);
             if(m_FrameObserver)m_FrameCpuMs[1]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-luaStart).count();
@@ -1740,12 +1741,12 @@ void Application::ReleasePlayerMouse()
 }
 bool Application::GameplayInputAllowed() const
 {
-    if(!IsSimulationRunning())return false;
+    if(!IsSimulationRunning()||m_UIInputMode==ui::InputMode::UIOnly)return false;
     auto* primary=dynamic_cast<GlfwWindow*>(const_cast<Application*>(this)->GetWindow());
     auto* window=primary?primary->GetGlfwHandle():nullptr;
     if(!window||!glfwGetWindowAttrib(window,GLFW_FOCUSED)||m_EditorLayer.BlocksGameplayInput())return false;
-    double x=0,y=0;glfwGetCursorPos(window,&x,&y);
-    return m_PlayerMouseCaptured||m_EditorLayer.IsPointInsideViewport(x,y);
+    const auto pointer=primary->PointerPosition();
+    return m_PlayerMouseCaptured||m_EditorLayer.IsPointInsideViewport(pointer[0],pointer[1]);
 }
 bool Application::CaptureGameplayCursor(bool capture)
 {
@@ -1756,9 +1757,19 @@ bool Application::CaptureGameplayCursor(bool capture)
     if(!m_PlayerMouseCaptured){glfwSetInputMode(window,GLFW_CURSOR,GLFW_CURSOR_DISABLED);if(glfwRawMouseMotionSupported())glfwSetInputMode(window,GLFW_RAW_MOUSE_MOTION,GLFW_TRUE);m_PlayerMouseCaptured=true;m_InputManager.ResetMouseDelta();}
     return true;
 }
+std::string Application::GetUIInputMode()const{return m_UIInputMode==ui::InputMode::UIOnly?"UIOnly":m_UIInputMode==ui::InputMode::GameAndUI?"GameAndUI":"GameOnly";}
+void Application::SetUIInputMode(const std::string& value){
+    if(!m_EditorPlayMode)throw std::runtime_error("UI input mode requires Play");
+    ui::InputMode next;if(value=="GameOnly")next=ui::InputMode::GameOnly;else if(value=="UIOnly")next=ui::InputMode::UIOnly;else if(value=="GameAndUI")next=ui::InputMode::GameAndUI;else throw std::runtime_error("Unknown UI input mode: "+value);
+    m_UIInputMode=next;GetRuntimeUI().CancelPointer();
+    if(next==ui::InputMode::GameOnly)CaptureGameplayCursor(true);else ReleasePlayerMouse();
+    m_InputManager.ResetMouseDelta();
+}
+bool Application::GameplayActionAllowed(const std::string& action)const{return GameplayInputAllowed()&&!(m_UIPointerConsumed&&m_InputManager.IsMouseAction(action));}
 void Application::UpdateGameplayInput()
 {
-    m_InputManager.BeginFrame();
+    m_InputManager.BeginFrame();m_UIPointerConsumed=false;
+    if(m_RenderSystem&&m_ResourceManager)GetRuntimeUI().Sync(GetWorld(),*m_ResourceManager);
     auto* primary=dynamic_cast<GlfwWindow*>(GetWindow());auto* window=primary?primary->GetGlfwHandle():nullptr;
     if(!window)return;
     const bool focused=glfwGetWindowAttrib(window,GLFW_FOCUSED)==GLFW_TRUE;
@@ -1767,18 +1778,28 @@ void Application::UpdateGameplayInput()
     if(focused&&!text&&glfwGetKey(window,GLFW_KEY_ESCAPE)==GLFW_PRESS){SetEditorPlayMode(false);return;}
     if(!focused||!IsSimulationRunning()||text||(tab&&!m_PlayerAltWasDown))ReleasePlayerMouse();
     m_PlayerAltWasDown=tab;
+    if(m_UIInputMode==ui::InputMode::UIOnly)ReleasePlayerMouse();
+    const auto pointer=primary->PointerPosition();double x=pointer[0],y=pointer[1];const auto bounds=m_EditorLayer.GetViewportBounds();
+    const float width=float(m_EditorLayer.GetViewportPixelWidth()),height=float(m_EditorLayer.GetViewportPixelHeight());
+    const bool inside=m_EditorLayer.IsPointInsideViewport(x,y);
+    const bool available=focused&&!text&&!IsGameplayMouseCaptured()&&m_UIInputMode!=ui::InputMode::GameOnly;
+    float px=-1,py=-1;if(inside&&m_EditorLayer.IsViewportHovered()&&bounds[2]>bounds[0]&&bounds[3]>bounds[1]){px=float((x-bounds[0])*width/(bounds[2]-bounds[0]));py=float((y-bounds[1])*height/(bounds[3]-bounds[1]));}
+    m_UIPointerConsumed=GetRuntimeUI().Pointer(px,py,width,height,glfwGetMouseButton(window,GLFW_MOUSE_BUTTON_LEFT)==GLFW_PRESS,available);
 }
 scripting::GameplayServices Application::GameplayCapabilities()
 {
     scripting::GameplayServices host;
     host.inputAllowed=[this]{return GameplayInputAllowed();};
-    host.pressed=[this](const std::string& a){return GameplayInputAllowed()&&m_InputManager.FramePressed(a);};
-    host.released=[this](const std::string& a){return GameplayInputAllowed()&&m_InputManager.FrameReleased(a);};
-    host.mouseDelta=[this]{return GameplayInputAllowed()&&m_PlayerMouseCaptured?m_InputManager.MouseDelta():ecs::Vec3{};};
+    host.pressed=[this](const std::string& a){return GameplayActionAllowed(a)&&m_InputManager.FramePressed(a);};
+    host.released=[this](const std::string& a){return GameplayActionAllowed(a)&&m_InputManager.FrameReleased(a);};
+    host.mouseDelta=[this]{return GameplayInputAllowed()&&!m_UIPointerConsumed&&m_PlayerMouseCaptured?m_InputManager.MouseDelta():ecs::Vec3{};};
     host.cursorCaptured=[this]{return m_PlayerMouseCaptured;};
     host.captureCursor=[this](bool capture){return CaptureGameplayCursor(capture);};
     host.bindAction=[this](const std::string& action,const std::string& key){return m_InputManager.BindNamedAction(action,key);};
     host.actions=[this]{return m_InputManager.Actions();};
+    host.runtimeUI=m_RenderSystem?&GetRuntimeUI():nullptr;
+    host.setUIInputMode=[this](const std::string& value){SetUIInputMode(value);};host.getUIInputMode=[this](){return GetUIInputMode();};
+    host.resetUIInput=[this](){m_UIInputMode=ui::InputMode::GameOnly;m_UIPointerConsumed=false;ReleasePlayerMouse();};
     host.postfxResources=m_ResourceManager.get();host.camera=&m_GameplayCamera;return host;
 }
 void Application::Shutdown()

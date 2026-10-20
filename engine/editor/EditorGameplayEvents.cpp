@@ -50,6 +50,7 @@ void EditorLayer::DrawGameplayEvents(Application& app){
         if(row->handlerStart>=0)ImGui::Text("Handler started: %.6f s | Finished: %.6f s",row->handlerStart,row->handlerEnd);
         else ImGui::TextDisabled("Handler execution: not observed");
         ImGui::TextWrapped("Lua Handler: %s | Script: %s",row->handler.c_str(),row->script.empty()?"Unavailable (no handler delivery captured)":row->script.c_str());
+        if(row->kind=="UI")ImGui::TextWrapped("Canvas: %s | Widget: %s",row->canvas.c_str(),row->widget.c_str());
         ImGui::TextWrapped("Payload: %s",row->payload.c_str());if(!row->error.empty())ImGui::TextWrapped("Diagnostic: %s",row->error.c_str());
         auto entity=[&](const char* label,const EventEntity& item){ImGui::PushID(label);ImGui::TextWrapped("%s: %s",label,item.entity.IsValid()?(item.name.empty()?"Unnamed":item.name.c_str()):"Unknown / unavailable");if(item.entity.IsValid()){
             ImGui::TextWrapped("ID: %s | World %llu : %u : %u",item.stableId.empty()?"unavailable":item.stableId.c_str(),static_cast<unsigned long long>(item.entity.world),item.entity.index,item.entity.generation);

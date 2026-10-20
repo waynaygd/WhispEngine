@@ -1,0 +1,314 @@
+{
+  "version": 1,
+  "name": "InteractiveRoomUI",
+  "enabled": true,
+  "referenceResolution": [
+    1920,
+    1080
+  ],
+  "scaleMode": 0,
+  "sortOrder": 0,
+  "root": "Root",
+  "widgets": [
+    {
+      "id": "Root",
+      "type": "Panel",
+      "anchorMax": [
+        1,
+        1
+      ],
+      "size": [
+        0,
+        0
+      ],
+      "color": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "StatusPanel",
+      "type": "Panel",
+      "parent": "Root",
+      "position": [
+        32,
+        32
+      ],
+      "size": [
+        440,
+        200
+      ],
+      "color": [
+        0.03,
+        0.04,
+        0.06,
+        0.85
+      ],
+      "clipChildren": true
+    },
+    {
+      "id": "HealthLabel",
+      "type": "Text",
+      "parent": "StatusPanel",
+      "position": [
+        20,
+        12
+      ],
+      "size": [
+        400,
+        40
+      ],
+      "text": "Health / Здоровье",
+      "fontSize": 28
+    },
+    {
+      "id": "HealthBar",
+      "type": "ProgressBar",
+      "parent": "StatusPanel",
+      "position": [
+        20,
+        58
+      ],
+      "size": [
+        400,
+        28
+      ],
+      "color": [
+        0.08,
+        0.09,
+        0.1,
+        1
+      ],
+      "fillColor": [
+        0.15,
+        0.85,
+        0.28,
+        1
+      ],
+      "value": 0.8
+    },
+    {
+      "id": "SanityLabel",
+      "type": "Text",
+      "parent": "StatusPanel",
+      "position": [
+        20,
+        96
+      ],
+      "size": [
+        400,
+        40
+      ],
+      "text": "Sanity / Рассудок",
+      "fontSize": 28
+    },
+    {
+      "id": "SanityBar",
+      "type": "ProgressBar",
+      "parent": "StatusPanel",
+      "position": [
+        20,
+        142
+      ],
+      "size": [
+        400,
+        28
+      ],
+      "color": [
+        0.08,
+        0.09,
+        0.1,
+        1
+      ],
+      "fillColor": [
+        0.24,
+        0.5,
+        1,
+        1
+      ],
+      "value": 0.65
+    },
+    {
+      "id": "InteractPrompt",
+      "type": "Text",
+      "parent": "Root",
+      "anchorMin": [
+        0.5,
+        1
+      ],
+      "anchorMax": [
+        0.5,
+        1
+      ],
+      "pivot": [
+        0.5,
+        1
+      ],
+      "position": [
+        0,
+        -48
+      ],
+      "size": [
+        900,
+        48
+      ],
+      "text": "[E] Interact / Нажмите E",
+      "textAlignment": 1,
+      "fontSize": 32
+    },
+    {
+      "id": "Menu",
+      "parent": "Root",
+      "type": "Panel",
+      "anchorMin": [
+        0.5,
+        0.5
+      ],
+      "anchorMax": [
+        0.5,
+        0.5
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ],
+      "size": [
+        520,
+        300
+      ],
+      "color": [
+        0.025,
+        0.035,
+        0.055,
+        0.98
+      ],
+      "visible": false,
+      "clipChildren": true
+    },
+    {
+      "id": "Resume",
+      "parent": "Menu",
+      "type": "Button",
+      "position": [
+        60,
+        70
+      ],
+      "size": [
+        400,
+        70
+      ],
+      "color": [
+        0.12,
+        0.24,
+        0.38,
+        1
+      ],
+      "hoverColor": [
+        0.2,
+        0.42,
+        0.66,
+        1
+      ],
+      "pressedColor": [
+        0.07,
+        0.14,
+        0.25,
+        1
+      ],
+      "disabledColor": [
+        0.18,
+        0.18,
+        0.18,
+        0.7
+      ],
+      "enabled": true
+    },
+    {
+      "id": "ResumeLabel",
+      "parent": "Resume",
+      "type": "Text",
+      "position": [
+        0,
+        16
+      ],
+      "anchorMax": [
+        1,
+        0
+      ],
+      "size": [
+        0,
+        45
+      ],
+      "textAlignment": 1,
+      "fontSize": 30,
+      "text": "Resume"
+    },
+    {
+      "id": "Back",
+      "parent": "Menu",
+      "type": "Button",
+      "position": [
+        60,
+        170
+      ],
+      "size": [
+        400,
+        70
+      ],
+      "color": [
+        0.12,
+        0.24,
+        0.38,
+        1
+      ],
+      "hoverColor": [
+        0.2,
+        0.42,
+        0.66,
+        1
+      ],
+      "pressedColor": [
+        0.07,
+        0.14,
+        0.25,
+        1
+      ],
+      "disabledColor": [
+        0.18,
+        0.18,
+        0.18,
+        0.7
+      ],
+      "enabled": true
+    },
+    {
+      "id": "BackLabel",
+      "parent": "Back",
+      "type": "Text",
+      "position": [
+        0,
+        16
+      ],
+      "anchorMax": [
+        1,
+        0
+      ],
+      "size": [
+        0,
+        45
+      ],
+      "textAlignment": 1,
+      "fontSize": 30,
+      "text": "Close Menu"
+    }
+  ],
+  "requiredWidgets": [
+    "SanityBar",
+    "InteractPrompt",
+    "Menu",
+    "Resume",
+    "Back"
+  ]
+}

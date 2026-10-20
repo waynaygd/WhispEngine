@@ -61,6 +61,9 @@ public:
     editor::EditorLayer& GetEditorLayer(){return m_EditorLayer;}
     void SetViewportUnlit(bool value){if(m_RenderSystem)m_RenderSystem->SetViewportUnlit(value);}
     bool IsViewportUnlit()const{return m_RenderSystem&&m_RenderSystem->IsViewportUnlit();}
+    void SetUIInputMode(const std::string&);
+    std::string GetUIInputMode()const;
+    ui::RuntimeUI& GetRuntimeUI(){return m_RenderSystem->RuntimeUI();}
     bool IsGameplayMouseCaptured()const{return m_PlayerMouseCaptured;}
     bool IsViewportMouseCaptured()const{return m_Camera.controlsActive||m_PlayerMouseCaptured;}
     ecs::World& GetWorld() { return m_RuntimeWorld?*m_RuntimeWorld:(m_PrefabWorld?*m_PrefabWorld:m_World); }
@@ -206,6 +209,7 @@ private:
     void UpdateCameraController(float dt);
     void UpdateGameplayInput();
     bool GameplayInputAllowed() const;
+    bool GameplayActionAllowed(const std::string&)const;
     bool CaptureGameplayCursor(bool);
     scripting::GameplayServices GameplayCapabilities();
     void ReleasePlayerMouse();
@@ -306,6 +310,8 @@ private:
     CameraControllerState m_Camera;
     ecs::Entity m_PlayerEntity{};
     bool m_PlayerMouseCaptured = false;
+    ui::InputMode m_UIInputMode=ui::InputMode::GameOnly;
+    bool m_UIPointerConsumed=false;
     bool m_PlayerAltWasDown = false;
     bool m_DebugCollidersEnabled = false;
     bool m_PhysicsDebugPose = false;

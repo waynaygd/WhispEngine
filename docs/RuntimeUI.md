@@ -8,7 +8,7 @@ Game UI is an independent CPU document/layout subsystem plus a DX12 renderer. It
 2. A newly created Canvas references a new `ui/Canvas-<unique-id>.ui.json` in the active Project Asset Root. With an empty component choose **New UI Document**, **Choose UI Document**, type a `.ui.json` key, or drag an existing UI Document asset onto the Inspector's document control.
 3. In the Canvas Inspector, choose **Add Widget**: Panel, Text, Image or ProgressBar. Select a widget in the tree/list, choose its parent Panel, then edit anchors, pivot, position, Size Delta, local Z, visibility, opacity and colors. Text adds multiline text, size and left/center/right alignment; Image adds a texture reference and UV rectangle; ProgressBar adds value/fill color. Panel can clip descendants.
 4. Use **Undo UI / Redo UI** for document changes and **Save UI** to write the separate document. Scene Undo/Redo remains for entity/component changes. Save the scene separately to persist the Canvas link.
-5. **UI Preview** in the Viewport toolbar hides/shows the overlay in Edit. In Play UI always renders. There are no widget hit targets or input events, so UI never captures scene picking or gameplay input.
+5. **UI Preview** in the Viewport toolbar hides/shows the overlay in Edit. In Play UI always renders. Interactive Buttons and input modes are described in [Interactive UI (UI.3)](InteractiveUI.md). Edit preview does not dispatch gameplay events.
 
 Open `scenes/interactive_room_ui.json` for the demonstration, or assign `ui/PlayerHUD.ui.json` to a Canvas in another scene. This is a copy of Interactive Room with a single Canvas; the original room, scripts, prefabs, story and gameplay remain unchanged. Health/Sanity values and `[E] Interact / Нажмите E` are static examples, without additional gameplay systems or Lua bindings. For a standalone project copy the UI document (and the room's normal assets if using the whole sample) into its Asset Root.
 
@@ -81,7 +81,7 @@ Unsaved drafts and their histories belong to the current editor session; Save UI
 
 Visual authoring is now implemented by [Widget Designer](WidgetDesigner.md), reusing these data, layout and document transactions. The paragraph below describes the UI.1 boundary.
 
-`ui::Document`, stable Widget IDs and `LayoutRect`/`LayoutDocument` are editor-independent data/commands shared with Widget Designer UI.2. `EditUIDocument` is the current authoring transaction entry point and is reused by the visual handles/anchor presets. RuntimeUI's per-entity `Instance::state` is the later temporary UI-state boundary; a future Lua API should change that instance rather than shared documents or files. No Lua UI API, widget input events, Button, animations or world-space UI is implemented by UI.1.
+`ui::Document`, stable Widget IDs and `LayoutRect`/`LayoutDocument` are editor-independent data/commands shared with Widget Designer UI.2. `EditUIDocument` is the current authoring transaction entry point and is reused by the visual handles/anchor presets. RuntimeUI's per-entity `Instance::state` is the temporary UI-state boundary used by [UI.3 Lua overrides and Buttons](InteractiveUI.md). Shared documents and files remain unchanged during Play.
 
 
 ## Verification results

@@ -286,6 +286,18 @@ if (WHISP_BUILD_PHYSICS_TESTS)
     if(TARGET Tracy::TracyClient)
       target_link_libraries(SpotLightRegression PRIVATE Tracy::TracyClient)
     endif()
+    add_executable(InteractiveUIRegression tests/InteractiveUIRegression.cpp)
+    target_link_libraries(InteractiveUIRegression PRIVATE Engine DearImGui ImGuizmo)
+    target_compile_definitions(InteractiveUIRegression PRIVATE ENABLE_DX12=1)
+    add_dependencies(InteractiveUIRegression LuaGameplayAssets MaterialShaderSources EditorPrimitiveFixtures IblFixtures)
+    if(TARGET Tracy::TracyClient)
+      target_link_libraries(InteractiveUIRegression PRIVATE Tracy::TracyClient)
+    endif()
+    if(MSVC)
+      target_compile_options(InteractiveUIRegression PRIVATE /utf-8)
+    endif()
+    add_test(NAME InteractiveUIRegression COMMAND InteractiveUIRegression)
+    set_tests_properties(InteractiveUIRegression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" RUN_SERIAL TRUE ENVIRONMENT "WHISP_DX12_DEBUG=1")
     add_executable(RuntimeUIRegression tests/RuntimeUIRegression.cpp)
     target_link_libraries(RuntimeUIRegression PRIVATE Engine DearImGui ImGuizmo)
     target_compile_definitions(RuntimeUIRegression PRIVATE ENABLE_DX12=1)
@@ -473,6 +485,8 @@ add_custom_target(HierarchyDemoAssets
 add_executable(WhispEngine WhispEngine.cpp)
 add_dependencies(WhispEngine HierarchyDemoAssets)
 add_custom_target(LuaGameplayAssets ALL
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets/scenes
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/interactive_room_interactive_ui.json ${CMAKE_BINARY_DIR}/assets/scenes/interactive_room_interactive_ui.json
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/engine/assets/ui ${CMAKE_BINARY_DIR}/assets/ui
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/interactive_room_ui.json ${CMAKE_BINARY_DIR}/assets/scenes/interactive_room_ui.json
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/engine/assets/postfx ${CMAKE_BINARY_DIR}/assets/postfx

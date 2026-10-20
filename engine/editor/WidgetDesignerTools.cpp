@@ -21,13 +21,13 @@ void SetRectangle(ui::Widget& w,ui::Rect r,ui::Rect p){
 }
 static void CheckDocument(const ui::Document& d){auto error=ui::Validate(d);if(!error.empty())throw std::runtime_error(error);}
 void Reparent(ui::Document& d,const std::string& id,const std::string& parent,ui::Rect canvas){
- if(id==d.root)throw std::runtime_error("Root cannot be reparented");if(Find(d,parent).type!="Panel")throw std::runtime_error("Only Panel can contain children");
+ if(id==d.root)throw std::runtime_error("Root cannot be reparented");if((Find(d,parent).type!="Panel"&&Find(d,parent).type!="Button"))throw std::runtime_error("Only Panel or Button can contain children");
  for(std::string p=parent;!p.empty();p=Find(d,p).parent)if(p==id)throw std::runtime_error("Reparent would create a cycle");
  auto r=Rectangle(d,id,canvas),p=Rectangle(d,parent,canvas);auto next=d;auto& w=const_cast<ui::Widget&>(Find(next,id));w.parent=parent;SetRectangle(w,r,p);CheckDocument(next);d=std::move(next);
 }
 void Rename(ui::Document& d,const std::string& id,const std::string& name){
  if(name==id)return;if(std::any_of(d.widgets.begin(),d.widgets.end(),[&](auto& w){return w.id==name;}))throw std::runtime_error("Widget ID already exists");
- auto next=d;const_cast<ui::Widget&>(Find(next,id)).id=name;for(auto& w:next.widgets)if(w.parent==id)w.parent=name;if(next.root==id)next.root=name;CheckDocument(next);d=std::move(next);
+ auto next=d;const_cast<ui::Widget&>(Find(next,id)).id=name;for(auto& w:next.widgets)if(w.parent==id)w.parent=name;if(next.root==id)next.root=name;for(auto& required:next.requiredWidgets)if(required==id)required=name;CheckDocument(next);d=std::move(next);
 }
 static std::set<std::string> Subtree(const ui::Document& d,const std::string& id){Find(d,id);std::set<std::string> ids{id};for(bool more=true;more;){more=false;for(auto& w:d.widgets)if(ids.contains(w.parent)&&ids.insert(w.id).second)more=true;}return ids;}
 std::string Duplicate(ui::Document& d,const std::string& id){

@@ -16,7 +16,7 @@ struct EventEntity {
 struct GameplayEvent {
     std::uint64_t sequence=0,session=0;
     double time=0,deliveryTime=0,handlerStart=-1,handlerEnd=-1;
-    std::string name,kind,script,handler,payload,error;
+    std::string name,kind,script,handler,payload,error,canvas,widget;
     EventEntity source,target,other;
     EventStatus status=EventStatus::Queued;
 };
@@ -51,6 +51,7 @@ public:
     std::uint64_t Add(GameplayEvent row){
         if(!Active())return 0;
         row.sequence=next++;row.session=session;
+        row.canvas=Bounded(row.canvas,1024);row.widget=Bounded(row.widget,128);
         row.name=Bounded(row.name,128);row.script=Bounded(row.script,1024);row.payload=Bounded(row.payload,2048);row.error=Bounded(row.error,4096);
         for(auto* e:{&row.source,&row.target,&row.other}){e->name=Bounded(e->name,256);e->stableId=Bounded(e->stableId,128);}
         if(rows.size()==capacity)rows.pop_front();rows.push_back(std::move(row));return rows.back().sequence;

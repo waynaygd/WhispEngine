@@ -512,7 +512,7 @@ namespace ecs {
                 const auto uiSubmitStart=std::chrono::steady_clock::now();
                 m_Renderer->DrawRuntimeUI(m_UIDrawList);
                 m_Statistics.runtimeUISubmitMs=elapsed(uiSubmitStart);
-            }else m_RuntimeUI.Clear();
+            }else if(m_ResourceManager)m_RuntimeUI.Sync(world,*m_ResourceManager);
         };
         if (!m_DebugCollidersEnabled) { renderUI();finishStatistics(); return; }
         {
@@ -789,6 +789,9 @@ namespace ecs {
             }
         }
 
+        // Keep loading/failed owners too: an Image must not revalidate its path
+        // every frame while loading or displaying a missing-texture diagnostic.
+        if(resource)m_TextureResources[key]=resource;
         if (resource == nullptr || !resource->IsUsable() || (optionalMap && resource->IsFailed()))
             return RenderTextureHandle::Invalid();
 

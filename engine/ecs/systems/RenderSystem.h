@@ -64,6 +64,7 @@ public:
     void SetPhysicsDebugPose(bool enabled) { m_PhysicsDebugPose = enabled; }
     void SetShadowSettings(const ShadowSettings* settings) { m_ShadowSettings=settings; }
     ui::DrawList BuildUIDesignerPreview(const ui::Document&,ui::Pair preview,IRenderAdapter* renderer);
+    ui::RuntimeUI& RuntimeUI(){return m_RuntimeUI;}
     void SetUIPreview(bool value){m_UIPreview=value;}
     const ui::DrawList& GetUIDrawList()const{return m_UIDrawList;}
     std::size_t UIInstanceCount()const{return m_RuntimeUI.Instances().size();}
