@@ -57,7 +57,7 @@ public:
     };
     CameraMouseFrame RouteCameraMouse(bool captured,bool buttonsDown,const ImVec2& pointer);
     bool IsViewportMaximized()const{return m_ViewportMaximized;}
-    struct Statistics {double uiMs=0,hierarchyMs=0,inspectorMs=0,assetBrowserMs=0,lightGizmoMs=0;};
+    struct Statistics {double uiMs=0,hierarchyMs=0,inspectorMs=0,assetBrowserMs=0,lightGizmoMs=0;std::uint64_t inspectorPathProbes=0;};
     const Statistics& GetStatistics()const{return m_Statistics;}
     EditorVisualSettings& GetVisualSettings(){return m_VisualSettings;}
     bool ProjectileTestEnabled()const{return m_ProjectileTestInput;}
@@ -450,6 +450,10 @@ private:
     void DrawViewportOverlays(Application&,const ImVec2&,const ImVec2&);
     void DrawSceneHierarchy(Application& app);
     void DrawInspector(Application& app);
+    bool DrawInspectorResource(const ecs::PropertyDescriptor&,std::string&);
+    std::string m_InspectorSearch;
+    std::string m_InspectorPrefabCacheKey,m_InspectorPrefabError;
+    nlohmann::json m_InspectorPrefabSource;
     void DrawBulkInspector(Application&);
     void RestoreBulkSnapshot(Application&,const EntitySnapshot&);
     struct BulkSession {

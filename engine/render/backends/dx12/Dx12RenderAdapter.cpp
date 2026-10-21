@@ -6,6 +6,9 @@
 #include "../../../editor/EditorTheme.h"
 #ifdef _WIN32
 
+// Dynamic ImGui font atlas resizing can retain an old texture for in-flight frames.
+static constexpr unsigned ExtraImGuiDescriptors=8;
+
 #include "../../../core/Logger.h"
 #include "../../../core/AssetPaths.h"
 #include <d3d12sdklayers.h>
@@ -1713,7 +1716,7 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
 
     D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
     srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    srvHeapDesc.NumDescriptors = MaxTextures+FrameCount*MaterialTablesPerFrame*4;
+    srvHeapDesc.NumDescriptors = MaxTextures+FrameCount*MaterialTablesPerFrame*4+ExtraImGuiDescriptors;
     srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     ThrowIfFailed(
         m_Device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&m_SrvHeap)),
@@ -1722,6 +1725,8 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
     m_FreeTextureDescriptorIndices.clear();
     m_FreeTextureDescriptorIndices.reserve(MaxTextures);
     m_FreeImGuiDescriptorIndices.clear();
+    const UINT extraImGuiBase=MaxTextures+FrameCount*MaterialTablesPerFrame*4;
+    for(UINT i=ExtraImGuiDescriptors;i>0;--i)m_FreeImGuiDescriptorIndices.push_back(extraImGuiBase+i-1);
     m_FreeImGuiDescriptorIndices.push_back(0);
     for (UINT descriptorIndex = 1; descriptorIndex < MaxTextures; ++descriptorIndex)
         m_FreeTextureDescriptorIndices.push_back(MaxTextures - descriptorIndex);
@@ -2087,12 +2092,16 @@ void Dx12RenderAdapter::FreeImGuiDescriptor(
     D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle,
     D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle)
 {
-    (void)cpuHandle;
     (void)gpuHandle;
-
     auto* self = static_cast<Dx12RenderAdapter*>(info->UserData);
-    if (self != nullptr)
-        self->m_FreeImGuiDescriptorIndices.push_back(0);
+    if(self&&self->m_SrvHeap){
+        const auto start=self->m_SrvHeap->GetCPUDescriptorHandleForHeapStart().ptr;
+        if(cpuHandle.ptr<start)return;
+        const auto index=UINT((cpuHandle.ptr-start)/self->m_SrvDescriptorSize);
+        const UINT extraBase=MaxTextures+FrameCount*MaterialTablesPerFrame*4;
+        if(index==0||(index>=extraBase&&index<extraBase+ExtraImGuiDescriptors))
+            self->m_FreeImGuiDescriptorIndices.push_back(index);
+    }
 }
 
 void Dx12RenderAdapter::ReleaseViewportResources()

@@ -96,6 +96,7 @@ if (WHISP_BUILD_PHYSICS_TESTS)
   add_executable(PhysicsRegression
     tests/PhysicsRegression.cpp
     engine/ecs/World.cpp
+    engine/ecs/Hierarchy.cpp
     engine/ecs/systems/SystemPipeline.cpp
     engine/ecs/systems/PhysicsSystem.cpp)
   target_sources(PhysicsRegression PRIVATE
@@ -868,4 +869,20 @@ if(WHISP_BUILD_PHYSICS_TESTS AND ENABLE_DX12)
     add_test(NAME Editor25Regression COMMAND Editor25Regression)
     add_test(NAME Editor25Dx12Regression COMMAND Editor25Regression --dx12)
     set_tests_properties(Editor25Regression Editor25Dx12Regression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" RUN_SERIAL TRUE ENVIRONMENT "WHISP_DX12_DEBUG=1")
+endif()
+
+if(WHISP_BUILD_PHYSICS_TESTS AND ENABLE_DX12)
+    add_executable(InspectorUXRegression tests/InspectorUXRegression.cpp)
+    target_link_libraries(InspectorUXRegression PRIVATE Engine DearImGui ImGuizmo)
+    target_compile_definitions(InspectorUXRegression PRIVATE ENABLE_DX12=1)
+    set_target_properties(InspectorUXRegression PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/inspector-ux-regression")
+    add_dependencies(InspectorUXRegression MaterialShaderSources EditorPrimitiveFixtures)
+    if(TARGET Tracy::TracyClient)
+        target_link_libraries(InspectorUXRegression PRIVATE Tracy::TracyClient)
+    endif()
+    if(MSVC)
+        target_compile_options(InspectorUXRegression PRIVATE /utf-8)
+    endif()
+    add_test(NAME InspectorUXRegression COMMAND InspectorUXRegression)
+    set_tests_properties(InspectorUXRegression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" ENVIRONMENT "WHISP_DX12_DEBUG=1" RUN_SERIAL TRUE)
 endif()
