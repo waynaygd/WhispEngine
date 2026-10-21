@@ -174,9 +174,10 @@ void EditorLayer::DrawPlayerStartGizmos(Application& app,const ImVec2& origin,co
         const bool selected=IsSelected(e);const ImU32 color=start.enabled?IM_COL32(80,235,255,255):IM_COL32(155,160,165,255);
         const auto half=ecs::PlayerBodyHalfExtents(start);
         const auto center=ecs::PlayerBodyCenter(t.position,half.y),eye=ecs::PlayerEyePosition(center,ecs::PlayerEyeHeight(start),half.y);
-        V forward=ecs::PlayerLookDirection(t);
+        V forward=PlayerStartGizmoDirection(t);
         V tip=Add(eye,Scale(forward,1.1f));line(eye,tip,color);
-        V right{std::cos(t.rotation.y),0,-std::sin(t.rotation.y)};
+        const auto q=ecs::RenderRotation(t.rotation);
+        V right{1-2*(q.y*q.y+q.z*q.z),2*(q.x*q.y+q.w*q.z),2*(q.x*q.z-q.w*q.y)};
         line(tip,Add(Sub(tip,Scale(forward,.2f)),Scale(right,.12f)),color);line(tip,Sub(Sub(tip,Scale(forward,.2f)),Scale(right,.12f)),color);
         auto p=project(t.position);
         if(p){

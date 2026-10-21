@@ -30,6 +30,7 @@ bool EditorLayer::SaveUIDocument(Application& app,const std::string& key){
 }
 bool EditorLayer::ReloadUIDocument(Application& app,const std::string& key){
  try{if(app.IsEditorPlayMode()||m_UIWidgetDrag)return false;auto loaded=UILoader::Load(key,{});if(!loaded.success||!loaded.data.document)throw std::runtime_error(loaded.errorMessage);auto& session=UIDocumentSession(app,key);UIDocumentEdit next;next.resourceKey=key;next.draft=*loaded.data.document;next.disk=next.draft;next.selected=next.draft.root;next.initialized=true;
+ next.lockedWidgets=session.lockedWidgets;std::erase_if(next.lockedWidgets,[&](const auto& id){return std::none_of(next.draft.widgets.begin(),next.draft.widgets.end(),[&](const auto& w){return w.id==id;});});
  auto* resources=app.GetResourceManager();auto asset=resources->Get<UIResource>(key);if(!asset)asset=resources->Load<UIResource>(key);asset->ReplaceData(loaded.data,ResourceLoadState::Loaded,false);resources->SetUIDirty(key,false);session=std::move(next);m_UIFit=true;m_EditorError.clear();return true;}catch(const std::exception& e){m_EditorError=e.what();return false;}
 }
 ecs::Entity EditorLayer::CreateUICanvas(Application& app,const std::string& existing){

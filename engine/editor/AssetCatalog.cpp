@@ -123,6 +123,8 @@ bool AssetCatalog::DeleteMaterial(const std::string& key,std::string* error){ret
 std::string AssetCatalog::FileSuffix(const std::string& key){
     if(key.ends_with(".prefab.json"))return ".prefab.json";
     if(key.ends_with(".material.json"))return ".material.json";
+    if(key.ends_with(".uistyle.json"))return ".uistyle.json";
+    if(key.ends_with(".ui.json"))return ".ui.json";
     return AssetPaths::ToUtf8String(std::filesystem::u8path(key).extension());
 }
 std::filesystem::path AssetCatalog::EditablePath(const std::string& key){
@@ -132,11 +134,12 @@ std::filesystem::path AssetCatalog::EditablePath(const std::string& key){
     if(relative.empty()||relative.is_absolute()||*relative.begin()=="..")throw std::runtime_error("File escapes active Asset Root");
     auto extension=FileSuffix(key);
     const bool supported=(key.starts_with("scripts/")&&extension==".lua")||
+        (key.starts_with("ui/")&&(extension==".ui.json"||extension==".uistyle.json"))||
         (key.starts_with("prefabs/")&&extension==".prefab.json")||
         (key.starts_with("materials/")&&(extension==".json"||extension==".material.json"||extension==".material"))||
         (key.starts_with("textures/")&&std::set<std::string>{".png",".jpg",".jpeg",".bmp",".tga",".dds"}.contains(extension))||
         (key.starts_with("environments/")&&extension==".hdr");
-    if(!supported)throw std::runtime_error("Protected or unsupported type: shaders, generated resources and model packages require their owning tools");
+    if(!supported)throw std::runtime_error("This asset requires its owning tool: shaders/model packages/generated resources are protected; Scene rename needs session and reference migration");
     const std::set<std::string> builtins={"materials/default_primitive.material.json","materials/stress.material.json","materials/pbr_textures.material.json",
         "textures/pbr_base.png","textures/pbr_normal.png","textures/pbr_orm.png","textures/pbr_control.jpg","textures/pbr_control.dds","textures/pbr_control_bc3.dds",
         "environments/studio.hdr","environments/uniform.hdr","environments/editor24_known_sun.hdr"};

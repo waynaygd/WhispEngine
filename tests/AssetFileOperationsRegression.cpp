@@ -4,8 +4,10 @@
 #include "core/Application.h"
 #include "core/AssetPaths.h"
 #include "editor/AssetCatalog.h"
+#include "editor/AssetImport.h"
 #include "editor/ScriptEditor.h"
 #include "ecs/components/LuaScriptComponent.h"
+#include "ecs/components/UICanvasComponent.h"
 #include "platform/GlfwWindow.h"
 #include "render/backends/dx12/Dx12RenderAdapter.h"
 #include "resources/ResourceManager.h"
@@ -19,6 +21,11 @@
 #endif
 namespace fs=std::filesystem;
 using editor::AssetCatalog;
+namespace editor {
+struct EditorDocumentTestAccess {
+ static void Import(EditorLayer& e,const std::string& source,const std::string& folder){e.m_ImportSource=source;e.m_ImportTargetFolder=folder;e.m_ImportRoot.clear();e.m_ImportPreview.clear();e.m_ImportPopup=true;e.m_EditorError.clear();}
+};
+}
 static unsigned checks=0;
 static std::string lastError;
 static void Check(bool ok,const char* why){++checks;if(!ok)throw std::runtime_error(std::string(why)+"\n"+lastError);}
@@ -159,6 +166,25 @@ static void Gpu(){
     auto* risk=ImGui::FindWindowByName("Delete Asset?");click(risk->WorkRect.Min.x+8,risk->DC.CursorPosPrevLine.y-ImGui::GetStyle().ItemSpacing.y-ImGui::GetFrameHeight()*.5f);confirmDelete();
     Check(!fs::exists(prefabCleanup.path),"dynamic checkbox enables explicit Delete in real modal");
     const auto again="prefabs/asset-file-risk-again-"+Id()+".prefab.json";Cleanup againCleanup{AssetPaths::ResolveAssetRoot()/again};Write(againCleanup.path,"{}");ui.SelectAsset(again,"Prefab");ImGui::SetWindowFocus("Asset Browser");app.Run();keypress(ImGuiKey_Delete);confirmDelete();Check(fs::exists(againCleanup.path),"dynamic consent resets for each operation");keypress(ImGuiKey_Escape);
-    Check(gpu->GetValidationErrorCount()==0,"DX12 validation clean");app.Shutdown();
+    const auto uiFolder="ui/asset-files-"+Id();Cleanup uiCleanup{AssetPaths::ResolveAssetRoot()/uiFolder};
+    const auto uiKey=uiFolder+"/Canvas-entity-author.ui.json";fs::create_directories(uiCleanup.path);Check(UILoader::Save(uiKey,ui::EmptyDocument(),&lastError),"authoring Canvas fixture");
+    Check(ui.OpenDocument(app,uiKey),"open authoring Canvas document");app.SetFrameLimit(8);app.Run();const auto document=ui.ActiveDocument();
+    ui.SwitchWorkspace(editor::EditorWorkspace::AssetManagement);app.Run();ui.SelectAsset(uiKey,"UI Document");ImGui::SetWindowFocus("Asset Browser");app.Run();app.SetFrameLimit(1);keypress(ImGuiKey_F2);
+    rename=ImGui::FindWindowByName("Rename Asset");Check(rename&&rename->Active,"UI document real Rename dialog");SyntheticEditorInput::Queue([](ImGuiIO& io){io.AddInputCharactersUTF8("Canvas Renamed");});app.Run();keypress(ImGuiKey_Enter);
+    const auto renamedUI=uiFolder+"/Canvas Renamed.ui.json";Check(fs::exists(uiCleanup.path/"Canvas Renamed.ui.json")&&!fs::exists(uiCleanup.path/"Canvas-entity-author.ui.json"),"UI rename preserves complete suffix");
+    Check(ui.ActiveDocument()==document&&std::any_of(ui.Documents().begin(),ui.Documents().end(),[&](auto& d){return d.id==document&&d.key==renamedUI;}),"rename retains active Document identity with new key");
+    auto draft=ui.GetUIDraft(app,renamedUI);draft.name="Unsaved renamed Canvas";Check(ui.EditUIDocument(app,renamedUI,draft),"edit renamed UI draft");Check(!ui.RenameAssetFile(app,renamedUI,"blocked",true,&lastError)&&ui.GetUIDraft(app,renamedUI).name==draft.name,"dirty UI rename blocked without losing draft");
+    Check(ui.SaveUIDocument(app,renamedUI),"save renamed UI");Check(ui.UndoUIDocument(app,renamedUI)&&ui.UndoUIDocument(app,renamedUI,true),"UI history remains usable at renamed key");
+    auto canvas=ui.CreateEntity(app,"Canvas reference");app.GetWorld().AddComponent<ecs::UICanvasComponent>(canvas).document=renamedUI;Check(!ui.RenameAssetFile(app,renamedUI,"referenced",true,&lastError)&&lastError.find("Current scene")!=std::string::npos,"referenced Canvas names concrete migration blocker");
+    const auto style=uiFolder+"/Custom.uistyle.json";Check(ui::SaveStyles(style,{},&lastError),"owned user style");Check(ui.RenameAssetFile(app,style,"Styled",true,&lastError)&&fs::exists(uiCleanup.path/"Styled.uistyle.json"),"user UI Style rename preserves complete suffix");
+    // Drive the real batch-import modal only against an isolated project.
+    Cleanup importCleanup{fs::current_path()/("asset-import-ui-"+Id())};fs::create_directories(importCleanup.path);auto project=ProjectManager::Create(importCleanup.path,"ImportFixture");
+    Check(app.OpenProject(project->descriptorPath,Application::ProjectDecision::Discard,&lastError),"open isolated import Project");
+    const auto first=importCleanup.path/"first.png",second=importCleanup.path/"second.jpg";
+    fs::copy_file(AssetPaths::ResolveAssetPath("@engine/textures/pbr_base.png"),first);fs::copy_file(AssetPaths::ResolveAssetPath("@engine/textures/pbr_control.jpg"),second);
+    editor::EditorDocumentTestAccess::Import(ui,AssetPaths::ToUtf8String(first)+"\n"+AssetPaths::ToUtf8String(second),"textures");app.SetFrameLimit(3);app.Run();auto* import=ImGui::FindWindowByName("Import Asset");Check(import&&import->Active,"native Import Asset modal");ImGui::ActivateItemByID(import->GetID("Scan dependencies"));app.Run();ImGui::ActivateItemByID(import->GetID("Import (no overwrite)"));app.Run();
+    Check(fs::is_regular_file(project->ResolveAsset("textures/first.png"))&&fs::is_regular_file(project->ResolveAsset("textures/second.jpg")),"batch PNG/JPEG publishes direct files");Check(!fs::exists(project->ResolveAsset("textures/first"))&&!fs::exists(project->ResolveAsset("textures/second")),"no filename package folders");
+    editor::ImportPlan repeat;Check(editor::AssetImport::Scan(first,"textures/first.png",repeat,&lastError,{},true),"rescan standalone texture");auto original=Read(project->ResolveAsset("textures/first.png"));Check(!editor::AssetImport::Publish(project->AssetRoot(),repeat,&lastError)&&Read(project->ResolveAsset("textures/first.png"))==original,"repeat import collision leaves original bytes intact");
+    Check(gpu->GetValidationErrorCount()==0,"DX12 validation clean");app.Shutdown();ProjectManager::Activate({});
 }
 int main(int argc,char**){try{ScopedEditorPreferenceRestore preserve;Cpu();PrefabDependencies();if(argc>1)Gpu();std::cout<<"AssetFileOperationsRegression: "<<checks<<" checks PASS\n";return 0;}catch(const std::exception& e){std::cerr<<"ASSET FILE FAILED: "<<e.what()<<'\n';return 1;}}

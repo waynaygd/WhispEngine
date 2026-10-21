@@ -67,9 +67,9 @@ static void Ui(){
         auto content=log();for(const char* label:{"3D Object","Empty Entity","Player","Light","Environment"})Check(content.find(label)!=std::string::npos,"Viewport contains all creation categories");
         // Query the submitted menu geometry: GetFontSize() outside the popup
         // frame may still refer to the fallback window's unscaled font.
-        const float rowStep=(root->DC.CursorPosPrevLine.y-root->DC.CursorStartPos.y)/4;
-        click(root->DC.CursorStartPos.x+40,root->DC.CursorStartPos.y+category*rowStep+root->DC.PrevLineSize.y*.5f);Check(popups.Size>=2&&popups[1].Window,"creation submenu opens");auto* menu=popups[1].Window;
-        const int children=category==0?5:category==3?3:1;
+        const float rowStep=(root->DC.CursorPosPrevLine.y-root->DC.CursorStartPos.y)/5;
+        click(root->DC.CursorStartPos.x+40,root->DC.CursorStartPos.y+(category==4?5:category)*rowStep+root->DC.PrevLineSize.y*.5f);Check(popups.Size>=2&&popups[1].Window,"creation submenu opens");auto* menu=popups[1].Window;
+        const int children=category==0?5:(category==3||category==4)?3:1;
         const float childStep=children>1?(menu->DC.CursorPosPrevLine.y-menu->DC.CursorStartPos.y)/(children-1):0;
         click(menu->DC.CursorStartPos.x+25,menu->DC.CursorStartPos.y+child*childStep+menu->DC.PrevLineSize.y*.5f);
     };
@@ -151,7 +151,7 @@ static void Benchmark(const std::string& label){
     }
 }
 #endif
-int main(int argc,char** argv){ScopedEditorPreferenceRestore preferences;try{
+int main(int argc,char** argv){ScopedEditorPreferenceRestore preferences;try{std::filesystem::remove("editor-preferences.json");std::filesystem::remove("imgui.ini");
 #if defined(ENABLE_DX12)
     if(argc>2&&std::string(argv[1])=="--bench")Benchmark(argv[2]);else if(argc>1&&std::string(argv[1])=="--dx12"){Ui();Edges();}else
 #endif

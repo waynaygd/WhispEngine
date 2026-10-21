@@ -17,7 +17,7 @@ struct EditorDocumentTestAccess {
     static auto& Session(EditorLayer& e,Application& a,const std::string& k){return e.UIDocumentSession(a,k);}
     static void View(EditorLayer& e){e.m_UIZoom=.63f;e.m_UIPan={17,23};e.m_UIFit=false;}
     static bool ViewPreserved(EditorLayer& e){return e.m_UIZoom==.63f&&e.m_UIPan.x==17&&e.m_UIPan.y==23;}
-    static void MaterialDirty(EditorLayer& e){e.m_MaterialDirty=true;}
+    static void MaterialDirty(EditorLayer& e,const MaterialResource& data){e.m_MaterialSessions[e.m_EditingMaterial].draft=data;e.m_MaterialDirty=true;}
     static void ClearPrompt(EditorLayer& e){e.m_DocumentPrompt=false;}
     static auto DraftCount(EditorLayer& e){return e.m_UIDocuments.size();}
 };
@@ -65,7 +65,7 @@ int main(int argc,char** argv){try{
     Check(e.SaveCurrentWorkspace(app),e.GetError());const auto dock=Panel("Canvas Designer")->DockId;e.SetWorkspaceFocused(true);frame();Check(e.IsWorkspaceFocused()&&Panel("Canvas Designer")->Size.x>canvas->Viewport->WorkSize.x*.9f,"focus expands central canvas");Check(!ImGui::FindWindowByName("Asset Browser")->Active,"focus temporarily hides utilities");e.SetWorkspaceFocused(false);frame();Check(Panel("Canvas Designer")->DockId==dock,"focus restores original native layout");Panel("Asset Browser");
     auto preview=app.BuildUIDesignerPreview(e.GetUIDraft(app,one),{800,600});Check(!preview.vertices.empty()&&preview.errors.empty(),"DX12 UI designer preview geometry");for(auto& command:preview.commands)Check(app.GetRenderAdapter()->GetTexturePreviewId(command.texture)!=0,"real GPU texture");
     Check(e.OpenDocument(app,material),e.GetError());frame();Check(e.GetWorkspace()==EditorWorkspace::Material,"Material workspace");Check(Panel("Material Editor")->DockId!=0,"material properties central dock");
-    auto resource=app.GetResourceManager()->Get<MaterialResource>(material);Check(resource&&resource->IsLoaded(),"actual material loaded");auto data=resource->GetData();data.roughness=.22f;resource->ReplaceData(data,ResourceLoadState::Loaded);app.GetResourceManager()->SetMaterialDirty(material,true);EditorDocumentTestAccess::MaterialDirty(e);Check(e.DocumentDirty(Doc(e,material)),"material dirty indicator");Check(e.SaveActiveDocument(app),e.GetError());
+    auto resource=app.GetResourceManager()->Get<MaterialResource>(material);Check(resource&&resource->IsLoaded(),"actual material loaded");auto data=resource->GetData();data.roughness=.22f;resource->ReplaceData(data,ResourceLoadState::Loaded);app.GetResourceManager()->SetMaterialDirty(material,true);EditorDocumentTestAccess::MaterialDirty(e,data);Check(e.DocumentDirty(Doc(e,material)),"material dirty indicator");Check(e.SaveActiveDocument(app),e.GetError());
     Check(e.OpenDocument(app,lua),e.GetError());frame();Panel("Script Document");Panel("Lua Runtime Inspector");Panel("Console / Diagnostics");Check(e.GetWorkspace()==EditorWorkspace::Script,"Script workspace");
     Check(!e.OpenDocument(app,"ui/no-scene.json"),"unrelated JSON not a scene");EditorDocumentTestAccess::ClearPrompt(e);
     Check(e.CloseDocument(app,Id(e,two)),"close inactive UI tab");

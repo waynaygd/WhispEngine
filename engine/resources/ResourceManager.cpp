@@ -76,6 +76,10 @@ void ResourceManager::PollAsyncLoads()
     }
 }
 
+void ResourceManager::StopWatchingAsset(const std::string& key){
+    std::lock_guard<std::recursive_mutex> lock(m_Mutex);
+    std::erase_if(m_HotReloadWatches,[&](const auto& entry){return entry.second.key==key;});
+}
 void ResourceManager::PollHotReload()
 {
     std::lock_guard<std::recursive_mutex> lock(m_Mutex);

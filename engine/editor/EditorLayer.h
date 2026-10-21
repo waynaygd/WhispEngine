@@ -426,6 +426,7 @@ private:
     void DrawScriptDocument(Application&);
     void SyncSceneDocument(Application&);
     void CaptureSceneDocument(Application&);
+    void RenameAssetDocument(Application&,const std::string&,const std::string&);
     void StoreDocumentSession();
     void RestoreDocumentSession(Application&);
     bool ResolveDocumentEdits(Application&,const EditorDocument&,OpenDecision);
@@ -560,7 +561,7 @@ private:
     int m_GizmoMode = 0;
     bool m_GameView=false,m_ProjectAssets=true,m_PlaneScaleCaptured=false;
     float m_AssetCardSize=180;
-    struct UIDocumentEdit {std::string resourceKey;ui::Document draft;nlohmann::json disk;std::vector<nlohmann::json> undo,redo;std::optional<nlohmann::json> pending;std::string selected;ui::Pair preview{1920,1080};float zoom=.35f,panX=0,panY=0;bool viewSaved=false,fit=true;bool initialized=false,dirty=false;};
+    struct UIDocumentEdit {std::set<std::string> lockedWidgets;std::string resourceKey;ui::Document draft;nlohmann::json disk;std::vector<nlohmann::json> undo,redo;std::optional<nlohmann::json> pending;std::string selected;ui::Pair preview{1920,1080};float zoom=.35f,panX=0,panY=0;bool viewSaved=false,fit=true;bool initialized=false,dirty=false;};
     std::map<std::string,UIDocumentEdit> m_UIDocuments;
     struct UIStyleEdit {ui::StyleSheet draft;nlohmann::json disk;std::vector<nlohmann::json> undo,redo;std::optional<nlohmann::json> pending;};
     std::map<std::string,UIStyleEdit> m_UIStyles;std::set<std::string> m_DirtyUIStyles;
@@ -584,6 +585,26 @@ private:
     bool m_ShowMaterialEditor = true;
     std::string m_EditingMaterial,m_MaterialError,m_NewMaterialKey="materials/new.material.json";
     bool m_MaterialDirty=false;
+    struct MaterialSession {
+        MaterialResource base,draft;
+        struct Change {MaterialResource before,after;};
+        std::vector<Change> undo,redo;std::optional<MaterialResource> transaction;
+        std::uint64_t version=0;bool initialized=false;
+        float yaw=.65f,pitch=.3f,distance=3.7f,panX=0,panY=0;int mesh=0,lighting=0;bool dark=false;
+    };
+    std::map<std::string,MaterialSession> m_MaterialSessions;
+    std::array<RenderMeshHandle,3> m_MaterialPreviewMeshes{};
+    RenderTextureHandle m_MaterialWhite;
+    std::map<std::string,std::function<void(IRenderAdapter*)>> m_MaterialGpuCleanup;
+    std::uint64_t m_MaterialPreviewImage=0;
+    double m_MaterialUpdateMs=0;std::uint64_t m_MaterialPathProbes=0;
+    MaterialSession* EnsureMaterialSession(Application&);
+    bool SaveMaterialDraft(Application&);
+    bool ReloadMaterialDraft(Application&);
+    void FinishMaterialEdit(Application&,bool cancel=false);
+    void UndoMaterialEdit(Application&,bool redo=false);
+    void ReleaseMaterialEditor(IRenderAdapter*);
+
     bool m_ShowDemoWindow = false;
     bool m_ShowLuaRuntimeInspector=false,m_LuaInspectorAuto=true,m_LuaInspectionCaptured=false;
     scripting::LuaInstanceSnapshot m_LuaInspection;

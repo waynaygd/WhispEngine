@@ -72,6 +72,7 @@ add_library(Engine
   editor/EditorTransactions.cpp
   editor/EditorSelection.cpp
   editor/EditorGroupTransform.cpp
+  editor/EditorMaterial.cpp
   editor/EditorInspector.cpp
   editor/SceneValidation.cpp
   editor/EditorSceneValidation.cpp

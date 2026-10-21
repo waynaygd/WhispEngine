@@ -39,6 +39,12 @@ bool EditorLayer::UIDesignerOwnsKeyboard()const{
  for(auto* name:{"Canvas Designer","Widget Hierarchy","Widget Inspector"})if(auto* window=ImGui::FindWindowByName(name);window&&focused->RootWindow==window->RootWindow)return true;return false;
 }
 bool EditorLayer::WidgetCommand(Application& app,const std::string& command,const std::string& argument){
+ if(command=="Lock"||command=="Unlock"){
+  if(app.IsEditorPlayMode()||m_DesignDocument.empty()||m_UIWidgetDrag)return false;
+  auto& s=UIDocumentSession(app,m_DesignDocument);if(s.selected.empty())return false;
+  if(command=="Lock")s.lockedWidgets.insert(s.selected);else s.lockedWidgets.erase(s.selected);
+  return true; // Editor session metadata: no runtime field or authored Undo record.
+ }
  try{if(app.IsEditorPlayMode()||m_DesignDocument.empty()||m_UIWidgetDrag)return false;auto& s=UIDocumentSession(app,m_DesignDocument);if(s.pending)EditUIDocument(app,m_DesignDocument,s.draft,true);auto next=s.draft;auto id=s.selected;auto selected=id;
   if(command=="Add"){
    if(next.widgets.empty()){auto root=ui::EmptyDocument().widgets[0];next.root=root.id;next.widgets.push_back(root);}ui::Widget w;w.id=argument;w.type=argument;w.position={16,16};w.text=argument=="Text"?"Text":"";
@@ -107,7 +113,7 @@ void EditorLayer::DrawUIDesigner(Application& app){
     if(m_UIGrid&&m_UIGridSize*logicalScale>=5){for(float x=0;x<=canvas.w;x+=m_UIGridSize)list->AddLine(logicalScreen(x,0),logicalScreen(x,canvas.h),IM_COL32(160,170,180,35));for(float y=0;y<=canvas.h;y+=m_UIGridSize)list->AddLine(logicalScreen(0,y),logicalScreen(canvas.w,y),IM_COL32(160,170,180,35));}
     list->AddRect({m_UICanvasOrigin.x,m_UICanvasOrigin.y},end,IM_COL32(160,170,180,255));list->AddRect({m_UICanvasOrigin.x,m_UICanvasOrigin.y},logicalScreen(s.draft.referenceResolution[0],s.draft.referenceResolution[1]),IM_COL32(90,140,210,130));
     auto selected=std::find_if(s.draft.widgets.begin(),s.draft.widgets.end(),[&](auto& w){return w.id==s.selected;});int hoveredHandle=-1;
-    if(selected!=s.draft.widgets.end()){
+    if(selected!=s.draft.widgets.end()&&!s.lockedWidgets.contains(selected->id)){
      auto r=widgets::Rectangle(displayed,selected->id,canvas);auto p=widgets::ParentRectangle(displayed,*selected,canvas);auto lo=logicalScreen(r.x,r.y),hi=logicalScreen(r.x+r.w,r.y+r.h);list->AddRect(lo,hi,IM_COL32(255,190,50,255),0.f,ImDrawFlags_None,2.f);
      float hx[]{0,.5f,1,1,1,.5f,0,0},hy[]{0,0,0,.5f,1,1,1,.5f};
      for(int i=0;i<8;++i){auto point=logicalScreen(r.x+r.w*hx[i],r.y+r.h*hy[i]);list->AddRectFilled({point.x-4,point.y-4},{point.x+4,point.y+4},IM_COL32(255,190,50,255));if(Contains({point.x-6,point.y-6,12,12},io.MousePos))hoveredHandle=i;}
@@ -116,9 +122,9 @@ void EditorLayer::DrawUIDesigner(Application& app){
     }
     list->PopClipRect();
     if(hovered&&ImGui::IsMouseClicked(0)&&!app.IsEditorPlayMode()){
-     if(hoveredHandle<0)s.selected=widgets::Pick(draw,(io.MousePos.x-m_UICanvasOrigin.x)/m_UIZoom,(io.MousePos.y-m_UICanvasOrigin.y)/m_UIZoom);
+     if(hoveredHandle<0)s.selected=widgets::Pick(draw,(io.MousePos.x-m_UICanvasOrigin.x)/m_UIZoom,(io.MousePos.y-m_UICanvasOrigin.y)/m_UIZoom,s.lockedWidgets);
      app.GetRuntimeUI().PreviewStop();app.GetRuntimeUI().Preview(s.draft,*app.GetResourceManager());
-     if(!s.selected.empty()&&!ui::ManagedByLayout(s.draft,widgets::Find(s.draft,s.selected))){if(s.pending)EditUIDocument(app,m_DesignDocument,s.draft,true);auto w=widgets::Find(s.draft,s.selected);m_UIWidgetDrag=UIWidgetDrag{m_DesignDocument,s.selected,w,widgets::Rectangle(displayed,s.selected,canvas),widgets::ParentRectangle(displayed,w,canvas),{io.MousePos.x,io.MousePos.y},hoveredHandle,logicalScale};}
+     if(!s.selected.empty()&&!s.lockedWidgets.contains(s.selected)&&!ui::ManagedByLayout(s.draft,widgets::Find(s.draft,s.selected))){if(s.pending)EditUIDocument(app,m_DesignDocument,s.draft,true);auto w=widgets::Find(s.draft,s.selected);m_UIWidgetDrag=UIWidgetDrag{m_DesignDocument,s.selected,w,widgets::Rectangle(displayed,s.selected,canvas),widgets::ParentRectangle(displayed,w,canvas),{io.MousePos.x,io.MousePos.y},hoveredHandle,logicalScale};}
     }
     if(m_UIWidgetDrag){
      if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)){CancelUIDocumentEdit(app,m_UIWidgetDrag->key);m_UIWidgetDrag.reset();m_EscapeConsumed=true;}
@@ -141,9 +147,19 @@ void EditorLayer::DrawUIDesigner(Application& app){
    const auto document=s.draft;std::optional<std::pair<std::string,std::string>> reparent;
    auto matches=[&](const ui::Widget& w){auto value=w.id+" "+w.type,needle=m_WidgetSearch;std::transform(value.begin(),value.end(),value.begin(),[](unsigned char c){return char(std::tolower(c));});std::transform(needle.begin(),needle.end(),needle.begin(),[](unsigned char c){return char(std::tolower(c));});return value.find(needle)!=std::string::npos;};
    auto hasMatch=[&](auto&& self,const ui::Widget& w)->bool{if(matches(w))return true;for(auto& child:document.widgets)if(child.parent==w.id&&self(self,child))return true;return false;};
+   auto lockButton=[&](const std::string& id){
+    const bool locked=s.lockedWidgets.contains(id);const float unit=ImGui::GetFrameHeight();
+    const auto pos=ImGui::GetCursorScreenPos();if(ImGui::Button("##EditorLock",{unit,unit})){s.selected=id;WidgetCommand(app,locked?"Unlock":"Lock");}
+    if(ImGui::IsItemHovered())ImGui::SetTooltip("%s Canvas selection, move and resize (editor session only)",locked?"Unlock":"Lock");
+    auto* d=ImGui::GetWindowDrawList();const auto color=ImGui::GetColorU32(locked?ImGuiCol_PlotHistogram:ImGuiCol_TextDisabled);
+    d->AddRect({pos.x+unit*.28f,pos.y+unit*.48f},{pos.x+unit*.73f,pos.y+unit*.8f},color,2);
+    d->PathArcTo({pos.x+unit*(locked?.5f:.67f),pos.y+unit*.48f},unit*.19f,3.14159f,6.28318f,10);d->PathStroke(color,0,1.5f);
+    ImGui::SameLine();
+   };
    auto tree=[&](auto&& self,const std::string& parent)->void{
     std::vector<const ui::Widget*> children;for(auto& w:document.widgets)if(w.parent==parent)children.push_back(&w);std::sort(children.begin(),children.end(),[](auto a,auto b){return std::tie(a->zOrder,a->id)<std::tie(b->zOrder,b->id);});
-    for(auto* w:children){if(!hasMatch(hasMatch,*w))continue;bool leaf=std::none_of(document.widgets.begin(),document.widgets.end(),[&](auto& child){return child.parent==w->id;});ImGui::PushID(w->id.c_str());if(!m_WidgetSearch.empty())ImGui::SetNextItemOpen(true);auto flags=ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_DefaultOpen|ImGuiTreeNodeFlags_SpanAvailWidth|(s.selected==w->id?ImGuiTreeNodeFlags_Selected:0)|(leaf?ImGuiTreeNodeFlags_Leaf:0);bool open=ImGui::TreeNodeEx("Widget",flags,"%s (%s)%s",w->id.c_str(),w->type.c_str(),w->visible?"":" [hidden]");if(ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen())s.selected=w->id;if(ImGui::IsItemHovered())ImGui::SetTooltip("%s (%s)",w->id.c_str(),w->type.c_str());
+    for(auto* w:children){if(!hasMatch(hasMatch,*w))continue;bool leaf=std::none_of(document.widgets.begin(),document.widgets.end(),[&](auto& child){return child.parent==w->id;});ImGui::PushID(w->id.c_str());lockButton(w->id);if(!m_WidgetSearch.empty())ImGui::SetNextItemOpen(true);auto flags=ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_DefaultOpen|ImGuiTreeNodeFlags_SpanAvailWidth|(s.selected==w->id?ImGuiTreeNodeFlags_Selected:0)|(leaf?ImGuiTreeNodeFlags_Leaf:0);bool open=ImGui::TreeNodeEx("Widget",flags,"%s (%s)%s",w->id.c_str(),w->type.c_str(),w->visible?"":" [hidden]");if(ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen())s.selected=w->id;if(ImGui::IsItemHovered())ImGui::SetTooltip("%s (%s)",w->id.c_str(),w->type.c_str());
+     if(ImGui::BeginPopupContextItem("Widget actions")){s.selected=w->id;const bool locked=s.lockedWidgets.contains(w->id);if(ImGui::MenuItem(locked?"Unlock":"Lock"))WidgetCommand(app,locked?"Unlock":"Lock");ImGui::EndPopup();}
      if(w->id!=document.root&&ImGui::BeginDragDropSource()){ImGui::SetDragDropPayload("WHISP_UI_WIDGET",w->id.c_str(),w->id.size()+1);ImGui::TextUnformatted(w->id.c_str());ImGui::EndDragDropSource();}
      if(ImGui::BeginDragDropTarget()){if(auto* payload=ImGui::AcceptDragDropPayload("WHISP_UI_WIDGET"))reparent={{static_cast<const char*>(payload->Data),w->id}};ImGui::EndDragDropTarget();}
      if(open){self(self,w->id);ImGui::TreePop();}ImGui::PopID();

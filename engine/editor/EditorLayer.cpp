@@ -447,7 +447,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     HandleEditorShortcuts(app);
     if (m_ShowAssetBrowser&&!m_WorkspaceFocus)
         DrawAssetBrowser(app);
-    if (m_ShowMaterialEditor&&!m_ActiveDocument.empty())
+    if ((m_ShowMaterialEditor||ActiveDocumentIs(DocumentType::Material))&&!m_ActiveDocument.empty())
         DrawMaterialEditor(app);
     if (m_ShowDemoWindow&&!m_WorkspaceFocus)
         ImGui::ShowDemoWindow(&m_ShowDemoWindow);
@@ -497,7 +497,7 @@ bool EditorLayer::BlocksGameplayInput()const{
 void EditorLayer::HandleEditorShortcuts(Application& app){
     const auto& io=ImGui::GetIO();if(io.WantTextInput||m_ModalActive||m_EscapeConsumed)return;
     if(UIDesignerOwnsKeyboard())return;
-    for(const auto& d:m_Documents)if(d.id==m_ActiveDocument&&d.type!=DocumentType::Scene){if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_S,false))SaveActiveDocument(app);return;}
+    for(const auto& d:m_Documents)if(d.id==m_ActiveDocument&&d.type!=DocumentType::Scene){if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_S,false))SaveActiveDocument(app);if(d.type==DocumentType::Material&&io.KeyCtrl){if(ImGui::IsKeyPressed(ImGuiKey_Z,false))UndoActiveDocument(app,io.KeyShift);if(ImGui::IsKeyPressed(ImGuiKey_Y,false))UndoActiveDocument(app,true);}return;}
     HandleViewportToolShortcuts(app);
     // Asset file shortcuts are handled by the browser after its widgets. Never
     // let a Delete intended for that window reach the entity command path.
@@ -724,104 +724,6 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     if(maximized)ImGui::PopStyleVar(2);
 }
 
-void EditorLayer::DrawMaterialEditor(Application& app)
-{
-    if(m_FocusMaterial){ImGui::SetNextWindowFocus();ImGui::SetNextWindowCollapsed(false);m_FocusMaterial=false;}
-    ImGui::SetNextWindowSize(ImVec2(390,480),ImGuiCond_FirstUseEver);
-    PrepareWorkspacePrimaryWindow();
-    if(!ImGui::Begin("Material Editor",&m_ShowMaterialEditor,m_WorkspaceFocus?ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings:0)){ImGui::End();return;}
-    if(app.IsEditorPlayMode())ImGui::TextWrapped("Stop Play before modifying shared material assets.");
-    ImGui::BeginDisabled(app.IsEditorPlayMode());
-    auto* resources=app.GetResourceManager();auto& world=app.GetWorld();
-    auto* component=world.GetComponent<ecs::MaterialComponent>(m_Selection.active);
-    const auto open=[&](const std::string& key) {
-        if(key.starts_with("@engine/")){m_MaterialError="Built-in material is read-only. Create a project material to customize it.";return;}
-        if(m_MaterialDirty&&key!=m_EditingMaterial){m_MaterialError="Unsaved changes: Save or Revert before opening another asset.";return;}
-        m_EditingMaterial=key;m_MaterialError.clear();
-        if(resources&&!key.empty()) {resources->Load<MaterialResource>(std::filesystem::u8path(key));resources->WatchForHotReload<MaterialResource>(std::filesystem::u8path(key));}
-    };
-    if(m_SelectedAssetKind=="Material"&&ImGui::Button("Open selected asset"))open(m_SelectedAsset);
-    if(component&&!component->materialPath.empty()) {ImGui::SameLine();if(ImGui::Button("Open entity material"))open(component->materialPath);}
-    int comparison=app.GetShadingModelOverride()+1;const char* comparisonModes[]={"Material setting","Force Lambert","Force PBR"};
-    if(ImGui::Combo("Scene shading comparison",&comparison,comparisonModes,3))app.SetShadingModelOverride(comparison-1);
-    if(ActiveDocumentIs(DocumentType::Scene)){
-        if(ImGui::Button("PBR spheres demo"))app.SetupPbrDemoScene();
-        ImGui::SameLine();if(ImGui::Button("PBR textures demo"))app.SetupPbrTexturesDemoScene();
-    }
-    unsigned mask=app.GetPbrTextureMask();const char* labels[]={"Normal mapping","MR maps","AO maps"};
-    for(unsigned i=0;i<3;++i){bool enabled=(mask&(1u<<i))!=0;if(ImGui::Checkbox(labels[i],&enabled)){mask=enabled?mask|(1u<<i):mask&~(1u<<i);app.SetPbrTextureMask(mask);}if(i<2)ImGui::SameLine();}
-    if(ActiveDocumentIs(DocumentType::Scene)&&ImGui::Button("Material slots demo"))app.SetupMaterialDemoScene();
-    ImGui::InputText("New asset key",&m_NewMaterialKey);
-    if(ImGui::Button("Create Material")) {
-        if(m_MaterialDirty)m_MaterialError="Unsaved changes: Save or Revert before creating an asset.";
-        else if(std::filesystem::exists(AssetPaths::ResolveAssetPath(m_NewMaterialKey)))m_MaterialError="Asset already exists; open it instead.";
-        else {MaterialResource data;data.name=std::filesystem::path(m_NewMaterialKey).stem().string();data.placeholder=false;
-            if(CreateMaterialAsset(app,m_NewMaterialKey,&m_MaterialError)){open(AssetPaths::NormalizeAssetKey(m_NewMaterialKey));m_AssetListsDirty=true;}}
-    }
-    ImGui::Separator();ImGui::Text("Asset: %s%s",m_EditingMaterial.c_str(),m_MaterialDirty?" *":"");
-    auto resource=resources?resources->Get<MaterialResource>(std::filesystem::u8path(m_EditingMaterial)):nullptr;
-    if(resource&&resource->IsLoaded()) {
-        auto data=resource->GetData();bool changed=false;
-        changed|=ImGui::InputText("Name",&data.name);
-        changed|=DrawResourceCombo("Shader",data.shaderPath,m_ShaderAssets,false);
-        changed|=DrawResourceCombo("Base texture (sRGB)",data.texturePath,m_TextureAssets,true);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,data.texturePath);
-        changed|=DrawResourceCombo("Normal texture (linear)",data.normalTexturePath,m_TextureAssets,true);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,data.normalTexturePath);
-        changed|=DrawResourceCombo("MR texture (G rough / B metal)",data.metallicRoughnessTexturePath,m_TextureAssets,true);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,data.metallicRoughnessTexturePath);
-        changed|=DrawResourceCombo("AO texture (R)",data.occlusionTexturePath,m_TextureAssets,true);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,data.occlusionTexturePath);
-        changed|=PrecisionSliderFloat("Normal scale",&data.normalScale,0,4);
-        changed|=PrecisionSliderFloat("AO strength",&data.occlusionStrength,0,1);
-        const char* slotLabels[]={"Base UV set","Normal UV set","MR UV set","AO UV set"};
-        for(int i=0;i<4;++i) {
-            changed|=ImGui::InputInt(slotLabels[i],&data.textureTexCoords[i]);data.textureTexCoords[i]=std::clamp(data.textureTexCoords[i],0,7);
-            if(data.textureTexCoords[i]!=0)ImGui::TextUnformatted("UV0 only: this map is disabled.");
-        }
-        const std::string* maps[]={&data.texturePath,&data.normalTexturePath,&data.metallicRoughnessTexturePath,&data.occlusionTexturePath};
-        for(const auto* key:maps)if(!key->empty()) {
-            auto map=resources->Get<TextureResource>(*key);
-            if(!map)(void)resources->LoadAsync<TextureResource>(*key);
-            if(!map||map->IsLoading())ImGui::Text("Loading: %s",key->c_str());
-            else if(map->IsFailed())ImGui::Text("Missing map, neutral fallback: %s",key->c_str());
-        }
-        changed|=LinearColorEdit("Asset Base Color",data.baseColor,4);
-        int shading=int(data.shadingModel);const char* shadingModels[]={"Lambert","PBR (GGX)"};
-        if(ImGui::Combo("Shading Model",&shading,shadingModels,2)){data.shadingModel=ShadingModel(shading);changed=true;}
-        changed|=PrecisionSliderFloat("Metallic",&data.metallic,0,1);
-        changed|=PrecisionSliderFloat("Roughness",&data.roughness,0,1);
-        if(data.shadingModel==ShadingModel::PBR)ImGui::TextWrapped("PBR uses direct GGX and optional scene IBL. Map values use their existing color semantics.");
-        ImGui::TextUnformatted("Base Color factor is linear. BRDF roughness minimum: 0.04.");
-        int mode=int(data.surfaceMode);const char* modes[]={"Opaque","Masked (unsupported)","Transparent (unsupported)"};
-        if(ImGui::Combo("Surface Mode",&mode,modes,3)){data.surfaceMode=MaterialSurfaceMode(mode);changed=true;}
-        if(data.surfaceMode!=MaterialSurfaceMode::Opaque)ImGui::TextWrapped("This surface mode is preserved in the asset but omitted from main and shadow passes.");
-        if(data.surfaceMode==MaterialSurfaceMode::Masked)changed|=PrecisionSliderFloat("Alpha Cutoff",&data.alphaCutoff,0,1);
-        changed|=ImGui::Checkbox("Double Sided",&data.doubleSided);
-        changed|=ImGui::Checkbox("Cast Shadows",&data.castShadows);
-        changed|=ImGui::Checkbox("Receive Shadows",&data.receiveShadows);
-        if(changed) {
-            resource->ReplaceData(std::move(data),ResourceLoadState::Loaded);m_MaterialDirty=true;
-            resources->SetMaterialDirty(m_EditingMaterial,true);
-        }
-        if(ImGui::Button("Save")) {
-            if(MaterialLoader::Save(m_EditingMaterial,resource->GetData(),&m_MaterialError)){m_MaterialDirty=false;resources->SetMaterialDirty(m_EditingMaterial,false);resources->Reload<MaterialResource>(std::filesystem::u8path(m_EditingMaterial));}
-        }
-        ImGui::SameLine();if(ImGui::Button("Revert"))ImGui::OpenPopup("Discard unsaved material edits?");
-        if(ImGui::BeginPopupModal("Discard unsaved material edits?",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::TextUnformatted("Revert this shared asset to its saved file?");
-            if(ImGui::Button("Revert to file")) {resources->SetMaterialDirty(m_EditingMaterial,false);auto reloaded=resources->Reload<MaterialResource>(std::filesystem::u8path(m_EditingMaterial));
-                if(reloaded&&reloaded->IsLoaded()){m_MaterialDirty=false;m_MaterialError.clear();}else {m_MaterialError=reloaded?reloaded->GetErrorMessage():"Reload failed";resources->SetMaterialDirty(m_EditingMaterial,m_MaterialDirty);}
-                ImGui::CloseCurrentPopup();}
-            ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();ImGui::EndPopup();
-        }
-        if(!resource->GetData().diagnostics.empty())ImGui::TextWrapped("%s",resource->GetData().diagnostics.c_str());
-        if(!resource->GetData().texturePath.empty()) {
-            auto texture=resources->Get<TextureResource>(resource->GetData().texturePath);
-            if(texture&&texture->HasError())ImGui::TextWrapped("Texture fallback: %s",texture->GetErrorMessage().c_str());
-            else if(texture&&texture->IsLoading())ImGui::TextUnformatted("Texture loading asynchronously...");
-        }
-    } else if(resource&&resource->HasError())ImGui::TextWrapped("%s",resource->GetErrorMessage().c_str());
-    if(!m_MaterialError.empty())ImGui::TextWrapped("%s",m_MaterialError.c_str());
-    ImGui::Separator();ImGui::TextWrapped("Per-entity references and overrides are edited in Inspector. Asset disk editing has a separate Save/Revert domain.");
-    ImGui::EndDisabled();ImGui::End();
-}
 
 void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const ImVec2& viewportSize)
 {

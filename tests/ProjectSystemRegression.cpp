@@ -140,6 +140,7 @@ int main(int argc,char** argv){try{
         auto* dx=dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter());Check(dx!=nullptr,"DX12 adapter");
         SyntheticEditorInput input;ui.SetFixedDiagnosticLayout(true);app.SetFrameLimit(2);
         Check(app.GetWorld().GetAliveCount()==0&&app.GetSceneKey().empty(),"startup does not load legacy scene");
+        Check(!ui.HasProjectEdits(),"fresh Project Browser has no authored changes");
         auto browserOnly=[&]{
             Check(app.Run()==0,"Project Browser ImGui frames");
             auto* browser=ImGui::FindWindowByName("Project Browser");Check(browser&&browser->Active,"Project Browser rendered");
@@ -150,6 +151,9 @@ int main(int argc,char** argv){try{
             Check(ui.GetViewportPixelWidth()==0&&!ui.OwnsViewportKeyboard(),"startup owns input without a viewport");
         };
         browserOnly();
+        ui.RequestProjectOpen(app,AssetPaths::ToUtf8String(moved/"HospitalDemo.whispproject"));app.Run();
+        Check(app.GetProject()&&app.GetProject()->root==moved,"fresh startup opens Project without unsaved modal");
+        Check(app.CloseProject(D::Discard,&error),error);browserOnly();
         const auto startupFrame=ImGui::GetFrameCount();
         glfwSetWindowShouldClose(window->GetGlfwHandle(),GLFW_TRUE);Check(app.Run()==0,"startup window close exits normally");
         Check(ImGui::GetFrameCount()==startupFrame&&window->ShouldClose(),"startup window close needs no workspace confirmation");
@@ -160,6 +164,9 @@ int main(int argc,char** argv){try{
         auto* chooser=ImGui::FindWindowByName("Project Browser")->DC.ChildWindows.front();
         ImGui::ActivateItemByID(chooser->GetID("Legacy Workspace"));app.Run();
         Check(!app.IsProjectBrowserActive()&&!app.GetProject()&&app.GetWorld().GetAliveCount()>0,"explicit Legacy Workspace loads existing scene");
+        Check(!ui.HasProjectEdits(),"opening Legacy Workspace does not create authored changes");
+        ui.RequestProjectOpen(app,AssetPaths::ToUtf8String(moved/"HospitalDemo.whispproject"));app.Run();
+        Check(app.GetProject()&&app.GetProject()->root==moved,"clean Legacy opens Project without unsaved modal");
         Check(app.CloseProject(D::Discard,&error),error);browserOnly();
         Check(app.OpenProject(moved/"HospitalDemo.whispproject",D::Discard,&error),error);
         Check(!app.IsProjectBrowserActive(),"explicit project open bypasses startup screen");

@@ -1,9 +1,16 @@
 #pragma once
 #include "../render/SceneLights.h"
 #include "../ecs/MathTypes.h"
+#include "../ecs/RenderPose.h"
 #include <optional>
 namespace editor
 {
+// Gizmo orientation must be invariant under equivalent Euler representations.
+// FPS spawn/camera pitch limits are not an editor-overlay transform.
+inline ecs::Vec3 PlayerStartGizmoDirection(const ecs::TransformComponent& t){
+    const auto q=ecs::RenderRotation(t.rotation);
+    return {2*(q.x*q.z+q.w*q.y),2*(q.y*q.z-q.w*q.x),1-2*(q.x*q.x+q.y*q.y)};
+}
 inline LightCamera GizmoCamera(ecs::Vec3 p,float yaw,float pitch,float fov,float aspect,float nearZ,float farZ)
 {
     LightCamera c;float sy=std::sin(yaw),cy=std::cos(yaw),sp=std::sin(pitch),cp=std::cos(pitch);

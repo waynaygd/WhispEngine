@@ -44,6 +44,19 @@ EditorDocument& EditorLayer::RegisterDocument(Application& app,DocumentType type
     EditorDocument document;document.type=type;document.project=project;document.key=key;document.canonical=canonical;document.id="Document-"+std::to_string(++serial);
     m_DocumentProject=project;m_Documents.push_back(std::move(document));return m_Documents.back();
 }
+void EditorLayer::RenameAssetDocument(Application& app,const std::string& old,const std::string& replacement){
+    for(auto& d:m_Documents)if(d.key==old){d.key=replacement;d.canonical=Canonical(AssetPaths::ResolveAssetPath(replacement));}
+    if(old.ends_with(".ui.json")){
+        const auto previous=AssetPaths::ToUtf8String(ui::SafeDocumentPath(old));
+        if(auto node=m_UIDocuments.extract(previous);!node.empty()){node.key()=AssetPaths::ToUtf8String(ui::SafeDocumentPath(replacement));node.mapped().resourceKey=replacement;m_UIDocuments.insert(std::move(node));}
+        if(m_DesignDocument==old)m_DesignDocument=replacement;
+        for(auto& key:m_UIDesignerKeys)if(key==old)key=replacement;
+    }
+    if(auto node=m_UIStyles.extract(old);!node.empty()){node.key()=replacement;m_UIStyles.insert(std::move(node));}
+    if(m_UIStyleKey==old)m_UIStyleKey=replacement;
+    if(auto node=m_MaterialSessions.extract(old);!node.empty()){node.key()=replacement;m_MaterialSessions.insert(std::move(node));}
+    m_ScriptKey.clear();m_UI4Selection.clear();StoreDocumentSession();
+}
 void EditorLayer::CaptureSceneDocument(Application& app){
     if(app.IsEditorPlayMode()||app.IsPrefabEditing())return;
     for(auto& d:m_Documents)if(d.type==DocumentType::Scene&&d.key==app.GetSceneKey()){
@@ -89,11 +102,8 @@ bool EditorLayer::ResolveDocumentEdits(Application& app,const EditorDocument& d,
         }
     }
     if(d.type==DocumentType::Material){
-        auto* rm=app.GetResourceManager();auto resource=rm->Get<MaterialResource>(d.key);if(!resource)return false;
-        if(decision==OpenDecision::Save&&!MaterialLoader::Save(d.key,resource->GetData(),&m_EditorError))return false;
-        rm->SetMaterialDirty(d.key,false);
-        if(decision==OpenDecision::Discard){auto loaded=rm->Reload<MaterialResource>(d.key);if(!loaded||!loaded->IsLoaded()){rm->SetMaterialDirty(d.key,true);m_EditorError="Material reload failed";return false;}}
-        m_MaterialDirty=false;
+        if(d.key!=m_EditingMaterial){m_EditorError="Material session is not active.";return false;}
+        return decision==OpenDecision::Save?SaveMaterialDraft(app):ReloadMaterialDraft(app);
     }
     return true;
 }
@@ -124,7 +134,7 @@ bool EditorLayer::ActivateDocument(Application& app,const std::string& id,OpenDe
     auto it=std::find_if(m_Documents.begin(),m_Documents.end(),[&](auto& d){return d.id==destination;});if(it==m_Documents.end()||it->project!=ProjectIdentity(app)){m_EditorError="Document is no longer available in this project.";return false;}
     const auto target=*it;const auto previous=m_ActiveDocument;
     if(destination==m_ActiveDocument&&(target.type!=DocumentType::Prefab||app.IsPrefabEditing()&&m_EditingPrefab==target.key))return true;
-    FinishTransaction(app);
+    FinishTransaction(app);FinishMaterialEdit(app);
     // Stage destination data before leaving the source context or resolving edits.
     nlohmann::json prefab,base;
     try{
@@ -190,7 +200,7 @@ bool EditorLayer::CloseDocument(Application& app,const std::string& id,OpenDecis
     const auto closing=id;
     auto it=std::find_if(m_Documents.begin(),m_Documents.end(),[&](auto& d){return d.id==closing;});if(it==m_Documents.end())return false;
     const auto target=*it;const auto index=std::size_t(it-m_Documents.begin());const bool active=m_ActiveDocument==closing;
-    FinishTransaction(app);if(decision==OpenDecision::Cancel&&NeedsDocumentDecision(app,closing,true)){m_EditorError.clear();return false;}
+    FinishTransaction(app);FinishMaterialEdit(app);if(decision==OpenDecision::Cancel&&NeedsDocumentDecision(app,closing,true)){m_EditorError.clear();return false;}
     if(app.IsEditorPlayMode()&&(target.type==DocumentType::Scene&&target.key==app.GetSceneKey()||DocumentDirty(target)))app.SetEditorPlayMode(false);
     if(app.IsPrefabEditing()&&(target.type==DocumentType::Prefab&&target.key==m_EditingPrefab||target.type==DocumentType::Scene&&target.key==app.GetSceneKey())){
         if(IsSceneDirty()){if(!(decision==OpenDecision::Save?SavePrefabEditor(app):ClosePrefabEditor(app,true)))return false;}
@@ -214,11 +224,13 @@ bool EditorLayer::SaveActiveDocument(Application& app){
     return app.SaveCurrentScene(&m_EditorError);
 }
 bool EditorLayer::CanUndoActiveDocument(bool redo)const{
+    if(ActiveDocumentIs(DocumentType::Material)){auto found=m_MaterialSessions.find(m_EditingMaterial);if(found==m_MaterialSessions.end())return false;const auto& s=found->second;return redo?!s.redo.empty():s.transaction.has_value()||!s.undo.empty();}
     if(m_PrefabHistory)return redo?CanRedo():CanUndo()||HasPendingTransaction();
     if(ActiveDocumentIs(DocumentType::UI)){for(const auto& [origin,s]:m_UIDocuments)if(s.resourceKey==m_DesignDocument)return redo?!s.redo.empty():s.pending.has_value()||!s.undo.empty();return false;}
     return ActiveDocumentIs(DocumentType::Scene)&&(redo?CanRedo():CanUndo()||HasPendingTransaction());
 }
 bool EditorLayer::UndoActiveDocument(Application& app,bool redo){
+    if(ActiveDocumentIs(DocumentType::Material)){if(!CanUndoActiveDocument(redo))return false;UndoMaterialEdit(app,redo);return true;}
     if(app.IsPrefabEditing()){if(redo)Redo(app);else Undo(app);return true;}
     if(ActiveDocumentIs(DocumentType::UI))return UndoUIDocument(app,m_DesignDocument,redo);
     if(!ActiveDocumentIs(DocumentType::Scene))return false;

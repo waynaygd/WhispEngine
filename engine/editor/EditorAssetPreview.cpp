@@ -7,7 +7,7 @@
 #include <set>
 #include <cstring>
 namespace editor {
-void EditorLayer::ReleaseAssetPreview(IRenderAdapter* renderer){ReleaseAssetThumbnails(renderer);if(renderer&&m_AssetPreviewTexture.IsValid())renderer->DestroyTexture(m_AssetPreviewTexture);m_AssetPreviewTexture={};m_AssetPreviewKey.clear();m_AssetPreviewVersion=0;}
+void EditorLayer::ReleaseAssetPreview(IRenderAdapter* renderer){ReleaseMaterialEditor(renderer);ReleaseAssetThumbnails(renderer);if(renderer&&m_AssetPreviewTexture.IsValid())renderer->DestroyTexture(m_AssetPreviewTexture);m_AssetPreviewTexture={};m_AssetPreviewKey.clear();m_AssetPreviewVersion=0;}
 void EditorLayer::ReleaseAssetThumbnails(IRenderAdapter* renderer){
     if(renderer){
         for(auto& [key,item]:m_AssetThumbnails)if(item.texture.IsValid())renderer->DestroyTexture(item.texture);

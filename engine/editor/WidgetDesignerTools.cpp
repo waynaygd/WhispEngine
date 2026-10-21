@@ -50,7 +50,7 @@ ui::Rect Drag(ui::Rect r,float dx,float dy,int handle,float grid){
  if(handle==4||handle==5||handle==6)bottom=std::max(top,snap(bottom+dy));
  return {left,top,right-left,bottom-top};
 }
-std::string Pick(const ui::DrawList& draw,float x,float y){
- for(auto it=draw.widgets.rbegin();it!=draw.widgets.rend();++it)for(unsigned c=it->first;c<it->first+it->count;++c){auto& cmd=draw.commands[c];auto& a=draw.vertices[cmd.first];auto& b=draw.vertices[cmd.first+2];auto r=ui::Intersect({a.x,a.y,b.x-a.x,b.y-a.y},cmd.clip);if(x>=r.x&&y>=r.y&&x<r.x+r.w&&y<r.y+r.h)return it->id;}return {};
+std::string Pick(const ui::DrawList& draw,float x,float y,const std::set<std::string>& locked){
+ for(auto it=draw.widgets.rbegin();it!=draw.widgets.rend();++it)if(!locked.contains(it->id))for(unsigned c=it->first;c<it->first+it->count;++c){auto& cmd=draw.commands[c];auto& a=draw.vertices[cmd.first];auto& b=draw.vertices[cmd.first+2];auto r=ui::Intersect({a.x,a.y,b.x-a.x,b.y-a.y},cmd.clip);if(x>=r.x&&y>=r.y&&x<r.x+r.w&&y<r.y+r.h)return it->id;}return {};
 }
 }

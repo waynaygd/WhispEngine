@@ -332,6 +332,7 @@ void EditorLayer::DrawInspector(Application& app){
             if(mode!=FogMode::Distance){ImGui::SeparatorText("Height profile (world space)");drawSection("Medium",false);}
             ImGui::SeparatorText(mode==FogMode::Distance?"Distance":mode==FogMode::Height?"Height":"Volumetric");
             drawSection(mode==FogMode::Distance?"Distance":mode==FogMode::Height?"Height":"Volumetric",false);
+            if(mode==FogMode::Volumetric){const auto& f=*world.GetComponent<ecs::FogComponent>(e);const float sigma=f.density*f.extinction;ImGui::TextWrapped("Extinction is per world unit. At/below Base Height, transmittance: %.1f%% over 1 unit, %.3f%% over 10 units. Above Base Height the height profile reduces absorption.",100*std::exp(-sigma),100*std::exp(-sigma*10));}
             const auto fog=ecs::GatherFog(world);if(fog.activeCount>1)ImGui::TextWrapped("Conflict: %u enabled Fog components. Lowest Entity index wins.",fog.activeCount);
             if(fog.invalidCount)ImGui::TextWrapped("Invalid Fog components ignored: %u",fog.invalidCount);
             ImGui::TextWrapped("Global environment; Transform is ignored. Colors are linear. Height density is constant below Base Height and decreases above it.");
@@ -420,7 +421,7 @@ void EditorLayer::DrawInspector(Application& app){
         }
         if(d.key=="PointLight"||d.key=="SpotLight")ImGui::TextWrapped("Point/Spot shadows are a reserved flag. Range is in world units; Transform scale is ignored.");
         if(d.key=="DirectionalLight"||d.key=="SpotLight")ImGui::TextWrapped("Outgoing rays follow Transform local +Z; Inspector rotation is in degrees (stored radians).");
-        if(d.key=="Material"){if(ImGui::Button("Open Material Asset Editor")){auto* material=world.GetComponent<ecs::MaterialComponent>(e);m_SelectedAsset=material->materialPath;m_SelectedAssetKind="Material";m_ShowMaterialEditor=true;}}
+        if(d.key=="Material"){if(ImGui::Button("Open Material Asset Editor")){auto* material=world.GetComponent<ecs::MaterialComponent>(e);OpenDocument(app,material->materialPath);}}
         }
         ImGui::PopID();
     }

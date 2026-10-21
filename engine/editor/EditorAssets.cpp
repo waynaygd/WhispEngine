@@ -10,6 +10,7 @@
 #include "../scripting/Prefab.h"
 #include <fstream>
 #include "../resources/ResourceManager.h"
+#include "../resources/loaders/MaterialLoader.h"
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <misc/cpp/imgui_stdlib.h>
@@ -71,6 +72,20 @@ std::vector<std::string> EditorLayer::AssetFileBlockers(Application& app,const s
     std::vector<std::string> reasons;
     if(app.IsEditorPlayMode())reasons.push_back("Stop Play before modifying asset files");
     if(m_MaterialDirty)reasons.push_back("Save or Revert unsaved material edits first");
+    if(app.IsPrefabEditing())reasons.push_back("Return from Prefab Editor before changing asset files");
+    if(std::any_of(m_Documents.begin(),m_Documents.end(),[&](auto& d){return d.key==key&&d.type==DocumentType::Prefab;}))reasons.push_back("Close the Prefab Document first; suspended Prefab session migration is not supported");
+    // Disk audits cannot see unsaved UI data or Undo/Redo snapshots.
+    for(const auto& [origin,s]:m_UIDocuments){
+        if(s.resourceKey==key&&(s.dirty||s.pending))reasons.push_back("Save or Discard the open UI document draft before changing its file");
+        if(AssetCatalog::ContainsReference(nlohmann::json(s.draft),key)||AssetCatalog::ContainsReference(s.disk,key)||
+           std::any_of(s.undo.begin(),s.undo.end(),[&](auto& j){return AssetCatalog::ContainsReference(j,key);})||
+           std::any_of(s.redo.begin(),s.redo.end(),[&](auto& j){return AssetCatalog::ContainsReference(j,key);}))reasons.push_back("UI document draft/history references this asset: "+s.resourceKey);
+    }
+    for(const auto& [style,s]:m_UIStyles)if(style==key&&(m_DirtyUIStyles.contains(key)||s.pending))reasons.push_back("Save or Discard the UI Style draft first");
+    for(const auto& [material,s]:m_MaterialSessions){
+        auto references=[&](const MaterialResource& d){return AssetCatalog::ContainsReference(MaterialLoader::Serialize(d),key);};
+        if(references(s.base)||references(s.draft)||std::any_of(s.undo.begin(),s.undo.end(),[&](auto& c){return references(c.before)||references(c.after);})||std::any_of(s.redo.begin(),s.redo.end(),[&](auto& c){return references(c.before)||references(c.after);}))reasons.push_back("Material session/history references this asset: "+material);
+    }
     try{(void)AssetCatalog::EditablePath(key);}catch(const std::exception& e){reasons.push_back(e.what());return reasons;}
     try{
         if(AssetReferenced(app,key)){
@@ -89,15 +104,22 @@ std::vector<std::string> EditorLayer::AssetFileBlockers(Application& app,const s
     try{auto disk=AssetCatalog::Dependencies(key);reasons.insert(reasons.end(),disk.begin(),disk.end());}catch(const std::exception& e){reasons.push_back("Dependency audit incomplete: "+std::string(e.what()));}return reasons;
 }
 void EditorLayer::InvalidateAssetFileUi(Application& app,const std::string& old,const std::string& replacement){
+    if(!replacement.empty())RenameAssetDocument(app,old,replacement);
     ReleaseAssetPreview(app.GetRenderAdapter());m_AssetMetadataKey.clear();m_AssetMetadata.clear();m_AssetMetadataVersion=0;
     if(auto* resources=app.GetResourceManager()){
         const auto path=std::filesystem::u8path(old);
-        resources->Unload<MaterialResource>(path);resources->Unload<TextureResource>(path);resources->Unload<EnvironmentResource>(path);
+        resources->StopWatchingAsset(old);
+        resources->Unload<MaterialResource>(path);resources->Unload<TextureResource>(path);resources->Unload<EnvironmentResource>(path);resources->Unload<UIResource>(path);
+        if(!replacement.empty()){
+            if(replacement.ends_with(".ui.json")||replacement.ends_with(".uistyle.json"))resources->WatchForHotReload<UIResource>(replacement);
+            else if(replacement.ends_with(".material.json")||replacement.starts_with("materials/"))resources->WatchForHotReload<MaterialResource>(replacement);
+            else if(replacement.starts_with("textures/"))resources->WatchForHotReload<TextureResource>(replacement);
+        }
     }
-    const bool editing=m_EditingMaterial==old;if(editing){m_EditingMaterial.clear();m_MaterialError.clear();}
+    const bool editing=m_EditingMaterial==old;if(editing){m_EditingMaterial=replacement;m_MaterialError.clear();}
     m_SelectedAsset=replacement;if(replacement.empty())m_SelectedAssetKind.clear();
     else {NavigateAssetFolder(AssetPaths::ToUtf8String(std::filesystem::u8path(replacement).parent_path()));m_AssetFilter.clear();m_AssetKindFilter=0;}
-    if(editing&&!replacement.empty())OpenMaterial(app,replacement);
+    if(editing&&!replacement.empty())app.GetResourceManager()->Load<MaterialResource>(replacement);
     m_AssetListsDirty=true;
 }
 bool EditorLayer::RenameAssetFile(Application& app,const std::string& key,const std::string& name,bool confirmed,std::string* error,bool acceptDynamicRisk){
@@ -120,6 +142,7 @@ bool EditorLayer::MoveAssetFile(Application& app,const std::string& key,const st
 bool EditorLayer::DeleteAssetFile(Application& app,const std::string& key,bool confirmed,std::string* error,bool acceptDynamicRisk){
     try{
         if(!confirmed)throw std::runtime_error("Confirm Delete first");
+        if(std::any_of(m_Documents.begin(),m_Documents.end(),[&](auto& d){return d.key==key;}))throw std::runtime_error("Close the asset Document before deleting its file");
         const auto reasons=AssetFileBlockers(app,key);if(!reasons.empty()){std::string message="Delete blocked:";for(auto& s:reasons)message+="\n- "+s;throw std::runtime_error(message);}
         std::string message;if(!m_AssetCatalog.DeleteAssetFile(key,&message,acceptDynamicRisk))throw std::runtime_error(message);
         InvalidateAssetFileUi(app,key,{});if(error)error->clear();return true;

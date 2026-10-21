@@ -1299,6 +1299,8 @@ bool Application::Initialize(StartupMode mode)
     });
     m_LegacyStartupScene=m_Config.ecsDemo.sceneFile;
     SetupEcsRuntimeDemo(!m_ProjectBrowserActive);
+    // Bootstrap establishes the baseline; stress cleanup is not a user edit.
+    m_EditorLayer.MarkSaved();
     if(!m_ProjectBrowserActive&&!m_Config.ecsDemo.sceneFile.empty()){std::string error;if(!OpenScene(m_Config.ecsDemo.sceneFile,&error))Logger::Get().Error(error);}
     m_EditorLayer.InitializePreferences(*this);
     if(m_ProjectBrowserActive)m_EditorLayer.ShowProjectBrowser();

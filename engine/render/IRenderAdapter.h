@@ -5,6 +5,7 @@
 #include "RenderInstanceData.h"
 #include "Shadows.h"
 #include "MaterialState.h"
+#include "MaterialPreview.h"
 #include "Environment.h"
 #include "AntiAliasing.h"
 #include "EditorVisuals.h"
@@ -51,6 +52,9 @@ public:
     // Called before scene rendering. The caller owns the returned cached texture.
     virtual RenderTextureHandle RenderMeshThumbnail(const MeshData&, RenderShaderHandle, RenderTextureHandle) { return {}; }
     virtual RenderTextureHandle CreateThumbnailTexture(const TextureData& data) { return CreateTexture2D(data); }
+    virtual std::uint64_t RenderMaterialPreview(const MaterialPreviewFrame&) {return 0;}
+    virtual void ReleaseMaterialPreview() {}
+    virtual MaterialPreviewMetrics GetMaterialPreviewMetrics()const{return {};}
     virtual void BeginFrame() = 0;
     virtual void Clear(float r, float g, float b, float a) = 0;
 

@@ -5,6 +5,7 @@
 #include "editor/EntityIcons.h"
 #include "editor/LightGizmoMath.h"
 #include "editor/EditorTheme.h"
+#include "ecs/PlayerSpawn.h"
 #include "ecs/components/LuaScriptComponent.h"
 #include <iostream>
 #include <fstream>
@@ -108,10 +109,19 @@ static void Gpu(){
     Check(std::abs(world.GetComponent<TransformComponent>(b)->rotation.z)>.01f,"Rotate fallback Entity");ui.UndoEdit(app);frame();
     ui.SetGizmoOperation(2);frame();point(pivot);Check(ImGuizmo::IsOver(ImGuizmo::SCALE),"Scale handle wins over fallback icon");SyntheticEditorInput::Button(0,true);frame(1);point({pivot.x+45,pivot.y-20});SyntheticEditorInput::Button(0,false);frame();
     Check(std::abs(world.GetComponent<TransformComponent>(b)->scale.x-original.scale.x)>.01f,"Scale fallback Entity");ui.UndoEdit(app);frame();key(ImGuiKey_F11);
+    // A fresh PlayerStart: decomposed Yaw=180 may be Euler (pi,0,pi).
+    // Applying FPS pitch clamping to that equivalent rotation made the overlay point up.
+    app.NewScene();auto marker=ui.CreatePlayerStart(app);world.GetComponent<TransformComponent>(marker)->position={0,0,4};app.SetEditorCameraPose({0,1,-6},0,0);ui.SelectEntity(marker);ui.SetGizmoOperation(1);frame();
+    const auto feet=world.WorldTransform(marker).position;
+    auto checkEyes=[&]{auto t=world.WorldTransform(marker);Check(std::abs(t.position.x-feet.x)<.001f&&std::abs(t.position.y-feet.y)<.001f&&std::abs(t.position.z-feet.z)<.001f,"rotation retains PlayerStart attachment");auto p=screen({feet.x,feet.y+1.7f,feet.z});auto image=gpu->ReadBackFramePixels();int w,h;glfwGetFramebufferSize(window,&w,&h);unsigned yellow=0;for(int y=int(p.y)-3;y<=int(p.y)+3;++y)for(int x=int(p.x)-3;x<=int(p.x)+3;++x)if(x>=0&&y>=0&&x<w&&y<h){auto at=(y*w+x)*4;yellow+=image[at]>240&&image[at+1]>195&&image[at+1]<235&&image[at+2]<120;}Check(yellow>4,"native Eyes pixels stay at feet plus eye height");};
+    for(bool global:{false,true})for(int turn=0;turn<4;++turn){Check(ui.RotateSelectedQuarter(app,1,1,global),"PlayerStart quarter yaw");frame();auto t=world.WorldTransform(marker);auto direction=PlayerStartGizmoDirection(t);Check(std::abs(direction.y)<.001f,"equivalent yaw Euler representation never tilts gaze up");checkEyes();if(turn==1){Check(direction.z<-.99f,"180 degree gaze points backward");Check(std::abs(ecs::PlayerLookDirection(t).y)>.99f,"reproduced former FPS-clamped overlay direction");capture("player-yaw180.ppm");}ui.UndoEdit(app);frame();checkEyes();ui.RedoEdit(app);frame();checkEyes();}
+    for(auto angles:{Vec3{.6f,0,0},Vec3{-.6f,1.2f,.3f},Vec3{}}){Check(ui.SetProperty(app,marker,ComponentId("Transform"),"rotation",angles),"PlayerStart pitch/roll");frame();checkEyes();float model[16];BuildRenderModelMatrix(model,RenderPose::From(world.WorldTransform(marker)));auto d=PlayerStartGizmoDirection(world.WorldTransform(marker));Check(std::abs(d.x-model[8])<.001f&&std::abs(d.y-model[9])<.001f&&std::abs(d.z-model[10])<.001f,"gaze follows complete rotation matrix");}
+    auto parent=ui.CreateEntity(app,"PlayerStart parent");auto& pt=*world.GetComponent<TransformComponent>(parent);pt.position={1,0,0};pt.scale={2,2,2};pt.rotation={0,.4f,0};std::string hierarchyError;Check(world.SetParent(marker,parent,false,&hierarchyError),"parent PlayerStart");ui.SelectEntity(marker);auto attachment=world.WorldTransform(marker).position;
+    for(int i=0;i<4;++i){Check(ui.RotateSelectedQuarter(app,1,1,true),"parented world yaw");frame();auto t=world.WorldTransform(marker);Check(std::abs(t.position.x-attachment.x)<.001f&&std::abs(t.position.y-attachment.y)<.001f&&std::abs(t.position.z-attachment.z)<.001f,"scaled parent retains rotation attachment");Check(std::abs(PlayerStartGizmoDirection(t).y)<.001f,"parented yaw direction remains horizontal");}
     Check(gpu->GetValidationErrorCount()==0,"DX12 validation zero");
 }
 #endif
-int main(int argc,char** argv){ScopedEditorPreferenceRestore preferences;try{
+int main(int argc,char** argv){ScopedEditorPreferenceRestore preferences;try{std::filesystem::remove("editor-preferences.json");std::filesystem::remove("imgui.ini");
 #if defined(ENABLE_DX12)
     if(argc>1&&std::string(argv[1])=="--dx12")Gpu();else
 #endif

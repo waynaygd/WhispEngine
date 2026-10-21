@@ -72,7 +72,7 @@ void EditorLayer::WorkspaceDefaults(){
     ApplyWorkspaceVisibility(visible);
 }
 void EditorLayer::InitializeWorkspaces(const EditorPreferences& preferences){
-    m_Workspaces=preferences.workspaces;m_Workspace=m_RequestedWorkspace=preferences.activeWorkspace;m_WorkspacePending=true;
+    m_Workspaces=preferences.workspaces;if(auto old=m_Workspaces.find("material");old!=m_Workspaces.end()&&old->second.ini.find("[Window][Material Preview]")==std::string::npos)m_Workspaces.erase(old);m_Workspace=m_RequestedWorkspace=preferences.activeWorkspace;m_WorkspacePending=true;
     if(ImGui::GetCurrentContext())ImGui::GetIO().IniFilename=nullptr;
     if(!preferences.workspacesInitialized){
         const auto path=AssetPaths::GetExecutableDirectory()/"imgui.ini";std::error_code error;
@@ -99,7 +99,9 @@ bool EditorLayer::ResetCurrentWorkspace(Application& app){
 void EditorLayer::BuildWorkspaceDocking(unsigned root,const ImVec2& size){
     ImGui::DockBuilderRemoveNode(root);ImGui::DockBuilderAddNode(root,ImGuiDockNodeFlags_DockSpace);ImGui::DockBuilderSetNodeSize(root,size);
     ImGuiID center=root,left=0,right=0,bottom=0;
-    if(m_Workspace==EditorWorkspace::AssetManagement){
+    if(m_Workspace==EditorWorkspace::Material){
+        ImGui::DockBuilderSplitNode(center,ImGuiDir_Right,.32f,&right,&center);ImGui::DockBuilderSplitNode(center,ImGuiDir_Down,.25f,&bottom,&center);ImGui::DockBuilderDockWindow("Material Preview",center);ImGui::DockBuilderDockWindow("Material Editor",right);ImGui::DockBuilderDockWindow("Asset Browser",bottom);
+    }else if(m_Workspace==EditorWorkspace::AssetManagement){
         ImGui::DockBuilderSplitNode(center,ImGuiDir_Right,.28f,&right,&center);
         ImGui::DockBuilderSplitNode(right,ImGuiDir_Up,.42f,&left,&right);
         bottom=center; // Assets are the primary region; the viewport occupies the upper right.
@@ -114,7 +116,7 @@ void EditorLayer::BuildWorkspaceDocking(unsigned root,const ImVec2& size){
     }
     for(const auto* name:{"Scene Settings","Editor Visuals","Lua Runtime Inspector","Project Settings"})ImGui::DockBuilderDockWindow(name,right);
     for(const auto* name:{"Console / Diagnostics","Gameplay Events","Scene Validation","Material Editor","Statistics","Physics Stress Test"})ImGui::DockBuilderDockWindow(name,bottom);
-    if(m_Workspace==EditorWorkspace::Material)ImGui::DockBuilderDockWindow("Material Editor",center);
+    if(m_Workspace==EditorWorkspace::Material){ImGui::DockBuilderDockWindow("Material Preview",center);ImGui::DockBuilderDockWindow("Material Editor",right);}
     ImGui::DockBuilderDockWindow("Script Document",center);ImGui::DockBuilderDockWindow("Start Workspace",center);
     ImGui::DockBuilderFinish(root);
     if(m_Workspace==EditorWorkspace::Scripting||m_Workspace==EditorWorkspace::GameplayDebugging){

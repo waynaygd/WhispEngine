@@ -61,13 +61,15 @@ bool AssetImport::NewFolder(const fs::path& root,const std::string& parent,const
  Key(name);if(fs::u8path(name).has_parent_path())throw std::runtime_error("Folder name must be one component");auto target=SafeTarget(root,parent.empty()?name:parent+"/"+name);
  if(!fs::is_directory(target.parent_path()))throw std::runtime_error("Parent folder does not exist");if(!fs::create_directory(target))throw std::runtime_error("Folder already exists");return true;
  }catch(const std::exception& e){if(error)*error=e.what();return false;}}
-bool AssetImport::Scan(const fs::path& source,const std::string& package,ImportPlan& output,std::string* error,const fs::path& dependencyRoot){try{
+bool AssetImport::Scan(const fs::path& source,const std::string& package,ImportPlan& output,std::string* error,const fs::path& dependencyRoot,bool standaloneImage){try{
  Key(package);CheckLinks(source);if(!fs::is_regular_file(source))throw std::runtime_error("Source must be a regular file");auto ext=Ext(source);
  const std::set<std::string> supported={".obj",".gltf",".glb",".png",".jpg",".jpeg",".dds",".hdr"};if(!supported.contains(ext))throw std::runtime_error("Unsupported import format: "+ext);
  if((ext==".obj"||ext==".gltf"||ext==".glb")&&!package.starts_with("models/"))throw std::runtime_error("Models must be imported into models/");
  if(ext==".hdr"&&!package.starts_with("environments/"))throw std::runtime_error("HDR must be imported into environments/");
  if((ext==".png"||ext==".jpg"||ext==".jpeg"||ext==".dds")&&!package.starts_with("textures/"))throw std::runtime_error("Textures must be imported into textures/");
- ImportPlan plan;plan.sourceRoot=fs::absolute(dependencyRoot.empty()?source.parent_path():dependencyRoot).lexically_normal();CheckLinks(plan.sourceRoot);if(!fs::is_directory(plan.sourceRoot))throw std::runtime_error("Dependency root must be an existing directory");plan.package=package;plan.entry=Utf8(fs::absolute(source).lexically_normal().lexically_relative(plan.sourceRoot));Key(plan.entry);
+ if(standaloneImage&&ext!=".png"&&ext!=".jpg"&&ext!=".jpeg"&&ext!=".dds")throw std::runtime_error("Standalone import requires a texture; models and HDR retain package ownership");
+ if(standaloneImage&&Ext(fs::u8path(package))!=ext)throw std::runtime_error("Texture destination must preserve its file extension");
+ ImportPlan plan;plan.standaloneImage=standaloneImage;plan.sourceRoot=fs::absolute(standaloneImage||dependencyRoot.empty()?source.parent_path():dependencyRoot).lexically_normal();CheckLinks(plan.sourceRoot);if(!fs::is_directory(plan.sourceRoot))throw std::runtime_error("Dependency root must be an existing directory");plan.package=package;plan.entry=Utf8(fs::absolute(source).lexically_normal().lexically_relative(plan.sourceRoot));Key(plan.entry);
  const auto modelFolder=fs::u8path(plan.entry).parent_path();
  std::set<std::string> seen;
  auto add=[&](const std::string& rel){Key(rel);if(!seen.insert(rel).second)return;auto p=SafeTarget(plan.sourceRoot,rel);if(!fs::is_regular_file(p))throw std::runtime_error("Missing dependency: "+rel);auto n=fs::file_size(p);if(n>MaxFile||plan.bytes+n>MaxTotal||plan.files.size()>=2048)throw std::runtime_error("Import size/file-count limit exceeded");plan.files.push_back({p,rel,n});plan.bytes+=n;};
@@ -96,9 +98,9 @@ bool AssetImport::Publish(const fs::path& root,const ImportPlan& plan,std::strin
  bool ownsStage=false;
  std::vector<fs::path> ownedParents;
  try{
-  ImportPlan verified;if(!Scan(plan.sourceRoot/fs::u8path(plan.entry),plan.package,verified,error,plan.sourceRoot))return false;
+  ImportPlan verified;if(!Scan(plan.sourceRoot/fs::u8path(plan.entry),plan.package,verified,error,plan.sourceRoot,plan.standaloneImage))return false;
   if(verified.files.size()!=plan.files.size()||verified.bytes!=plan.bytes)throw std::runtime_error("Source changed since dependency scan; scan again");
-  auto destination=SafeTarget(root,plan.package);if(fs::exists(destination))throw std::runtime_error("Destination package exists; choose a new name (no overwrite)");
+  auto destination=SafeTarget(root,plan.package);if(fs::exists(destination))throw std::runtime_error("Destination exists; choose a new name or folder (no overwrite)");
   // Staged assets take precedence during loading; refuse a collision there too.
   auto authoring=ProjectRoot(),runtime=AssetPaths::ResolveAssetRoot();auto canonicalRoot=fs::weakly_canonical(root);
   if(canonicalRoot==fs::weakly_canonical(authoring)||canonicalRoot==fs::weakly_canonical(runtime))
@@ -129,7 +131,7 @@ bool AssetImport::Publish(const fs::path& root,const ImportPlan& plan,std::strin
   // Windows scanners can retain a just-decoded file briefly. Keep the atomic
   // publication and no-overwrite policy; retry only transient access/sharing errors.
   for(unsigned attempt=0;;++attempt){
-   std::error_code ec;fs::rename(stage,destination,ec);if(!ec)break;
+   std::error_code ec;fs::rename(plan.standaloneImage?stage/fs::u8path(verified.entry):stage,destination,ec);if(!ec)break;
 #ifdef _WIN32
    if(attempt<10&&(ec.value()==ERROR_ACCESS_DENIED||ec.value()==ERROR_SHARING_VIOLATION||ec.value()==ERROR_LOCK_VIOLATION)&&!fs::exists(destination)){
     std::this_thread::sleep_for(std::chrono::milliseconds(20));CheckLinks(destination.parent_path());continue;
@@ -137,7 +139,7 @@ bool AssetImport::Publish(const fs::path& root,const ImportPlan& plan,std::strin
 #endif
    throw fs::filesystem_error("Import publication failed",stage,destination,ec);
   }
-  stage.clear();return true;
+  if(plan.standaloneImage){std::error_code ec;fs::remove(stage,ec);}stage.clear();return true;
  }catch(const std::exception& e){if(ownsStage&&!stage.empty()){std::error_code ec;fs::remove_all(stage,ec);}for(auto it=ownedParents.rbegin();it!=ownedParents.rend();++it){std::error_code ec;fs::remove(*it,ec);}if(error)*error=e.what();return false;}
 }
 }

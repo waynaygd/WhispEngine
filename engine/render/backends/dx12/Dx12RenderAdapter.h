@@ -33,6 +33,9 @@ public:
 	void EndFrame() override;
 	void Present() override;
 	void ShutdownEditorUi() override;
+    std::uint64_t RenderMaterialPreview(const MaterialPreviewFrame&) override;
+    void ReleaseMaterialPreview() override;
+    MaterialPreviewMetrics GetMaterialPreviewMetrics()const override{return m_MaterialPreviewMetrics;}
 	void Shutdown() override;
 
 	void SetTestTransform(const float* mvp16) override;
@@ -412,6 +415,12 @@ private:
 	std::unordered_map<std::uint64_t, UploadedShader> m_UploadedShaders;
 	std::uint64_t m_NextShaderHandle = 1;
 	ViewportTarget m_ViewportTarget;
+    RenderTextureHandle m_MaterialPreviewColor;
+    ViewportTarget m_MaterialPreviewTarget;
+    MaterialPreviewMetrics m_MaterialPreviewMetrics;
+    Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_MaterialPreviewTime;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_MaterialPreviewReadback;
+    std::array<bool,FrameCount> m_MaterialPreviewTimed{};
 	RenderShaderHandle m_BoundShaderHandle{};
 	RenderTextureHandle m_BoundTextureHandle{};
 	bool m_EditorUiInitialized = false;

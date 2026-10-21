@@ -50,6 +50,7 @@ public:
     };
 
     void SetUIDirty(const std::string& key,bool dirty){std::lock_guard<std::recursive_mutex> lock(m_Mutex);if(dirty)m_DirtyUI.insert(key);else m_DirtyUI.erase(key);}
+    void StopWatchingAsset(const std::string& key);
     void SetMaterialDirty(const std::string& key,bool dirty) {std::lock_guard<std::recursive_mutex> lock(m_Mutex);if(dirty)m_DirtyMaterials.insert(key);else m_DirtyMaterials.erase(key);}
     std::size_t PumpFinalization(std::size_t maxItems);
     void ReloadEnvironmentAsync(const std::filesystem::path& path) {

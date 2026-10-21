@@ -26,7 +26,7 @@ bool Application::OpenLegacyWorkspace(std::string* error){
     // OpenScene stages disk data before replacing the current (empty) workspace.
     if(!m_LegacyStartupScene.empty()){
         if(!OpenScene(m_LegacyStartupScene,error))return false;
-    }else SetupEcsRuntimeDemo();
+    }else {SetupEcsRuntimeDemo();m_EditorLayer.MarkSaved();}
     m_ProjectBrowserActive=false;
     InitializeConfigHotReload();
     m_EditorLayer.ProjectOpened(*this);
