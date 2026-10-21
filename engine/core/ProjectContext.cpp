@@ -13,6 +13,7 @@ namespace fs = std::filesystem;
 namespace {
 std::atomic<std::shared_ptr<const ProjectContext>> active;
 std::atomic_uint64_t sequence{0};
+thread_local std::uint64_t linkProbes=0;
 std::string Utf8(const fs::path& p) { auto s=p.generic_u8string(); return {s.begin(),s.end()}; }
 void Write(const fs::path& path,const nlohmann::json& json,bool replace) {
     auto temp=path; temp += ".tmp-"+std::to_string(++sequence);
@@ -58,15 +59,16 @@ void ProjectContext::ValidateName(const std::string& name){
 }
 void ProjectContext::CheckNoLinks(const fs::path& path) {
     for(auto p=fs::absolute(path).lexically_normal();!p.empty();p=p.parent_path()) {
-        std::error_code ec;auto status=fs::symlink_status(p,ec);
+        ++linkProbes;std::error_code ec;auto status=fs::symlink_status(p,ec);
         if(fs::is_symlink(status))throw std::runtime_error("Project symlinks are not supported: "+Utf8(p));
 #ifdef _WIN32
-        const auto flags=GetFileAttributesW(p.c_str());
+        ++linkProbes;const auto flags=GetFileAttributesW(p.c_str());
         if(flags!=INVALID_FILE_ATTRIBUTES&&(flags&FILE_ATTRIBUTE_REPARSE_POINT))throw std::runtime_error("Project reparse points are not supported: "+Utf8(p));
 #endif
         if(p==p.parent_path())break;
     }
 }
+std::uint64_t ProjectContext::LinkProbeCount(){return linkProbes;}
 fs::path ProjectContext::Resolve(const std::string& key) const {
     ValidateRelative(key);const auto target=(root/fs::u8path(key)).lexically_normal();CheckNoLinks(target);
     const auto relative=target.lexically_relative(root);

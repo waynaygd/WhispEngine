@@ -1,5 +1,7 @@
 # Editor.1 — Document tabs and workspace shell
 
+Editor.1.1 adds Prefab Documents and replaces the former Prefab-mode navigation restriction with explicit Save/Discard/Cancel transitions. See [EditorPrefabDocuments.md](EditorPrefabDocuments.md) for the reproduced defect, lifecycle, save failure recovery and native regression results. The Editor.1 results below describe the original baseline; the linked document records the update.
+
 ## Architecture audit
 
 The existing `EditorLayer` owns the editor UI, scene transaction history, material editing, UI document sessions and style sessions. `EditorWorkspaces` already provides native ImGui docking, separate serialized layouts, panel visibility and default layout construction. The existing Widget Designer already renders a large DX12 canvas alongside Widget Hierarchy and Widget Inspector. Its property adapter exposes UI.2 layout, UI.3 styles and UI.4 animations. Those implementations are reused.

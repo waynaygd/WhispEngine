@@ -21,6 +21,7 @@ nlohmann::json PreferencesToJson(const EditorPreferences& p){
     auto layouts=nlohmann::json::object();for(const auto& [key,layout]:p.workspaces)layouts[key]={{"ini",layout.ini},{"visible",layout.visible}};
     result["workspaces"]=std::move(layouts);
     const auto& f=p.selectionFilters;result["selectionFilters"]={{"meshes",f.meshes},{"lights",f.lights},{"playerStarts",f.playerStarts},{"fog",f.fog},{"physics",f.physics},{"other",f.other}};
+    result["assetBrowser"]={{"view",p.assetView},{"tree",p.assetTree},{"treeWidth",p.assetTreeWidth},{"allAssets",p.assetSearchAll},{"details",p.assetDetails},{"sessions",p.browserSessions}};
     return result;
 }
 EditorPreferences PreferencesFromJson(const nlohmann::json& j){
@@ -52,6 +53,13 @@ EditorPreferences PreferencesFromJson(const nlohmann::json& j){
     if(j.contains("recentProjects")&&j.at("recentProjects").is_array()){for(const auto& item:j.at("recentProjects")){try{auto name=item.at("name").get<std::string>(),path=item.at("descriptor").get<std::string>();if(!name.empty()&&name.size()<241&&path.size()<32768&&std::filesystem::u8path(path).is_absolute()&&p.recentProjects.size()<12)p.recentProjects.push_back({name,path});}catch(...){}}}
     if(j.contains("recentScenes")){for(const auto& item:j.at("recentScenes")){auto key=item.get<std::string>();if(!ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::None)||std::filesystem::u8path(key).extension()!=".json")throw std::runtime_error("Invalid recent scene key");if(std::find(p.recentScenes.begin(),p.recentScenes.end(),key)==p.recentScenes.end()&&p.recentScenes.size()<12)p.recentScenes.push_back(key);}}
     p.assetGrid=j.value("assetGrid",true);p.projectAssets=j.value("projectAssets",true);p.assetCardSize=j.value("assetCardSize",180.f);if(!std::isfinite(p.assetCardSize)||p.assetCardSize<120||p.assetCardSize>320)throw std::runtime_error("Invalid card size");
+    p.assetView=p.assetGrid?0:1;
+    if(j.contains("assetBrowser")){
+        const auto& b=j.at("assetBrowser");p.assetView=std::clamp(b.value("view",p.assetView),0,2);
+        p.assetTree=b.value("tree",true);p.assetSearchAll=b.value("allAssets",false);p.assetDetails=b.value("details",false);
+        const float width=b.value("treeWidth",180.f);p.assetTreeWidth=std::isfinite(width)?std::clamp(width,90.f,480.f):180.f;
+        if(b.contains("sessions")&&b["sessions"].is_object())p.browserSessions=b["sessions"];
+    }
     p.backgroundOverride=j.value("backgroundOverride",false);p.projectileTestInput=j.value("projectileTestInput",false);
     p.surfaceSnap=j.value("surfaceSnap",true);p.alignToNormal=j.value("alignToNormal",false);
     p.physicsStress=j.value("physicsStress",false);p.rotationSnapping=j.value("rotationSnapping",j.value("snapping",false));p.transformPrecision=j.value("transformPrecision",1);p.lightXrayMode=j.value("lightXrayMode",j.value("xray",false)?2:1);

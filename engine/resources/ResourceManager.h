@@ -168,6 +168,15 @@ public:
         return Get<T>(path) != nullptr;
     }
 
+    // Presentation of catalogued keys must never resolve a disk path. This
+    // lookup cannot load or open a file; file operations still use Get/Load.
+    template <typename T>
+    ResourceHandle<T> PeekIndexed(const std::string& key)
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_Mutex);
+        return FindCachedResource<T>(key);
+    }
+
     template <typename T>
     void Unload(const std::filesystem::path& path)
     {

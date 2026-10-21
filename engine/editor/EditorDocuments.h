@@ -3,10 +3,11 @@
 #include <array>
 #include <vector>
 namespace editor {
-enum class DocumentType {Scene, UI, Material, Lua};
+enum class DocumentType {Scene, UI, Material, Lua, Prefab};
 struct EditorDocument {
     DocumentType type=DocumentType::Scene;
     std::string project,key,canonical,id;
+    std::string returnDocument;
     // Only stable authored identities survive a scene reload; never ECS/resource handles.
     std::vector<std::string> selection;
     std::array<float,3> camera{};

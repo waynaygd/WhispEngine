@@ -27,6 +27,8 @@ struct ProjectContext {
     std::filesystem::path ResolveScene(const std::string& key) const;
     static void ValidateRelative(const std::string& key);
     static void CheckNoLinks(const std::filesystem::path& path);
+    // Per-thread filesystem probes, for editor steady-state diagnostics.
+    static std::uint64_t LinkProbeCount();
 };
 
 class ProjectManager {

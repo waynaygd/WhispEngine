@@ -1200,6 +1200,14 @@ bool Dx12RenderAdapter::InitializeEditorUi(IWindow* window)
             ImFontConfig config;config.MergeMode=true;
             io.Fonts->AddFontFromFileTTF(AssetPaths::ToUtf8String(font).c_str(),16.f,&config,cyrillic);
         }
+        // Optional proportional browser face in the existing atlas. Code and
+        // technical panels retain their current font; no redistributed font.
+        const auto browserFont=std::filesystem::path(windowsDirectory)/"Fonts"/"segoeui.ttf";
+        if(std::filesystem::is_regular_file(browserFont)){
+            static const ImWchar browserRanges[]={0x0020,0x00ff,0x0400,0x052f,0};
+            ImFontConfig browserConfig;strcpy_s(browserConfig.Name,"Browser UI");
+            io.Fonts->AddFontFromFileTTF(AssetPaths::ToUtf8String(browserFont).c_str(),13.f,&browserConfig,browserRanges);
+        }
     }
 
 

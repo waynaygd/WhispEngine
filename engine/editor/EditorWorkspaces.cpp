@@ -151,11 +151,11 @@ void EditorLayer::DrawWorkspaceMenu(Application& app){
     if(!ImGui::BeginMenu("Workspaces"))return;
     auto select=[&](EditorWorkspace workspace){
         const auto type=workspace==EditorWorkspace::UIDesigner?DocumentType::UI:workspace==EditorWorkspace::Material?DocumentType::Material:workspace==EditorWorkspace::Script?DocumentType::Lua:DocumentType::Scene;
-        if(!ActiveDocumentIs(type)){
+        if(!ActiveDocumentIs(type)&&!(type==DocumentType::Scene&&ActiveDocumentIs(DocumentType::Prefab))){
             std::string id;for(const auto& d:m_Documents)if(d.type==type&&(type!=DocumentType::Scene||d.key==app.GetSceneKey())){id=d.id;break;}
             if(id.empty()&&type==DocumentType::Scene)id=RegisterDocument(app,type,app.GetSceneKey()).id;
             if(id.empty()){m_OpenDocumentKey=type==DocumentType::UI?"ui/":type==DocumentType::Material?"materials/":"scripts/";m_OpenDocumentPrompt=true;return;}
-            if(!ActivateDocument(app,id)){m_PendingDocument=id;m_DocumentClose=false;m_DocumentPrompt=true;return;}
+            if(!RequestDocumentNavigation(app,id))return;
         }
         SwitchWorkspace(workspace);
     };

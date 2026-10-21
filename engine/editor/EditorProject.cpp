@@ -16,10 +16,10 @@
 
 namespace editor {
 bool EditorLayer::ResolveProjectEdits(Application& app,int decision,std::string* error){
-    if(app.IsPrefabEditing()){
-        if(error)*error="Save and Return or Discard changes in the Prefab menu before changing project or exiting";return false;
-    }
     if(decision==int(Application::ProjectDecision::Cancel))return false;
+    if(app.IsPrefabEditing()){
+        if(!(decision==int(Application::ProjectDecision::Save)?SavePrefabEditor(app):ClosePrefabEditor(app,true))){if(error)*error=m_EditorError;return false;}
+    }
     if(decision!=int(Application::ProjectDecision::Save))return true;
     if(UIDraftsDirty()){
         if(app.IsEditorPlayMode()){if(error)*error="Stop Play before saving UI Documents and Styles";return false;}
@@ -43,6 +43,7 @@ bool EditorLayer::ResolveProjectEdits(Application& app,int decision,std::string*
 }
 void EditorLayer::ResetProjectState(IRenderAdapter* renderer){
     StoreDocumentSession();m_Documents.clear();m_ActiveDocument.clear();m_ObservedScene="<initial>";m_DocumentProject.clear();m_PendingDocument.clear();m_DocumentPrompt=false;m_WorkspaceFocus=false;m_RestoreDocuments=true;m_ScriptKey.clear();m_ScriptText.clear();
+    m_AssetDoubleClick.clear();m_PrefabActionKey.clear();m_PrefabConfirm=false;m_PrefabCreatePopup=false;m_PrefabAction=0;m_PrefabActionEntity={};m_PrefabRoot={};m_EditingPrefab.clear();m_PrefabDiskBase={};m_PrefabHistory.reset();
     m_UIDocuments.clear();m_UIStyles.clear();m_DirtyUIStyles.clear();m_DesignDocument.clear();m_UIDesignerKeys.clear();m_UIWidgetDrag.reset();m_UI4Selection.clear();m_UIStyleKey.clear();m_UIStyleId.clear();m_UIClipId.clear();
     m_EventFilter={};m_SelectedGameplayEvent=0;
     m_ShowProjectSettings=m_FocusProjectSettings=false;m_ProjectSettingsBase.reset();m_ProjectSettingsDraft={};m_ProjectSettingsScenes={};m_ProjectSettingsError.clear();m_ProjectSettingsNotice.clear();
@@ -52,7 +53,9 @@ void EditorLayer::ResetProjectState(IRenderAdapter* renderer){
     m_BackgroundAssetDraft.clear();m_BackgroundAssetEditing=false;m_BackgroundDraftWorld=0;
     ReleaseAssetPreview(renderer);ResetHistory();m_EditHistory.reset();m_Clipboard={};
     m_SelectedAsset.clear();m_SelectedAssetKind.clear();m_EditingMaterial.clear();m_MaterialDirty=false;m_MaterialError.clear();
-    m_AssetDirectory.clear();m_AssetNavigation={};m_AssetCatalog=AssetCatalog{};
+    if(!m_BrowserProject.empty())m_BrowserSessions[m_BrowserProject]={{"folder",m_AssetDirectory},{"expanded",m_AssetExpanded}};
+    const bool all=m_AssetNavigation.projectSearch;m_BrowserProject.clear();m_AssetExpanded.clear();m_AssetSelection.clear();m_AssetAnchor.clear();m_AssetCategory=0;m_AssetKindFilter=0;
+    m_AssetDirectory.clear();m_AssetNavigation={};m_AssetNavigation.projectSearch=all;m_AssetCatalog=AssetCatalog{};
     m_AssetMetadataKey.clear();m_AssetMetadata.clear();m_AssetMetadataVersion=0;
     m_MeshAssets.clear();m_TextureAssets.clear();m_MaterialAssets.clear();m_ShaderAssets.clear();m_EnvironmentAssets.clear();
     m_AssetListsDirty=true;m_RecentScenes.clear();m_SceneCatalog={};m_RenameTarget={};m_DragOriginal={};

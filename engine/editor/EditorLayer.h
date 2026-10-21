@@ -70,11 +70,20 @@ public:
     bool IsRotationSnapping()const{return m_RotationSnapping;}
     void SetSkyDiagnosticEnabled(bool enabled){m_SkyDiagnosticEnabled=enabled;}
     void SetDiagnosticViewport(int w,int h){m_DiagnosticWidth=w;m_DiagnosticHeight=h;}
-    void SetAssetGrid(bool grid){m_AssetGrid=grid;}
+    enum class AssetView {Grid,List,Compact};
+    void SetAssetView(AssetView view){m_AssetView=int(view);m_AssetGrid=view==AssetView::Grid;}
+    AssetView GetAssetView()const{return AssetView(m_AssetView);}
+    void SetAssetGrid(bool grid){SetAssetView(grid?AssetView::Grid:AssetView::List);}
+    void SetAssetSearchScope(bool all){m_AssetNavigation.projectSearch=all;}
+    void SetAssetTree(bool visible,float width=180){m_AssetTree=visible;m_AssetTreeReveal=visible;m_AssetTreeWidth=std::clamp(width,90.f,480.f);}
+    float AssetTreeWidth()const{return m_AssetTreeWidth;}
+    const auto& SelectedAssets()const{return m_AssetSelection;}
+    struct BrowserStatistics {unsigned visible=0,matched=0,thumbnailCalls=0,thumbnailHits=0,requests=0,uploads=0;std::uint64_t pathProbes=0,catalogRevision=0;};
+    const BrowserStatistics& GetBrowserStatistics()const{return m_BrowserStatistics;}
     void SetAssetCardSize(float size){if(std::isfinite(size))m_AssetCardSize=std::clamp(size,120.f,320.f);}
     void SetAssetSearch(const std::string& search){m_AssetFilter=search;}
-    void SetAssetTypeFilter(ecs::AssetKind kind){m_AssetKindFilter=0;for(std::size_t i=0;i<m_AssetCatalog.Types().size();++i)if(m_AssetCatalog.Types()[i].kind==kind){m_AssetKindFilter=int(i)+1;break;}}
-    void NavigateAssetFolder(const std::string& folder){auto key=AssetCatalog::DirectoryKey(std::filesystem::u8path(folder));m_AssetNavigation.Go(key);m_AssetDirectory=key;}
+    void SetAssetTypeFilter(ecs::AssetKind kind){m_AssetKindFilter=0;m_AssetCategory=0;if(kind==ecs::AssetKind::None)return;for(std::size_t i=0;i<m_AssetCatalog.Types().size();++i)if(m_AssetCatalog.Types()[i].kind==kind){m_AssetKindFilter=int(i)+1;break;}}
+    void NavigateAssetFolder(const std::string& folder){auto key=AssetCatalog::DirectoryKey(std::filesystem::u8path(folder));m_AssetNavigation.Go(key);m_AssetDirectory=key;m_AssetTreeReveal=true;for(auto parent=AssetNavigation::Parent(key);!parent.empty();parent=AssetNavigation::Parent(parent))m_AssetExpanded.insert(parent);}
     const std::string& AssetFolder()const{return m_AssetDirectory;}
     const std::string& ImportTargetFolder()const{return m_ImportTargetFolder;}
     void BeginAssetImport(){m_ImportTargetFolder=m_AssetDirectory;m_ImportTarget.clear();m_ImportPackageName.clear();m_ImportPopup=true;m_ImportPreview.clear();}
@@ -94,7 +103,8 @@ public:
     void ResetProjectState(IRenderAdapter*);
     void ProjectOpened(Application&);
     bool UIDraftsDirty()const{if(!m_DirtyUIStyles.empty())return true;for(auto& [key,s]:m_UIDocuments)if(s.dirty)return true;return false;}
-    bool HasProjectEdits()const{return UIDraftsDirty()||m_PrefabHistory.has_value()||ProjectSettingsDirty()||m_MaterialDirty||(m_EditHistory?(m_EditHistory->external||m_EditHistory->revision!=m_EditHistory->saved):IsSceneDirty());}
+    bool AuthoringSceneDirty()const{const auto* history=m_PrefabHistory?&*m_PrefabHistory:m_EditHistory?&*m_EditHistory:nullptr;return history?(history->external||history->revision!=history->saved):IsSceneDirty();}
+    bool HasProjectEdits()const{return UIDraftsDirty()||ProjectSettingsDirty()||m_MaterialDirty||AuthoringSceneDirty()||(m_PrefabHistory&&IsSceneDirty());}
     void ShowProjectSettings(Application&);
     void RevertProjectSettings(Application&);
     bool SaveProjectSettingsDraft(Application&);
@@ -187,6 +197,9 @@ public:
     enum class OpenDecision {Cancel,Discard,Save};
     bool ActivateDocument(Application&,const std::string&,OpenDecision decision=OpenDecision::Cancel);
     bool CloseDocument(Application&,const std::string&,OpenDecision decision=OpenDecision::Cancel);
+    bool RequestDocumentNavigation(Application&,const std::string&,bool close=false);
+    bool NeedsDocumentDecision(Application&,const std::string&,bool close=false)const;
+    void BackToSceneDocument(Application&);
     bool SaveActiveDocument(Application&);
     bool UndoActiveDocument(Application&,bool redo=false);
     bool CanUndoActiveDocument(bool redo=false)const;
@@ -285,7 +298,7 @@ public:
     bool CreatePrefab(Application&,const std::string& key);
     ecs::Entity InstantiatePrefab(Application&,const std::string& key,ecs::Vec3 position={},const ecs::TransformComponent* placement=nullptr,const nlohmann::json* prepared=nullptr);
     bool OpenPrefabEditor(Application&,const std::string& key);
-    bool SavePrefabEditor(Application&);
+    bool SavePrefabEditor(Application&,bool stayOpen=false);
     void RequestPrefabSave(){m_PrefabAction=1;m_PrefabConfirm=true;}
     bool ClosePrefabEditor(Application&,bool discard=false);
     bool ApplyPrefab(Application&,ecs::Entity);
@@ -301,7 +314,7 @@ public:
     bool MoveAssetFile(Application&,const std::string&,const std::string& destination,bool confirmed,std::string* error=nullptr,bool acceptDynamicRisk=false);
     std::vector<std::string> AssetFileBlockers(Application&,const std::string&)const;
     const std::string& SelectedAsset()const{return m_SelectedAsset;}
-    void SelectAsset(const std::string& key,const std::string& kind){m_SelectedAsset=key;m_SelectedAssetKind=kind;}
+    void SelectAsset(const std::string& key,const std::string& kind){m_SelectedAsset=key;m_SelectedAssetKind=kind;m_AssetSelection.clear();m_AssetAnchor=kind=="Folder"?AssetContentItem::FolderId(key):key;if(!key.empty())m_AssetSelection.insert(m_AssetAnchor);}
     struct BulkValue {
         bool common=false;ecs::PropertyValue value;
         std::array<bool,4> mixed{};
@@ -593,6 +606,13 @@ private:
     Statistics m_Statistics;
     AssetCatalog m_AssetCatalog;
     bool m_AssetGrid=true,m_AssetActionRequested=false;
+    int m_AssetView=0,m_AssetCategory=0;
+    bool m_AssetTree=true,m_AssetDetails=false,m_AssetScrollSelection=false,m_AssetTreeReveal=false;
+    float m_AssetTreeWidth=180;
+    std::set<std::string> m_AssetSelection,m_AssetExpanded;
+    std::string m_AssetAnchor,m_BrowserProject;
+    nlohmann::json m_BrowserSessions=nlohmann::json::object();
+    BrowserStatistics m_BrowserStatistics;
     int m_AssetAction=0,m_ModelImportMode=0;
     std::string m_AssetActionSource,m_AssetActionKey="materials/new.material.json";
     bool m_AssetActionFocus=false;
@@ -633,7 +653,7 @@ private:
     struct HistoryContext {SelectionSet selection;std::vector<UndoRecord> undo,redo;std::uint64_t revision,saved,next;bool external;};
     std::optional<HistoryContext> m_EditHistory;
     std::optional<HistoryContext> m_PrefabHistory;
-    std::string m_EditingPrefab,m_PrefabActionKey,m_PrefabDoubleClick,m_PrefabNewKey="prefabs/cabinet.prefab.json";
+    std::string m_EditingPrefab,m_PrefabActionKey,m_AssetDoubleClick,m_PrefabNewKey="prefabs/cabinet.prefab.json";
     nlohmann::json m_PrefabDiskBase;
     SceneSettings m_PrefabSavedSceneSettings;
     ecs::Entity m_PrefabRoot{};

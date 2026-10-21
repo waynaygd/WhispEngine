@@ -6,7 +6,6 @@
 #include <GLFW/glfw3.h>
 
 bool Application::OpenProject(const std::filesystem::path& path,ProjectDecision decision,std::string* error){
-    if(IsPrefabEditing()){if(error)*error="Return from Prefab Editor before changing projects";return false;}
     if(decision==ProjectDecision::Cancel)return false;
     try {
         auto next=ProjectManager::Prepare(path);
@@ -16,7 +15,6 @@ bool Application::OpenProject(const std::filesystem::path& path,ProjectDecision 
     }catch(const std::exception& e){if(error)*error=std::string("Open project: ")+e.what();return false;}
 }
 bool Application::CloseProject(ProjectDecision decision,std::string* error){
-    if(IsPrefabEditing()){if(error)*error="Return from Prefab Editor before changing projects";return false;}
     if(decision==ProjectDecision::Cancel)return false;
     ecs::World empty;return CommitProject({},empty,SceneSettings{},decision,error);
 }
@@ -104,8 +102,12 @@ bool Application::BeginPrefabContext(std::unique_ptr<ecs::World> world){
     if(m_PhysicsSystem)m_PhysicsSystem->ResetState();return true;
 }
 void Application::EndPrefabContext(){
-    if(!m_PrefabWorld)return;
-    m_Mutations.Clear();m_PrefabWorld.reset();m_Camera=m_PrefabSavedCamera;m_EcsDebugEntities=std::move(m_PrefabSavedDebug);m_StressEntities=std::move(m_PrefabSavedStress);
+    SuspendPrefabContext();
+}
+std::unique_ptr<ecs::World> Application::SuspendPrefabContext(){
+    if(!m_PrefabWorld)return {};
+    m_Mutations.Clear();auto world=std::move(m_PrefabWorld);m_Camera=m_PrefabSavedCamera;m_EcsDebugEntities=std::move(m_PrefabSavedDebug);m_StressEntities=std::move(m_PrefabSavedStress);
     m_LightingSettings.enabled=m_PrefabSavedSettings.lighting.enabled;m_ShadowSettings.debugMode=m_PrefabSavedSettings.shadows.debugMode;SetSceneSettings(m_PrefabSavedSettings);
     if(m_PhysicsSystem)m_PhysicsSystem->ResetState();ResetPhysicsClock();
+    return world;
 }

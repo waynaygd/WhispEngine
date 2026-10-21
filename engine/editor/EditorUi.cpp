@@ -35,7 +35,8 @@ void EditorLayer::InitializePreferences(Application& app){
     m_RecentScenes=p.recentScenes;m_RecentProjects=p.recentProjects;
     m_Bookmarks=p.bookmarks;m_SelectionFilters=p.selectionFilters;
     m_ShowHierarchy=p.hierarchy;m_ShowInspector=p.inspector;m_ShowViewport=p.viewport;m_ShowAssetBrowser=p.assets;m_ShowMaterialEditor=p.material;m_ShowSceneSettings=p.settings;m_ShowConsole=p.console;m_ShowStatistics=p.diagnostics;
-    m_AssetGrid=p.assetGrid;m_ProjectAssets=p.projectAssets;m_AssetCardSize=p.assetCardSize;m_BackgroundOverride=p.backgroundOverride;m_ProjectileTestInput=p.projectileTestInput;
+    m_AssetView=p.assetView;m_AssetTree=p.assetTree;m_AssetTreeWidth=p.assetTreeWidth;m_AssetDetails=p.assetDetails;m_AssetNavigation.projectSearch=p.assetSearchAll;m_BrowserSessions=p.browserSessions;
+    m_AssetGrid=m_AssetView==0;m_ProjectAssets=p.projectAssets;m_AssetCardSize=p.assetCardSize;m_BackgroundOverride=p.backgroundOverride;m_ProjectileTestInput=p.projectileTestInput;
     m_SurfaceSnap=p.surfaceSnap;m_AlignToNormal=p.alignToNormal;m_SurfaceOffset=p.surfaceOffset;m_SurfaceRotationOffset=p.surfaceRotationOffset;
     m_ShowVisualSettings=p.visualPanel;m_VisualSettings=p.visuals;m_ShowGrid=p.grid;m_ShowLightGizmos=p.lightGizmos;m_LightXray=p.xray;m_LightXrayMode=p.lightXrayMode;m_TransformPrecision=p.transformPrecision;m_RotationSnapping=p.rotationSnapping;m_ShowPhysicsStress=p.physicsStress;m_Snapping=p.snapping;m_GizmoOperation=p.operation;m_GizmoMode=p.space;
     m_SnapTranslation=p.translationSnap;m_SnapRotation=p.rotationSnap;m_SnapScale=p.scaleSnap;app.SetCameraNavigation(p.cameraSpeed,p.cameraSensitivity);
@@ -46,6 +47,8 @@ bool EditorLayer::PersistPreferences(Application& app){
     if(ImGui::GetCurrentContext()&&!ImGui::GetCurrentContext()->WithinFrameScope)CaptureCurrentWorkspace();
     CaptureSceneDocument(app);StoreDocumentSession();
     EditorPreferences p;p.documentSessions=m_DocumentSessions;p.activeWorkspace=m_Workspace;p.workspaces=m_Workspaces;p.workspacesInitialized=true;p.recentScenes=app.GetProject()?std::vector<std::string>{}:m_RecentScenes;p.recentProjects=m_RecentProjects;p.hierarchy=m_ShowHierarchy;p.inspector=m_ShowInspector;p.viewport=m_ShowViewport;p.assets=m_ShowAssetBrowser;p.material=m_ShowMaterialEditor;p.settings=m_ShowSceneSettings;p.console=m_ShowConsole;p.diagnostics=m_ShowStatistics;
+    if(!m_BrowserProject.empty())m_BrowserSessions[m_BrowserProject]={{"folder",m_AssetDirectory},{"expanded",m_AssetExpanded}};
+    p.assetView=m_AssetView;p.assetTree=m_AssetTree;p.assetTreeWidth=m_AssetTreeWidth;p.assetDetails=m_AssetDetails;p.assetSearchAll=m_AssetNavigation.projectSearch;p.browserSessions=m_BrowserSessions;
     p.assetGrid=m_AssetGrid;p.projectAssets=m_ProjectAssets;p.assetCardSize=m_AssetCardSize;p.backgroundOverride=m_BackgroundOverride;p.projectileTestInput=m_ProjectileTestInput;
     p.bookmarks=m_Bookmarks;p.selectionFilters=m_SelectionFilters;
     p.surfaceSnap=m_SurfaceSnap;p.alignToNormal=m_AlignToNormal;p.surfaceOffset=m_SurfaceOffset;p.surfaceRotationOffset=m_SurfaceRotationOffset;
@@ -56,12 +59,13 @@ void EditorLayer::DrawToolbar(Application& app){
     auto* viewport=ImGui::GetMainViewport();ImGui::SetNextWindowPos(viewport->WorkPos);ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x,ImGui::GetFrameHeightWithSpacing()+8));
     ImGui::Begin("Main Toolbar",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings);
     if(ImGui::Button(app.IsPrefabEditing()?"Save Prefab":"Save")){if(!SaveActiveDocument(app))Logger::Get().Error(m_EditorError);}ImGui::SameLine();
-    if(app.IsPrefabEditing()){if(ImGui::Button("Return to Scene")){if(!IsSceneDirty())ClosePrefabEditor(app);else {m_PrefabAction=2;m_PrefabConfirm=true;}}ImGui::SameLine();}
+    if(app.IsPrefabEditing()){if(ImGui::Button("Return to Scene"))BackToSceneDocument(app);ImGui::SameLine();}
     ImGui::BeginDisabled(app.IsPrefabEditing());
     if(!app.IsEditorPlayMode()){ImGui::BeginDisabled(!ActiveDocumentIs(DocumentType::Scene));if(ImGui::Button("Play"))app.SetEditorPlayMode(true);ImGui::EndDisabled();}else{
         if(ImGui::Button(app.IsEditorPaused()?"Resume":"Pause"))app.SetEditorPaused(!app.IsEditorPaused());ImGui::SameLine();if(ImGui::Button("Stop"))app.SetEditorPlayMode(false);
     }
     ImGui::EndDisabled();
+    if(app.IsPrefabEditing()&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Play belongs to the scene. Return to the Scene document before starting Play.");
     ImGui::SameLine();ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);ImGui::SameLine();
     ImGui::RadioButton("Move",&m_GizmoOperation,0);ImGui::SameLine();ImGui::RadioButton("Rotate",&m_GizmoOperation,1);ImGui::SameLine();ImGui::RadioButton("Scale",&m_GizmoOperation,2);ImGui::SameLine();
     ImGui::RadioButton("Local",&m_GizmoMode,0);ImGui::SameLine();auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(m_Selection.active);const bool localScale=m_Selection.items.size()==1&&m_GizmoOperation==2&&t&&(std::abs(t->rotation.x)+std::abs(t->rotation.y)+std::abs(t->rotation.z)>1e-6f);if(localScale)m_GizmoMode=0;ImGui::BeginDisabled(localScale);ImGui::RadioButton("World",&m_GizmoMode,1);ImGui::EndDisabled();if(m_GizmoOperation==2&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Scale axes/planes use local TRS axes. Rotated world non-uniform scale requires shear and is not represented by Transform.");ImGui::SameLine();ImGui::Checkbox(m_GizmoOperation==1?"Rotation Snap":"Snap",m_GizmoOperation==1?&m_RotationSnapping:&m_Snapping);ImGui::SameLine();ImGui::Checkbox("Grid",&m_ShowGrid);ImGui::SameLine();
@@ -75,7 +79,6 @@ void EditorLayer::DrawMainMenu(Application& app){
     bool preferencesRequested=false;
     auto action=[&](int kind){m_SceneDialogAction=kind;m_SceneDialogRequested=true;};
     if(ImGui::BeginMenu("File")){
-        ImGui::BeginDisabled(app.IsPrefabEditing());
         if(ImGui::MenuItem("New Project...")){m_ShowProjectBrowser=true;m_ProjectTab=1;}
         if(ImGui::MenuItem("Open Project...")){m_ShowProjectBrowser=true;m_ProjectTab=2;}
         if(ImGui::BeginMenu("Recent Projects",!m_RecentProjects.empty())){
@@ -85,8 +88,11 @@ void EditorLayer::DrawMainMenu(Application& app){
         if(ImGui::MenuItem("Close Project",nullptr,false,!app.IsProjectBrowserActive()))RequestProjectOpen(app,{},true);
         ImGui::Separator();
         if(ImGui::MenuItem("Open Document..."))m_OpenDocumentPrompt=true;
+        ImGui::BeginDisabled(app.IsPrefabEditing());
         if(ImGui::MenuItem("New Scene"))action(1);
+        if(app.IsPrefabEditing()&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Return to the Scene document before creating a new scene.");
         if(ImGui::MenuItem("Open Scene"))action(2);
+        if(app.IsPrefabEditing()&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Use Open Document or the Scene tab to leave Prefab Editor safely.");
         if(ImGui::BeginMenu("Recent Scenes",!m_RecentScenes.empty())){const auto recent=m_RecentScenes;for(const auto& key:recent)if(ImGui::MenuItem(key.c_str())){RequestRecentScene(app,key);}ImGui::EndMenu();}
         ImGui::EndDisabled();
         if(ImGui::MenuItem("Save","Ctrl+S",false,!app.IsEditorPlayMode())){if(!SaveActiveDocument(app))Logger::Get().Error(m_EditorError);}

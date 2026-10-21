@@ -124,7 +124,7 @@ bool EditorLayer::StartPrefabEditor(Application& app,const std::string& key,cons
     }catch(const std::exception& e){m_EditorError=e.what();return false;}
 }
 bool EditorLayer::OpenPrefabEditor(Application& app,const std::string& key){
-    try{auto data=scripting::ReadPrefab(key);return StartPrefabEditor(app,key,data,DiskPrefab(key));}catch(const std::exception& e){m_EditorError=e.what();return false;}
+    return OpenDocument(app,key);
 }
 void EditorLayer::RestorePrefabHistory(){
     ResetHistory();if(m_PrefabHistory){auto saved=std::move(*m_PrefabHistory);m_PrefabHistory.reset();m_Selection=std::move(saved.selection);m_UndoStack=std::move(saved.undo);m_RedoStack=std::move(saved.redo);m_Revision=saved.revision;m_SavedRevision=saved.saved;m_NextRevision=saved.next;m_ExternalDirty=saved.external;}
@@ -134,17 +134,30 @@ void EditorLayer::RestorePrefabHistory(){
 bool EditorLayer::ClosePrefabEditor(Application& app,bool discard){
     if(!app.IsPrefabEditing())return true;FinishTransaction(app);
     if(IsSceneDirty()&&!discard){m_EditorError="Prefab has unsaved changes; Save and Return or Discard explicitly";return false;}
-    app.EndPrefabContext();RestorePrefabHistory();m_EditorError.clear();return true;
+    app.EndPrefabContext();RestorePrefabHistory();
+    m_ActiveDocument=RegisterDocument(app,DocumentType::Scene,app.GetSceneKey()).id;m_FocusViewportWindow=true;
+    m_EditorError.clear();return true;
 }
-bool EditorLayer::SavePrefabEditor(Application& app){
+bool EditorLayer::SavePrefabEditor(Application& app,bool stayOpen){
     if(!app.IsPrefabEditing())return false;
     try{
         FinishTransaction(app);if(app.GetWorld().Subtree(m_PrefabRoot).size()!=app.GetWorld().GetAliveCount())throw std::runtime_error("A prefab must contain exactly one root; parent all entities beneath its root");auto data=scripting::CapturePrefab(app.GetWorld(),m_PrefabRoot);auto key=m_EditingPrefab;auto base=m_PrefabDiskBase;
         if(DiskPrefab(key)!=base)throw std::runtime_error("Prefab changed on disk; return without saving and reopen it");
         auto nodes=UpdatedNodes(app.GetEditorWorld(),key,data);ValidateNodes(app.GetEditorWorld(),m_PrefabSavedSceneSettings,nodes);
-        ClosePrefabEditor(app,true);
-        if(WritePrefabAndUpdate(app,key,data,base,true))return true;
-        const auto error=m_EditorError;StartPrefabEditor(app,key,data,base);MarkDirty();m_EditorError=error;return false;
+        // Hold the existing prefab World and its history while the scene's existing
+        // atomic file/instance transaction runs. A failed write must not recreate it.
+        const auto root=m_PrefabRoot;const auto active=m_ActiveDocument;const auto position=app.GetCameraPosition();const auto yaw=app.GetCameraYaw(),pitch=app.GetCameraPitch();const auto settings=app.GetSceneSettings();
+        auto isolation=m_Isolation;const auto gameView=m_GameView;
+        HistoryContext history{m_Selection,std::move(m_UndoStack),std::move(m_RedoStack),m_Revision,m_SavedRevision,m_NextRevision,m_ExternalDirty};
+        auto world=app.SuspendPrefabContext();RestorePrefabHistory();
+        const bool ok=WritePrefabAndUpdate(app,key,data,base,true);const auto error=m_EditorError;
+        if(ok&&!stayOpen){m_ActiveDocument=RegisterDocument(app,DocumentType::Scene,app.GetSceneKey()).id;m_FocusViewportWindow=true;return true;}
+        app.BeginPrefabContext(std::move(world));
+        m_PrefabIsolation=std::move(m_Isolation);m_PrefabGameView=m_GameView;
+        m_PrefabHistory=HistoryContext{m_Selection,std::move(m_UndoStack),std::move(m_RedoStack),m_Revision,m_SavedRevision,m_NextRevision,m_ExternalDirty};ResetHistory();
+        m_Selection=std::move(history.selection);m_UndoStack=std::move(history.undo);m_RedoStack=std::move(history.redo);m_Revision=history.revision;m_SavedRevision=history.saved;m_NextRevision=history.next;m_ExternalDirty=history.external;
+        m_Isolation=std::move(isolation);m_GameView=gameView;m_EditingPrefab=key;m_PrefabRoot=root;m_PrefabDiskBase=ok&&!data.value("_legacySceneReferences",false)?data:base;m_ActiveDocument=active;
+        app.SetSceneSettings(settings);app.SetEditorCameraPose(position,yaw,pitch);if(ok)MarkSaved();m_EditorError=error;return ok;
     }catch(const std::exception& e){m_EditorError=e.what();return false;}
 }
 void EditorLayer::DrawPrefabWorkflow(Application& app){
@@ -152,8 +165,8 @@ void EditorLayer::DrawPrefabWorkflow(Application& app){
     if(ImGui::BeginMenu("Prefab")){
         if(app.IsPrefabEditing()){
             ImGui::TextWrapped("Editing %s",m_EditingPrefab.c_str());
-            if(ImGui::MenuItem("Save Prefab and Return")){m_PrefabAction=1;m_PrefabConfirm=true;}
-            if(ImGui::MenuItem("Return to Scene")){if(!IsSceneDirty())ClosePrefabEditor(app);else{m_PrefabAction=2;m_PrefabConfirm=true;}}
+            if(ImGui::MenuItem("Save Prefab"))SavePrefabEditor(app,true);
+            if(ImGui::MenuItem("Return to Scene"))BackToSceneDocument(app);
         }else{
             if(ImGui::MenuItem("Create Prefab from Selection...",nullptr,false,!app.IsEditorPlayMode()&&m_Selection.items.size()==1))m_PrefabCreatePopup=true;
             auto root=scripting::PrefabRoot(app.GetWorld(),m_Selection.active);auto* link=app.GetWorld().GetComponent<ecs::PrefabInstanceComponent>(root);
@@ -166,7 +179,7 @@ void EditorLayer::DrawPrefabWorkflow(Application& app){
             }
         }ImGui::EndMenu();
     }ImGui::EndMainMenuBar();
-    if(!m_PrefabActionKey.empty()&&!m_PrefabConfirm&&!ImGui::IsPopupOpen("Prefab changes")){auto key=std::exchange(m_PrefabActionKey,{});OpenPrefabEditor(app,key);}
+    if(!m_PrefabActionKey.empty()&&!m_PrefabConfirm&&!ImGui::IsPopupOpen("Prefab changes")){auto key=std::exchange(m_PrefabActionKey,{});OpenDocument(app,key);}
     if(m_PrefabCreatePopup){ImGui::OpenPopup("Create Prefab");m_PrefabCreatePopup=false;}
     if(ImGui::BeginPopupModal("Create Prefab",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
         ImGui::TextUnformatted("One selected root and its complete subtree. Path inside Assets:");ImGui::InputText("Asset key",&m_PrefabNewKey);

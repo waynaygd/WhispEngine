@@ -69,6 +69,7 @@ static void Cpu(){
 #if defined(ENABLE_DX12)
 static void Gpu(){
     Application app;Check(app.Initialize(),"DX12 initialization");auto* window=dynamic_cast<GlfwWindow*>(app.GetWindow());glfwHideWindow(window->GetGlfwHandle());auto* renderer=dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter());
+    auto& browserEditor=app.GetEditorLayer();browserEditor.SwitchWorkspace(editor::EditorWorkspace::LevelEditing);app.SetFrameLimit(3);Check(app.Run()==0,"activate Level fixture");Check(browserEditor.ResetCurrentWorkspace(app),"reset persisted viewport layout");app.SetFrameLimit(3);Check(app.Run()==0,"apply Level fixture");
     app.SetupPhysicsStressScene(500);app.SetEditorPlayMode(false);app.SetGpuInstancingEnabled(true);app.GetEditorLayer().SetGridVisible(true);app.GetEditorLayer().SetBackgroundOverride(false);
     auto settings=app.GetSceneSettings();settings.background.background=EditorBackground::Cubemap;settings.background.cubemap="environments/uniform.hdr";settings.background.skyIntensity=.15f;Check(app.SetSceneSettings(settings),"authored HDR sky");app.GetEnvironmentSettings().enabled=true;
     app.SetFrameLimit(250);Check(app.Run()==0,"Edit async HDR rendering");auto edit=renderer->ReadBackViewportPixels();auto diagnostics=renderer->GetEditorVisualDiagnostics();Check(diagnostics.skyReady&&diagnostics.backgroundDraws==1&&diagnostics.gridDraws==1,"Edit scene sky/grid");Check(app.GetRenderStatistics().submitted.drawCalls==1&&app.GetRenderStatistics().submitted.renderedInstances==501,"500 batching");
@@ -104,7 +105,7 @@ static void Gpu(){
     Check(SceneSerializer::CaptureWorld(app.GetWorld(),app.GetSceneSettings())==document&&!ui.IsSceneDirty()&&ui.UndoCount()==history,"40 shading roundtrips preserve scene/settings/dirty/history");
     {
         SyntheticEditorInput synthetic;app.SetFrameLimit(1);ImGui::SetWindowFocus("Viewport");app.Run();
-        app.NewScene();auto pickedCube=ui.CreatePrimitive(app,"cube");Check(app.SetEditorCameraPose({0,0,-6},0,0),"Game View picking camera");ui.SetGameView(true);app.SetFrameLimit(100);app.Run();app.SetFrameLimit(1);
+        app.NewScene();app.SetFrameLimit(3);app.Run();auto pickedCube=ui.CreatePrimitive(app,"cube");Check(app.SetEditorCameraPose({0,0,-6},0,0),"Game View picking camera");ui.SetGameView(true);app.SetFrameLimit(100);app.Run();Check(app.SetEditorCameraPose({0,0,-6},0,0),"settled Game View picking camera");app.SetFrameLimit(3);app.Run();app.SetFrameLimit(1);
         auto bounds=ui.GetViewportBounds();SyntheticEditorInput::Position((bounds[0]+bounds[2])*.5f,(bounds[1]+bounds[3])*.5f);app.Run();SyntheticEditorInput::Button(0,true);app.Run();SyntheticEditorInput::Button(0,false);app.Run();
         Check(!ui.IsGameView()&&ui.GetSelectedEntity()==pickedCube,"successful mesh picking exits Game View and retains entity");
         ui.SetGameView(true);SyntheticEditorInput::Position(bounds[2]-10,bounds[1]+10);app.Run();SyntheticEditorInput::Button(0,true);app.Run();SyntheticEditorInput::Button(0,false);app.Run();Check(ui.IsGameView(),"empty viewport click preserves Game View");ui.SetGameView(false);

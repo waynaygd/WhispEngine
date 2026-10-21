@@ -35,6 +35,10 @@ struct EditorPreferences {
     std::vector<RecentProject> recentProjects;
     bool assetGrid=true,projectAssets=true;
     float assetCardSize=180;
+    int assetView=0;
+    bool assetTree=true,assetSearchAll=false,assetDetails=false;
+    float assetTreeWidth=180;
+    nlohmann::json browserSessions=nlohmann::json::object();
     bool visualPanel=false,backgroundOverride=false,projectileTestInput=false;
     bool grid=true,lightGizmos=true,xray=false,snapping=false,rotationSnapping=false,physicsStress=false;
     bool surfaceSnap=true,alignToNormal=false;

@@ -593,7 +593,7 @@ bool Application::ReloadSceneFromCurrentConfig(const char* reason){
 }
 
 bool Application::SaveCurrentScene(std::string* error){
-    if(IsPrefabEditing()){m_EditorLayer.RequestPrefabSave();return true;}
+    if(IsPrefabEditing())return m_EditorLayer.SavePrefabEditor(*this,true);
     return SaveSceneAs(m_SceneKey.empty()?DefaultSceneKey():m_SceneKey,!m_SceneKey.empty(),error);
 }
 bool Application::LoadCurrentScene(std::string* error){

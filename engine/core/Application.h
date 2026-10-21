@@ -70,6 +70,7 @@ public:
     bool IsPrefabEditing()const{return bool(m_PrefabWorld);}
     bool BeginPrefabContext(std::unique_ptr<ecs::World>);
     void EndPrefabContext();
+    std::unique_ptr<ecs::World> SuspendPrefabContext();
     ecs::World& GetEditorWorld(){return m_World;}
     scripting::LuaRuntime& GetLuaRuntime(){return m_LuaRuntime;}
     ecs::MutationQueue& GetMutationQueue(){return m_Mutations;}

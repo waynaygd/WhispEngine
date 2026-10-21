@@ -6,6 +6,7 @@
 #include "../core/ProjectContext.h"
 #include "../resources/loaders/MaterialLoader.h"
 #include <fstream>
+#include <map>
 #include <algorithm>
 #include <stdexcept>
 #include "../scripting/Prefab.h"
@@ -30,6 +31,9 @@ AssetCatalog::AssetCatalog(){
     Register({"Shader","[S]","",ecs::AssetKind::Shader,{".hlsl"},true});
     Register({"Scene Document","[Level]","scenes",ecs::AssetKind::None,{".json"}});
     Register({"Imported Scene","[Scene]","models",ecs::AssetKind::None,{".wscene"}});
+    Register({"UI Style","[Style]","",ecs::AssetKind::None,{".json"}});
+    Register({"Unknown","[?]","",ecs::AssetKind::None,{"*"}});
+    Register({"Audio","[Audio]","",ecs::AssetKind::None,{".wav",".ogg",".mp3",".flac"}});
     Register({"Environment","[HDR]","environments",ecs::AssetKind::Environment,{".hdr"}});
 }
 void AssetCatalog::Register(AssetType type){
@@ -39,20 +43,34 @@ void AssetCatalog::Register(AssetType type){
 }
 void AssetCatalog::Refresh(){
     std::vector<AssetEntry> ready;std::set<std::string> dirs;
+    std::map<std::filesystem::path,bool> safeEntries;std::set<std::filesystem::path> checkedDirectories;
     const auto active=std::filesystem::weakly_canonical(AssetPaths::ResolveAssetRoot());
     for(std::size_t i=0;i<types.size();++i){auto& type=types[i];if(type.name=="Scene Document")continue;if(type.shaderRoot&&ProjectManager::Active())continue;const std::set<std::filesystem::path> roots=type.shaderRoot?std::set<std::filesystem::path>{AssetPaths::ResolveShaderRoot()}:std::set<std::filesystem::path>{AssetPaths::ResolveAssetRoot(),AssetImport::ProjectRoot()};for(const auto& root:roots){const auto directory=root/type.folder;
         if(!std::filesystem::exists(directory))continue;
+        if(checkedDirectories.insert(directory).second)ProjectContext::CheckNoLinks(directory);
         if(!type.folder.empty())dirs.insert(type.folder);
         for(std::filesystem::recursive_directory_iterator walk(directory,std::filesystem::directory_options::skip_permission_denied),end;walk!=end;++walk){const auto& item=*walk;
-            try{(void)AssetImport::SafeTarget(root,AssetPaths::ToUtf8String(item.path().lexically_relative(root)));}catch(...){if(item.is_directory())walk.disable_recursion_pending();continue;}
+            // Iterator paths already belong to the checked root. Inspect each entry
+            // once per refresh; resolving every ancestor for every type made a
+            // 1000-file folder block the UI for tens of seconds. Never follow links.
+            auto [safe,inserted]=safeEntries.try_emplace(item.path(),true);
+            if(inserted){safe->second=!std::filesystem::is_symlink(item.symlink_status());
+#ifdef _WIN32
+                const auto attributes=GetFileAttributesW(item.path().c_str());safe->second=safe->second&&attributes!=INVALID_FILE_ATTRIBUTES&&!(attributes&FILE_ATTRIBUTE_REPARSE_POINT);
+#endif
+            }
+            if(!safe->second){if(item.is_directory())walk.disable_recursion_pending();continue;}
             if(item.is_directory()&&!std::filesystem::is_symlink(item.symlink_status()))dirs.insert(DirectoryKey(item.path().lexically_relative(root)));
             if(!item.is_regular_file()||std::filesystem::is_symlink(item.symlink_status()))continue;
             if(type.kind==ecs::AssetKind::Prefab&&!item.path().filename().string().ends_with(".prefab.json"))continue;
             if(type.kind==ecs::AssetKind::UIDocument&&!item.path().filename().string().ends_with(".ui.json"))continue;
+            if(type.name=="UI Style"&&!item.path().filename().string().ends_with(".uistyle.json"))continue;
             if(type.kind==ecs::AssetKind::PostFx&&!item.path().filename().string().ends_with(".postfx.json"))continue;
             auto ext=item.path().extension().string();std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});
-            if(std::find(type.extensions.begin(),type.extensions.end(),ext)==type.extensions.end())continue;
-            auto key=AssetPaths::ToUtf8String(item.path().lexically_relative(root));std::replace(key.begin(),key.end(),'\\','/');ready.push_back({key,i});
+            if(type.name=="Unknown"){
+                if(ext==".wtex"||ext==".wmesh"||ext==".tmp"||item.path().filename().wstring().starts_with(L"."))continue;
+            }else if(std::find(type.extensions.begin(),type.extensions.end(),ext)==type.extensions.end())continue;
+            auto key=AssetPaths::ToUtf8String(item.path().lexically_relative(root));std::replace(key.begin(),key.end(),'\\','/');std::error_code sizeError;const auto bytes=item.file_size(sizeError);ready.push_back({key,i,sizeError?std::nullopt:std::optional<std::uintmax_t>(bytes)});
             if(hiddenFallbacks.contains(key)&&std::filesystem::weakly_canonical(root)!=active&&!std::filesystem::exists(AssetImport::SafeTarget(active,key))){ready.pop_back();continue;}
             auto folder=std::filesystem::u8path(key).parent_path();while(!folder.empty()){dirs.insert(DirectoryKey(folder));folder=folder.parent_path();}
         }
@@ -64,6 +82,8 @@ void AssetCatalog::Refresh(){
         ready.push_back({entry.key,std::size_t(sceneType-types.begin())});auto folder=std::filesystem::u8path(entry.key).parent_path();
         while(!folder.empty()){dirs.insert(DirectoryKey(folder));folder=folder.parent_path();}
     }
+    std::set<std::string> known;for(const auto& entry:ready)if(types[entry.type].name!="Unknown")known.insert(entry.key);
+    std::erase_if(ready,[&](const auto& entry){return types[entry.type].name=="Unknown"&&known.contains(entry.key);});
     std::sort(ready.begin(),ready.end(),[](auto& a,auto& b){return a.key<b.key;});ready.erase(std::unique(ready.begin(),ready.end(),[](const auto& a,const auto& b){return a.key==b.key&&a.type==b.type;}),ready.end());entries=std::move(ready);folders=std::move(dirs);++revision;
 }
 std::filesystem::path AssetCatalog::SafeMaterialPath(const std::string& key){
