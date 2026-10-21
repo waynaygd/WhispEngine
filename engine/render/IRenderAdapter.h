@@ -10,6 +10,9 @@
 #include "EditorVisuals.h"
 #include "SceneLights.h"
 #include "Fog.h"
+#include "ScreenEffects.h"
+#include "../resources/PostFxResource.h"
+namespace ui {struct DrawList;}
 struct EnvironmentResource;
 #include <span>
 
@@ -41,8 +44,13 @@ public:
         return false;
     }
     virtual void EndViewportRender() {}
+    virtual std::array<unsigned,2> RenderAreaSize()const{return {0,0};}
+    virtual void DrawRuntimeUI(const ui::DrawList&) {}
     virtual std::uint64_t GetViewportTextureId() const { return 0; }
     virtual std::uint64_t GetTexturePreviewId(RenderTextureHandle)const{return 0;}
+    // Called before scene rendering. The caller owns the returned cached texture.
+    virtual RenderTextureHandle RenderMeshThumbnail(const MeshData&, RenderShaderHandle, RenderTextureHandle) { return {}; }
+    virtual RenderTextureHandle CreateThumbnailTexture(const TextureData& data) { return CreateTexture2D(data); }
     virtual void BeginFrame() = 0;
     virtual void Clear(float r, float g, float b, float a) = 0;
 
@@ -104,6 +112,7 @@ public:
     virtual void EndShadowPass() {}
     virtual void SetEditorVisuals(const EditorVisualFrame&) {}
     virtual bool UploadEditorSky(const EnvironmentResource&,std::uint64_t){return false;}
+    virtual void ReleaseEditorSky() {}
     virtual EditorVisualDiagnostics GetEditorVisualDiagnostics()const{return {};}
     virtual void BeginMainPass() {}
     virtual void EndMainPass() {}
@@ -121,6 +130,9 @@ public:
     virtual void SetSceneLights(std::span<const GpuSceneLight>,LightRenderingMode,const SceneLightDiagnostics& = {}) {}
     virtual SceneLightDiagnostics GetSceneLightDiagnostics() const {return {};}
 
+    virtual void SetCustomPostFx(const PostFxFrame&) {}
+    virtual std::string CustomPostFxStatus(const std::string&)const{return "Not requested";}
+    virtual void SetScreenEffects(const ScreenEffects&) {}
     virtual void SetFog(const FogFrame&) {}
     virtual FogDiagnostics GetFogDiagnostics()const{return {};}
     virtual void SetAntiAliasing(AntiAliasingMode) {}

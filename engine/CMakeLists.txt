@@ -25,15 +25,22 @@ target_include_directories(ImGuizmo PUBLIC
 target_link_libraries(ImGuizmo PUBLIC DearImGui)
 
 add_library(Engine
+  ui/UILayout.cpp
+  ui/UIEffects.cpp
+  editor/EditorUI4.cpp
   scripting/LuaRuntime.cpp
   scripting/Prefab.cpp
   core/Application.cpp
+  core/ApplicationProject.cpp
   core/AssetDependencyValidation.cpp
   core/AssetPaths.cpp
+  core/ProjectContext.cpp
   core/Time.cpp
   core/Logger.cpp
   ecs/World.cpp
+  ecs/Hierarchy.cpp
   ecs/ComponentRegistry.cpp
+  ecs/PostProcessEvaluation.cpp
   ecs/systems/BoundsBounceSystem.cpp
   ecs/systems/MotionSystem.cpp
   ecs/systems/PhysicsSystem.cpp
@@ -43,6 +50,13 @@ add_library(Engine
   jobs/JobSystem.cpp
   jobs/JobSystem.h
   resources/ResourceManager.cpp
+  resources/PostFxResource.cpp
+  ui/UIDocument.cpp
+  ui/RuntimeUI.cpp
+  ui/UIFont.cpp
+  editor/EditorRuntimeUI.cpp
+  editor/WidgetDesignerTools.cpp
+  editor/EditorWidgetDesigner.cpp
   resources/loaders/MeshLoader.cpp
   resources/loaders/MaterialLoader.cpp
   resources/loaders/TextureLoader.cpp
@@ -51,19 +65,33 @@ add_library(Engine
   scene/SceneSerializer.cpp
   scene/SceneSettings.cpp
   editor/EditorLayer.cpp
+  editor/EditorProject.cpp
+  editor/EditorProjectSettings.cpp
+  editor/EditorQualityOfLife.cpp
   editor/EditorTransactions.cpp
   editor/EditorSelection.cpp
   editor/EditorGroupTransform.cpp
   editor/EditorInspector.cpp
+  editor/SceneValidation.cpp
+  editor/EditorSceneValidation.cpp
+  editor/EditorLuaRuntimeInspector.cpp
+  editor/EditorGameplayEvents.cpp
+  editor/EditorBulkInspector.cpp
+  editor/EditorWorkspaces.cpp
   editor/EditorPreferences.cpp
   editor/EditorUi.cpp
   editor/EditorViewportCreate.cpp
+  editor/EditorPivot.cpp
+  editor/EditorVertexSnap.cpp
+  editor/EditorPlacement.cpp
   editor/EditorFogGizmos.cpp
+  editor/EditorPostProcess.cpp
   editor/EditorEntityIcons.cpp
   editor/EditorVisualSettings.cpp
   editor/AssetCatalog.cpp
   editor/EditorAssetPreview.cpp
   editor/EditorAssets.cpp
+  editor/EditorPrefabs.cpp
   editor/ScriptEditor.cpp
   editor/GltfSceneImport.cpp
   editor/EditorLevelWorkflow.cpp
@@ -71,6 +99,7 @@ add_library(Engine
   editor/AssetImport.cpp
   editor/EditorImportUi.cpp
   editor/LightGizmos.cpp
+  editor/MeshOcclusion.cpp
   render/RenderFactory.cpp
   platform/GlfwWindow.cpp
   platform/InputManager.cpp
@@ -113,9 +142,11 @@ if (WIN32 AND ENABLE_DX12)
     render/backends/dx12/Dx12EditorVisuals.cpp
     render/backends/dx12/Dx12Fog.cpp
     render/backends/dx12/Dx12Environment.cpp
+    render/backends/dx12/Dx12PostFx.cpp
+    render/backends/dx12/Dx12RuntimeUI.cpp
     render/backends/dx12/Dx12SceneLights.cpp
   )
-  target_link_libraries(Engine PRIVATE d3d12 dxgi dxguid d3dcompiler)
+  target_link_libraries(Engine PRIVATE d3d12 dxgi dxguid gdi32 d3dcompiler)
   target_include_directories(Engine PRIVATE ${CMAKE_SOURCE_DIR}/external/dxc/include)
   target_link_libraries(Engine PRIVATE ${CMAKE_SOURCE_DIR}/external/dxc/lib/x64/dxcompiler.lib)
 endif()
@@ -132,4 +163,10 @@ endif()
 if(WIN32)
   target_link_libraries(Engine PRIVATE shell32 version)
   target_link_libraries(Engine PRIVATE comdlg32)
+endif()
+
+if(MSVC)
+  set_source_files_properties(ui/UIDocument.cpp editor/EditorRuntimeUI.cpp
+  editor/WidgetDesignerTools.cpp
+  editor/EditorWidgetDesigner.cpp PROPERTIES COMPILE_OPTIONS "/utf-8")
 endif()

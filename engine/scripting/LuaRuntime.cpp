@@ -1,4 +1,6 @@
 #include "LuaRuntime.h"
+#include "../ui/RuntimeUI.h"
+#include "../resources/ResourceManager.h"
 #include "Prefab.h"
 #include "EntityReference.h"
 #include "../ecs/ComponentRegistry.h"
@@ -7,6 +9,7 @@
 #include "../ecs/MutationQueue.h"
 #include "../ecs/components/LuaScriptComponent.h"
 #include "../ecs/components/TagComponent.h"
+#include "../ecs/components/SceneIdentityComponent.h"
 #include "../ecs/components/TransformComponent.h"
 #include "../ecs/components/LightComponent.h"
 #include "../ecs/PlayerSpawn.h"
@@ -17,6 +20,9 @@
 #include <cmath>
 #include <thread>
 #include <limits>
+#include <sstream>
+#include <iomanip>
+#include <unordered_set>
 #if defined(TRACY_ENABLE)
 #include <tracy/Tracy.hpp>
 #endif
@@ -72,7 +78,7 @@ Json Schema(sol::table definition){
         if(!ValidValue(field,field["default"]))throw std::runtime_error("Invalid default: "+key);
         schema[key]=field;
     }
-    for(const char* callback:{"on_start","on_update","on_fixed_update","on_event","on_stop","on_destroy"}){
+    for(const char* callback:{"on_start","on_update","on_fixed_update","on_event","on_ui_event","on_stop","on_destroy"}){
         sol::object fn=definition[callback];if(fn.valid()&&fn!=sol::nil&&fn.get_type()!=sol::type::function)throw std::runtime_error(std::string(callback)+" must be a function");
     }
     return schema;
@@ -81,13 +87,23 @@ Json Schema(sol::table definition){
 struct LuaRuntime::Impl {
     // State is declared first, so all Lua references die before the VM.
     sol::state lua;
+    PostFxRuntimeOverrides postfx;
+    LuaRuntime* facade=nullptr;
     struct Program {std::string source;Json fields;std::uint64_t revision=0;};
-    struct Instance {std::string path;std::uint64_t revision;sol::environment env;sol::table definition,self;Json overrides;bool failed=false;ecs::Entity entity{};};
+    struct Instance {std::string path;std::uint64_t revision;sol::environment env;sol::table definition,self;Json overrides;bool failed=false;ecs::Entity entity{};
+        std::uint64_t serial=0;
+        std::string lastCallback,lastError;
+        EventStatus lastStatus=EventStatus::Skipped;
+    };
     std::map<std::string,Program> programs;
     std::map<std::string,std::string> errors;
     std::map<ecs::Entity,Instance,EntityLess> instances;
-    std::map<ecs::Entity,std::string,EntityLess> rejected;
-    struct Event {ecs::Entity target,other;std::string type;float amount=0;};
+    struct Rejected {std::string fingerprint,error;};
+    std::map<ecs::Entity,Rejected,EntityLess> rejected;
+    std::set<std::string> loadFailures;
+    std::uint64_t nextInstanceSerial=1;
+    struct Event {ecs::Entity target,other;std::string type;float amount=0;ecs::Entity source{};std::uint64_t trace=0;std::string kind="Lua";std::optional<ui::PointerEvent> uiEvent;};
+    GameplayEventHistory history;
     std::vector<Event> events;
     struct Timer {ecs::Entity owner;double deadline,interval;std::string event;};
     std::map<lua_Integer,Timer> timers;
@@ -98,7 +114,7 @@ struct LuaRuntime::Impl {
     ecs::World* world=nullptr;
     std::function<bool(const std::string&)> input;
     GameplayServices services;
-    ecs::Entity cameraOwner{},cursorOwner{};
+    ecs::Entity cameraOwner{},cursorOwner{},uiInputOwner{};
     bool fixedPhase=false;
     std::map<std::string,bool> held,pressed,released;
     std::map<std::string,bool> fixedPressed,fixedReleased;
@@ -108,10 +124,30 @@ struct LuaRuntime::Impl {
     Impl(){
         lua.open_libraries(sol::lib::base,sol::lib::math,sol::lib::string,sol::lib::table,sol::lib::utf8);
         lua.new_usertype<ecs::Entity>("Entity",sol::no_constructor);
+        auto canvas=lua.new_usertype<ui::CanvasHandle>("CanvasHandle",sol::no_constructor);
+        canvas["play_animation"]=[this](const ui::CanvasHandle& h,const std::string& id,sol::optional<sol::table> options){bool restart=true;float speed=1;if(options){restart=options->get_or("restart",true);speed=options->get_or("speed",1.f);}UI().Play(h,id,restart,speed);};
+        canvas["stop_animation"]=[this](const ui::CanvasHandle& h,const std::string& id){UI().Stop(h,id);};
+        canvas["is_animation_playing"]=[this](const ui::CanvasHandle& h,const std::string& id){return UI().Playing(h,id);};
+        canvas["valid"]=[this](const ui::CanvasHandle& h){return world&&services.runtimeUI&&services.runtimeUI->Valid(h);};
+        canvas["set_text"]=[this](const ui::CanvasHandle& h,const std::string& id,const std::string& v){UI().Set(h,id,"text",v);};
+        canvas["set_visible"]=[this](const ui::CanvasHandle& h,const std::string& id,bool v){UI().Set(h,id,"visible",v);};
+        canvas["set_opacity"]=[this](const ui::CanvasHandle& h,const std::string& id,float v){UI().Set(h,id,"opacity",v);};
+        canvas["set_progress"]=[this](const ui::CanvasHandle& h,const std::string& id,float v){UI().Set(h,id,"progress",v);};
+        canvas["set_image"]=[this](const ui::CanvasHandle& h,const std::string& id,const std::string& v){UI().Set(h,id,"image",v);};
+        canvas["set_enabled"]=[this](const ui::CanvasHandle& h,const std::string& id,bool v){UI().Set(h,id,"enabled",v);};
+        canvas["set_color"]=[this](const ui::CanvasHandle& h,const std::string& id,sol::table color){Json v=Json::array();if(color.size()!=4)throw std::runtime_error("UI Color requires four channels");for(int n=1;n<=4;++n){sol::object c=color[n];if(c.get_type()!=sol::type::number)throw std::runtime_error("UI Color channel must be numeric");v.push_back(c.as<double>());}UI().Set(h,id,"color",v);};
+        canvas["get_text"]=[this](const ui::CanvasHandle& h,const std::string& id){auto& w=UI().Read(h,id);if(w.type!="Text")throw std::runtime_error("UI: expected Text widget");return w.text;};
+        canvas["get_progress"]=[this](const ui::CanvasHandle& h,const std::string& id){auto& w=UI().Read(h,id);if(w.type!="ProgressBar")throw std::runtime_error("UI: expected ProgressBar");return w.value;};
+        canvas["get_visible"]=[this](const ui::CanvasHandle& h,const std::string& id){return UI().Read(h,id).visible;};
+        canvas["get_opacity"]=[this](const ui::CanvasHandle& h,const std::string& id){return UI().Read(h,id).opacity;};
+        canvas["get_image"]=[this](const ui::CanvasHandle& h,const std::string& id){auto& w=UI().Read(h,id);if(w.type!="Image")throw std::runtime_error("UI: expected Image");return w.texture;};
+        canvas["get_enabled"]=[this](const ui::CanvasHandle& h,const std::string& id){auto& w=UI().Read(h,id);if(w.type!="Button")throw std::runtime_error("UI: expected Button");return w.enabled;};
+        canvas["get_color"]=[this](const ui::CanvasHandle& h,const std::string& id){auto c=UI().Read(h,id).color;return std::make_tuple(c[0],c[1],c[2],c[3]);};
         lua.new_usertype<ecs::Vec3>("Vec3",sol::constructors<ecs::Vec3(),ecs::Vec3(float,float,float)>(),"x",&ecs::Vec3::x,"y",&ecs::Vec3::y,"z",&ecs::Vec3::z);
     }
+    ui::RuntimeUI& UI(){if(!world||!services.runtimeUI)throw std::runtime_error("UI requires an active runtime Canvas host");return *services.runtimeUI;}
     void Check()const{if(owner!=std::this_thread::get_id())throw std::logic_error("Lua VM belongs to its owner thread");}
-    void Fail(const std::string& path,const std::string& callback,const std::string& message){errors[path]=callback+": "+message;Logger::Get().Error("Lua ["+path+"] "+errors[path]);}
+    void Fail(const std::string& path,const std::string& callback,const std::string& message){errors[path]=callback+": "+message;if(callback=="load")loadFailures.insert(path);else loadFailures.erase(path);Logger::Get().Error("Lua ["+path+"] "+errors[path]);}
     sol::environment Environment(){
         sol::environment env(lua,sol::create);
         // Explicit allowlist: no package/io/os/debug/load/dofile/rawset/metatables/pcall.
@@ -140,7 +176,7 @@ struct LuaRuntime::Impl {
             Impl validation;
             auto env=validation.Environment();auto definition=validation.Evaluate(source,path,env);auto fields=Schema(definition);
             auto revision=programs.contains(path)?programs.at(path).revision+1:1;
-            programs[path]={std::move(source),std::move(fields),revision};errors.erase(path);return true;
+            programs[path]={std::move(source),std::move(fields),revision};errors.erase(path);loadFailures.erase(path);return true;
         }catch(const std::exception& e){Fail(path,"load",e.what());return false;}
     }
     bool Alive(ecs::Entity e)const{return world&&world->IsAlive(e)&&!destroying.contains(e);}
@@ -160,13 +196,39 @@ struct LuaRuntime::Impl {
             // periods without building an unbounded catch-up event queue.
             if(timer.interval>0)at->second.deadline=timer.deadline+(std::floor((gameTime-timer.deadline)/timer.interval)+1)*timer.interval;
             else timers.erase(at);
-            auto data=lua.create_table();data["type"]=timer.event;data["amount"]=0;data["timer"]=id;data["other"]=ecs::Entity{};Call(instance->second,"on_event",data);
+            auto data=lua.create_table();data["type"]=timer.event;data["amount"]=0;data["timer"]=id;data["other"]=ecs::Entity{};Event event{timer.owner,{},timer.event,0,timer.owner,0,"Timer"};if(history.Active())event.trace=Trace(event,"; timer = "+std::to_string(id));Deliver(event,data);
         }
+    }
+    EventEntity Snapshot(ecs::Entity e)const{
+        EventEntity out;out.entity=e;
+        if(world&&world->IsAlive(e)){
+            if(auto* t=world->GetComponent<ecs::TagComponent>(e))out.name=t->name;
+            if(auto* id=world->GetComponent<ecs::SceneIdentityComponent>(e))out.stableId=id->value;
+        }
+        return out;
+    }
+    std::uint64_t Trace(const Event& event,const std::string& extra={}){
+        if(!history.Active())return 0;
+        GameplayEvent row;row.time=gameTime;row.name=event.type;row.kind=event.kind;row.handler=event.uiEvent?"on_ui_event":"on_event";
+        if(event.uiEvent){row.canvas=event.uiEvent->canvas.document;row.widget=event.uiEvent->widget;}
+        row.source=Snapshot(event.source);row.target=Snapshot(event.target);row.other=Snapshot(event.other);
+        row.payload="amount = "+std::to_string(event.amount)+extra;
+        if(event.uiEvent)row.payload+="; canvas = "+event.uiEvent->canvas.document+"; widget = "+event.uiEvent->widget+"; animation = "+event.uiEvent->animation;
+        return history.Add(std::move(row));
+    }
+    void Enqueue(Event event){if(history.Active())event.trace=Trace(event);events.push_back(std::move(event));}
+    void Deliver(const Event& event,sol::table data){
+        auto id=event.trace;if(history.Active()&&(!id||!history.Find(id)))id=Trace(event);
+        auto i=instances.find(event.target);
+        if(!Alive(event.target)||i==instances.end()){if(history.Active())history.Update(id,EventStatus::Skipped,gameTime,{},"Target destroyed, disabled, or has no active script instance");return;}
+        if(!history.Active()){Call(i->second,event.uiEvent?"on_ui_event":"on_event",data);return;}
+        const auto result=CallObserved(id,i->second,event.uiEvent?"on_ui_event":"on_event",data);
+        history.Update(id,result,gameTime,i->second.path,result==EventStatus::Error?errors[i->second.path]:result==EventStatus::Skipped?"Handler absent or script instance already failed":"");
     }
     ecs::TransformComponent& Transform(ecs::Entity e){if(!Alive(e))throw std::runtime_error("Dead/stale/foreign entity");auto* t=world->GetComponent<ecs::TransformComponent>(e);if(!t)throw std::runtime_error("Entity has no Transform");return *t;}
     void SetTransform(ecs::Entity e,const char* field,ecs::Vec3 value){
-        Transform(e);std::string error;
-        if(!ecs::ComponentRegistry::Builtins().Set(*world,e,ecs::ComponentId("Transform"),field,value,&error))throw std::runtime_error("World.set_"+std::string(field)+": "+error);
+        Transform(e);auto t=world->WorldTransform(e);if(std::string(field)=="position")t.position=value;else if(std::string(field)=="rotation")t.rotation=value;else t.scale=value;
+        std::string error;if(!world->SetWorldTransform(e,t,&error))throw std::runtime_error("World.set_"+std::string(field)+": "+error);
     }
     std::string LightComponent(ecs::Entity e){
         if(!Alive(e))throw std::runtime_error("Light: dead/stale/foreign entity");
@@ -187,6 +249,7 @@ struct LuaRuntime::Impl {
     static void Number(float n,float max){if(!std::isfinite(n)||n<0||n>max)throw std::runtime_error("Gameplay parameter outside valid range");}
     void ClearControl(ecs::Entity e){
         if(world&&world->IsAlive(e))if(auto* m=world->GetComponent<ecs::CharacterMovementComponent>(e)){m->desiredDirection={};m->jumpRequested=false;if(auto* b=world->GetComponent<ecs::RigidbodyComponent>(e)){b->velocity.x=0;b->velocity.z=0;}}
+        if(uiInputOwner==e){if(services.resetUIInput)services.resetUIInput();uiInputOwner={};}
         if(cameraOwner==e){if(services.camera)services.camera->following=false;cameraOwner={};}
         if(cursorOwner==e){if(services.captureCursor)services.captureCursor(false);cursorOwner={};}
     }
@@ -208,16 +271,23 @@ struct LuaRuntime::Impl {
         auto api=lua.create_table();
         api.set_function("is_alive",[this](ecs::Entity e){return Alive(e);});
         api.set_function("find_by_tag",[this](const std::string& tag){auto list=lua.create_table();int i=1;for(auto e:world->Entities())if(auto* t=world->GetComponent<ecs::TagComponent>(e);Alive(e)&&t&&t->name==tag)list[i++]=e;return list;});
-        api.set_function("get_position",[this](ecs::Entity e){return Transform(e).position;});
-        api.set_function("get_rotation",[this](ecs::Entity e){return Transform(e).rotation;});
-        api.set_function("get_scale",[this](ecs::Entity e){return Transform(e).scale;});
+        api.set_function("get_position",[this](ecs::Entity e){Transform(e);return world->WorldTransform(e).position;});
+        api.set_function("get_rotation",[this](ecs::Entity e){Transform(e);return world->WorldTransform(e).rotation;});
+        api.set_function("get_scale",[this](ecs::Entity e){Transform(e);return world->WorldTransform(e).scale;});
         api.set_function("find_in_radius",[this](ecs::Vec3 center,float radius){auto list=lua.create_table();int index=1;for(auto e:ecs::FindInRadius(*world,center,radius))if(Alive(e))list[index++]=e;return list;});
-        api.set_function("set_position",[this](ecs::Entity e,ecs::Vec3 p){if(!std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.z))throw std::runtime_error("Nonfinite position");Transform(e).position=p;});
+        api.set_function("set_position",[this](ecs::Entity e,ecs::Vec3 p){if(!std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.z))throw std::runtime_error("Nonfinite position");SetTransform(e,"position",p);});
         api.set_function("set_rotation",[this](ecs::Entity e,ecs::Vec3 v){SetTransform(e,"rotation",v);});
         api.set_function("set_scale",[this](ecs::Entity e,ecs::Vec3 v){SetTransform(e,"scale",v);});
+        api.set_function("get_local_position",[this](ecs::Entity e){return Transform(e).position;});
+        api.set_function("get_local_rotation",[this](ecs::Entity e){return Transform(e).rotation;});
+        api.set_function("get_local_scale",[this](ecs::Entity e){return Transform(e).scale;});
+        api.set_function("get_world_transform",[this](ecs::Entity e){Transform(e);auto t=world->WorldTransform(e);auto value=lua.create_table();value["position"]=t.position;value["rotation"]=t.rotation;value["scale"]=t.scale;return value;});
+        for(const char* field:{"position","rotation","scale"})api.set_function(std::string("set_local_")+field,[this,key=std::string(field)](ecs::Entity e,ecs::Vec3 value){Transform(e);std::string error;if(!ecs::ComponentRegistry::Builtins().Set(*world,e,ecs::ComponentId("Transform"),key,value,&error))throw std::runtime_error(error);});
+        api.set_function("get_parent",[this](ecs::Entity e){if(!Alive(e))throw std::runtime_error("Dead/stale/foreign entity");auto parent=world->Parent(e);return parent.IsValid()?sol::make_object(lua,parent):sol::make_object(lua,sol::nil);});
+        api.set_function("set_parent",[this](ecs::Entity e,sol::optional<ecs::Entity> parent,sol::optional<bool> keep){std::string error;if(!world->SetParent(e,parent.value_or(ecs::Entity{}),keep.value_or(true),&error))throw std::runtime_error(error);});
         api.set_function("spawn_prefab",[this](const std::string& key,ecs::Vec3 p){if(stopping)throw std::runtime_error("Spawn during Stop");if(world->GetAliveCount()>10000)throw std::runtime_error("Lua entity budget exceeded");return SpawnPrefab(*world,key,p);});
         api.set_function("destroy",[this](ecs::Entity e){if(Alive(e)){destroying.insert(e);mutations.Destroy(e);}});
-        api.set_function("send_event",[this](ecs::Entity e,const std::string& type,float amount){if(Alive(e)&&events.size()<1024&&type.size()<128&&std::isfinite(amount))events.push_back({e,{},type,amount});});
+        api.set_function("send_event",[this,owner](ecs::Entity e,const std::string& type,float amount){if(Alive(e)&&events.size()<1024&&type.size()<128&&std::isfinite(amount))Enqueue({e,{},type,amount,owner});});
         env["World"]=api;
         auto physics=lua.create_table();
         physics.set_function("raycast",[this](ecs::Vec3 origin,ecs::Vec3 direction,float distance,sol::optional<ecs::Entity> ignore)->sol::object{
@@ -231,6 +301,20 @@ struct LuaRuntime::Impl {
         light.set_function("get_intensity",[this](ecs::Entity e){ecs::PropertyValue value;std::string error;auto key=LightComponent(e);if(!ecs::ComponentRegistry::Builtins().Get(*world,e,ecs::ComponentId(key.c_str()),"intensity",value,&error))throw std::runtime_error(error);return std::get<float>(value);});
         light.set_function("set_intensity",[this](ecs::Entity e,float value){std::string error;auto key=LightComponent(e);if(!ecs::ComponentRegistry::Builtins().Set(*world,e,ecs::ComponentId(key.c_str()),"intensity",value,&error))throw std::runtime_error("Light.set_intensity: "+error);});
         env["Light"]=light;
+        auto postfxApi=lua.create_table();
+        postfxApi.set_function("set",[this](const std::string& id,const std::string& parameter,sol::object value){
+            Json j;if(value.get_type()==sol::type::boolean)j=value.as<bool>();else if(value.get_type()==sol::type::number){double number=value.as<double>();if(std::isfinite(number)&&std::floor(number)==number&&std::abs(number)<=1000000)j=int(number);else j=number;}else if(value.get_type()==sol::type::table){j=Json::array();auto table=value.as<sol::table>();if(table.size()<2||table.size()>4)return facade->SetPostFx(id,parameter,Json());for(size_t i=1;i<=table.size();++i){sol::object item=table[i];if(item.get_type()!=sol::type::number)return facade->SetPostFx(id,parameter,Json());j.push_back(item.as<double>());}}else return facade->SetPostFx(id,parameter,Json());
+            return facade->SetPostFx(id,parameter,j);
+        });
+        postfxApi.set_function("set_weight",[this](const std::string& id,float weight){return facade->SetPostFxWeight(id,weight);});
+        postfxApi.set_function("clear",[this](const std::string& id){return facade->ClearPostFx(id);});env["postfx"]=postfxApi;
+        auto uiApi=lua.create_table();
+        uiApi.set_function("get",sol::overload([this](const std::string& name){return UI().Get(name);},[this](ecs::Entity e){if(!Alive(e))throw std::runtime_error("UI: stale Canvas owner");return UI().Get(e);}));
+        uiApi.set_function("set_input_mode",[this,owner](const std::string& mode){if(!Alive(owner)||!services.setUIInputMode)throw std::runtime_error("UI input host unavailable");services.setUIInputMode(mode);uiInputOwner=mode=="GameOnly"?ecs::Entity{}:owner;
+            // A menu may be opened before the FPS script's first capture click.
+            // Hand the existing capture permission to its current camera owner.
+            if(mode=="GameOnly"&&!Alive(cursorOwner)&&Alive(cameraOwner)&&InputAllowed(cameraOwner)&&services.cursorCaptured&&services.cursorCaptured())cursorOwner=cameraOwner;});
+        uiApi.set_function("get_input_mode",[this](){if(!world||!services.getUIInputMode)throw std::runtime_error("UI input host unavailable");return services.getUIInputMode();});env["ui"]=uiApi;
         auto log=lua.create_table();log.set_function("info",[](const std::string& s){Logger::Get().Info("Lua: "+s);});log.set_function("warning",[](const std::string& s){Logger::Get().Warn("Lua: "+s);});log.set_function("error",[](const std::string& s){Logger::Get().Error("Lua: "+s);});env["Log"]=log;
         auto controls=lua.create_table();
         controls.set_function("is_down",[this,owner](const std::string& s){if(!InputAllowed(owner))return false;DiscoverInput(s);return held[s];});
@@ -270,15 +354,19 @@ struct LuaRuntime::Impl {
         if(action.empty()||action.size()>128||(held.size()>=128&&!held.contains(action)))throw std::runtime_error("Input action name/budget invalid");
         if(!held.contains(action)){bool now=input&&input(action);held[action]=now;pressed[action]=services.pressed?services.pressed(action):now;released[action]=services.released&&services.released(action);fixedPressed[action]|=pressed[action];fixedReleased[action]|=released[action];}
     }
-    template<class... Args>void Call(Instance& instance,const char* callback,Args&&... args){
-        if(instance.failed&&std::string_view(callback)!="on_destroy"&&std::string_view(callback)!="on_stop")return;
+    template<class... Args>EventStatus Call(Instance& instance,const char* callback,Args&&... args){return CallObserved(0,instance,callback,std::forward<Args>(args)...);}
+    template<class... Args>EventStatus CallObserved(std::uint64_t trace,Instance& instance,const char* callback,Args&&... args){
+        if(instance.failed&&std::string_view(callback)!="on_destroy"&&std::string_view(callback)!="on_stop")return EventStatus::Skipped;
         try{
-        sol::object fn=instance.definition[callback];if(!fn.valid()||fn==sol::nil)return;
+        sol::object fn=instance.definition[callback];if(!fn.valid()||fn==sol::nil)return EventStatus::Skipped;
+        instance.lastCallback=callback;
         if(fn.get_type()!=sol::type::function)throw std::runtime_error("Callback is no longer a function");
+        if(trace)history.Update(trace,EventStatus::Processing,gameTime,instance.path);
         ExecutionBudget budget(lua.lua_state());sol::protected_function function=fn;auto result=function(instance.self,std::forward<Args>(args)...);
-        if(!result.valid()){sol::error error=result;instance.failed=true;Fail(instance.path,callback,error.what());}
-        }catch(const std::exception& error){instance.failed=true;Fail(instance.path,callback,error.what());}
+        if(!result.valid()){sol::error error=result;instance.failed=true;instance.lastError=GameplayEventHistory::Bounded(std::string(callback)+": "+error.what(),4096);Fail(instance.path,callback,error.what());}
+        }catch(const std::exception& error){instance.failed=true;instance.lastError=GameplayEventHistory::Bounded(std::string(callback)+": "+error.what(),4096);Fail(instance.path,callback,error.what());}
         if(instance.failed){CancelTimers(instance.entity);ClearControl(instance.entity);}
+        instance.lastStatus=instance.failed?EventStatus::Error:EventStatus::Success;return instance.lastStatus;
     }
     void Retire(ecs::Entity e,Instance& instance){Call(instance,"on_stop");Call(instance,"on_destroy");CancelTimers(e);ClearControl(e);}
     void Sync(){
@@ -293,7 +381,7 @@ struct LuaRuntime::Impl {
             const auto path=c->scriptPath;const auto overrides=c->properties;
             if(!programs.contains(path)&&(!errors.contains(path)?!Load(path):true))continue;
             const auto fingerprint=path+":"+std::to_string(programs.at(path).revision)+":"+overrides.dump();
-            if(rejected.contains(e)&&rejected.at(e)==fingerprint)continue;
+            if(rejected.contains(e)&&rejected.at(e).fingerprint==fingerprint)continue;
             try{
                 auto& program=programs.at(path);auto env=Environment();auto definition=Evaluate(program.source,path,env);Bind(env,e);
                 auto self=lua.create_table();self["entity"]=e;
@@ -301,22 +389,25 @@ struct LuaRuntime::Impl {
                     if(it.value().at("type")=="entity"){auto target=ResolveEntityReference(*world,value);self[it.key()]=Alive(target)?sol::make_object(lua,target):sol::make_object(lua,sol::nil);}
                     else self[it.key()]=ToLua(lua,value);
                 }
-                auto [it,ok]=instances.emplace(e,Instance{path,program.revision,std::move(env),definition,self,overrides,false,e});Call(it->second,"on_start");
+                auto [it,ok]=instances.emplace(e,Instance{path,program.revision,std::move(env),definition,self,overrides,false,e,nextInstanceSerial++});Call(it->second,"on_start");
                 rejected.erase(e);
-            }catch(const std::exception& error){rejected[e]=fingerprint;Fail(path,"instance",error.what());}
+            }catch(const std::exception& error){rejected[e]={fingerprint,GameplayEventHistory::Bounded(error.what(),4096)};Fail(path,"instance",error.what());}
         }
         std::erase_if(rejected,[this](const auto& pair){return !world->IsAlive(pair.first);});
     }
 };
-LuaRuntime::LuaRuntime():impl(std::make_unique<Impl>()){}
+LuaRuntime::LuaRuntime():impl(std::make_unique<Impl>()){impl->facade=this;}
 LuaRuntime::~LuaRuntime(){Stop();}
-void LuaRuntime::Start(ecs::World& world,std::function<bool(const std::string&)> input,GameplayServices services){Stop();impl->Check();world.AssertOwnerThread();impl->programs.clear();impl->errors.clear();impl->world=&world;impl->input=std::move(input);impl->services=std::move(services);}
+void LuaRuntime::Start(ecs::World& world,std::function<bool(const std::string&)> input,GameplayServices services){Stop();impl->Check();world.AssertOwnerThread();impl->programs.clear();impl->errors.clear();impl->loadFailures.clear();impl->world=&world;impl->input=std::move(input);impl->services=std::move(services);impl->history.BeginSession();if(impl->services.runtimeUI){impl->services.runtimeUI->Clear();if(impl->services.postfxResources)impl->services.runtimeUI->Sync(world,*impl->services.postfxResources);}}
 void LuaRuntime::Stop(){
     impl->Check();impl->stopping=true;
     for(auto& [e,i]:impl->instances)impl->Retire(e,i);
-    impl->instances.clear();impl->rejected.clear();impl->events.clear();
+    impl->postfx.clear();
+    impl->history.EndSession();impl->instances.clear();impl->rejected.clear();impl->events.clear();
+    impl->programs.clear();impl->errors.clear();impl->loadFailures.clear();
     impl->timers.clear();impl->gameTime=0;
     impl->mutations.Clear();impl->destroying.clear();impl->world=nullptr;
+    if(impl->services.runtimeUI)impl->services.runtimeUI->Clear();if(impl->services.resetUIInput)impl->services.resetUIInput();impl->uiInputOwner={};
     impl->input={};impl->services={};impl->cameraOwner={};impl->cursorOwner={};
     impl->held.clear();impl->pressed.clear();impl->released.clear();
     impl->fixedPressed.clear();impl->fixedReleased.clear();impl->boundKeys.clear();
@@ -335,10 +426,28 @@ void LuaRuntime::Update(float dt){
     impl->gameTime+=double(dt);impl->Sync();auto events=std::move(impl->events);impl->events.clear();
     for(auto& [e,i]:impl->instances)if(auto* m=impl->world->GetComponent<ecs::CharacterMovementComponent>(e)){m->desiredDirection={};if(!impl->MotionAllowed(e)||i.failed){m->jumpRequested=false;if(!impl->MotionAllowed(e)){impl->fixedPressed.clear();impl->fixedReleased.clear();}}}
     impl->FireTimers();
-    for(const auto& event:events)if(impl->Alive(event.target)){auto i=impl->instances.find(event.target);if(i!=impl->instances.end()){auto data=impl->lua.create_table();data["type"]=event.type;data["amount"]=event.amount;data["other"]=event.other;impl->Call(i->second,"on_event",data);}}
+    for(const auto& event:events){if(!impl->Alive(event.target)||!impl->instances.contains(event.target)){if(impl->history.Active())impl->Deliver(event,sol::table{});continue;}auto data=impl->lua.create_table();data["type"]=event.type;data["amount"]=event.amount;data["other"]=event.other;impl->Deliver(event,data);}
     for(auto& [e,i]:impl->instances)if(impl->Alive(e))impl->Call(i,"on_update",std::min(dt,.1f));
     // Destruction callback while components still exist; apply once, after all calls.
     for(auto e:impl->destroying){auto i=impl->instances.find(e);if(i!=impl->instances.end()){impl->Retire(e,i->second);impl->instances.erase(i);}}
+    impl->mutations.Apply(*impl->world);impl->destroying.clear();
+}
+void LuaRuntime::DispatchUIEvents(){
+    impl->Check();if(!impl->world||!impl->services.runtimeUI)return;
+    impl->world->AssertOwnerThread();impl->Sync();
+    for(auto& pointer:impl->services.runtimeUI->TakeEvents()){
+        if(impl->events.size()>=1024)break;
+        Impl::Event event{pointer.canvas.entity,{},pointer.type,0,pointer.canvas.entity,0,"UI",pointer};impl->Enqueue(std::move(event));
+    }
+    auto pending=std::move(impl->events);impl->events.clear();std::vector<Impl::Event> retained;
+    for(auto& event:pending){if(!event.uiEvent){retained.push_back(std::move(event));continue;}
+        if(!impl->services.runtimeUI->Valid(event.uiEvent->canvas)){impl->history.Update(event.trace,EventStatus::Skipped,impl->gameTime,{},"Stale UI Canvas");continue;}
+        auto data=impl->lua.create_table();data["type"]=event.type;data["widget"]=event.uiEvent->widget;data["canvas"]=event.uiEvent->canvas;
+        data["animation"]=event.uiEvent->animation;data["canvas_key"]=event.uiEvent->canvas.document;data["source"]=event.source;data["owner"]=event.target;data["session"]=impl->history.Session();
+        impl->Deliver(event,data);
+    }
+    impl->events.insert(impl->events.begin(),std::make_move_iterator(retained.begin()),std::make_move_iterator(retained.end()));
+    for(auto e:impl->destroying){auto at=impl->instances.find(e);if(at!=impl->instances.end()){impl->Retire(e,at->second);impl->instances.erase(at);}}
     impl->mutations.Apply(*impl->world);impl->destroying.clear();
 }
 void LuaRuntime::FixedUpdate(float dt){
@@ -358,10 +467,141 @@ void LuaRuntime::SuspendInput(){
     if(impl->world)for(const auto& [e,i]:impl->instances)if(auto* m=impl->world->GetComponent<ecs::CharacterMovementComponent>(e)){m->desiredDirection={};m->jumpRequested=false;if(auto* b=impl->world->GetComponent<ecs::RigidbodyComponent>(e)){b->velocity.x=0;b->velocity.z=0;}}
     if(impl->services.captureCursor)impl->services.captureCursor(false);impl->cursorOwner={};
 }
-void LuaRuntime::QueueCollision(const ecs::CollisionEvent& e){impl->Check();if(impl->world&&impl->events.size()<1022){const char* type=e.kind==ecs::CollisionKind::TriggerEnter?"trigger_enter":e.kind==ecs::CollisionKind::TriggerExit?"trigger_exit":"collision";if(impl->Alive(e.a))impl->events.push_back({e.a,e.b,type});if(impl->Alive(e.b))impl->events.push_back({e.b,e.a,type});}}
+void LuaRuntime::QueueCollision(const ecs::CollisionEvent& e){impl->Check();if(impl->world&&impl->events.size()<1022){const char* type=e.kind==ecs::CollisionKind::TriggerEnter?"trigger_enter":e.kind==ecs::CollisionKind::TriggerExit?"trigger_exit":"collision";if(impl->Alive(e.a))impl->Enqueue({e.a,e.b,type,0,{},0,"Physics"});if(impl->Alive(e.b))impl->Enqueue({e.b,e.a,type,0,{},0,"Physics"});}}
+GameplayEventHistory& LuaRuntime::Events(){impl->Check();return impl->history;}
 bool LuaRuntime::ReloadScript(const std::string& path){return impl->Load(path);}
 nlohmann::json LuaRuntime::Fields(const std::string& path){impl->Check();if(!impl->programs.contains(path)&&!impl->errors.contains(path))impl->Load(path);auto i=impl->programs.find(path);return i==impl->programs.end()?Json::object():i->second.fields;}
+std::optional<nlohmann::json> LuaRuntime::CachedFields(const std::string& path,const std::string& source)const{
+    impl->Check();auto i=impl->programs.find(path);
+    if(i==impl->programs.end()||i->second.source!=source)return std::nullopt;
+    return i->second.fields;
+}
+bool LuaRuntime::ValidFieldValue(const Json& schema,const Json& value){try{return ValidValue(schema,value);}catch(...){return false;}}
 std::string LuaRuntime::Error(const std::string& path)const{impl->Check();auto i=impl->errors.find(path);return i==impl->errors.end()?std::string():i->second;}
+const char* LuaInstanceStateName(LuaInstanceState state){
+    switch(state){
+    case LuaInstanceState::Stopped:return "Runtime unavailable (Play stopped)";
+    case LuaInstanceState::NoEntity:return "Entity destroyed, stale or not selected";
+    case LuaInstanceState::NoScript:return "No Lua behaviour";
+    case LuaInstanceState::Disabled:return "Script disabled";
+    case LuaInstanceState::Pending:return "Waiting for runtime synchronization";
+    case LuaInstanceState::Running:return "Running";
+    case LuaInstanceState::Failed:return "Failed";
+    case LuaInstanceState::Rejected:return "Instance creation rejected";
+    default:return "Reload pending (old fields unavailable)";
+    }
+}
+LuaInstanceInfo LuaRuntime::InspectionInfo(ecs::Entity entity)const{
+    impl->Check();LuaInstanceInfo out;out.entity=entity;out.session=impl->history.Session();
+    if(!impl->world)return out;
+    if(!impl->Alive(entity)){out.state=LuaInstanceState::NoEntity;return out;}
+    auto* component=impl->world->GetComponent<ecs::LuaScriptComponent>(entity);
+    if(!component){out.state=LuaInstanceState::NoScript;return out;}
+    out.path=component->scriptPath;
+    if(impl->loadFailures.contains(out.path))if(auto error=impl->errors.find(out.path);error!=impl->errors.end())out.loadError=GameplayEventHistory::Bounded(error->second,4096);
+    if(!component->enabled){out.state=LuaInstanceState::Disabled;return out;}
+    const auto program=impl->programs.find(out.path);
+    if(program!=impl->programs.end())out.programRevision=program->second.revision;
+    const auto found=impl->instances.find(entity);
+    if(found==impl->instances.end()){
+        out.state=program==impl->programs.end()&&!out.loadError.empty()?LuaInstanceState::Rejected:LuaInstanceState::Pending;
+        if(auto rejected=impl->rejected.find(entity);rejected!=impl->rejected.end()&&rejected->second.fingerprint.starts_with(out.path+":")){
+            out.state=LuaInstanceState::Rejected;out.lastError=rejected->second.error;
+        }
+        return out;
+    }
+    const auto& instance=found->second;
+    out.serial=instance.serial;out.revision=instance.revision;
+    out.lastCallback=instance.lastCallback;out.lastStatus=instance.lastStatus;out.lastError=instance.lastError;
+    if(instance.path!=out.path||out.revision!=out.programRevision){out.state=LuaInstanceState::ReloadPending;return out;}
+    out.state=instance.failed?LuaInstanceState::Failed:LuaInstanceState::Running;
+    return out;
+}
+namespace {
+struct LuaStackRestore {
+    lua_State* state;int top;
+    explicit LuaStackRestore(lua_State* s):state(s),top(lua_gettop(s)){}
+    ~LuaStackRestore(){lua_settop(state,top);}
+};
+struct InspectionReader {
+    lua_State* state;
+    std::size_t remaining=256;
+    bool limited=false;
+    std::unordered_set<const void*> ancestors;
+    static std::string Text(const char* data,std::size_t size,std::size_t maximum){
+        const auto text=Json(std::string(data,std::min(size,maximum))).dump(-1,' ',false,Json::error_handler_t::replace);
+        return text+(size>maximum?"... (truncated)":"");
+    }
+    std::string Key(int index){
+        switch(lua_type(state,index)){
+        case LUA_TSTRING:{std::size_t n=0;auto* text=lua_tolstring(state,index,&n);return Text(text,n,128);}
+        case LUA_TNUMBER:{std::ostringstream value;value<<std::setprecision(17)<<lua_tonumber(state,index);return "["+value.str()+"]";}
+        case LUA_TBOOLEAN:return lua_toboolean(state,index)?"[true]":"[false]";
+        default:return std::string("<")+luaL_typename(state,index)+" key>";
+        }
+    }
+    LuaInspectedValue Value(int index,std::string name,unsigned depth){
+        LuaInspectedValue value;value.name=std::move(name);index=lua_absindex(state,index);
+        value.type=luaL_typename(state,index);
+        switch(lua_type(state,index)){
+        case LUA_TNIL:value.value="nil";break;
+        case LUA_TBOOLEAN:value.value=lua_toboolean(state,index)?"true":"false";break;
+        case LUA_TNUMBER:{std::ostringstream text;if(lua_isinteger(state,index))text<<lua_tointeger(state,index);else text<<std::setprecision(17)<<lua_tonumber(state,index);value.value=text.str();break;}
+        case LUA_TSTRING:{std::size_t size=0;auto* text=lua_tolstring(state,index,&size);value.value=Text(text,size,512);value.limited=size>512;limited|=value.limited;break;}
+        case LUA_TUSERDATA:
+            if(sol::stack::check<ecs::Entity>(state,index,sol::no_panic)){
+                value.entity=sol::stack::get<ecs::Entity>(state,index);value.type="Entity";
+                const auto e=value.entity;value.value=std::to_string(e.world)+":"+std::to_string(e.index)+":"+std::to_string(e.generation);
+            }else value.value="<userdata>";
+            break;
+        case LUA_TTABLE:{
+            const auto* identity=lua_topointer(state,index);
+            if(ancestors.contains(identity)){value.value="<cycle>";value.limited=limited=true;}
+            else if(depth>=3){value.value="<depth limit>";value.limited=limited=true;}
+            else {value.children=Table(index,depth+1,0);value.value="table";}
+            break;
+        }
+        default:value.value=std::string("<")+value.type+">";break;
+        }
+        return value;
+    }
+    // lua_next/rawget never call __pairs, __index or __tostring. Numeric keys are
+    // copied with lua_tonumber, never converted in-place while iterating.
+    std::vector<LuaInspectedValue> Table(int index,unsigned depth,int root){
+        LuaStackRestore restore(state);index=lua_absindex(state,index);std::vector<LuaInspectedValue> result;
+        const auto* identity=lua_topointer(state,index);ancestors.insert(identity);
+        lua_pushnil(state);unsigned scanned=0;
+        while(lua_next(state,index)!=0){
+            if(++scanned>64||!remaining){limited=true;break;}
+            bool skip=false;
+            if(root&&lua_type(state,-2)==LUA_TSTRING){
+                std::size_t size=0;const auto* text=lua_tolstring(state,-2,&size);std::string_view key(text,size);
+                skip=root==1?key=="entity":key=="fields"||key=="on_start"||key=="on_update"||key=="on_fixed_update"||key=="on_event"||key=="on_ui_event"||key=="on_stop"||key=="on_destroy";
+            }
+            if(!skip){--remaining;result.push_back(Value(-1,Key(-2),depth));}
+            lua_pop(state,1);
+        }
+        ancestors.erase(identity);
+        std::stable_sort(result.begin(),result.end(),[](const auto& a,const auto& b){return a.name<b.name;});return result;
+    }
+};
+}
+LuaInstanceSnapshot LuaRuntime::Inspect(ecs::Entity entity)const{
+    auto info=InspectionInfo(entity);LuaInstanceSnapshot snapshot;snapshot.info=info;
+    if(!info.CanRead())return snapshot;
+    const auto& instance=impl->instances.at(entity);auto* state=impl->lua.lua_state();LuaStackRestore restore(state);
+    InspectionReader reader{state};instance.self.push();const int self=lua_absindex(state,-1);
+    snapshot.fields=reader.Table(self,0,1);
+    // Absent declared fields really are nil in this instance; read raw values,
+    // never substitute serialized overrides or schema defaults.
+    const auto& schema=impl->programs.at(info.path).fields;
+    for(auto it=schema.begin();it!=schema.end()&&reader.remaining;++it){
+        lua_pushlstring(state,it.key().data(),it.key().size());lua_rawget(state,self);
+        if(lua_isnil(state,-1)){--reader.remaining;snapshot.fields.push_back(reader.Value(-1,InspectionReader::Text(it.key().data(),it.key().size(),128),0));}lua_pop(state,1);
+    }
+    std::stable_sort(snapshot.fields.begin(),snapshot.fields.end(),[](const auto& a,const auto& b){return a.name<b.name;});
+    instance.definition.push();snapshot.definition=reader.Table(-1,0,2);snapshot.limited=reader.limited;return snapshot;
+}
 std::size_t LuaRuntime::InstanceCount()const{return impl->instances.size();}
 bool LuaRuntime::HasCameraOwner()const{
     impl->Check();
@@ -369,3 +609,14 @@ bool LuaRuntime::HasCameraOwner()const{
     return script&&script->enabled&&script->cameraEnabled;
 }
 }
+
+const PostFxRuntimeOverrides& scripting::LuaRuntime::PostFxOverrides()const{return impl->postfx;}
+bool scripting::LuaRuntime::SetPostFx(const std::string& id,const std::string& name,const nlohmann::json& value){
+    impl->Check();auto* resources=impl->services.postfxResources;
+    if(impl->world&&!impl->stopping&&resources){auto key=resources->FindPostFx(id);auto asset=key.empty()?nullptr:resources->Get<PostFxResource>(key);if(asset&&asset->GetData().definition)for(auto& p:asset->GetData().definition->parameters)if(p.name==name&&p.Valid(value)){impl->postfx[id].parameters[name]=value;return true;}}
+    Logger::Get().Warn("Lua postfx.set: unknown effect/parameter or invalid value: "+id+" / "+name);return false;
+}
+bool scripting::LuaRuntime::SetPostFxWeight(const std::string& id,float weight){
+    impl->Check();auto* r=impl->services.postfxResources;if(impl->world&&!impl->stopping&&r&&std::isfinite(weight)&&weight>=0&&weight<=1&&!r->FindPostFx(id).empty()){impl->postfx[id].weight=weight;return true;}Logger::Get().Warn("Lua postfx.set_weight: unknown effect or invalid weight: "+id);return false;
+}
+bool scripting::LuaRuntime::ClearPostFx(const std::string& id){impl->Check();auto* r=impl->services.postfxResources;if(!impl->world||impl->stopping||!r||r->FindPostFx(id).empty()){Logger::Get().Warn("Lua postfx.clear: unknown effect: "+id);return false;}impl->postfx.erase(id);return true;}

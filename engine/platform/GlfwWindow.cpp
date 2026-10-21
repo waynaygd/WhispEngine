@@ -12,6 +12,8 @@ static int g_GlfwRefCount = 0;
 
 namespace
 {
+void PointerCallback(GLFWwindow* window,double x,double y){if(auto* owner=static_cast<GlfwWindow*>(glfwGetWindowUserPointer(window)))owner->PointerMoved(x,y);}
+void PointerEnterCallback(GLFWwindow* window,int entered){if(!entered)if(auto* owner=static_cast<GlfwWindow*>(glfwGetWindowUserPointer(window)))owner->PointerLeft();}
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset)
 {
     (void)xoffset;
@@ -66,6 +68,7 @@ bool GlfwWindow::Create(int width, int height, const std::string& title)
 
     glfwSetWindowUserPointer(m_Window, this);
     glfwSetScrollCallback(m_Window, ScrollCallback);
+    glfwSetCursorPosCallback(m_Window,PointerCallback);glfwSetCursorEnterCallback(m_Window,PointerEnterCallback);
 
     return true;
 }
@@ -106,3 +109,7 @@ void GlfwWindow::AddScrollDeltaY(double delta)
     m_PendingScrollDeltaY += delta;
 }
 
+
+std::array<double,2> GlfwWindow::PointerPosition()const{
+    if(m_HasPointer)return m_Pointer;std::array<double,2> p{};if(m_Window)glfwGetCursorPos(m_Window,&p[0],&p[1]);return p;
+}

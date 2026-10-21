@@ -7,6 +7,7 @@ namespace AssetPaths
 {
 std::filesystem::path GetExecutableDirectory();
 std::filesystem::path ResolveAssetRoot();
+std::filesystem::path ResolveEngineAssetRoot();
 std::filesystem::path ResolveShaderRoot();
 std::string NormalizeAssetKey(const std::filesystem::path& path);
 std::string NormalizeShaderKey(const std::filesystem::path& path);

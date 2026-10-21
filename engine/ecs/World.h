@@ -1,9 +1,11 @@
 #pragma once
 
 #include "Entity.h"
+#include "components/TransformComponent.h"
 #include "systems/SystemPipeline.h"
 
 #include <cstddef>
+#include <functional>
 #include <atomic>
 #include <type_traits>
 #include <thread>
@@ -19,6 +21,7 @@
 
 namespace ecs
 {
+struct RigidbodyComponent;
 class World
 {
 public:
@@ -41,6 +44,19 @@ public:
     [[nodiscard]] bool IsIterating()const{return m_IterationDepth!=0;}
     Entity CreateEntity();
     bool DestroyEntity(Entity entity);
+    Entity Parent(Entity entity)const;
+    std::vector<Entity> Children(Entity entity)const;
+    std::vector<Entity> Subtree(Entity entity)const;
+    std::vector<Entity> HierarchyRoots(const std::vector<Entity>& entities)const;
+    TransformComponent LocalTransform(Entity entity)const;
+    TransformComponent WorldTransform(Entity entity,const std::function<TransformComponent(Entity,const TransformComponent&)>& pose={})const;
+    bool SetLocalTransform(Entity,const TransformComponent&,std::string* error=nullptr);
+    bool SetWorldTransform(Entity,const TransformComponent&,std::string* error=nullptr);
+    bool SetLocalTransforms(const std::vector<std::pair<Entity,TransformComponent>>&,std::string* error=nullptr);
+    bool SetWorldTransforms(const std::vector<std::pair<Entity,TransformComponent>>&,std::string* error=nullptr);
+    bool SetParent(Entity child,Entity parent,bool keepWorld=true,std::string* error=nullptr);
+    bool SetParents(const std::vector<std::pair<Entity,Entity>>&,bool keepWorld=true,std::string* error=nullptr);
+    void ValidateHierarchy()const;
 
     template <typename T, typename... Args>
     T& AddComponent(Entity entity, Args&&... args);
@@ -86,6 +102,8 @@ public:
     [[nodiscard]] std::string DebugDescribeEntity(Entity entity) const;
 
 private:
+    std::unordered_map<Entity,Entity,EntityHash> m_Parents;
+    bool ApplyHierarchy(const std::vector<std::pair<Entity,Entity>>&,const std::vector<std::pair<Entity,TransformComponent>>&,bool worldSpace,std::string* error);
     struct IComponentStorage
     {
         virtual ~IComponentStorage() = default;
@@ -212,7 +230,11 @@ T& World::AddComponent(Entity entity, Args&&... args)
     if (!IsAlive(entity))
         throw std::logic_error("Cannot add component to dead or foreign-world entity");
 
-    return GetOrCreateStorage<T>().Emplace(entity.index, std::forward<Args>(args)...);
+    auto& storage=GetOrCreateStorage<T>();auto& component=storage.Emplace(entity.index,std::forward<Args>(args)...);
+    if constexpr(std::is_same_v<T,RigidbodyComponent>){
+        if(Parent(entity).IsValid()&&component.simulatePhysics&&!component.isStatic){storage.Remove(entity.index);throw std::logic_error("Dynamic Rigidbody must be a root entity");}
+    }
+    return component;
 }
 
 template <typename T>
@@ -252,6 +274,7 @@ bool World::RemoveComponent(Entity entity)
     if (!IsAlive(entity))
         return false;
 
+    if constexpr(std::is_same_v<T,TransformComponent>)if(Parent(entity).IsValid()||!Children(entity).empty())throw std::logic_error("Unparent before removing Transform");
     ComponentStorage<T>* storage = FindStorage<T>();
     return storage != nullptr && storage->RemoveComponent(entity.index);
 }

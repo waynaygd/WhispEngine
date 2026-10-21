@@ -1,4 +1,5 @@
 #include "../ecs/FogGather.h"
+#include "../ecs/PostProcessEvaluation.h"
 #include "../render/IRenderAdapter.h"
 #include "PrecisionInputs.h"
 #include "SunSynchronization.h"
@@ -9,9 +10,13 @@
 #include "../core/Application.h"
 #include "../ecs/components/LuaScriptComponent.h"
 #include "../scripting/EntityReference.h"
+#include "../scripting/Prefab.h"
+#include "../ecs/components/PrefabInstanceComponent.h"
 #include "../ecs/PlayerSpawn.h"
 #include "../resources/ResourceManager.h"
 #include <imgui.h>
+#include <imgui_internal.h>
+#include <charconv>
 #include <chrono>
 #include <misc/cpp/imgui_stdlib.h>
 namespace editor {
@@ -35,11 +40,21 @@ bool EditorLayer::SetLuaEntityReference(Application& app,ecs::Entity owner,const
 namespace {
 ecs::PropertyValue Initial(const ecs::PropertyDescriptor& p){
     using K=ecs::PropertyKind;
+    const PostProcessSettings postDefaults;
+#define PP_INITIAL(name,target,lo,hi,section,label) if(p.key==#name)return postDefaults.target;
+    WHISP_PP_FLOATS(PP_INITIAL)
+#undef PP_INITIAL
+    if(p.key=="fogEnabled"||p.key=="sceneLighting"||p.key=="toneMapping")return true;
+    if(p.key=="fogMode")return int(postDefaults.fog.mode);
+    if(p.key=="fogQuality")return int(postDefaults.fog.quality);
+    if(p.key=="tint")return postDefaults.screenEffects.tint;
+    if(p.key=="fogColor")return postDefaults.fog.color;
+    if(p.key=="scatteringColor")return postDefaults.fog.scatteringColor;
     switch(p.kind){case K::Boolean:return false;case K::Integer:return 0;case K::Number:return p.key.find("roughness")!=std::string::npos?.5f:p.key.find("Scale")!=std::string::npos||p.key.find("Strength")!=std::string::npos?1.f:std::max(p.minimum,0.f);case K::String:case K::Asset:return std::string();case K::Vector:return ecs::Vec3{};case K::Color:return std::array<float,4>{1,1,1,1};case K::AssetList:return std::vector<std::string>{};}return {};
 }
 bool Drawer(const ecs::PropertyDescriptor& p,ecs::PropertyValue& v,const char* vectorFormat="%.3g",bool degrees=false){
     using K=ecs::PropertyKind;bool changed=false;
-    if(p.nullable){bool enabled=!std::holds_alternative<std::monostate>(v);if(ImGui::Checkbox("##override",&enabled)){v=enabled?Initial(p):ecs::PropertyValue{};changed=true;}if(ImGui::IsItemHovered())ImGui::SetTooltip("Override this property for the selected entity; unchecked inherits the material asset.");if(!enabled){ImGui::SameLine();ImGui::TextDisabled("Inherit");return changed;}ImGui::SameLine();}
+    if(p.nullable){bool enabled=!std::holds_alternative<std::monostate>(v);if(ImGui::Checkbox("##override",&enabled)){v=enabled?Initial(p):ecs::PropertyValue{};changed=true;}if(ImGui::IsItemHovered())ImGui::SetTooltip("Override this property for the selected entity; unchecked inherits the underlying asset or evaluated scene state.");if(!enabled){ImGui::SameLine();ImGui::TextDisabled("Inherit");return changed;}ImGui::SameLine();}
     switch(p.kind){
     case K::Boolean:changed|=ImGui::Checkbox("##value",&std::get<bool>(v));break;
     case K::Integer:{auto& x=std::get<int>(v);if(p.choices.empty())changed|=PrecisionDragInt("##value",&x,1,int(p.minimum),int(p.maximum));else if(ImGui::BeginCombo("##value",x>=0&&x<int(p.choices.size())?p.choices[x].c_str():"Invalid")){for(int i=0;i<int(p.choices.size());++i)if(ImGui::Selectable(p.choices[i].c_str(),x==i)){x=i;changed=true;}ImGui::EndCombo();}break;}
@@ -52,7 +67,7 @@ bool Drawer(const ecs::PropertyDescriptor& p,ecs::PropertyValue& v,const char* v
         for(int i=0;i<3;++i){ImGui::PushID(i);if(i&&!stacked)ImGui::SameLine();ImGui::BeginGroup();ImGui::AlignTextToFramePadding();ImGui::TextColored(colors[i],"%s",axes[i]);const float axisWidth=ImGui::CalcTextSize(axes[i]).x;ImGui::SameLine(0,2);ImGui::SetNextItemWidth(std::max(20.f,width-axisWidth-2));changed|=PrecisionDragFloat("##axis",values[i],p.speed,p.minimum,p.maximum,vectorFormat,ImGuiSliderFlags_NoRoundToFormat);ImGui::EndGroup();ImGui::PopID();}ImGui::PopStyleVar();ImGui::EndGroup();if(changed){
         if(degrees){x=old;if(display.x!=initialDisplay.x)x.x=Radians(display.x);if(display.y!=initialDisplay.y)x.y=Radians(display.y);if(display.z!=initialDisplay.z)x.z=Radians(display.z);}else x=display;
     }break;}
-    case K::Color:{auto& color=std::get<std::array<float,4>>(v);if(p.key=="tint")changed|=ImGui::ColorEdit4("##value",color.data(),ImGuiColorEditFlags_NoInputs);else changed|=LinearColorEdit("##value",color.data(),p.colorComponents,ImGuiColorEditFlags_NoInputs);break;}
+    case K::Color:{auto& color=std::get<std::array<float,4>>(v);if(p.key=="tint"){if(p.colorComponents==3)changed|=ImGui::ColorEdit3("##value",color.data(),ImGuiColorEditFlags_NoInputs);else changed|=ImGui::ColorEdit4("##value",color.data(),ImGuiColorEditFlags_NoInputs);}else changed|=LinearColorEdit("##value",color.data(),p.colorComponents,ImGuiColorEditFlags_NoInputs);break;}
     case K::String:case K::Asset:changed|=ImGui::InputText("##value",&std::get<std::string>(v));break;
     case K::AssetList:{auto& list=std::get<std::vector<std::string>>(v);for(int i=0;i<int(list.size());++i){ImGui::PushID(i);changed|=ImGui::InputText("Slot",&list[i]);if(ImGui::BeginDragDropTarget()){if(auto* payload=ImGui::AcceptDragDropPayload("WHISP_ASSET"))if(payload->DataSize==sizeof(AssetPayload)){auto* data=static_cast<const AssetPayload*>(payload->Data);if(data->kind==p.asset){list[i]=data->key;changed=true;}}ImGui::EndDragDropTarget();}ImGui::SameLine();if(ImGui::SmallButton("X")){list.erase(list.begin()+i);changed=true;ImGui::PopID();break;}ImGui::PopID();}if(ImGui::SmallButton("Add slot")){list.emplace_back();changed=true;}break;}
     }
@@ -64,6 +79,110 @@ template<class T>void AssetState(ResourceManager* resources,const std::string& k
     if(resource->IsLoading())ImGui::TextDisabled("Loading...");else if(resource->IsFailed())ImGui::TextWrapped("Missing/invalid asset: %s",resource->GetErrorMessage().c_str());
 }
 }
+void EditorLayer::DrawBulkInspector(Application& app){
+    auto& world=app.GetWorld();const auto& registry=ecs::ComponentRegistry::Builtins();
+    if(m_BulkUiSelection!=m_Selection.items){FinishTransaction(app);m_BulkText.clear();m_PropertyDrafts.clear();m_BulkUiSelection=m_Selection.items;}
+    ImGui::Text("%zu Entities Selected",m_Selection.items.size());ImGui::TextWrapped("Changes apply to all selected entities.");
+    if(app.IsPrefabEditing())ImGui::TextDisabled("Editing the open prefab; Save is explicit.");
+    else if(std::any_of(m_Selection.items.begin(),m_Selection.items.end(),[&](auto e){return scripting::PrefabRoot(world,e).IsValid();}))
+        ImGui::TextWrapped("Prefab sources remain unchanged. Select one instance for Apply/Revert.");
+    if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)&&m_Transaction&&m_Transaction->before.bulk){CancelTransaction(app);m_BulkText.clear();return;}
+    if(app.IsEditorPlayMode())ImGui::TextWrapped("Stop Play to bulk edit. Runtime changes are discarded on Stop.");
+    ImGui::BeginDisabled(app.IsEditorPlayMode());ImGui::PushID("BulkInspector");
+    const auto common=CommonInspectorComponents(app);if(common.empty())ImGui::TextWrapped("No shared components. Missing components are never added automatically.");
+    auto commit=[&](const ecs::ComponentDescriptor& d,const ecs::PropertyDescriptor& p,const ecs::PropertyValue& value,unsigned mask,bool finish){
+        if(SetBulkProperty(app,d.id,p.key,value,mask,m_InspectorWorldTransform,d.key=="Transform"&&m_BulkRelative,false)&&finish)FinishTransaction(app);
+    };
+    for(auto id:common){const auto& d=*registry.Find(id);ImGui::PushID(d.key.c_str());
+        if(!ImGui::CollapsingHeader(d.label.c_str(),d.key=="Tag"?0:ImGuiTreeNodeFlags_DefaultOpen)){ImGui::PopID();continue;}
+        if(d.key=="Transform"){
+            if(ImGui::Checkbox("World coordinates",&m_InspectorWorldTransform)){FinishTransaction(app);m_PropertyDrafts.clear();m_BulkText.clear();}
+            ImGui::SameLine();if(ImGui::Checkbox("Relative",&m_BulkRelative)){FinishTransaction(app);m_PropertyDrafts.clear();m_BulkText.clear();}
+            ImGui::TextDisabled(m_BulkRelative?"Relative: offset / scale factor":"Absolute: replace edited axes only");
+            if(ImGui::IsItemHovered())ImGui::SetTooltip("Absolute sets the edited axes for every entity in Local or World coordinates. Local fields are independent of Parent; World fields are solved together. Relative adds Position/Rotation (Euler) offsets and multiplies Scale. Selected descendants follow their selected ancestor once; relative edits affect only selected roots.");
+        }
+        if(d.key=="LuaScript")ImGui::TextWrapped("Script fields keep their individual values. Select one entity to edit behavior fields.");
+        if(ImGui::BeginTable("BulkProperties",2,ImGuiTableFlags_SizingStretchProp)){
+            ImGui::TableSetupColumn("Property",ImGuiTableColumnFlags_WidthFixed,std::min(110*ImGui::GetStyle().FontScaleDpi,ImGui::GetContentRegionAvail().x*.40f));ImGui::TableSetupColumn("Value",ImGuiTableColumnFlags_WidthStretch);
+            std::string section;
+            for(const auto& p:d.properties){if(p.internal)continue;
+                if(!p.section.empty()&&p.section!=section){section=p.section;ImGui::TableNextRow();ImGui::TableSetColumnIndex(0);ImGui::TextDisabled("%s",section.c_str());}
+                auto state=InspectBulkProperty(app,d.id,p.key,m_InspectorWorldTransform);if(!state.common)continue;
+                ImGui::TableNextRow();ImGui::TableSetColumnIndex(0);ImGui::AlignTextToFramePadding();ImGui::TextUnformatted(d.key=="Transform"&&p.key=="rotation"?"Rotation (deg)":p.label.c_str());
+                if(ImGui::IsItemHovered())ImGui::SetTooltip("%s\nApplies to %zu selected entities. Mixed means values differ.",p.tooltip.c_str(),m_Selection.items.size());
+                ImGui::TableSetColumnIndex(1);ImGui::PushID(p.key.c_str());const auto draftId=ImGui::GetID("BulkDraft");
+                auto draft=m_PropertyDrafts.find(draftId);auto value=draft==m_PropertyDrafts.end()?state.value:draft->second;
+                const bool relative=d.key=="Transform"&&m_BulkRelative;
+                if(relative&&draft==m_PropertyDrafts.end())value=p.key=="scale"?ecs::PropertyValue(ecs::Vec3{1,1,1}):ecs::PropertyValue(ecs::Vec3{});
+                const bool drivenRotation=d.key=="Transform"&&p.key=="rotation"&&app.GetSceneBackground().sunSync==SunSyncMode::SkyDrivesLight&&app.GetSceneBackground().sunMetadata&&m_Selection.Contains(PrimarySun(world));
+                const bool drivenLight=d.key=="DirectionalLight"&&(p.key=="color"||p.key=="intensity")&&app.GetSceneBackground().background==EditorBackground::DayNight&&app.GetSceneBackground().driveLightProperties&&m_Selection.Contains(PrimarySun(world));
+                const bool readOnly=p.readOnly||drivenRotation||drivenLight||(d.key=="DirectionalLight"&&p.key=="primary");
+                ImGui::BeginDisabled(readOnly);bool changed=false,finished=false;unsigned mask=15;
+                if(p.nullable){
+                    bool enabled=!std::holds_alternative<std::monostate>(state.value);bool mixedEnabled=false;
+                    for(auto e:m_Selection.items)mixedEnabled|=(!std::holds_alternative<std::monostate>(p.get(world,e)))!=enabled;
+                    if(mixedEnabled)ImGui::PushItemFlag(ImGuiItemFlags_MixedValue,true);
+                    bool toggled=ImGui::Checkbox("Override",&enabled);if(mixedEnabled)ImGui::PopItemFlag();
+                    if(toggled){commit(d,p,enabled?Initial(p):ecs::PropertyValue{},15,true);ImGui::EndDisabled();ImGui::PopID();continue;}
+                    if(!enabled&&!mixedEnabled){ImGui::SameLine();ImGui::TextDisabled("Inherit");ImGui::EndDisabled();ImGui::PopID();continue;}
+                }
+                if(std::holds_alternative<std::monostate>(value))value=Initial(p);
+                auto numeric=[&](float& number,bool mixed,const char* format)->bool{
+                    const auto textId=ImGui::GetID("NumberText");ImGui::SetNextItemWidth(-1);
+                    if(mixed){
+                        auto& buffer=m_BulkText[textId];bool enter=ImGui::InputTextWithHint("##number","Mixed",&buffer,ImGuiInputTextFlags_EnterReturnsTrue);
+                        if((enter||ImGui::IsItemDeactivatedAfterEdit())&&!buffer.empty()){
+                            float parsed=0;const auto result=std::from_chars(buffer.data(),buffer.data()+buffer.size(),parsed);
+                            if(result.ec==std::errc{}&&result.ptr==buffer.data()+buffer.size()&&std::isfinite(parsed)){number=parsed;finished=true;m_BulkText.erase(textId);return true;}
+                            m_EditorError="Enter a finite number; the selection was not changed.";
+                        }return false;
+                    }
+                    bool edited=PrecisionDragFloat("##number",&number,p.speed,p.minimum,p.maximum,format);finished|=ImGui::IsItemDeactivatedAfterEdit();return edited;
+                };
+                using K=ecs::PropertyKind;
+                if(p.kind==K::Vector){
+                    auto v=std::get<ecs::Vec3>(value);float numbers[]={v.x,v.y,v.z};const char* axes[]={"X","Y","Z"};mask=0;
+                    for(int axis=0;axis<3;++axis){ImGui::PushID(axis);ImGui::TextDisabled("%s",axes[axis]);ImGui::SameLine();float display=d.key=="Transform"&&p.key=="rotation"?Degrees(numbers[axis]):numbers[axis];
+                        if(numeric(display,!relative&&state.mixed[axis],TransformFormat(m_TransformPrecision))){numbers[axis]=d.key=="Transform"&&p.key=="rotation"?Radians(display):display;mask|=1u<<axis;changed=true;}ImGui::PopID();}
+                    value=ecs::Vec3{numbers[0],numbers[1],numbers[2]};
+                }else if(p.kind==K::Number){float number=std::get<float>(value);changed=numeric(number,state.IsMixed(),"%.6g");value=number;
+                }else if(p.kind==K::Integer){
+                    int number=std::get<int>(value);ImGui::SetNextItemWidth(-1);
+                    if(!p.choices.empty()){
+                        const char* label=state.IsMixed()?"Mixed":number>=0&&number<int(p.choices.size())?p.choices[number].c_str():"Invalid";
+                        if(ImGui::BeginCombo("##enum",label)){for(int choice=0;choice<int(p.choices.size());++choice)if(ImGui::Selectable(p.choices[choice].c_str(),!state.IsMixed()&&choice==number)){number=choice;changed=finished=true;}ImGui::EndCombo();}
+                    }else if(state.IsMixed()){
+                        auto& buffer=m_BulkText[draftId];bool enter=ImGui::InputTextWithHint("##integer","Mixed",&buffer,ImGuiInputTextFlags_EnterReturnsTrue);
+                        if((enter||ImGui::IsItemDeactivatedAfterEdit())&&!buffer.empty()){auto result=std::from_chars(buffer.data(),buffer.data()+buffer.size(),number);if(result.ec==std::errc{}&&result.ptr==buffer.data()+buffer.size()){changed=finished=true;m_BulkText.erase(draftId);}else m_EditorError="Enter a whole number; the selection was not changed.";}
+                    }else {changed=PrecisionDragInt("##integer",&number,1,int(p.minimum),int(p.maximum));finished=ImGui::IsItemDeactivatedAfterEdit();}value=number;
+                }else if(p.kind==K::Boolean){bool enabled=state.IsMixed()?false:std::get<bool>(value);if(state.IsMixed())ImGui::PushItemFlag(ImGuiItemFlags_MixedValue,true);changed=ImGui::Checkbox("##boolean",&enabled);if(state.IsMixed())ImGui::PopItemFlag();value=enabled;finished=changed;
+                }else if(p.kind==K::Color){
+                    if(state.IsMixed()||ImGui::IsPopupOpen("BulkColor")){
+                        if(ImGui::Button(state.IsMixed()?"Mixed":"Choose color"))ImGui::OpenPopup("BulkColor");
+                        if(ImGui::BeginPopup("BulkColor")){
+                            ImGui::TextUnformatted("Choose a color for all selected entities");auto color=draft!=m_PropertyDrafts.end()?std::get<std::array<float,4>>(draft->second):state.IsMixed()?std::array<float,4>{1,1,1,1}:std::get<std::array<float,4>>(state.value);
+                            float display[4];for(int i=0;i<4;++i)display[i]=i<3&&p.key!="tint"?LinearToSrgb(color[i]):color[i];
+                            changed=p.colorComponents==3?ImGui::ColorPicker3("##color",display):ImGui::ColorPicker4("##color",display);
+                            if(changed){for(int i=0;i<4;++i)color[i]=i<3&&p.key!="tint"?SrgbToLinear(display[i]):display[i];value=color;}
+                            finished=ImGui::IsItemDeactivatedAfterEdit();ImGui::EndPopup();
+                        }
+                    }else {changed=Drawer(p,value);finished=ImGui::IsItemDeactivatedAfterEdit();}
+                }else if(p.kind==K::String||p.kind==K::Asset){
+                    auto it=m_BulkText.find(draftId);if(it==m_BulkText.end())it=m_BulkText.emplace(draftId,state.IsMixed()?"":std::get<std::string>(value)).first;
+                    ImGui::SetNextItemWidth(-1);bool enter=ImGui::InputTextWithHint("##text",state.IsMixed()?"Mixed":"",&it->second,ImGuiInputTextFlags_EnterReturnsTrue);
+                    if(enter||ImGui::IsItemDeactivatedAfterEdit()){value=it->second;changed=finished=true;m_BulkText.erase(draftId);}
+                    if(p.kind==K::Asset){std::string asset;if(AcceptAssetDrop(p.asset,asset)){value=asset;changed=finished=true;m_BulkText.erase(draftId);}}
+                }else ImGui::TextDisabled(state.IsMixed()?"Mixed slots (single selection)":"Slots: edit with single selection");
+                if(changed){m_PropertyDrafts[draftId]=value;commit(d,p,value,mask,finished);}
+                if(finished){FinishTransaction(app);m_PropertyDrafts.erase(draftId);}
+                ImGui::EndDisabled();if(readOnly&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip(drivenRotation||drivenLight?"Controlled by the sky/day-night settings.":"Read-only for multiple selection.");
+                ImGui::PopID();
+            }ImGui::EndTable();
+        }ImGui::PopID();
+    }
+    if(m_Transaction&&m_Transaction->before.bulk&&!ImGui::IsAnyItemActive()){FinishTransaction(app);m_PropertyDrafts.clear();}
+    ImGui::PopID();ImGui::EndDisabled();if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());
+}
 void EditorLayer::DrawInspector(Application& app){
     const auto start=std::chrono::steady_clock::now();
     struct Finish {double& value;std::chrono::steady_clock::time_point start;~Finish(){value=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}} finish{m_Statistics.inspectorMs,start};
@@ -71,9 +190,22 @@ void EditorLayer::DrawInspector(Application& app){
     if(!ImGui::Begin("Inspector",&m_ShowInspector)){ImGui::End();return;}
     auto& world=app.GetWorld();auto e=m_Selection.active;
     if(!world.IsAlive(e)){ImGui::TextUnformatted("No entity selected");ImGui::End();return;}
-    if(m_Selection.items.size()>1){ImGui::Text("%zu entities selected",m_Selection.items.size());ImGui::TextWrapped("Properties below affect only the Active Entity. Use the shared viewport gizmo to transform the group.");}
+    if(m_BulkSession&&m_BulkSession->selection!=m_Selection.items)FinishTransaction(app);
+    if(m_Selection.items.size()>1){DrawBulkInspector(app);ImGui::End();return;}
+    m_BulkUiSelection.clear();m_BulkText.clear();
     const auto* tag=world.GetComponent<ecs::TagComponent>(e);if(m_Selection.items.size()>1)ImGui::TextUnformatted("Active Entity:");ImGui::SeparatorText(tag?tag->name.c_str():"Entity");
+    if(auto root=scripting::PrefabRoot(world,e);root.IsValid()){
+        auto* link=world.GetComponent<ecs::PrefabInstanceComponent>(root);ImGui::TextWrapped("Prefab: %s",link->asset.c_str());
+        if(!app.IsPrefabEditing()&&!app.IsEditorPlayMode()){
+            if(ImGui::Button("Open Prefab"))m_PrefabActionKey=link->asset;
+            ImGui::SameLine();if(ImGui::Button("Apply...")){m_PrefabAction=3;m_PrefabActionEntity=root;m_PrefabConfirm=true;}
+            ImGui::SameLine();if(ImGui::Button("Revert...")){m_PrefabAction=4;m_PrefabActionEntity=root;m_PrefabConfirm=true;}
+        }
+    }
     if(app.IsEditorPlayMode())ImGui::TextWrapped("Runtime edits are discarded on Stop.");
+    if(auto parent=world.Parent(e);parent.IsValid()){auto* name=world.GetComponent<ecs::TagComponent>(parent);ImGui::Text("Parent: %s",name?name->name.c_str():"Entity");}
+    if(ImGui::Checkbox("World coordinates",&m_InspectorWorldTransform)){FinishTransaction(app);m_PropertyDrafts.clear();}
+    if(ImGui::IsItemHovered())ImGui::SetTooltip("Transform fields use World coordinates when enabled, otherwise Local coordinates relative to Parent.");
     ImGui::Combo("Transform precision",&m_TransformPrecision,"Compact\0Precise\0Full Precision (9 significant digits)\0");
     const auto& registry=ecs::ComponentRegistry::Builtins();ImGui::PushID(int(e.index));ImGui::PushID(int(e.generation));
     if(ImGui::Button("Add Component"))ImGui::OpenPopup("AddComponent");
@@ -89,12 +221,18 @@ void EditorLayer::DrawInspector(Application& app){
 
             ImGui::PushID(p.key.c_str());const auto id=ImGui::GetID("PropertyDraft");auto draft=m_PropertyDrafts.find(id);
             auto value=draft!=m_PropertyDrafts.end()?draft->second:p.get(world,e);
+            if(draft==m_PropertyDrafts.end()&&m_InspectorWorldTransform&&d.key=="Transform"){auto t=world.WorldTransform(e);if(p.key=="position")value=t.position;else if(p.key=="rotation")value=t.rotation;else if(p.key=="scale")value=t.scale;}
             const bool skyDriven=d.key=="Transform"&&p.key=="rotation"&&app.GetSceneBackground().sunSync==SunSyncMode::SkyDrivesLight&&app.GetSceneBackground().sunMetadata&&world.HasComponent<ecs::DirectionalLightComponent>(e)&&PrimarySun(world)==e;
             const bool readOnly=p.readOnly||skyDriven;
             ImGui::BeginDisabled(readOnly);bool changed=Drawer(p,value,d.key=="Transform"?TransformFormat(m_TransformPrecision):"%.6g",d.key=="Transform"&&p.key=="rotation");bool activated=ImGui::IsItemActivated();bool deactivated=ImGui::IsItemDeactivatedAfterEdit();ImGui::EndDisabled();
             if(skyDriven&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Sky Drives Light controls this orientation. Select Independent to edit it manually.");else if(p.readOnly&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Readonly: %s",p.tooltip.c_str());else if(ImGui::IsItemHovered()&&!p.tooltip.empty())ImGui::SetTooltip("%s",p.tooltip.c_str());
             if(activated||changed){if(!m_Transaction)PushUndoBeforeChange(app,"Edit "+d.label+" / "+p.label);m_PropertyDrafts[id]=value;}
-            if(changed){if(SetProperty(app,e,d.id,p.key,value,false))m_EditorError.clear();else ImGui::TextColored(ImVec4(1,.45f,.35f,1),"%s",m_EditorError.c_str());}
+            if(changed){
+                bool applied=false;
+                if(m_InspectorWorldTransform&&d.key=="Transform"){auto target=world.WorldTransform(e);if(p.key=="position")target.position=std::get<ecs::Vec3>(value);else if(p.key=="rotation")target.rotation=std::get<ecs::Vec3>(value);else if(p.key=="scale")target.scale=std::get<ecs::Vec3>(value);else if(p.key=="pivot")target=ecs::RebasePivot(target,std::get<ecs::Vec3>(value));applied=world.SetWorldTransform(e,target,&m_EditorError);if(applied)app.NotifyEditorMutation(e);}
+                else applied=SetProperty(app,e,d.id,p.key,value,false);
+                if(applied)m_EditorError.clear();else ImGui::TextColored(ImVec4(1,.45f,.35f,1),"%s",m_EditorError.c_str());
+            }
             if(deactivated){FinishTransaction(app);m_PropertyDrafts.erase(id);}
             // Combo/checkbox/drop actions are discrete; numeric/text drag owns a pending transaction.
             if(changed&&!ImGui::IsAnyItemActive()){FinishTransaction(app);m_PropertyDrafts.erase(id);}
@@ -114,6 +252,11 @@ void EditorLayer::DrawInspector(Application& app){
                 bool primary=std::string(section)=="Surface"||std::string(section)=="Base Color"||std::string(section)=="Metallic / Roughness";
                 if(ImGui::TreeNodeEx(section,primary?ImGuiTreeNodeFlags_DefaultOpen:0)){drawSection(section,false);ImGui::TreePop();}
             }
+        }else if(d.key=="PostProcessVolume"){
+            ImGui::TextWrapped("Unchecked parameters inherit the current scene/volume stack. Half extents use World Transform; blend radius is outside the box in world units.");
+            for(const char* section:{"Volume","Fog","Height Fog","Volumetric Fog","Environment","Atmosphere","Color Grading","Vignette","Film Grain","Chromatic Aberration"})if(ImGui::TreeNodeEx(section,ImGuiTreeNodeFlags_DefaultOpen)){drawSection(section,false);ImGui::TreePop();}
+            DrawCustomPostFxInspector(app,e);
+        }else if(d.key=="UICanvas"){drawSection("",false);DrawUICanvasInspector(app,e);
         }else if(d.key=="Fog"){
             drawSection("",false);auto mode=world.GetComponent<ecs::FogComponent>(e)->mode;
             if(mode!=FogMode::Distance){ImGui::SeparatorText("Height profile (world space)");drawSection("Medium",false);}

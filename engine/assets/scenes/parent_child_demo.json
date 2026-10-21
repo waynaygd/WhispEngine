@@ -1,0 +1,251 @@
+{
+  "version": 4,
+  "entities": [
+    {
+      "id": "house",
+      "components": {
+        "Tag": {
+          "name": "House"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0,
+            8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "walls",
+      "components": {
+        "Tag": {
+          "name": "Walls"
+        },
+        "Transform": {
+          "position": [
+            0,
+            1.5,
+            1
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            6,
+            3,
+            0.3
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "@engine/models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "@engine/materials/default_primitive.material.json",
+          "tint": [
+            0.7,
+            0.8,
+            0.9,
+            1
+          ],
+          "override.doubleSided": true
+        }
+      },
+      "parent": "house"
+    },
+    {
+      "id": "door",
+      "components": {
+        "Tag": {
+          "name": "Door"
+        },
+        "Transform": {
+          "position": [
+            1,
+            1,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            2,
+            0.2
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "@engine/models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "@engine/materials/default_primitive.material.json",
+          "tint": [
+            0.5,
+            0.25,
+            0.1,
+            1
+          ],
+          "override.doubleSided": true
+        }
+      },
+      "parent": "house"
+    },
+    {
+      "id": "door-light",
+      "components": {
+        "Tag": {
+          "name": "DoorLight"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.3,
+            -3
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PointLight": {
+          "enabled": true,
+          "color": [
+            1,
+            0.8,
+            0.5
+          ],
+          "intensity": 50,
+          "range": 12,
+          "attenuation": 0.1
+        }
+      },
+      "parent": "door"
+    },
+    {
+      "id": "ceiling",
+      "components": {
+        "Tag": {
+          "name": "CeilingLamp"
+        },
+        "Transform": {
+          "position": [
+            0,
+            3,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.5,
+            0.1,
+            0.5
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "@engine/models/primitives/cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "@engine/materials/default_primitive.material.json",
+          "tint": [
+            1,
+            1,
+            0.5,
+            1
+          ],
+          "override.doubleSided": true
+        }
+      },
+      "parent": "house"
+    },
+    {
+      "id": "ground",
+      "components": {
+        "Tag": {
+          "name": "Ground"
+        },
+        "Transform": {
+          "position": [
+            0,
+            -0.1,
+            8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            20,
+            1,
+            20
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "@engine/models/primitives/plane.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "@engine/materials/default_primitive.material.json",
+          "tint": [
+            0.25,
+            0.3,
+            0.35,
+            1
+          ],
+          "override.doubleSided": true
+        }
+      }
+    },
+    {
+      "id": "other",
+      "components": {
+        "Tag": {
+          "name": "Other Parent"
+        },
+        "Transform": {
+          "position": [
+            8,
+            0,
+            8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      }
+    }
+  ]
+}

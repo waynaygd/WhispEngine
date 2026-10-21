@@ -22,7 +22,7 @@ inline std::optional<std::vector<ecs::TransformComponent>> TransformGroup(const 
         if(!transformed)return {};
         for(float value:{transformed->position.x,transformed->position.y,transformed->position.z})if(std::abs(value)>1e6f)return {};
         for(float value:{transformed->scale.x,transformed->scale.y,transformed->scale.z})if(std::abs(value)<.001f||std::abs(value)>10000.f)return {};
-        result.push_back(*transformed);
+        result.push_back(ecs::RebasePivot(*transformed,original.pivot));
     }
     return result;
 }

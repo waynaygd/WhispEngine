@@ -1,7 +1,7 @@
 #define NOMINMAX
 #include "EditorTestPreferences.h"
 #include "SyntheticEditorInput.h"
-#include "core/Application.h"
+#include "ApplicationTestAccess.h"
 #include "scripting/LuaRuntime.h"
 #include "scripting/Prefab.h"
 #include "scripting/EntityReference.h"
@@ -105,7 +105,7 @@ static void LuaQueries(Files& files){
     files.Write("return {on_start=function(self) for i=1,129 do Timer.every(1,'limit') end end}");World budget;Actor(budget,files.key);lua.Start(budget);lua.Update(0);Check(lua.Error(files.key).find("budget")!=std::string::npos,"timer instance budget enforced");lua.Stop();
 }
 #if defined(ENABLE_DX12)
-static void Native(Files& files){
+static void Native(Files& files,float frameDelta){
     files.Write(R"(return {on_start=function(self)
       self.enter=0;self.exit=0;self.count=0
       assert(Camera.acquire());local hit=Physics.raycast(Camera.position(),Camera.forward(),20,self.entity);assert(hit and World.is_alive(hit.entity))
@@ -115,20 +115,20 @@ static void Native(Files& files){
       if event.type=='trigger_enter' then self.enter=self.enter+1 elseif event.type=='trigger_exit' then self.exit=self.exit+1 elseif event.type=='beat' then self.count=self.count+1 end
       World.set_rotation(self.entity,Vec3.new(self.enter,self.exit,self.count))
     end})");
-    Application app;Check(app.Initialize(),"DX12 init");SyntheticEditorInput input;auto* window=dynamic_cast<GlfwWindow*>(app.GetWindow())->GetGlfwHandle();glfwHideWindow(window);app.NewScene();auto& ui=app.GetEditorLayer();auto& edit=app.GetWorld();auto box=ui.CreatePrimitive(app,"cube"),sensor=ui.CreateEntity(app,"Sensor");
+    Application app;Check(app.Initialize(),"DX12 init");ApplicationTestAccess::FrameDelta(app,frameDelta);SyntheticEditorInput input;auto* window=dynamic_cast<GlfwWindow*>(app.GetWindow())->GetGlfwHandle();glfwHideWindow(window);app.NewScene();auto& ui=app.GetEditorLayer();auto& edit=app.GetWorld();auto box=ui.CreatePrimitive(app,"cube"),sensor=ui.CreateEntity(app,"Sensor");
     ui.AddComponent(app,box,ComponentId("Collider"));ui.AddComponent(app,box,ComponentId("Rigidbody"));edit.GetComponent<RigidbodyComponent>(box)->isStatic=true;edit.GetComponent<TransformComponent>(box)->position={0,0,5};ui.AddComponent(app,sensor,ComponentId("Collider"));edit.GetComponent<ColliderComponent>(sensor)->isTrigger=true;edit.GetComponent<ColliderComponent>(sensor)->halfExtents={2,2,2};edit.GetComponent<TransformComponent>(sensor)->position={0,0,5};ui.AddComponent(app,sensor,ComponentId("LuaScript"));auto* script=edit.GetComponent<LuaScriptComponent>(sensor);script->scriptPath=files.key;script->cameraEnabled=true;ui.ClearSelection();app.SetEditorCameraPose({0,0,-6},0,0);
     auto frame=[&](int n=3){app.SetFrameLimit(n);Check(app.Run()==0,"native frames");};frame(60);auto saved=SceneSerializer::CaptureWorld(edit,app.GetSceneSettings());auto sensorRef=nlohmann::json{{"$entity",edit.GetComponent<SceneIdentityComponent>(sensor)->value}},boxRef=nlohmann::json{{"$entity",edit.GetComponent<SceneIdentityComponent>(box)->value}};
     app.SetEditorPlayMode(true);auto& runtime=app.GetWorld();auto owner=scripting::ResolveEntityReference(runtime,sensorRef),target=scripting::ResolveEntityReference(runtime,boxRef);
-    for(int i=0;i<30;++i){std::this_thread::sleep_for(std::chrono::milliseconds(5));frame(8);}auto* pose=runtime.GetComponent<TransformComponent>(owner);Check(app.GetLuaRuntime().Error(files.key).empty(),"native query/timer/trigger callbacks healthy");Near(pose->rotation.x,1,"native PhysicsSystem trigger routed through Application EventBus");Check(pose->rotation.z>0,"native gameplay timer advances");
-    app.SetEditorPaused(true);auto paused=*pose;std::this_thread::sleep_for(std::chrono::milliseconds(60));frame(10);Check(pose->rotation.x==paused.rotation.x&&pose->rotation.y==paused.rotation.y&&pose->rotation.z==paused.rotation.z,"Pause freezes gameplay timers");
-    app.SetEditorPaused(false);runtime.GetComponent<TransformComponent>(target)->position={20,0,5};for(int i=0;i<10;++i){std::this_thread::sleep_for(std::chrono::milliseconds(5));frame(8);}Near(pose->rotation.y,1,"native Trigger Exit once");
+    frame(32);Check(app.GetPhysicsFrameStatistics().simulationSeconds>0,"deterministic entry includes fixed ticks");auto* pose=runtime.GetComponent<TransformComponent>(owner);Check(app.GetLuaRuntime().Error(files.key).empty(),"native query/timer/trigger callbacks healthy");Near(pose->rotation.x,1,"native PhysicsSystem trigger routed through Application EventBus");Check(pose->rotation.z>0,"native gameplay timer advances");
+    app.SetEditorPaused(true);auto paused=*pose;frame(10);Check(pose->rotation.x==paused.rotation.x&&pose->rotation.y==paused.rotation.y&&pose->rotation.z==paused.rotation.z,"Pause freezes gameplay timers");
+    app.SetEditorPaused(false);runtime.GetComponent<TransformComponent>(target)->position={20,0,5};frame(32);Check(app.GetPhysicsFrameStatistics().simulationSeconds>0,"deterministic exit includes fixed ticks");Near(pose->rotation.y,1,"native Trigger Exit once");frame(32);Near(pose->rotation.x,1,"no duplicate enter");Near(pose->rotation.y,1,"no duplicate exit after additional ticks");
     files.Write("return {on_start=function(self) Timer.after(0,'new') end,on_event=function(self,event) assert(event.type=='new'); World.set_scale(self.entity,Vec3.new(2,2,2)) end}");Check(app.GetLuaRuntime().ReloadScript(files.key),"native hot reload");frame(10);Near(pose->scale.x,2,"native new timer callback");Check(app.GetLuaRuntime().Error(files.key).empty(),"native reload clears previous repeating timers");
     app.SetEditorPlayMode(false);frame();Check(SceneSerializer::CaptureWorld(edit,app.GetSceneSettings())==saved,"Stop preserves editor scene and trigger data");Check(app.GetLuaRuntime().InstanceCount()==0,"Stop retires Lua instances/timers");Check(dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter())->GetValidationErrorCount()==0,"DX12 validation zero");
 }
 #endif
 int main(int argc,char** argv){ScopedEditorPreferenceRestore preferences;try{Files files;
 #if defined(ENABLE_DX12)
-    if(argc>1&&std::string(argv[1])=="--dx12")Native(files);else
+    if(argc>1&&std::string(argv[1])=="--dx12"){for(float fps:{30.f,60.f,144.f})Native(files,1.f/fps);}else
 #endif
     {Queries();Triggers(files);Timers(files);LuaQueries(files);}std::cout<<"Lua Physics Events: "<<checks<<" checks passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

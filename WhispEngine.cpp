@@ -4,18 +4,58 @@
 #include <cstring>
 #include <cstdlib>
 #include <algorithm>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifdef APIENTRY
+#undef APIENTRY
+#endif
+#include <Windows.h>
+#include <shellapi.h>
+#endif
+
 
 int main(int argc, char** argv)
 {
     Application app;
 
-    if (!app.Initialize())
+    bool legacy=false,projectArgument=false;
+    for(int i=1;i<argc;++i){
+        legacy|=std::strcmp(argv[i],"--legacy")==0||std::strcmp(argv[i],"--interactive-room")==0;
+        projectArgument|=std::strcmp(argv[i],"--project")==0;
+    }
+    if (!app.Initialize(legacy&&!projectArgument?Application::StartupMode::LegacyWorkspace:Application::StartupMode::ProjectBrowser))
         return -1;
 
     bool overlap=false;int lightObjects=100;
     for(int i=1;i<argc;++i){if(std::strcmp(argv[i],"--light-overlap")==0)overlap=true;if(std::strcmp(argv[i],"--light-objects")==0&&i+1<argc)lightObjects=std::atoi(argv[++i]);}
     // Optional repeatable visual smoke/benchmark run. Normal startup is unchanged.
     for (int i = 1; i < argc; ++i) {
+        if(std::strcmp(argv[i],"--project")==0){
+            std::string error;
+            try{
+                if(i+1>=argc)throw std::runtime_error("--project requires a .whispproject path");
+                std::filesystem::path descriptor;
+#ifdef _WIN32
+                // main's narrow argv uses the Windows code page, not UTF-8.
+                int nativeCount=0;
+                std::unique_ptr<wchar_t*,decltype(&LocalFree)> nativeArguments(CommandLineToArgvW(GetCommandLineW(),&nativeCount),LocalFree);
+                if(!nativeArguments||i+1>=nativeCount)throw std::runtime_error("Cannot read project command line");
+                descriptor=nativeArguments.get()[++i];
+#else
+                descriptor=std::filesystem::u8path(argv[++i]);
+#endif
+                if(app.OpenProject(descriptor,Application::ProjectDecision::Discard,&error))continue;
+            }catch(const std::exception& e){error=e.what();}
+            Logger::Get().Error(error);app.GetEditorLayer().ShowProjectBrowser(error);
+            continue;
+        }
+        if(std::strcmp(argv[i],"--interactive-room")==0){
+            std::string error;if(!app.OpenScene("scenes/interactive_room.json",&error)){Logger::Get().Error(error);app.Shutdown();return 1;}
+            app.SetEditorCameraPose({-1.85f,1.65f,-5.4f},0,0);
+        }
+        else
         if(std::strcmp(argv[i],"--lua-demo")==0){
             std::string error;if(!app.OpenScene("scenes/lua_wave_demo.json",&error)){Logger::Get().Error(error);app.Shutdown();return 1;}
             app.SetEditorCameraPose({0,10,-14},0,-.55f);

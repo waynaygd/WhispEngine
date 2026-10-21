@@ -17,9 +17,9 @@ inline ecs::Vec3 MetadataSun(const SceneBackground& b,float rotation){
 inline float DaylightFactor(float elevation){float t=std::clamp((elevation+.10f)/.25f,0.f,1.f);return t*t*(3-2*t);}
 inline bool SynchronizeSun(ecs::World& world,const SceneBackground& b,float rotation){
  if(b.sunSync!=SunSyncMode::SkyDrivesLight&&!(b.background==EditorBackground::DayNight&&b.driveLightProperties))return false;
- auto entity=PrimarySun(world);if(!entity.IsValid())return false;auto* t=world.GetComponent<ecs::TransformComponent>(entity);bool changed=false;
+ auto entity=PrimarySun(world);if(!entity.IsValid())return false;auto absolute=world.WorldTransform(entity);auto* t=&absolute;bool changed=false;
  if(b.sunSync==SunSyncMode::SkyDrivesLight&&b.sunMetadata){auto d=MetadataSun(b,rotation);ecs::Vec3 r{std::asin(std::clamp(d.y,-1.f,1.f)),std::atan2(-d.x,-d.z),0};
-  if(std::abs(t->rotation.x-r.x)>1e-6f||std::abs(t->rotation.y-r.y)>1e-6f||std::abs(t->rotation.z-r.z)>1e-6f){t->rotation=r;changed=true;}
+  if(std::abs(t->rotation.x-r.x)>1e-6f||std::abs(t->rotation.y-r.y)>1e-6f||std::abs(t->rotation.z-r.z)>1e-6f){t->rotation=r;std::string error;if(world.SetWorldTransform(entity,*t,&error))changed=true;}
  }
  if(b.background==EditorBackground::DayNight&&b.driveLightProperties){auto rays=ecs::LightDirection(ecs::RenderPose::From(*t));float day=DaylightFactor(-rays.y),warm=std::clamp((-rays.y-.02f)/.35f,0.f,1.f);auto* light=world.GetComponent<ecs::DirectionalLightComponent>(entity);auto old=light->color;float intensity=b.dayLightIntensity*day;std::array<float,3> color{1,.45f+.53f*warm,.22f+.68f*warm};changed|=old!=color||light->intensity!=intensity;light->color=color;light->intensity=intensity;}
  return changed;

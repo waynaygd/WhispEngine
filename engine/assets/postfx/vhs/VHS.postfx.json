@@ -1,0 +1,9 @@
+{
+ "version":1,"id":"whisp.vhs","name":"VHS Scanlines","description":"Display-referred scanlines and mild horizontal tracking.",
+ "shader":"VHS.hlsl","stage":"AfterTonemap","order":100,
+ "parameters":[
+  {"name":"scanlineStrength","type":"float","default":0.35,"min":0,"max":1},
+  {"name":"tracking","type":"float","default":0,"min":0,"max":1},
+  {"name":"frequency","type":"float","default":1,"min":0.25,"max":2}
+ ]
+}

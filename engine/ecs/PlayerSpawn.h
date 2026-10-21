@@ -35,7 +35,7 @@ inline Entity SpawnPlayer(World& world,TransformComponent* spawnPoint=nullptr){
  // Collect handles before adding/removing entities.
  auto markers=world.Entities();
  for(auto e:markers){auto* s=world.GetComponent<PlayerStartComponent>(e);auto* t=world.GetComponent<TransformComponent>(e);
-  if(!chosen.IsValid()&&s&&s->enabled&&t){chosen=e;spawn=*t;settings=*s;}}
+  if(!chosen.IsValid()&&s&&s->enabled&&t){chosen=e;spawn=world.WorldTransform(e);settings=*s;}}
  Entity player;
  if(chosen.IsValid()){
   if(spawnPoint)*spawnPoint=spawn;
@@ -49,7 +49,7 @@ inline Entity SpawnPlayer(World& world,TransformComponent* spawnPoint=nullptr){
   if(!settings.controllerScript.empty()){auto& script=world.AddComponent<LuaScriptComponent>(player);script.scriptPath=settings.controllerScript;script.inputEnabled=true;script.cameraEnabled=true;}
  }
  // All runtime markers are editor-only, including disabled/legacy physical ones.
- for(auto e:markers)if(world.HasComponent<PlayerStartComponent>(e))world.DestroyEntity(e);
+ for(auto e:markers)if(world.HasComponent<PlayerStartComponent>(e)){for(auto child:world.Children(e)){std::string error;if(!world.SetParent(child,{},true,&error))throw std::runtime_error(error);}world.DestroyEntity(e);}
  return player;
 }
 inline void SampleCharacterInput(CharacterMovementComponent& m,Vec3 direction,bool jumpDown,bool active){

@@ -1,5 +1,6 @@
 #pragma once
 #include "AssetImport.h"
+#include "../core/ProjectContext.h"
 #include <map>
 #include <chrono>
 #include <ctime>
@@ -13,7 +14,9 @@ public:
  auto Revision()const{return revision;}
  void Refresh(const std::vector<std::filesystem::path>& roots){
   namespace fs=std::filesystem;std::map<std::string,SceneEntry> indexed;
-  for(const auto& root:roots){auto folder=root/"scenes";if(!fs::is_directory(folder))continue;
+  const auto project=ProjectManager::Active();
+  const auto search=project?std::vector<fs::path>{project->root}:roots;
+  for(const auto& root:search){auto folder=project?project->SceneRoot():root/"scenes";if(!fs::is_directory(folder))continue;
    for(fs::recursive_directory_iterator it(folder,fs::directory_options::skip_permission_denied),end;it!=end;++it){
     auto encoded=it->path().lexically_relative(root).generic_u8string();std::string key(encoded.begin(),encoded.end());
     try{(void)AssetImport::SafeTarget(root,key);}catch(...){if(it->is_directory())it.disable_recursion_pending();continue;}

@@ -223,7 +223,10 @@ void Dx12RenderAdapter::InitializeGpuTiming() {
     }
 }
 void Dx12RenderAdapter::ShadowTimestamp(UINT phase) {
-    if(m_TimeCurrentPass!=UINT_MAX)m_CmdList->EndQuery(m_TimeHeap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_FrameIndex*TimingQueries+2+6*m_TimeCurrentPass+phase);
+    if(m_TimeCurrentPass!=UINT_MAX){
+        m_CmdList->EndQuery(m_TimeHeap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_FrameIndex*TimingQueries+2+TimingStages*m_TimeCurrentPass+phase);
+        if(phase>=6)m_TimeExtras[m_TimeCurrentPass]|=1u<<(phase-6);
+    }
 }
 void Dx12RenderAdapter::CollectGpuTiming(UINT slot) {
     ZoneScopedN("ShadowResolve");
@@ -232,7 +235,12 @@ void Dx12RenderAdapter::CollectGpuTiming(UINT slot) {
     if(FAILED(m_TimeReadback[slot]->Map(0,&range,&mapped)))return;
     auto* ticks=static_cast<UINT64*>(mapped);RenderGpuTimings result{};result.valid=m_TimeComplete[slot];
     const double milliseconds=1000.0/m_TimeFrequency;result.frameMs=(ticks[1]-ticks[0])*milliseconds;
-    for(UINT q=2;q<m_TimePending[slot];q+=6) {result.shadowMs+=(ticks[q+1]-ticks[q])*milliseconds;result.mainMs+=(ticks[q+3]-ticks[q+2])*milliseconds;result.outputMs+=(ticks[q+5]-ticks[q+4])*milliseconds;}
+    for(UINT q=2;q<m_TimePending[slot];q+=TimingStages) {
+        result.shadowMs+=(ticks[q+1]-ticks[q])*milliseconds;result.mainMs+=(ticks[q+3]-ticks[q+2])*milliseconds;result.outputMs+=(ticks[q+5]-ticks[q+4])*milliseconds;
+        const auto extras=m_TimeSlotExtras[slot][(q-2)/TimingStages];
+        if((extras&3)==3)result.customPostFxMs+=(ticks[q+7]-ticks[q+6])*milliseconds;
+        if((extras&12)==12)result.runtimeUIMs+=(ticks[q+9]-ticks[q+8])*milliseconds;
+    }
     D3D12_RANGE noWrites{0,0};m_TimeReadback[slot]->Unmap(0,&noWrites);m_GpuTimings=result;m_TimePending[slot]=0;
 }
 unsigned Dx12RenderAdapter::GetValidationErrorCount() const {

@@ -427,7 +427,7 @@ void Application::RunEcsBootstrapCheck()
     Logger::Get().Info("ECS bootstrap: world reset after self-check");
 }
 
-void Application::SetupEcsRuntimeDemo()
+void Application::SetupEcsRuntimeDemo(bool populate)
 {
     ClearPhysicsStressScene();
     GetWorld().Clear();
@@ -449,16 +449,19 @@ void Application::SetupEcsRuntimeDemo()
     m_PhysicsSystem->SetEnabled(m_EditorPlayMode);
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
+    m_RenderSystem->SetPostFxOverrides(&m_LuaRuntime.PostFxOverrides());
     m_RenderSystem->SetInterpolation(&m_RenderInterpolation);
     m_RenderSystem->SetPhysicsDebugPose(m_PhysicsDebugPose);
     m_RenderSystem->SetInstancingEnabled(m_GpuInstancing);
     m_RenderSystem->SetShadingModelOverride(m_ShadingModelOverride);m_RenderSystem->SetTextureMapMask(m_PbrTextureMask);
     m_RenderSystem->SetLightingSettings(&m_LightingSettings);m_RenderSystem->SetLightRenderingMode(m_LightMode);
     m_RenderSystem->SetEnvironmentSettings(&m_EnvironmentSettings);
+    m_RenderSystem->SetAtmosphereSettings(&m_Background);
     m_RenderSystem->SetShadowSettings(&m_ShadowSettings);
     m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled);
 
     m_EcsDebugEntities.clear();
+    if(!populate)return;
     const std::vector<EcsDemoEntityConfig> entities =
         m_Config.ecsDemo.initialEntities.empty() ? BuildDefaultEcsDemoEntities() : m_Config.ecsDemo.initialEntities;
     PreloadSceneResourcesAsync(entities);
@@ -572,7 +575,7 @@ void Application::InitializeConfigHotReload()
     }
 
     m_SceneWatchPath.clear();
-    if (!m_Config.ecsDemo.sceneFile.empty())
+    if (!m_ProjectBrowserActive && !m_Config.ecsDemo.sceneFile.empty())
     {
         m_SceneWatchPath = AssetPaths::ResolveAssetPath(m_Config.ecsDemo.sceneFile);
         if (!m_SceneWatchPath.empty() && std::filesystem::exists(m_SceneWatchPath, ec))
@@ -590,7 +593,8 @@ bool Application::ReloadSceneFromCurrentConfig(const char* reason){
 }
 
 bool Application::SaveCurrentScene(std::string* error){
-    return SaveSceneAs(m_SceneKey.empty()?"scenes/editor_scene.json":m_SceneKey,true,error);
+    if(IsPrefabEditing()){m_EditorLayer.RequestPrefabSave();return true;}
+    return SaveSceneAs(m_SceneKey.empty()?DefaultSceneKey():m_SceneKey,!m_SceneKey.empty(),error);
 }
 bool Application::LoadCurrentScene(std::string* error){
     auto key=m_SceneKey.empty()?m_Config.ecsDemo.sceneFile:m_SceneKey;
@@ -621,6 +625,7 @@ void Application::ConfigureInputBindings()
 
 void Application::PollConfigHotReload()
 {
+    if(m_ProjectBrowserActive||ProjectManager::Active())return;
     std::error_code ec;
 
     if (m_HasConfigWatch && std::filesystem::exists(m_ConfigWatchPath, ec))
@@ -692,12 +697,13 @@ ecs::Entity Application::SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg
     const std::size_t entityOrdinal = m_EcsDebugEntities.size();
     if(entityCfg.light){
         auto& t=GetWorld().AddComponent<ecs::TransformComponent>(entity);
-        t.position=entityCfg.position;t.rotation=entityCfg.rotation;t.scale=entityCfg.scale;
+        t.pivot=entityCfg.pivot;t.position=entityCfg.position;t.rotation=entityCfg.rotation;t.scale=entityCfg.scale;
         GetWorld().AddComponent<ecs::TagComponent>(entity).name=entityCfg.tag;
         ecs::AddSceneLight(GetWorld(),entity,*entityCfg.light);return entity;
     }
 
     auto& transform = GetWorld().AddComponent<ecs::TransformComponent>(entity);
+    transform.pivot = entityCfg.pivot;
     transform.position = entityCfg.position;
     transform.rotation = entityCfg.rotation;
     transform.scale = entityCfg.scale;
@@ -833,6 +839,7 @@ void Application::ExitGameplayScene()
 
 void Application::UpdateCameraController(float dt)
 {
+    if(m_ProjectBrowserActive)return;
     auto* primary = dynamic_cast<GlfwWindow*>(GetWindow());
     if (primary == nullptr)
         return;
@@ -1082,6 +1089,8 @@ bool Application::IsInputActionActive(const std::string& action) const
 
 void Application::SetEditorPlayMode(bool enabled)
 {
+    if(enabled&&IsPrefabEditing())return;
+    if(enabled&&m_ProjectBrowserActive)return;
     if(m_EditorPlayMode==enabled)return;
     // A Play/Stop transition must release editor free-fly capture as well.
     // Keep previousRightMouseDown until release, so a held RMB cannot recapture
@@ -1117,7 +1126,7 @@ void Application::SetEditorPlayMode(bool enabled)
             m_Camera.yaw=t.rotation.y;m_Camera.pitch=std::clamp(spawnPoint.rotation.x,-kMaxCameraPitch,kMaxCameraPitch);
         }
         m_GameplayCamera={};m_GameplayCamera.position=m_Camera.position;m_GameplayCamera.yaw=m_Camera.yaw;m_GameplayCamera.pitch=m_Camera.pitch;
-        m_LuaRuntime.Start(*m_RuntimeWorld,[this](const std::string& action){return GameplayInputAllowed()&&m_InputManager.FrameDown(action);},GameplayCapabilities());
+        m_LuaRuntime.Start(*m_RuntimeWorld,[this](const std::string& action){return GameplayActionAllowed(action)&&m_InputManager.FrameDown(action);},GameplayCapabilities());
         m_StateMachine.Clear(*this);RequestStateChange(std::make_unique<LoadingState>());m_StateMachine.ApplyPending(*this);
         m_LastCloneMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
     }else{
@@ -1181,7 +1190,7 @@ void Application::UpdateEcs(float dt)
     Logger::Get().Info(ss.str());
 }
 
-bool Application::Initialize()
+bool Application::Initialize(StartupMode mode)
 {
     Logger::Get().Initialize("engine.log");
     Logger::Get().Info("Application Initialize");
@@ -1199,7 +1208,8 @@ bool Application::Initialize()
 
     m_ResourceManager =
         std::make_unique<ResourceManager>(m_JobSystem.get());
-    RunResourceBootstrapCheck();
+    m_ProjectBrowserActive=mode==StartupMode::ProjectBrowser;
+    if(!m_ProjectBrowserActive)RunResourceBootstrapCheck();
 
     RunEcsBootstrapCheck();
 
@@ -1212,7 +1222,7 @@ bool Application::Initialize()
     m_Config.ecsDemo.initialEntities = BuildDefaultEcsDemoEntities();
 
     const bool configLoaded = ConfigLoader::Load(m_ConfigWatchPath.string(), m_Config);
-    if (!m_Config.ecsDemo.sceneFile.empty())
+    if (!m_ProjectBrowserActive && !m_Config.ecsDemo.sceneFile.empty())
     {
         std::string sceneError;
         std::vector<EcsDemoEntityConfig> sceneEntities;
@@ -1287,17 +1297,21 @@ bool Application::Initialize()
 
         if(m_RuntimeWorld){ecs::GroundCharacter(*m_RuntimeWorld,e.a,e);ecs::GroundCharacter(*m_RuntimeWorld,e.b,e);}
     });
-    SetupEcsRuntimeDemo();
-    if(!m_Config.ecsDemo.sceneFile.empty()){std::string error;if(!OpenScene(m_Config.ecsDemo.sceneFile,&error))Logger::Get().Error(error);}
+    m_LegacyStartupScene=m_Config.ecsDemo.sceneFile;
+    SetupEcsRuntimeDemo(!m_ProjectBrowserActive);
+    if(!m_ProjectBrowserActive&&!m_Config.ecsDemo.sceneFile.empty()){std::string error;if(!OpenScene(m_Config.ecsDemo.sceneFile,&error))Logger::Get().Error(error);}
     m_EditorLayer.InitializePreferences(*this);
+    if(m_ProjectBrowserActive)m_EditorLayer.ShowProjectBrowser();
     // SetupRenderStressScene();
     // Stress scene is created explicitly from the editor panel.
     InitializeConfigHotReload();
 
     m_IsRunning = true;
 
-    RequestStateChange(std::make_unique<LoadingState>());
-    m_StateMachine.ApplyPending(*this);
+    if(!m_ProjectBrowserActive){
+        RequestStateChange(std::make_unique<LoadingState>());
+        m_StateMachine.ApplyPending(*this);
+    }
 
     return true;
 }
@@ -1380,7 +1394,7 @@ int Application::Run()
             m_Windows[0].window->PollEvents();
 
         auto* primary = dynamic_cast<GlfwWindow*>(GetWindow());
-        if (primary)
+        if (primary&&!m_ProjectBrowserActive)
         {
             GLFWwindow* w = primary->GetGlfwHandle();
             static bool prevF5 = false;
@@ -1424,11 +1438,16 @@ int Application::Run()
 
         }
 
+        if((GetProject()||IsPrefabEditing())&&m_EditorLayer.HasProjectEdits()&&!m_EditorLayer.ProjectExitConfirmed()){
+            if(auto* native=dynamic_cast<GlfwWindow*>(GetWindow()))if(native->ShouldClose()){
+                glfwSetWindowShouldClose(native->GetGlfwHandle(),GLFW_FALSE);m_EditorLayer.RequestProjectExit();
+            }
+        }
         bool anyAlive = false;
         for (auto& wc : m_Windows)
             anyAlive |= (wc.window && !wc.window->ShouldClose());
 
-        if (!anyAlive) break;
+        if (!anyAlive || m_EditorLayer.ProjectExitConfirmed()) break;
 
         if (currentFrame == m_SlowFrame)
             std::this_thread::sleep_for(std::chrono::milliseconds(m_SlowFrameMilliseconds));
@@ -1436,6 +1455,7 @@ int Application::Run()
 
         {
             ZoneScopedN("ResourceUpdate");
+            const auto resourceStart=std::chrono::steady_clock::now();
 
             if (m_ResourceManager != nullptr)
             {
@@ -1471,13 +1491,17 @@ int Application::Run()
             }
 
             PollConfigHotReload();
+            if(m_FrameObserver)m_FrameCpuMs[0]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-resourceStart).count();
         }
 
         {
             ZoneScopedN("GameUpdate");
 
-            if(m_EditorPlayMode)UpdateGameplayInput();
+            if(m_EditorPlayMode)UpdateGameplayInput(dt);
+            if(m_EditorPlayMode)m_LuaRuntime.DispatchUIEvents();
+            const auto luaStart=std::chrono::steady_clock::now();
             if(IsSimulationRunning())m_LuaRuntime.Update(dt);
+            if(m_FrameObserver)m_FrameCpuMs[1]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-luaStart).count();
             UpdateCameraController(dt);
 
             if (IsSimulationRunning() && m_UpdateMode == UpdateMode::Variable) {
@@ -1487,6 +1511,7 @@ int Application::Run()
         }
         {
             ZoneScopedN("PhysicsFixedFrame");
+            const auto physicsStart=std::chrono::steady_clock::now();
             m_ActiveCollisionPairs.clear();
             m_PhysicsFrame = {};
             const double physicsDelta = m_ResetPhysicsDelta ? 0.0 : m_Time.GetFrameDeltaTime();
@@ -1518,14 +1543,17 @@ int Application::Run()
             m_PhysicsFrame.accumulatorSeconds = m_FixedClock.Accumulator();
             m_PhysicsFrame.totalDroppedSeconds = m_FixedClock.DroppedSeconds();
             m_PhysicsFrame.simulationSeconds = m_FixedSimulationSeconds;
+            if(m_FrameObserver)m_FrameCpuMs[2]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-physicsStart).count();
         }
+        const auto ecsStart=std::chrono::steady_clock::now();
         ApplyStructuralCommands();
         UpdateEcs(dt);
+        if(m_FrameObserver){m_FrameCpuMs[3]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-ecsStart).count();m_FrameCpuMs[4]=0;}
         m_RenderInterpolation.SetFrame(GetWorld(),IsSimulationRunning(),m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
         if(m_EditorPlayMode&&m_LuaRuntime.HasCameraOwner()){
             if(m_GameplayCamera.following){
                 auto* t=GetWorld().GetComponent<ecs::TransformComponent>(m_GameplayCamera.target);
-                if(t){auto p=m_RenderInterpolation.Resolve(m_GameplayCamera.target,*t).position;m_GameplayCamera.position=Add(p,m_GameplayCamera.offset);}
+                if(t){auto p=m_RenderInterpolation.ResolveWorld(GetWorld(),m_GameplayCamera.target).position;m_GameplayCamera.position=Add(p,m_GameplayCamera.offset);}
                 else m_GameplayCamera.following=false;
             }
             m_Camera.position=m_GameplayCamera.position;m_Camera.yaw=m_GameplayCamera.yaw;m_Camera.pitch=m_GameplayCamera.pitch;
@@ -1588,6 +1616,12 @@ int Application::Run()
                     }
                 }
 
+                if(m_RenderSystem){
+                    m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled&&!(IsEditorPlayMode()&&IsGameplayMouseCaptured()));
+                    m_RenderSystem->SetEditorIsolation(!IsEditorPlayMode()&&wc.editorUiAvailable?m_EditorLayer.IsolationEntities():std::vector<ecs::Entity>{});
+                    const auto& preview=m_EditorLayer.GetPlacementPreview();
+                    m_RenderSystem->SetPlacementPreview(!IsEditorPlayMode()&&wc.editorUiAvailable&&preview.active?preview.items:std::vector<ecs::PlacementRenderItem>{});
+                }
                 // Diagnostics own the comparison switches after editor input as well.
                 // Ordinary runs continue to apply UI edits immediately.
                 if(m_LightingBenchmark||m_ShadowBenchmark||m_PbrBenchmark||m_PbrTexturesBenchmark) {
@@ -1603,12 +1637,13 @@ int Application::Run()
                     if(m_ShadowBenchmark){m_LightingSettings.enabled=true;m_ShadowSettings.enabled=block%6>=2;m_ShadowSettings.pcf=block%6>=4;}
                 }
 
+                if(m_RenderSystem)m_RenderSystem->SetUIPreview(m_EditorPlayMode||m_EditorLayer.IsUIPreviewVisible());
                 wc.renderer->SetAntiAliasing(m_AntiAliasing);
                 wc.renderer->SetEditorVisuals(m_EditorLayer.BuildVisualFrame(*this));
                 const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
                 const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();
                 const bool renderSceneToViewport =
-                    wc.editorUiAvailable &&
+                    !m_ProjectBrowserActive && wc.editorUiAvailable &&
                     viewportWidth > 1 &&
                     viewportHeight > 1 &&
                     wc.renderer->BeginViewportRender(viewportWidth, viewportHeight, wc.clear);
@@ -1626,7 +1661,9 @@ int Application::Run()
                         m_RenderInterpolation.SetFrame(GetWorld(), IsSimulationRunning(),
                             m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
                         editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);
+                        const auto renderStart=std::chrono::steady_clock::now();
                         m_World.UpdateFrameSystemsOn(GetWorld(),dt);
+                        if(m_FrameObserver)m_FrameCpuMs[4]+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-renderStart).count();
                     }
                     m_StateMachine.Render(*this, *wc.renderer);
                     wc.renderer->EndViewportRender();
@@ -1634,7 +1671,7 @@ int Application::Run()
 
                 wc.renderer->Clear(wc.clear[0], wc.clear[1], wc.clear[2], wc.clear[3]);
 
-                if (!renderSceneToViewport)
+                if (!renderSceneToViewport&&!m_ProjectBrowserActive)
                 {
                     if (m_RenderSystem != nullptr)
                     {
@@ -1647,14 +1684,18 @@ int Application::Run()
                         m_RenderInterpolation.SetFrame(GetWorld(), IsSimulationRunning(),
                             m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
                         editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);
+                        const auto renderStart=std::chrono::steady_clock::now();
                         m_World.UpdateFrameSystemsOn(GetWorld(),dt);
+                        if(m_FrameObserver)m_FrameCpuMs[4]+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-renderStart).count();
                     }
 
                     m_StateMachine.Render(*this, *wc.renderer);
                 }
 
+                const auto imguiStart=std::chrono::steady_clock::now();
                 if (wc.editorUiAvailable)
                     wc.renderer->RenderEditorUiFrame();
+                if(m_FrameObserver)m_FrameCpuMs[5]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-imguiStart).count();
 
                 wc.renderer->EndFrame();
                 if(!m_FrameCaptureOutput.empty()&&m_FrameLimit&&currentFrame+1==m_FrameLimit)
@@ -1671,6 +1712,7 @@ int Application::Run()
             }
         }
 
+        if(m_FrameObserver){m_FrameCpuMs[6]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-frameStart).count();m_FrameObserver();}
         if (!m_DiagnosticOutput.empty() && m_PhysicsSystem) {
             const double frameMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frameStart).count();
             samples.push_back({diagnosticPhase, m_PhysicsSystem->IsParallel(), currentFrame, frameMs, m_PhysicsFrame.physics, m_PhysicsFrame});
@@ -1699,12 +1741,12 @@ void Application::ReleasePlayerMouse()
 }
 bool Application::GameplayInputAllowed() const
 {
-    if(!IsSimulationRunning())return false;
+    if(!IsSimulationRunning()||m_UIInputMode==ui::InputMode::UIOnly)return false;
     auto* primary=dynamic_cast<GlfwWindow*>(const_cast<Application*>(this)->GetWindow());
     auto* window=primary?primary->GetGlfwHandle():nullptr;
     if(!window||!glfwGetWindowAttrib(window,GLFW_FOCUSED)||m_EditorLayer.BlocksGameplayInput())return false;
-    double x=0,y=0;glfwGetCursorPos(window,&x,&y);
-    return m_PlayerMouseCaptured||m_EditorLayer.IsPointInsideViewport(x,y);
+    const auto pointer=primary->PointerPosition();
+    return m_PlayerMouseCaptured||m_EditorLayer.IsPointInsideViewport(pointer[0],pointer[1]);
 }
 bool Application::CaptureGameplayCursor(bool capture)
 {
@@ -1715,9 +1757,20 @@ bool Application::CaptureGameplayCursor(bool capture)
     if(!m_PlayerMouseCaptured){glfwSetInputMode(window,GLFW_CURSOR,GLFW_CURSOR_DISABLED);if(glfwRawMouseMotionSupported())glfwSetInputMode(window,GLFW_RAW_MOUSE_MOTION,GLFW_TRUE);m_PlayerMouseCaptured=true;m_InputManager.ResetMouseDelta();}
     return true;
 }
-void Application::UpdateGameplayInput()
+std::string Application::GetUIInputMode()const{return m_UIInputMode==ui::InputMode::UIOnly?"UIOnly":m_UIInputMode==ui::InputMode::GameAndUI?"GameAndUI":"GameOnly";}
+void Application::SetUIInputMode(const std::string& value){
+    if(!m_EditorPlayMode)throw std::runtime_error("UI input mode requires Play");
+    ui::InputMode next;if(value=="GameOnly")next=ui::InputMode::GameOnly;else if(value=="UIOnly")next=ui::InputMode::UIOnly;else if(value=="GameAndUI")next=ui::InputMode::GameAndUI;else throw std::runtime_error("Unknown UI input mode: "+value);
+    m_UIInputMode=next;GetRuntimeUI().CancelPointer();
+    if(next==ui::InputMode::GameOnly)CaptureGameplayCursor(true);else ReleasePlayerMouse();
+    m_InputManager.ResetMouseDelta();
+}
+bool Application::GameplayActionAllowed(const std::string& action)const{return GameplayInputAllowed()&&!(m_UIPointerConsumed&&m_InputManager.IsMouseAction(action));}
+void Application::UpdateGameplayInput(float uiDelta)
 {
-    m_InputManager.BeginFrame();
+    m_InputManager.BeginFrame();m_UIPointerConsumed=false;
+    if(m_RenderSystem&&m_ResourceManager)GetRuntimeUI().Sync(GetWorld(),*m_ResourceManager);
+    if(m_RenderSystem)GetRuntimeUI().Advance(uiDelta);
     auto* primary=dynamic_cast<GlfwWindow*>(GetWindow());auto* window=primary?primary->GetGlfwHandle():nullptr;
     if(!window)return;
     const bool focused=glfwGetWindowAttrib(window,GLFW_FOCUSED)==GLFW_TRUE;
@@ -1726,19 +1779,29 @@ void Application::UpdateGameplayInput()
     if(focused&&!text&&glfwGetKey(window,GLFW_KEY_ESCAPE)==GLFW_PRESS){SetEditorPlayMode(false);return;}
     if(!focused||!IsSimulationRunning()||text||(tab&&!m_PlayerAltWasDown))ReleasePlayerMouse();
     m_PlayerAltWasDown=tab;
+    if(m_UIInputMode==ui::InputMode::UIOnly)ReleasePlayerMouse();
+    const auto pointer=primary->PointerPosition();double x=pointer[0],y=pointer[1];const auto bounds=m_EditorLayer.GetViewportBounds();
+    const float width=float(m_EditorLayer.GetViewportPixelWidth()),height=float(m_EditorLayer.GetViewportPixelHeight());
+    const bool inside=m_EditorLayer.IsPointInsideViewport(x,y);
+    const bool available=focused&&!text&&!IsGameplayMouseCaptured()&&m_UIInputMode!=ui::InputMode::GameOnly;
+    float px=-1,py=-1;if(inside&&m_EditorLayer.IsViewportHovered()&&bounds[2]>bounds[0]&&bounds[3]>bounds[1]){px=float((x-bounds[0])*width/(bounds[2]-bounds[0]));py=float((y-bounds[1])*height/(bounds[3]-bounds[1]));}
+    m_UIPointerConsumed=GetRuntimeUI().Pointer(px,py,width,height,glfwGetMouseButton(window,GLFW_MOUSE_BUTTON_LEFT)==GLFW_PRESS,available);
 }
 scripting::GameplayServices Application::GameplayCapabilities()
 {
     scripting::GameplayServices host;
     host.inputAllowed=[this]{return GameplayInputAllowed();};
-    host.pressed=[this](const std::string& a){return GameplayInputAllowed()&&m_InputManager.FramePressed(a);};
-    host.released=[this](const std::string& a){return GameplayInputAllowed()&&m_InputManager.FrameReleased(a);};
-    host.mouseDelta=[this]{return GameplayInputAllowed()&&m_PlayerMouseCaptured?m_InputManager.MouseDelta():ecs::Vec3{};};
+    host.pressed=[this](const std::string& a){return GameplayActionAllowed(a)&&m_InputManager.FramePressed(a);};
+    host.released=[this](const std::string& a){return GameplayActionAllowed(a)&&m_InputManager.FrameReleased(a);};
+    host.mouseDelta=[this]{return GameplayInputAllowed()&&!m_UIPointerConsumed&&m_PlayerMouseCaptured?m_InputManager.MouseDelta():ecs::Vec3{};};
     host.cursorCaptured=[this]{return m_PlayerMouseCaptured;};
     host.captureCursor=[this](bool capture){return CaptureGameplayCursor(capture);};
     host.bindAction=[this](const std::string& action,const std::string& key){return m_InputManager.BindNamedAction(action,key);};
     host.actions=[this]{return m_InputManager.Actions();};
-    host.camera=&m_GameplayCamera;return host;
+    host.runtimeUI=m_RenderSystem?&GetRuntimeUI():nullptr;
+    host.setUIInputMode=[this](const std::string& value){SetUIInputMode(value);};host.getUIInputMode=[this](){return GetUIInputMode();};
+    host.resetUIInput=[this](){m_UIInputMode=ui::InputMode::GameOnly;m_UIPointerConsumed=false;ReleasePlayerMouse();};
+    host.postfxResources=m_ResourceManager.get();host.camera=&m_GameplayCamera;return host;
 }
 void Application::Shutdown()
 {
@@ -1776,6 +1839,7 @@ void Application::Shutdown()
         m_ResourceManager->Shutdown();
 
     m_ResourceManager.reset();
+    ProjectManager::Activate({});
 
 
     if (m_JobSystem != nullptr)
@@ -2098,7 +2162,7 @@ ecs::Entity Application::CreateLightEntity(LightType type){
     c.light=SceneLightDescription{};c.light->type=type;c.light->parameters.castShadows=type==LightType::Directional;
     c.simulatePhysics=false;c.bounce=false;auto e=SpawnEcsDemoEntity(c);m_EcsDebugEntities.push_back(e);return e;
 }
-bool Application::DestroySceneEntity(ecs::Entity e){bool result=GetWorld().DestroyEntity(e);std::erase(m_EcsDebugEntities,e);std::erase(m_StressEntities,e);return result;}
+bool Application::DestroySceneEntity(ecs::Entity e){bool result=GetWorld().DestroyEntity(e);std::erase_if(m_EcsDebugEntities,[&](auto entity){return !GetWorld().IsAlive(entity);});std::erase_if(m_StressEntities,[&](auto entity){return !GetWorld().IsAlive(entity);});return result;}
 void Application::SetupIblDemoScene(){SetupPbrTexturesDemoScene();m_EnvironmentSettings.enabled=true;m_EnvironmentSettings.toneMapping=true;m_LightingSettings.directional.enabled=false;m_LightingSettings.ambientIntensity=0;SetEditorPlayMode(false);}
 
 void Application::SetupIblBenchmarkScene(int count){SetupPbrTexturesBenchmarkScene(count);m_EnvironmentSettings.enabled=true;SetShadingModelOverride(1);m_ResourceManager->LoadAsync<EnvironmentResource>(m_EnvironmentSettings.assetPath);}
@@ -2131,11 +2195,13 @@ void Application::SetupLightDemoScene(){
 
 namespace {
 std::filesystem::path SafeScenePath(const std::string& key,bool output){
+    if(auto project=ProjectManager::Active())return project->ResolveScene(key);
     const auto staged=AssetPaths::ResolveAssetRoot();if(output)return editor::AssetImport::SafeTarget(staged,key);
     for(const auto& root:{staged,editor::AssetImport::ProjectRoot()}){auto candidate=editor::AssetImport::SafeTarget(root,key);if(std::filesystem::is_regular_file(candidate))return candidate;}
     return editor::AssetImport::SafeTarget(staged,key);
 }
 bool SceneKeyValid(const std::string& key){
+    if(auto project=ProjectManager::Active()){try{project->ResolveScene(key);return true;}catch(...){return false;}}
     if(!key.starts_with("scenes/")||std::filesystem::u8path(key).extension()!=".json")return false;
     return ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::None);
 }
@@ -2150,6 +2216,7 @@ bool Application::SetSceneSettings(const SceneSettings& s,std::string* error){
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }
 bool Application::SaveSceneAs(const std::string& key,bool overwrite,std::string* error){
+    if(IsPrefabEditing()){if(error)*error="Use Save Prefab and Return";return false;}
     if(IsEditorPlayMode()){if(error)*error="Stop Play before saving the authoring scene";return false;}
     if(!SceneKeyValid(key)){if(error)*error="Scene key must be a portable scenes/*.json path";return false;}
     try{
@@ -2159,6 +2226,7 @@ bool Application::SaveSceneAs(const std::string& key,bool overwrite,std::string*
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }
 bool Application::OpenScene(const std::string& key,std::string* error){
+    if(IsPrefabEditing()){if(error)*error="Return from Prefab Editor before opening a scene";return false;}
     if(!SceneKeyValid(key)){if(error)*error="Scene key must be a portable scenes/*.json path";return false;}
     // Parse/validate completely before changing modes or discarding the current scene.
     ecs::World staged;SceneSettings settings;std::filesystem::path path;try{path=SafeScenePath(key,false);}catch(const std::exception& e){if(error)*error=e.what();return false;}
@@ -2168,6 +2236,7 @@ bool Application::OpenScene(const std::string& key,std::string* error){
     SetSceneSettings(settings);m_SceneKey=key;m_Config.ecsDemo.sceneFile=key;m_EditorLayer.ResetHistory();m_EditorLayer.MarkSaved();m_EditorLayer.RememberScene(key);InitializeConfigHotReload();return true;
 }
 void Application::NewScene(){
+    if(IsPrefabEditing())return;
     SetEditorPlayMode(false);ClearPhysicsStressScene();m_World.Clear();m_EcsDebugEntities.clear();m_StressEntities.clear();m_Mutations.Clear();
     m_SceneKey.clear();m_Config.ecsDemo.sceneFile.clear();SetSceneSettings(SceneSettings{});m_EditorLayer.ResetHistory();m_EditorLayer.MarkSaved();
 }
@@ -2181,18 +2250,40 @@ void Application::NotifyEditorMutation(ecs::Entity entity){
     if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
 }
 void Application::FocusEntity(ecs::Entity entity){
-    if(auto* t=GetWorld().GetComponent<ecs::TransformComponent>(entity)){
-        float radius=std::max({std::abs(t->scale.x),std::abs(t->scale.y),std::abs(t->scale.z),1.f});
-        auto center=t->position;
-        if(m_ResourceManager)if(auto* mr=GetWorld().GetComponent<ecs::MeshRendererComponent>(entity))if(auto mesh=m_ResourceManager->Get<MeshResource>(mr->meshPath);mesh&&mesh->IsLoaded()&&!mesh->GetData().meshData.vertices.empty()){
-            ecs::Vec3 low{FLT_MAX,FLT_MAX,FLT_MAX},high{-FLT_MAX,-FLT_MAX,-FLT_MAX};
-            for(const auto& vertex:mesh->GetData().meshData.vertices){low.x=std::min(low.x,vertex.position[0]);low.y=std::min(low.y,vertex.position[1]);low.z=std::min(low.z,vertex.position[2]);high.x=std::max(high.x,vertex.position[0]);high.y=std::max(high.y,vertex.position[1]);high.z=std::max(high.z,vertex.position[2]);}
-            float model[16];ecs::BuildRenderModelMatrix(model,ecs::RenderPose::From(*t));const ecs::Vec3 p{(low.x+high.x)*.5f,(low.y+high.y)*.5f,(low.z+high.z)*.5f};
-            center={model[0]*p.x+model[4]*p.y+model[8]*p.z+model[12],model[1]*p.x+model[5]*p.y+model[9]*p.z+model[13],model[2]*p.x+model[6]*p.y+model[10]*p.z+model[14]};
-            radius=.5f*std::sqrt(std::pow((high.x-low.x)*t->scale.x,2)+std::pow((high.y-low.y)*t->scale.y,2)+std::pow((high.z-low.z)*t->scale.z,2));
+    FocusEntities({entity});
+}
+void Application::FocusEntities(const std::vector<ecs::Entity>& entities){
+    ecs::Vec3 low{FLT_MAX,FLT_MAX,FLT_MAX},high{-FLT_MAX,-FLT_MAX,-FLT_MAX};bool valid=false;
+    auto include=[&](ecs::Vec3 p){
+        if(!std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.z))return;
+        low.x=std::min(low.x,p.x);low.y=std::min(low.y,p.y);low.z=std::min(low.z,p.z);
+        high.x=std::max(high.x,p.x);high.y=std::max(high.y,p.y);high.z=std::max(high.z,p.z);valid=true;
+    };
+    std::vector<ecs::Entity> expanded;for(auto root:GetWorld().HierarchyRoots(entities)){auto subtree=GetWorld().Subtree(root);expanded.insert(expanded.end(),subtree.begin(),subtree.end());}
+    for(auto entity:expanded)if(GetWorld().HasComponent<ecs::TransformComponent>(entity)){
+        auto absolute=GetWorld().WorldTransform(entity);auto* t=&absolute;
+        bool geometry=false;
+        if(m_ResourceManager)if(auto* mr=GetWorld().GetComponent<ecs::MeshRendererComponent>(entity)){
+            auto mesh=m_ResourceManager->Get<MeshResource>(mr->meshPath);
+            if(mesh&&mesh->IsLoaded()&&!mesh->GetData().meshData.vertices.empty()){
+                ecs::Vec3 lo{FLT_MAX,FLT_MAX,FLT_MAX},hi{-FLT_MAX,-FLT_MAX,-FLT_MAX};
+                for(const auto& v:mesh->GetData().meshData.vertices){lo.x=std::min(lo.x,v.position[0]);lo.y=std::min(lo.y,v.position[1]);lo.z=std::min(lo.z,v.position[2]);hi.x=std::max(hi.x,v.position[0]);hi.y=std::max(hi.y,v.position[1]);hi.z=std::max(hi.z,v.position[2]);}
+                float m[16];ecs::BuildRenderModelMatrix(m,ecs::RenderPose::From(*t));
+                for(int i=0;i<8;++i){const ecs::Vec3 p{i&1?hi.x:lo.x,i&2?hi.y:lo.y,i&4?hi.z:lo.z};include({m[0]*p.x+m[4]*p.y+m[8]*p.z+m[12],m[1]*p.x+m[5]*p.y+m[9]*p.z+m[13],m[2]*p.x+m[6]*p.y+m[10]*p.z+m[14]});}
+                geometry=true;
+            }
         }
-        if(auto* light=ecs::GetLightParameters(GetWorld(),entity))radius=std::clamp(light->range,1.f,30.f);
-        const float d=std::clamp(radius/std::tan(m_Camera.verticalFovRadians*.5f)*1.6f,2.f,100.f),cp=std::cos(m_Camera.pitch);
-        m_Camera.position={center.x-d*std::sin(m_Camera.yaw)*cp,center.y-d*std::sin(m_Camera.pitch),center.z-d*std::cos(m_Camera.yaw)*cp};
+        if(!geometry){
+            ecs::Vec3 extent{std::max(.5f,std::abs(t->scale.x)*.5f),std::max(.5f,std::abs(t->scale.y)*.5f),std::max(.5f,std::abs(t->scale.z)*.5f)};
+            if(expanded.size()==1)if(auto* light=ecs::GetLightParameters(GetWorld(),entity)){float r=std::clamp(light->range,1.f,30.f);extent={r,r,r};}
+            include({t->position.x-extent.x,t->position.y-extent.y,t->position.z-extent.z});include({t->position.x+extent.x,t->position.y+extent.y,t->position.z+extent.z});
+        }
     }
+    if(!valid)return;
+    const ecs::Vec3 center{(low.x+high.x)*.5f,(low.y+high.y)*.5f,(low.z+high.z)*.5f};
+    const float radius=.5f*std::sqrt(std::pow(high.x-low.x,2)+std::pow(high.y-low.y,2)+std::pow(high.z-low.z,2));
+    const float aspect=float(std::max(1,m_EditorLayer.GetViewportPixelWidth()))/std::max(1,m_EditorLayer.GetViewportPixelHeight());
+    const float halfFov=std::min(m_Camera.verticalFovRadians*.5f,std::atan(std::tan(m_Camera.verticalFovRadians*.5f)*aspect));
+    const float distance=std::max(2.f,radius/std::sin(halfFov)*1.1f),cp=std::cos(m_Camera.pitch);
+    m_Camera.position={center.x-distance*std::sin(m_Camera.yaw)*cp,center.y-distance*std::sin(m_Camera.pitch),center.z-distance*std::cos(m_Camera.yaw)*cp};
 }

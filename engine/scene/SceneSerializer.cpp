@@ -66,6 +66,7 @@ nlohmann::json EntityToJson(const EcsDemoEntityConfig& entity)
     json["color"] = ColorToJson(entity.materialTint);
     json["visible"] = entity.visible;
     json["bounce"] = entity.bounce;
+    if(entity.pivot.x||entity.pivot.y||entity.pivot.z)json["pivot"]=Vec3ToJson(entity.pivot);
     json["position"] = Vec3ToJson(entity.position);
     json["rotation"] = Vec3ToJson(entity.rotation);
     json["scale"] = Vec3ToJson(entity.scale);
@@ -103,6 +104,8 @@ EcsDemoEntityConfig EntityFromJson(const nlohmann::json& json)
     }
     entity.visible = json.value("visible", true);
     entity.bounce = json.value("bounce", true);
+    if(json.contains("pivot")&&(!json["pivot"].is_array()||json["pivot"].size()!=3))throw std::runtime_error("Pivot must have three coordinates");
+    ReadVec3(json, "pivot", entity.pivot);
     ReadVec3(json, "position", entity.position);
     ReadVec3(json, "rotation", entity.rotation);
     ReadVec3(json, "scale", entity.scale);
@@ -116,6 +119,8 @@ EcsDemoEntityConfig EntityFromJson(const nlohmann::json& json)
     entity.simulatePhysics = json.value("simulatePhysics", true);
     entity.isStatic = json.value("isStatic", false);
     entity.useGravity = json.value("useGravity", true);
+    for(float value:{entity.pivot.x,entity.pivot.y,entity.pivot.z})if(!std::isfinite(value)||std::abs(value)>1e6f)throw std::runtime_error("Invalid Pivot");
+    if(!entity.light&&entity.simulatePhysics&&!entity.isStatic&&(entity.pivot.x||entity.pivot.y||entity.pivot.z))throw std::runtime_error("Nonzero Pivot is unsupported on dynamic Rigidbody");
     return entity;
 }
 }
@@ -148,7 +153,7 @@ bool SceneSerializer::LoadEntityConfigs(
         std::vector<EcsDemoEntityConfig> loaded;
         for(auto entity:world.Entities()){
             EcsDemoEntityConfig c;c.scale={1,1,1};c.bounce=false;c.simulatePhysics=false;c.useGravity=false;
-            if(auto* t=world.GetComponent<ecs::TransformComponent>(entity)){c.position=t->position;c.rotation=t->rotation;c.scale=t->scale;}
+            if(auto* t=world.GetComponent<ecs::TransformComponent>(entity)){auto absolute=world.WorldTransform(entity);c.pivot=absolute.pivot;c.position=absolute.position;c.rotation=absolute.rotation;c.scale=absolute.scale;}
             if(auto* tag=world.GetComponent<ecs::TagComponent>(entity))c.tag=tag->name;
             if(auto* m=world.GetComponent<ecs::MeshRendererComponent>(entity)){c.meshPath=m->meshPath;c.texturePath=m->texturePath;c.shaderPath=m->shaderPath;c.visible=m->visible;}
             if(auto* m=world.GetComponent<ecs::MaterialComponent>(entity)){c.materialPath=m->materialPath;c.slotMaterials=m->slotMaterials;c.materialOverrides=m->overrides;std::copy(m->tint,m->tint+4,c.materialTint.begin());if(!m->shaderPath.empty())c.shaderPath=m->shaderPath;if(!m->texturePath.empty())c.texturePath=m->texturePath;}
@@ -214,6 +219,7 @@ std::string SceneSerializer::PrimaryDirectionalId(ecs::World& world){
     return selected.IsValid()?EntitySceneId(world,selected):std::string();
 }
 nlohmann::json SceneSerializer::CaptureWorld(ecs::World& world,const SceneSettings& settings){
+    world.ValidateHierarchy();
     auto resolved=settings;resolved.primaryDirectional=PrimaryDirectionalId(world);
     nlohmann::json scene={{"version",4},{"settings",SceneSettingsToJson(resolved)},{"entities",nlohmann::json::array()}};
     std::set<std::string> ids;const auto& registry=ecs::ComponentRegistry::Builtins();
@@ -224,6 +230,7 @@ nlohmann::json SceneSerializer::CaptureWorld(ecs::World& world,const SceneSettin
         // Validate a value copy before writing. No changes to the source scene.
         registry.Restore(check,test,components);
         scene["entities"].push_back({{"id",id},{"components",std::move(components)}});
+        if(auto parent=world.Parent(e);parent.IsValid())scene["entities"].back()["parent"]=EntitySceneId(world,parent);
     }
     return scene;
 }
@@ -238,6 +245,13 @@ bool SceneSerializer::RestoreWorld(const nlohmann::json& scene,ecs::World& world
             if(staged.HasComponent<ecs::SceneIdentityComponent>(e))throw std::runtime_error("SceneIdentity belongs in entity.id, not components");
             staged.AddComponent<ecs::SceneIdentityComponent>(e).value=id;
         }
+        std::unordered_map<std::string,ecs::Entity> identities;for(auto e:staged.Entities())identities.emplace(EntitySceneId(staged,e),e);
+        std::vector<std::pair<ecs::Entity,ecs::Entity>> parents;
+        for(const auto& node:scene.at("entities"))if(node.contains("parent")){
+            const auto id=node.at("parent").get<std::string>();auto it=identities.find(id);if(it==identities.end())throw std::runtime_error("Unknown Parent ID: "+id);
+            parents.emplace_back(identities.at(node.at("id").get<std::string>()),it->second);
+        }
+        std::string hierarchyError;if(!staged.SetParents(parents,false,&hierarchyError))throw std::runtime_error(hierarchyError);
         if(!next.primaryDirectional.empty()&&next.primaryDirectional!=PrimaryDirectionalId(staged))throw std::runtime_error("Primary directional reference conflicts with ECS preferences/order");
         world.ReplaceData(staged);settings=std::move(next);return true;
     }catch(const std::exception& e){SetError(error,std::string("Scene load: ")+e.what());return false;}
@@ -249,7 +263,7 @@ bool SceneSerializer::LoadWorld(const std::filesystem::path& path,ecs::World& wo
         std::vector<EcsDemoEntityConfig> configs;if(!LoadEntityConfigs(path,configs,error))return false;
         ecs::World staged;for(const auto& c:configs){
             auto e=staged.CreateEntity();staged.AddComponent<ecs::SceneIdentityComponent>(e);staged.AddComponent<ecs::TagComponent>(e).name=c.tag;
-            auto& t=staged.AddComponent<ecs::TransformComponent>(e);t.position=c.position;t.rotation=c.rotation;t.scale=c.scale;
+            auto& t=staged.AddComponent<ecs::TransformComponent>(e);t.pivot=c.pivot;t.position=c.position;t.rotation=c.rotation;t.scale=c.scale;
             if(!c.meshPath.empty()){auto& m=staged.AddComponent<ecs::MeshRendererComponent>(e);m.meshPath=c.meshPath;m.texturePath=c.texturePath;m.shaderPath=c.shaderPath;m.visible=c.visible;}
             if(!c.meshPath.empty()||!c.materialPath.empty()){auto& m=staged.AddComponent<ecs::MaterialComponent>(e);m.materialPath=c.materialPath;m.slotMaterials=c.slotMaterials;m.overrides=c.materialOverrides;m.shaderPath=c.shaderPath;m.texturePath=c.texturePath;std::copy(c.materialTint.begin(),c.materialTint.end(),m.tint);}
             if(c.light)ecs::AddSceneLight(staged,e,*c.light);

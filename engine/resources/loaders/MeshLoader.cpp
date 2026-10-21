@@ -409,7 +409,7 @@ ResourceLoadResult<MeshResource> MeshLoader::Load(const std::string& normalizedK
         " indices=" + std::to_string(totalIndices) +
         " submeshes=" + std::to_string(mesh.meshData.submeshes.size()));
 
-    SaveMeshBinaryCache(binaryCachePath, mesh);
+    if(!normalizedKey.starts_with("@engine/"))SaveMeshBinaryCache(binaryCachePath, mesh);
 
     result.success = true;
     result.data = std::move(mesh);

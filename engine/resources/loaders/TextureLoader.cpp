@@ -473,7 +473,7 @@ ResourceLoadResult<TextureResource> TextureLoader::Load(const std::string& norma
             std::to_string(texture.textureData.height) +
             " storedChannels=4");
 
-        if (sourceHash.has_value())
+        if (sourceHash.has_value()&&!normalizedKey.starts_with("@engine/"))
             SaveTextureBinaryCache(binaryCachePath, texture, *sourceHash);
         result.success = true;
         result.data = std::move(texture);
@@ -533,7 +533,7 @@ ResourceLoadResult<TextureResource> TextureLoader::Load(const std::string& norma
         " sourceChannels=" + std::to_string(sourceChannelCount) +
         " storedChannels=4");
 
-    if (sourceHash.has_value())
+    if (sourceHash.has_value()&&!normalizedKey.starts_with("@engine/"))
         SaveTextureBinaryCache(binaryCachePath, texture, *sourceHash);
     result.success = true;
     result.data = std::move(texture);

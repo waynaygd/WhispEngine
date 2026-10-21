@@ -314,9 +314,24 @@ bool EditorLayer::IsPointInsideViewport(double x, double y) const
 void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
 {
     ZoneScopedN("EditorLayer");
+    UpdateLuaRuntimeInspector(app,ImGui::GetTime());
+    // Keep prepared prefab data throughout one drag, but never render a stale
+    // previous-frame ghost when the pointer leaves or the viewport is hidden.
+    if(!m_ShowViewport||app.IsProjectBrowserActive()||ImGui::GetIO().AppFocusLost)m_BoxSelection.reset();
+    const auto* placementDrag=ImGui::GetDragDropPayload();
+    if(!placementDrag||!placementDrag->IsDataType("WHISP_ASSET")||!m_ShowViewport||app.IsProjectBrowserActive())CancelPlacement();
+    else {m_PlacementPreview.active=false;m_PlacementPreview.items.clear();}
     m_Statistics.hierarchyMs=m_Statistics.inspectorMs=m_Statistics.assetBrowserMs=m_Statistics.lightGizmoMs=0;
     const auto uiStart=std::chrono::steady_clock::now();
     struct FinishUi {Statistics& stats;std::chrono::steady_clock::time_point start;~FinishUi(){stats.uiMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}} finish{m_Statistics,uiStart};
+    if(app.IsProjectBrowserActive()){
+        m_ViewportPixelWidth=m_ViewportPixelHeight=0;
+        m_ViewportHovered=m_ViewportHasBounds=m_ViewportFocused=m_HierarchyFocused=false;
+        m_ToolActive=m_LightPointerCaptured=m_LightHandleHovered=false;
+        m_InputTextActive=ImGui::GetIO().WantTextInput;m_ModalActive=true;
+        DrawProjectBrowser(app);
+        return;
+    }
     RefreshAssetLists(dt);
     PruneSelection(app);
     if(m_Transaction&&!m_Transaction->before.settings&&m_Transaction->before.entity.IsValid()&&m_Transaction->before.entity!=m_Selection.active)FinishTransaction(app);
@@ -329,12 +344,14 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
         if(HasPendingTransaction())CancelTransaction(app);
         m_LightPointerCaptured=m_PlaneScaleCaptured=m_ToolActive=false;m_CancelGizmoUntilRelease=true;
         ImGuizmo::Enable(false);ImGuizmo::Enable(true);ImGui::ClearActiveID();
+        if(m_UIWidgetDrag){CancelUIDocumentEdit(app,m_UIWidgetDrag->key);m_UIWidgetDrag.reset();}
+        if(!m_ViewportMaximized)CaptureCurrentWorkspace();
         m_ViewportMaximized=!m_ViewportMaximized;m_FocusViewportWindow=true;
     }
     if(m_ViewportMaximized){
         m_HierarchyFocused=false;
         ImGui::DockSpace(ImHashStr("WhispEngine.Editor.Dockspace"),ImVec2(0,0),ImGuiDockNodeFlags_KeepAliveOnly);
-        DrawViewport(app,renderer);HandleEditorShortcuts(app);return;
+        DrawProjectBrowser(app);DrawViewport(app,renderer);HandleEditorShortcuts(app);return;
     }
     ConfigureDocking();DrawToolbar(app);
 
@@ -344,11 +361,17 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     m_ViewportHovered = false;
     m_ViewportHasBounds = false;
     m_ViewportFocused=false;m_HierarchyFocused=false;
-    DrawMainMenu(app);DrawSceneDialogs(app);
+    DrawMainMenu(app);DrawPrefabWorkflow(app);DrawSceneDialogs(app);DrawProjectBrowser(app);
+    if(app.IsProjectBrowserActive())return;
+    DrawUIDesigner(app);
+    if(m_ShowProjectSettings)DrawProjectSettings(app);
     if(m_ShowSceneSettings)DrawSceneSettings(app,renderer,dt);
     if(m_ShowVisualSettings)DrawEditorVisualSettings(app,renderer);
     PrepareEditorSky(app,renderer);
     if(m_ShowConsole)DrawConsole(app,renderer);
+    if(m_ShowGameplayEvents)DrawGameplayEvents(app);
+    if(m_ShowSceneValidation)DrawSceneValidation(app);
+    if(m_ShowLuaRuntimeInspector)DrawLuaRuntimeInspector(app);
     ImGui::SetNextWindowSize(ImVec2(340, 330), ImGuiCond_FirstUseEver);
     if(m_ShowPhysicsStress){
     if (ImGui::Begin("Physics Stress Test",&m_ShowPhysicsStress)) {
@@ -472,19 +495,23 @@ bool EditorLayer::BlocksGameplayInput()const{
 
 void EditorLayer::HandleEditorShortcuts(Application& app){
     const auto& io=ImGui::GetIO();if(io.WantTextInput||m_ModalActive||m_EscapeConsumed)return;
+    if(UIDesignerOwnsKeyboard())return;
+    HandleViewportToolShortcuts(app);
     // Asset file shortcuts are handled by the browser after its widgets. Never
     // let a Delete intended for that window reach the entity command path.
     if(AssetBrowserOwnsKeyboard()&&(ImGui::IsKeyPressed(ImGuiKey_Delete,false)||ImGui::IsKeyPressed(ImGuiKey_F2,false)))return;
     if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)&&!app.IsEditorPlayMode()){
-        if(HasPendingTransaction()){CancelTransaction(app);m_LightPointerCaptured=false;m_CancelGizmoUntilRelease=true;}else if((m_ViewportFocused||m_HierarchyFocused)&&!m_InputTextActive&&!app.IsCameraControlActive())ClearSelection();return;
+        if(m_BoxSelection){m_BoxSelection.reset();return;}
+        if(HasPendingTransaction()){CancelTransaction(app);m_LightPointerCaptured=false;m_CancelGizmoUntilRelease=true;}else if(!m_SelectionLocked&&(m_ViewportFocused||m_HierarchyFocused)&&!m_InputTextActive&&!app.IsCameraControlActive())ClearSelection();return;
     }
     const bool entityKeys=!app.IsEditorPlayMode()&&(m_ViewportFocused||m_HierarchyFocused)&&!m_InputTextActive&&!m_ToolActive&&!app.IsCameraControlActive();
     if(entityKeys){if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_C,false))CopyEntity(app,m_Selection.active);if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_V,false))PasteEntity(app);if(ImGui::IsKeyPressed(ImGuiKey_Delete,false))DeleteSelection(app);if(m_HierarchyFocused&&io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_A,false))SelectAllEntities(app,m_HierarchyVisible);}
+    if(entityKeys&&m_HierarchyFocused&&!io.KeyCtrl&&!io.KeyAlt&&ImGui::IsKeyPressed(ImGuiKey_F,false))FocusSelection(app);
     if(io.KeyCtrl){
         if(ImGui::IsKeyPressed(ImGuiKey_Z,false))Undo(app);
         if(ImGui::IsKeyPressed(ImGuiKey_Y,false))Redo(app);
-        if(ImGui::IsKeyPressed(ImGuiKey_S,false)){if(io.KeyShift){m_SceneDialogAction=3;m_SceneDialogRequested=true;}else{std::string error;if(!app.SaveCurrentScene(&error)){m_EditorError=error;Logger::Get().Error(error);}}}
-        if(ImGui::IsKeyPressed(ImGuiKey_D,false))DuplicateEntity(app,m_Selection.active);
+        if(ImGui::IsKeyPressed(ImGuiKey_S,false)){if(io.KeyShift&&!app.IsPrefabEditing()){m_SceneDialogAction=3;m_SceneDialogRequested=true;}else{std::string error;if(!app.SaveCurrentScene(&error)){m_EditorError=error;Logger::Get().Error(error);}}}
+        if(entityKeys&&ImGui::IsKeyPressed(ImGuiKey_D,false))DuplicateEntity(app,m_Selection.active);
     }
     if(io.KeyAlt&&!io.KeyCtrl&&!io.KeyShift&&(m_ViewportFocused||app.IsViewportMouseCaptured())&&!BlocksGameplayInput()&&!ImGuizmo::IsUsing()&&!ImGui::IsMouseDown(0)&&!ImGui::IsMouseDown(1)){
         if(ImGui::IsKeyPressed(ImGuiKey_3,false))app.SetViewportUnlit(false);
@@ -492,7 +519,7 @@ void EditorLayer::HandleEditorShortcuts(Application& app){
     }
     if(!EditorHotkeysAllowed(app.IsEditorPlayMode(),OwnsViewportKeyboard(),io.WantCaptureKeyboard,app.IsCameraControlActive()))return;
     if(!io.KeyCtrl&&!io.KeyAlt&&!m_InputTextActive&&ImGui::IsKeyPressed(ImGuiKey_G,false))m_GameView=!m_GameView;
-    if(ImGui::IsKeyPressed(ImGuiKey_F,false))app.FocusEntity(m_Selection.active);
+    if(ImGui::IsKeyPressed(ImGuiKey_F,false))FocusSelection(app);
     if(ImGui::IsKeyPressed(ImGuiKey_W,false))m_GizmoOperation=0;
     if(ImGui::IsKeyPressed(ImGuiKey_E,false))m_GizmoOperation=1;
     if(ImGui::IsKeyPressed(ImGuiKey_R,false))m_GizmoOperation=2;
@@ -580,25 +607,34 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     ImGui::Begin(ViewportWindowName(),maximized?nullptr:&m_ShowViewport,ImGuiWindowFlags_NoNavInputs|(maximized?(ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoBringToFrontOnFocus):0));
 
     const bool playMode = app.IsEditorPlayMode();
-    if(!maximized){
+    // Gameplay owns a clean image until its existing cursor capture is released.
+    // Fullscreen only changes layout; it never decides editor visibility.
+    const bool showEditorControls=!(playMode&&app.IsGameplayMouseCaptured());
+    if(!maximized&&showEditorControls){
     DrawViewportCreateMenu(app);
+    ImGui::SameLine();DrawPlacementMenu(app);
+    ImGui::SameLine();DrawViewportTools(app);
     ImGui::SameLine();
+    if(ImGui::GetContentRegionAvail().x<370*ImGui::GetStyle().FontScaleDpi)ImGui::NewLine();
+    ImGui::BeginDisabled(app.IsPrefabEditing());
     if (ImGui::Button(playMode ? "Stop" : "Play"))
         app.SetEditorPlayMode(!playMode);
+    ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::TextUnformatted(playMode ? "Play" : "Edit");
     ImGui::SameLine();ImGui::SetNextItemWidth(85*ImGui::GetStyle().FontScaleDpi);
     int shading=app.IsViewportUnlit()?1:0;
     if(ImGui::Combo("##ViewportShading",&shading,"Lit\0Unlit\0"))app.SetViewportUnlit(shading==1);
     if(!playMode){
-        if(ImGui::GetWindowWidth()>520*ImGui::GetStyle().FontScaleDpi)ImGui::SameLine();
+        ImGui::SameLine();if(ImGui::GetContentRegionAvail().x<ImGui::CalcTextSize("Game View (G)").x+ImGui::GetFrameHeight()+ImGui::GetStyle().ItemSpacing.x)ImGui::NewLine();
         ImGui::Checkbox("Game View (G)",&m_GameView);
+        ImGui::SameLine();ImGui::Checkbox("UI Preview",&m_ShowRuntimeUI);
     }
 
     ImGui::Separator();
     }
 
-    if(m_FixedDiagnosticLayout&&!maximized)ImGui::Dummy(ImVec2(1,ImGui::GetFrameHeightWithSpacing()*2-ImGui::GetStyle().ItemSpacing.y));
+    if(m_FixedDiagnosticLayout&&!maximized&&showEditorControls)ImGui::Dummy(ImVec2(1,ImGui::GetFrameHeightWithSpacing()*2-ImGui::GetStyle().ItemSpacing.y));
     const ImVec2 contentMin = ImGui::GetCursorScreenPos();
     const ImVec2 available = ImGui::GetContentRegionAvail();
     const ImVec2 viewportSize(std::max(available.x, 1.0f), std::max(available.y, 1.0f));
@@ -638,25 +674,29 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
             "Viewport render target will appear here");
     }
 
-    if(!playMode&&!m_ModalActive&&!m_ToolActive&&!m_LightPointerCaptured&&!m_PlaneScaleCaptured&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)&&ImGui::BeginDragDropTarget()){
-        if(const auto* payload=ImGui::AcceptDragDropPayload("WHISP_ASSET"))if(payload->DataSize==sizeof(AssetPayload)){
-            const auto& asset=*static_cast<const AssetPayload*>(payload->Data);
-            if((asset.kind==ecs::AssetKind::Mesh||asset.kind==ecs::AssetKind::None)&&std::memchr(asset.key,0,sizeof(asset.key))){
-                auto mouse=ImGui::GetMousePos();auto point=PlacementPoint(app,(mouse.x-contentMin.x)/viewportSize.x,(mouse.y-contentMin.y)/viewportSize.y);if(asset.kind==ecs::AssetKind::Mesh)PlaceModel(app,asset.key,point);else if(std::string(asset.key).ends_with(".wscene"))PlaceImportedScene(app,asset.key,point);
-            }
-        }ImGui::EndDragDropTarget();
-    }
-    m_ViewportHovered=ImGui::IsItemHovered();
-    if(maximized){
+    DrawPlacementTarget(app,contentMin,viewportSize);
+    m_ViewportHovered=ImGui::IsItemHovered(playMode?ImGuiHoveredFlags_AllowWhenBlockedByActiveItem:ImGuiHoveredFlags_None);
+    if(maximized&&showEditorControls){
         // The image already registered the full content bounds. Create is the
         // final layout item; the remaining helpers only submit draw-list data.
         // Do not restore the post-image cursor (it includes ItemSpacing below
         // CursorMaxPos and would extend the window without submitting an item).
         ImGui::SetCursorScreenPos(ImVec2(contentMin.x+8,contentMin.y+8));
         if(DrawViewportCreateMenu(app))m_ViewportHovered=false;
+        ImGui::SameLine();if(DrawPlacementMenu(app))m_ViewportHovered=false;
+        ImGui::SameLine();if(DrawViewportTools(app))m_ViewportHovered=false;
+    }
+    // A Play click belongs to the viewport content. Keeping its existing input
+    // ID active prevents ImGui from dragging the window behind a held UI Button.
+    if(playMode){
+        auto* viewport=ImGui::GetCurrentWindow();const auto id=viewport->GetID("ViewportCanvas");
+        if(m_ViewportHovered&&ImGui::IsMouseClicked(0)&&!BlocksGameplayInput())ImGui::SetActiveID(id,viewport);
+        if(ImGui::GetActiveID()==id){ImGui::KeepAliveID(id);if(!ImGui::IsMouseDown(0))ImGui::ClearActiveID();}
     }
     if(m_ViewportHovered&&ImGui::IsMouseClicked(1))ImGui::SetWindowFocus();
     if(m_ViewportHovered&&ImGui::IsMouseClicked(0))ImGui::SetWindowFocus();
+    DrawVertexSnap(app,contentMin,viewportSize,false);
+    DrawSurfaceMove(app,contentMin,viewportSize,false);
     m_LightHandleHovered=m_LightIconClicked=false;
     m_SpecialIconHovered=false;
     // Specialized markers retain visual and picking priority over fallback icons.
@@ -667,12 +707,15 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     DrawLightGizmos(app,renderer,contentMin,viewportSize);
     DrawPlayerStartGizmos(app,contentMin,viewportSize);
     DrawFogGizmos(app,contentMin,viewportSize);
+    DrawPostProcessGizmos(app,contentMin,viewportSize);
     iconLayers.SetCurrentChannel(iconDraw,0);
     DrawEntityIcons(app,contentMin,viewportSize);
     iconLayers.Merge(iconDraw);
     ImGui::GetWindowDrawList()->PushClipRect(contentMin,ImVec2(contentMin.x+viewportSize.x,contentMin.y+viewportSize.y),true);
-    if(!m_LightIconClicked&&!m_LightPointerCaptured&&!m_LightHandleHovered)DrawGizmo(app, contentMin, viewportSize);
+    if(!m_LightIconClicked&&!m_LightPointerCaptured&&!m_LightHandleHovered&&!m_VertexSourcePicking)DrawGizmo(app, contentMin, viewportSize);
     ImGui::GetWindowDrawList()->PopClipRect();
+    DrawSurfaceMove(app,contentMin,viewportSize,true);
+    DrawVertexSnap(app,contentMin,viewportSize,true);
     DrawViewportOverlays(app,contentMin,viewportSize);
     m_ToolActive=ImGuizmo::IsUsing()||(m_Transaction&&!m_Transaction->before.settings);
     ImGui::End();
@@ -689,6 +732,7 @@ void EditorLayer::DrawMaterialEditor(Application& app)
     auto* resources=app.GetResourceManager();auto& world=app.GetWorld();
     auto* component=world.GetComponent<ecs::MaterialComponent>(m_Selection.active);
     const auto open=[&](const std::string& key) {
+        if(key.starts_with("@engine/")){m_MaterialError="Built-in material is read-only. Create a project material to customize it.";return;}
         if(m_MaterialDirty&&key!=m_EditingMaterial){m_MaterialError="Unsaved changes: Save or Revert before opening another asset.";return;}
         m_EditingMaterial=key;m_MaterialError.clear();
         if(resources&&!key.empty()) {resources->Load<MaterialResource>(std::filesystem::u8path(key));resources->WatchForHotReload<MaterialResource>(std::filesystem::u8path(key));}
@@ -780,6 +824,7 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
     // shared handle. Snap remains controlled by the existing toolbar settings.
     if((ImGui::GetIO().KeyCtrl||ImGui::GetIO().KeyShift)&&ImGui::IsMouseClicked(0)&&!ImGuizmo::IsUsing())return;
     if(m_ModalActive){if(m_GizmoUndoCaptured)CancelTransaction(app);m_GizmoUndoCaptured=false;m_CancelGizmoUntilRelease=true;ImGuizmo::Enable(false);return;}
+    if(std::any_of(m_Selection.items.begin(),m_Selection.items.end(),[&](auto e){return !EditorEntityVisible(app,e);}))return;
     if((app.IsCameraControlActive()||ImGui::IsMouseDown(1))&&!ImGuizmo::IsUsing())return;
     if (app.IsEditorPlayMode() || m_GameView || viewportSize.x <= 1.0f || viewportSize.y <= 1.0f)
         return;
@@ -804,13 +849,15 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
         app.GetCameraNearPlane(),
         app.GetCameraFarPlane());
 
-    float translation[3] = { transform->position.x, transform->position.y, transform->position.z };
+    const auto absolute=world.WorldTransform(m_Selection.active);
+    const auto pivotPoint=ecs::PivotPosition(absolute);
+    float translation[3] = { pivotPoint.x,pivotPoint.y,pivotPoint.z };
     float rotation[3] = {
-        RadiansToDegrees(transform->rotation.x),
-        RadiansToDegrees(transform->rotation.y),
-        RadiansToDegrees(transform->rotation.z)
+        RadiansToDegrees(absolute.rotation.x),
+        RadiansToDegrees(absolute.rotation.y),
+        RadiansToDegrees(absolute.rotation.z)
     };
-    float scale[3] = { transform->scale.x, transform->scale.y, transform->scale.z };
+    float scale[3] = { absolute.scale.x, absolute.scale.y, absolute.scale.z };
     float matrix[16];
     ImGuizmo::RecomposeMatrixFromComponents(translation, rotation, scale, matrix);
 
@@ -819,6 +866,7 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
     ImGuizmo::SetRect(viewportMin.x, viewportMin.y, viewportSize.x, viewportSize.y);
 
     ImGuizmo::SetGizmoSizeClipSpace(ScaleGizmoClipSize);
+    if(m_EditPivot){DrawPivotGizmo(app,view,projection,viewportMin,viewportSize);return;}
     if(m_Selection.items.size()>1){DrawGroupGizmo(app,view,projection);return;}
     const bool planeOwnsPointer=!ImGuizmo::IsUsing()&&DrawScalePlanes(app,viewportMin,viewportSize,matrix);
     const ImGuizmo::MODE mode = m_GizmoMode == 0 ? ImGuizmo::LOCAL : ImGuizmo::WORLD;
@@ -830,7 +878,7 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
     // NoInputs helper window is distinct from our viewport draw-list owner.
     auto& context=*ImGui::GetCurrentContext();auto* hoveredWindow=context.HoveredWindow;
     if(planeOwnsPointer)context.HoveredWindow=ImGui::FindWindowByName("gizmo");
-    const bool manipulated=ImGuizmo::Manipulate(view, projection, ToGizmoOperation(m_GizmoOperation), mode, matrix,nullptr,(m_GizmoOperation==1?m_RotationSnapping:m_Snapping)?snap:nullptr);
+    const bool manipulated=ImGuizmo::Manipulate(view, projection, ToGizmoOperation(m_GizmoOperation), mode, matrix,nullptr,(m_GizmoOperation==1?m_RotationSnapping:(m_Snapping&&!(m_VertexSnapEnabled&&m_GizmoOperation==0&&!ImGui::GetIO().KeyAlt)))?snap:nullptr);
     context.HoveredWindow=hoveredWindow;
     bool matrixChanged=false;for(int i=0;i<16;++i)matrixChanged|=std::abs(matrix[i]-originalMatrix[i])>1e-6f;
     // ImGuizmo's previous delta may report "modified" on a later stationary drag.
@@ -841,12 +889,14 @@ void EditorLayer::DrawGizmo(Application& app, const ImVec2& viewportMin, const I
         if (!m_GizmoUndoCaptured)
         {
             if(m_GizmoOperation==0&&ImGui::GetIO().KeyAlt){auto copy=BeginDuplicateDrag(app);if(copy.IsValid())transform=world.GetComponent<ecs::TransformComponent>(copy);}
+            else if((m_VertexSnapEnabled||m_SurfaceMove)&&m_GizmoOperation==0)BeginTransaction(m_VertexSnapEnabled?"Vertex Snap":"Surface Move",CaptureSelection(app,true));
             else PushUndoBeforeChange(app,"Transform Gizmo");
             m_GizmoUndoCaptured = true;
         }
 
         ImportMatrix result;std::copy(matrix,matrix+16,result.begin());
-        if(auto decomposed=DecomposeTransform(result,transform->scale)){*transform=*decomposed;app.NotifyEditorMutation(m_Selection.active);}else m_EditorError="Transform requires shear/singular scale; use Local scale handles";
+        const auto p=absolute.pivot;result[12]-=result[0]*p.x+result[4]*p.y+result[8]*p.z;result[13]-=result[1]*p.x+result[5]*p.y+result[9]*p.z;result[14]-=result[2]*p.x+result[6]*p.y+result[10]*p.z;
+        if(auto decomposed=DecomposeTransform(result,absolute.scale)){if(world.SetWorldTransform(m_Selection.active,ecs::RebasePivot(*decomposed,absolute.pivot),&m_EditorError))app.NotifyEditorMutation(m_Selection.active);}else m_EditorError="Transform requires shear/singular scale; use Local scale handles";
     }
     else if (!ImGuizmo::IsUsing())
     {

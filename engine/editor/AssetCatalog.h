@@ -41,6 +41,7 @@ public:
     static std::vector<std::string> Dependencies(const std::string& key);
     static AssetDependencyAudit AuditDependencies(const std::string& key);
     bool RenameAssetFile(const std::string& from,const std::string& to,std::string* error=nullptr,bool acceptDynamicRisk=false);
+    bool MoveAssetFile(const std::string& from,const std::string& to,std::string* error=nullptr,bool acceptDynamicRisk=false);
     bool DeleteAssetFile(const std::string& key,std::string* error=nullptr,bool acceptDynamicRisk=false);
 };
 }

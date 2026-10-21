@@ -279,7 +279,7 @@ void Dx12RenderAdapter::BeginHdrScene()
 {
     const bool hdrSky=m_EditorVisualFrame.active&&m_EditorVisualFrame.backgroundEnabled&&m_EditorVisualFrame.settings.background==EditorBackground::Cubemap;
     m_HdrNative=m_EnvironmentSettings.enabled||hdrSky;
-    if (!m_HdrNative&&m_AntiAliasing==AntiAliasingMode::Off&&!m_Fog.active)
+    if (!m_HdrNative&&m_AntiAliasing==AntiAliasingMode::Off&&!m_Fog.active&&!m_ScreenEffects.Active()&&m_CustomPostFx.passes.empty())
         return;
     ZoneScopedN("HdrSceneBegin");
     UINT w = m_ViewportTarget.rendering ? m_ViewportTarget.width : m_Width,
@@ -340,6 +340,8 @@ void Dx12RenderAdapter::EndHdrScene()
     if (!m_HdrActive)
         return;
     ZoneScopedN("HdrOutput");
+    auto custom=PrepareCustomPostFx();
+    if(m_MaterialTableCount+custom.size()+1>MaterialTablesPerFrame)custom.clear();
     auto &target = m_HdrTargets[m_FrameIndex];
     auto barrier =
         CD3DX12_RESOURCE_BARRIER::Transition(target.color.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
@@ -348,7 +350,7 @@ void Dx12RenderAdapter::EndHdrScene()
     if (!m_OutputPso)
     {
         const char *source = R"(
-Texture2D<float4> scene:register(t0);SamplerState clampSampler:register(s0);cbuffer Output:register(b0){float exposure;float tone;float aa;float pad;};
+Texture2D<float4> scene:register(t0);SamplerState clampSampler:register(s0);cbuffer Output:register(b0){float exposure;float tone;float aa;float frameSeed;float4 grading;float4 tint;float4 vignette;float4 grainCA;};
 struct Out{float4 pos:SV_Position;float2 uv:TEXCOORD;};Out VS(uint id:SV_VertexID){Out o;o.uv=float2((id<<1)&2,id&2);o.pos=float4(o.uv*float2(2,-2)+float2(-1,1),0,1);return o;}
 float Encode(float c){return c<=.0031308?c*12.92:1.055*pow(c,1/2.4)-.055;}
 float3 DisplayColor(float3 radiance){float scale=exp2(exposure);float3 c=min(max(radiance,0),3.402823e38/max(scale,1))*scale;if(tone>.5)c=c/(1+c);c=saturate(c);return float3(Encode(c.r),Encode(c.g),Encode(c.b));}
@@ -364,18 +366,59 @@ float3 Color(float2 uv){
  return lerp(lerp(a,b,f.x),lerp(c,d,f.x),f.y);
 }
 float Luma(float3 c){return dot(c,float3(.299,.587,.114));}
-float4 PS(Out i):SV_Target{
- float3 center=Color(i.uv);if(aa<.5)return float4(center,1);
+float3 ResolveDisplay(float2 uv){
+ float3 center=Color(uv);if(aa<.5)return center;
  uint w,h;scene.GetDimensions(w,h);float2 pixel=1.0/float2(w,h);
- float3 nw=Color(i.uv+float2(-1,-1)*pixel),ne=Color(i.uv+float2(1,-1)*pixel),sw=Color(i.uv+float2(-1,1)*pixel),se=Color(i.uv+pixel);
+ float3 nw=Color(uv+float2(-1,-1)*pixel),ne=Color(uv+float2(1,-1)*pixel),sw=Color(uv+float2(-1,1)*pixel),se=Color(uv+pixel);
  float lnw=Luma(nw),lne=Luma(ne),lsw=Luma(sw),lse=Luma(se),lm=Luma(center);
  float low=min(lm,min(min(lnw,lne),min(lsw,lse))),high=max(lm,max(max(lnw,lne),max(lsw,lse)));
- if(high-low<max(aa>1.5?.015625:.03125,high*(aa>1.5?.083333:.166667)))return float4(center,1);
+ if(high-low<max(aa>1.5?.015625:.03125,high*(aa>1.5?.083333:.166667)))return center;
  float2 dir=float2(-((lnw+lne)-(lsw+lse)),(lnw+lsw)-(lne+lse));
  float reduce=max((lnw+lne+lsw+lse)*.03125,.0078125);float reciprocal=1/(min(abs(dir.x),abs(dir.y))+reduce);float span=aa>1.5?8:4;dir=clamp(dir*reciprocal,-span,span)*pixel;
- float3 a=.5*(Color(i.uv+dir*(1.0/3-.5))+Color(i.uv+dir*(2.0/3-.5)));
- float3 b=a*.5+.25*(Color(i.uv-dir*.5)+Color(i.uv+dir*.5));float lb=Luma(b);
- return float4(lb<low||lb>high?a:b,1);
+ float3 a=.5*(Color(uv+dir*(1.0/3-.5))+Color(uv+dir*(2.0/3-.5)));
+ float3 b=a*.5+.25*(Color(uv-dir*.5)+Color(uv+dir*.5));float lb=Luma(b);
+ return lb<low||lb>high?a:b;
+}
+// Built-in stage: source samples resolve tone mapping and FXAA exactly once per
+// sample. Later ordered fullscreen effects can consume this display-referred
+// result in a separate ping-pong target at EndHdrScene, before UI composition.
+float Hash(uint2 cell,uint seed){
+ uint h=cell.x*1597334677u+cell.y*3812015801u+seed*2798796415u;
+ h=(h^(h>>16))*2246822519u;h=(h^(h>>13))*3266489917u;
+ return float(h^(h>>16))*(1.0/4294967296.0)-.5;
+}
+float3 BuiltInPostFX(float2 uv,float2 size){
+ float2 p=(uv-.5)*2;float aspect=size.x/size.y;
+ float2 radial=p*float2(aspect,1);float radius=saturate(length(radial)/length(float2(aspect,1)));
+ float3 color;
+ // Channel offsets precede all color operations; UVs stay inside texel centers.
+ if(grainCA.z>0){
+  float2 offset=radial/float2(aspect,1)*(.015*grainCA.z*pow(radius,grainCA.w));
+  float2 edge=.5/size;
+  float3 red=ResolveDisplay(clamp(uv+offset,edge,1-edge));
+  float3 green=ResolveDisplay(uv);
+  float3 blue=ResolveDisplay(clamp(uv-offset,edge,1-edge));
+  color=float3(red.r,green.g,blue.b);
+ }else color=ResolveDisplay(uv);
+ float gray=dot(color,float3(.2126,.7152,.0722));
+ color=(lerp(gray.xxx,color,grading.x)-.5)*grading.y+.5+grading.z;
+ color*=tint.rgb;
+ if(vignette.x>0){
+  float shape=lerp(max(abs(p.x),abs(p.y)),radius,vignette.z);
+  color*=1-vignette.x*smoothstep(1-vignette.y,1,shape);
+ }
+ if(grainCA.x>0){
+  uint2 cell=uint2(floor(uv*size/grainCA.y));
+  float phase=frameSeed*.25;uint seed=uint(floor(phase));float t=smoothstep(0,1,frac(phase));
+  float noise=lerp(Hash(cell,seed),Hash(cell,(seed+1)&255u),t);
+  color+=noise*(.06*grainCA.x);
+ }
+ return saturate(color);
+}
+float4 PS(Out i):SV_Target{
+ if(grading.w<.5)return float4(ResolveDisplay(i.uv),1);
+ uint w,h;scene.GetDimensions(w,h);
+ return float4(BuiltInPostFX(i.uv,float2(w,h)),1);
 })";
         auto vs = Compile(source, "VS", "vs_5_1"), ps = Compile(source, "PS", "ps_5_1");
         CD3DX12_DESCRIPTOR_RANGE range;
@@ -385,7 +428,7 @@ float4 PS(Out i):SV_Target{
         roots[0].DescriptorTable = {1, &range};
         roots[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
         roots[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-        roots[1].Constants = {0, 0, 4};
+        roots[1].Constants = {0, 0, 20};
         roots[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
         CD3DX12_STATIC_SAMPLER_DESC sampler(
             0, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
@@ -433,23 +476,37 @@ float4 PS(Out i):SV_Target{
                                           : m_RtvHeap->GetCPUDescriptorHandleForHeapStart();
     if (!m_ViewportTarget.rendering)
         rtv.ptr += SIZE_T(m_FrameIndex) * m_RtvSize;
+    auto finalRtv=rtv;
+    if(!custom.empty()){
+        auto& intermediate=m_PostFxTargets[m_FrameIndex][0];EnsurePostFxTarget(intermediate,target.width,target.height);
+        auto transition=CD3DX12_RESOURCE_BARRIER::Transition(intermediate.color.Get(),D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);m_CmdList->ResourceBarrier(1,&transition);rtv=intermediate.rtv;
+    }
     m_CmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
     ID3D12DescriptorHeap *heaps[]{m_SrvHeap.Get()};
     m_CmdList->SetDescriptorHeaps(1, heaps);
     m_CmdList->SetGraphicsRootSignature(m_OutputRoot.Get());
     m_CmdList->SetPipelineState(m_OutputPso.Get());
     m_CmdList->SetGraphicsRootDescriptorTable(0, gpu);
-    float params[4] = {m_HdrNative?m_EnvironmentSettings.exposure:0,
-                       m_HdrNative&&m_EnvironmentSettings.toneMapping ? 1.f : 0.f, float(m_AntiAliasing), 0};
+    const auto& fx=m_ScreenEffects;
+    float params[20] = {m_HdrNative?m_EnvironmentSettings.exposure:0,
+                       m_HdrNative&&m_EnvironmentSettings.toneMapping ? 1.f : 0.f, float(m_AntiAliasing), float(m_PostFxFrame&1023u),
+                       fx.saturation,fx.contrast,fx.brightness,fx.Active()?1.f:0.f,
+                       fx.tint[0],fx.tint[1],fx.tint[2],1,
+                       fx.vignetteIntensity,fx.vignetteSmoothness,fx.vignetteRoundness,0,
+                       fx.grainIntensity,fx.grainScale,fx.aberrationIntensity,fx.aberrationFalloff};
     if (m_ShadowConstants.parameters[3] > .5)
     {
         params[0] = 0;
         params[1] = 0;
     }
-    m_CmdList->SetGraphicsRoot32BitConstants(1, 4, params, 0);
+    m_CmdList->SetGraphicsRoot32BitConstants(1, 20, params, 0);
     m_CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_CmdList->DrawInstanced(3, 1, 0, 0);
     ++m_SubmissionStatistics.outputDrawCalls;
+    if(!custom.empty()){
+        auto transition=CD3DX12_RESOURCE_BARRIER::Transition(m_PostFxTargets[m_FrameIndex][0].color.Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);m_CmdList->ResourceBarrier(1,&transition);
+        DrawCustomPostFx(custom,finalRtv);
+    }
     m_HdrActive = false;
 }
 std::vector<float> Dx12RenderAdapter::ReadBackFloatTexture(ID3D12Resource *texture, unsigned sub,

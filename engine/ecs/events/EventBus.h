@@ -10,7 +10,6 @@ namespace ecs {
         Entity a{};
         Entity b{};
 
-        // Нормаль направлена от B к A
         Vec3 normal{};
         CollisionKind kind=CollisionKind::Contact;
     };

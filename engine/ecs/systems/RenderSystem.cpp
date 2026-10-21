@@ -1,5 +1,6 @@
 #include "../FogGather.h"
 #include "RenderSystem.h"
+#include "../components/UICanvasComponent.h"
 #include "../LightGather.h"
 
 #include "../World.h"
@@ -208,6 +209,7 @@ namespace ecs {
         IRenderAdapter* renderer = m_ResourceOwnerRenderer != nullptr ? m_ResourceOwnerRenderer : m_Renderer;
         if (renderer != nullptr)
         {
+            if(m_UIFontTexture.IsValid())renderer->DestroyTexture(m_UIFontTexture);m_UIFontTexture={};m_RuntimeUI.Clear();m_UIDrawList={};
             for (auto& [key, resource] : m_ShaderResources)
             {
                 (void)key;
@@ -258,6 +260,8 @@ namespace ecs {
         m_LoggedMeshReuseKeys.clear();
         m_LoggedTextureReuseKeys.clear();
         m_LoggedShaderReuseKeys.clear();
+        m_GpuFinalizeQueue.clear();m_PendingGpuFinalizations.clear();
+        m_RenderSnapshots.clear();m_RenderPackets.clear();m_Batches.clear();m_ShadowBatches.clear();m_InstanceData.clear();
         m_ResourceOwnerRenderer = nullptr;
     }
 
@@ -273,13 +277,22 @@ namespace ecs {
         lightCamera.nearPlane=m_CameraNearPlane;lightCamera.farPlane=m_CameraFarPlane;
         auto lights=GatherSceneLights(world,m_LightingSettings?*m_LightingSettings:m_DefaultLighting,lightCamera,m_Interpolation);
         if(m_ViewportUnlit)lights.lighting.enabled=false;
+        auto fog=GatherFog(world,lightCamera);
+        PostProcessSettings postBase;postBase.fog=fog.settings;postBase.fog.enabled=fog.active;
+        if(m_EnvironmentSettings)postBase.environment=*m_EnvironmentSettings;
+        if(m_AtmosphereSettings)postBase.atmosphere=*m_AtmosphereSettings;
+        m_EvaluatedPostProcess=EvaluatePostProcess(m_CameraPosition,world,postBase);
+        fog.settings=m_EvaluatedPostProcess.fog;fog.active=fog.settings.enabled;
         if(m_Renderer){
-            auto fog=GatherFog(world,lightCamera);std::string warning;
+            std::string warning;
             if(fog.activeCount>1)warning="Multiple enabled global Fog components: lowest Entity index wins";
             if(fog.invalidCount)warning="Invalid Fog component ignored at render boundary";
             if(fog.active&&!m_Renderer->GetFogDiagnostics().supported)warning="Fog is not supported by this render backend";
             if(warning!=m_FogWarning){m_FogWarning=warning;if(!warning.empty())Logger::Get().Warn(warning);}
             m_Renderer->SetFog(fog);
+            m_Renderer->SetScreenEffects(m_EvaluatedPostProcess.screenEffects);
+            m_PostFxTime+=std::isfinite(dt)?std::max(dt,0.f):0;
+            if(m_ResourceManager)m_Renderer->SetCustomPostFx(ResolvePostFx(m_EvaluatedPostProcess.customEffects,*m_ResourceManager,m_PostFxOverrides,m_PostFxTime,dt));
         }
         if(m_Renderer){m_Renderer->SetCameraPosition({m_CameraPosition.x,m_CameraPosition.y,m_CameraPosition.z,0});
             m_Renderer->SetLighting(BuildLightingConstants(lights.lighting));
@@ -288,7 +301,7 @@ namespace ecs {
         if (m_Renderer == nullptr)
             return;
         if(m_EnvironmentSettings){
-            auto environment=*m_EnvironmentSettings;if(m_ViewportUnlit)environment.diffuse=environment.specular=false;
+            auto environment=m_EvaluatedPostProcess.environment;if(m_ViewportUnlit)environment.diffuse=environment.specular=false;
             m_Renderer->SetEnvironmentSettings(environment);
             if(m_ResourceManager&&m_EnvironmentSettings->enabled){
                 const auto& key=m_EnvironmentSettings->assetPath;
@@ -319,8 +332,9 @@ namespace ecs {
             refresh(m_ShaderResources,[&](auto handle){m_Renderer->DestroyShader(handle);},m_FailedShaderGpuVersions);
             for(auto it=m_MaterialResources.begin();it!=m_MaterialResources.end();)if(m_ResourceManager->Get<MaterialResource>(it->first)!=it->second)it=m_MaterialResources.erase(it);else ++it;
         }
-        PumpGpuFinalization(
-            maxGpuFinalizationsPerFrame);
+        const auto uploadStart=std::chrono::steady_clock::now();
+        PumpGpuFinalization(maxGpuFinalizationsPerFrame);
+        m_Statistics.gpuFinalizationMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-uploadStart).count();
 
         const auto submittedBefore = m_Renderer->GetSubmissionStatistics();
         const auto elapsed = [](auto start) { return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count(); };
@@ -339,16 +353,16 @@ namespace ecs {
                         TransformComponent& transform,
                         MeshRendererComponent& meshRenderer)
                     {
-                        if (!meshRenderer.visible)
+                        if (!meshRenderer.visible||(!m_EditorIsolated.empty()&&!m_EditorIsolated.contains(entity)))
                             return;
 
-                        const auto key=AssetPaths::NormalizeAssetKey(meshRenderer.meshPath);
+                        const auto key=m_MeshResources.contains(meshRenderer.meshPath)?meshRenderer.meshPath:AssetPaths::NormalizeAssetKey(meshRenderer.meshPath);
                         const auto meshHandle=GetOrUploadMesh(key);if(!meshHandle.IsValid())return;
                         const auto resource=m_MeshResources.find(key);
                         if(resource==m_MeshResources.end())return;
                         const auto& mesh=resource->second->GetData().meshData;
                         const auto count=std::max(std::size_t(1),mesh.submeshes.size());
-                        const auto pose=m_Interpolation?m_Interpolation->Resolve(entity,transform):RenderPose::From(transform);
+                        const auto pose=m_Interpolation?m_Interpolation->ResolveWorld(world,entity):RenderPose::From(world.WorldTransform(entity));
                         bool visible=false,casts=false;
                         for(std::size_t slot=0;slot<count;++slot) {
                             RenderSnapshot snapshot{};
@@ -363,6 +377,16 @@ namespace ecs {
                             for(int c=0;c<8;++c)for(int row=0;row<3;++row){float value=model[12+row];for(int k=0;k<3;++k)value+=model[k*4+row]*(c&(1<<k)?it->second.maximum[k]:it->second.minimum[k]);b.minimum[row]=std::min(b.minimum[row],value);b.maximum[row]=std::max(b.maximum[row],value);}m_ShadowWorldBounds.push_back(b);
                         }
                     });
+                for(const auto& item:m_PlacementItems){
+                    const auto resource=m_ResourceManager->Get<MeshResource>(item.mesh);
+                    if(resource&&resource->IsLoaded()&&!resource->GetData().placeholder){
+                        RenderSnapshot preview;preview.mesh=GetOrUploadMesh(item.mesh);
+                        preview.shader=GetOrCreateShader("dx12/textured.hlsl");preview.texture=GetOrCreateTexture("defaults/texture");
+                        preview.pose=RenderPose::From(item.transform);preview.castShadows=false;preview.materialState={true,false,false};
+                        preview.baseColor={.08f,.8f,1,1};preview.tint={.5f,1,1,1};
+                        if(preview.mesh.IsValid()&&preview.shader.IsValid()&&preview.texture.IsValid())m_RenderSnapshots.push_back(preview);
+                    }
+                }
                 m_Statistics.gatherMs = elapsed(start);
                 m_Statistics.visibleSubmeshes = m_RenderSnapshots.size();
             }
@@ -459,6 +483,7 @@ namespace ecs {
                 m_Statistics.submitMs=elapsed(start);
             }
             m_Renderer->EndMainPass();
+
         }
 
         const auto finishStatistics = [&] {
@@ -475,15 +500,30 @@ namespace ecs {
         m_Statistics.submitted.shadowCasters-=submittedBefore.shadowCasters;
         m_Statistics.submitted.instanceBufferGrowths-=submittedBefore.instanceBufferGrowths;
         };
-        if (!m_DebugCollidersEnabled) { finishStatistics(); return; }
+        auto renderUI=[&](){
+            m_UIDrawList={};bool hasUI=false;if(m_UIPreview)for(auto e:world.Entities())if(auto* c=world.GetComponent<UICanvasComponent>(e);c&&c->enabled&&!c->document.empty()){hasUI=true;break;}
+            if(hasUI&&m_ResourceManager){
+                if(!m_UIFont)m_UIFont=ui::RasterizeFont();
+                if(!m_UIFontTexture.IsValid())m_UIFontTexture=m_Renderer->CreateTexture2D(m_UIFont->texture);
+                auto area=m_Renderer->RenderAreaSize();
+                const auto layoutStart=std::chrono::steady_clock::now();
+                m_UIDrawList=m_RuntimeUI.Build(world,*m_ResourceManager,float(area[0]),float(area[1]),*m_UIFont,m_UIFontTexture,[&](const std::string& key){return key.empty()?RenderTextureHandle{}:GetOrCreateTexture(key,true);});
+                m_Statistics.runtimeUILayoutMs=elapsed(layoutStart);
+                const auto uiSubmitStart=std::chrono::steady_clock::now();
+                m_Renderer->DrawRuntimeUI(m_UIDrawList);
+                m_Statistics.runtimeUISubmitMs=elapsed(uiSubmitStart);
+            }else if(m_ResourceManager)m_RuntimeUI.Sync(world,*m_ResourceManager);
+        };
+        if (!m_DebugCollidersEnabled) { renderUI();finishStatistics(); return; }
         {
             ZoneScopedN("DebugColliders");
 
             world.ForEach<TransformComponent, ColliderComponent>(
                 [&](Entity entity, TransformComponent& transform, ColliderComponent& collider)
                 {
+                    if(!m_EditorIsolated.empty()&&!m_EditorIsolated.contains(entity))return;
                     float mvp[16];
-                    RenderPose debugTransform = m_Interpolation && !m_PhysicsDebugPose ? m_Interpolation->Resolve(entity, transform) : RenderPose::From(transform);
+                    RenderPose debugTransform = m_Interpolation && !m_PhysicsDebugPose ? m_Interpolation->ResolveWorld(world,entity) : RenderPose::From(world.WorldTransform(entity));
                     debugTransform.position.x += collider.offset.x;
                     debugTransform.position.y += collider.offset.y;
                     debugTransform.position.z += collider.offset.z;
@@ -517,13 +557,14 @@ namespace ecs {
                     m_Renderer->DrawTestCube();
                 });
         }
-        finishStatistics();
+        renderUI();finishStatistics();
     }
 
     bool RenderSystem::TryBuildRenderSnapshot(const MeshRendererComponent& meshRenderer,
         const MaterialComponent* component,RenderSnapshot& snapshot,const MeshData& mesh,RenderMeshHandle meshHandle,std::size_t submeshIndex)
     {
         ZoneScopedN("MaterialResolve");
+        ++m_Statistics.materialResolves;
         const auto start=std::chrono::steady_clock::now();
         const auto finish=[&](bool result) {m_Statistics.materialResolveMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();return result;};
         if(!m_Renderer||!m_ResourceManager||meshRenderer.meshPath.empty())return finish(false);
@@ -541,7 +582,10 @@ namespace ecs {
             if(slot<component->slotMaterials.size()&&!component->slotMaterials[slot].empty())asset=component->slotMaterials[slot];
         }
         if(!asset.empty()) {
-            const auto key=AssetPaths::NormalizeAssetKey(asset);
+            const auto pathStart=std::chrono::steady_clock::now();
+            std::string key=asset;
+            if(!m_MaterialResources.contains(asset)){++m_Statistics.materialPathChecks;key=AssetPaths::NormalizeAssetKey(asset);}
+            m_Statistics.materialPathMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-pathStart).count();
             if(m_MaterialResources.count(key))++m_Statistics.materialCacheHits;else ++m_Statistics.materialCacheMisses;
             const auto resource=key.empty()?nullptr:GetOrLoadMaterial(key);
             if(!resource||resource->IsLoading())return finish(false);
@@ -561,16 +605,31 @@ namespace ecs {
             return finish(false);
         }
         const bool hasUV0=submeshIndex>=mesh.submeshes.size()||mesh.submeshes[submeshIndex].hasUV0;
-        snapshot.texture=GetOrCreateTexture(material.texturePath.empty()||material.textureTexCoords[0]!=0||!hasUV0?"defaults/texture":AssetPaths::NormalizeAssetKey(material.texturePath));
+        auto textureStart=std::chrono::steady_clock::now();
+        std::string textureKey="defaults/texture";
+        if(!material.texturePath.empty()&&material.textureTexCoords[0]==0&&hasUV0) {
+            auto pathStart=std::chrono::steady_clock::now();
+            // Imported texture paths are already canonical resource keys. Reuse
+            // the renderer-owned resource, just as the optional maps do below.
+            // GetOrCreateTexture still checks usability and GPU resource version;
+            // cache-epoch refresh and ReleaseGpuResources retire stale owners.
+            if(m_TextureResources.contains(material.texturePath))textureKey=material.texturePath;
+            else {++m_Statistics.materialPathChecks;textureKey=AssetPaths::NormalizeAssetKey(material.texturePath);}
+            m_Statistics.materialPathMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-pathStart).count();
+        }
+        snapshot.texture=GetOrCreateTexture(textureKey);
         snapshot.textureParameters={material.normalScale,material.occlusionStrength,0,1};
         const std::string* paths[3]={&material.normalTexturePath,&material.metallicRoughnessTexturePath,&material.occlusionTexturePath};
         for(int i=0;i<3;++i)if(hasUV0 && !paths[i]->empty() && material.textureTexCoords[i+1]==0) {
             snapshot.maps[i]=GetOrCreateTexture(m_TextureResources.count(*paths[i])?*paths[i]:AssetPaths::NormalizeAssetKey(*paths[i]),true);
             if(snapshot.maps[i].IsValid()&&(m_TextureMapMask&(1<<i)))snapshot.textureParameters[2]+=float(1<<i);
         }
+        m_Statistics.materialTextureMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-textureStart).count();
+        const auto shaderStart=std::chrono::steady_clock::now();
         const auto shaderKey=AssetPaths::NormalizeShaderKey(material.shaderPath);
         snapshot.shader=GetOrCreateShader(shaderKey);
         const auto shaderSource=m_ResourceManager->Get<ShaderResource>(shaderKey);
+        m_Statistics.materialShaderMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-shaderStart).count();
         const bool colorPipeline=shaderSource && shaderSource->GetData().fragmentSource.find("PBR_COLOR_PIPELINE_V1")!=std::string::npos;
         for(int i=0;i<4;++i) {
             snapshot.tint[i]=(colorPipeline?1.f:material.baseColor[i])*(component?component->tint[i]:1.f);
@@ -622,7 +681,7 @@ namespace ecs {
         if (m_Renderer == nullptr)
             return;
         if(m_EnvironmentSettings){
-            auto environment=*m_EnvironmentSettings;if(m_ViewportUnlit)environment.diffuse=environment.specular=false;
+            auto environment=m_EvaluatedPostProcess.environment;if(m_ViewportUnlit)environment.diffuse=environment.specular=false;
             m_Renderer->SetEnvironmentSettings(environment);
             if(m_ResourceManager&&m_EnvironmentSettings->enabled){
                 const auto& key=m_EnvironmentSettings->assetPath;
@@ -730,6 +789,9 @@ namespace ecs {
             }
         }
 
+        // Keep loading/failed owners too: an Image must not revalidate its path
+        // every frame while loading or displaying a missing-texture diagnostic.
+        if(resource)m_TextureResources[key]=resource;
         if (resource == nullptr || !resource->IsUsable() || (optionalMap && resource->IsFailed()))
             return RenderTextureHandle::Invalid();
 
@@ -1132,4 +1194,18 @@ namespace ecs {
             "RenderSystem: GPU finalized shader key=" +
             key);
     }
+}
+
+ui::DrawList ecs::RenderSystem::BuildUIDesignerPreview(const ui::Document& document,ui::Pair preview,IRenderAdapter* renderer){
+ struct RestoreAdapter {IRenderAdapter*& field;IRenderAdapter* previous;~RestoreAdapter(){field=previous;}} restore{m_Renderer,m_Renderer};
+ SetRenderAdapter(renderer);
+ if(!m_Renderer||!m_ResourceManager)return {};
+ if(!m_UIFont)m_UIFont=ui::RasterizeFont();
+ if(!m_UIFontTexture.IsValid())m_UIFontTexture=m_Renderer->CreateTexture2D(m_UIFont->texture);
+ PumpGpuFinalization(1);
+ return ui::LayoutDocument(m_RuntimeUI.Preview(document,*m_ResourceManager),preview[0],preview[1],*m_UIFont,m_UIFontTexture,[&](const std::string& key){
+  if(key.empty())return RenderTextureHandle{};
+  auto cached=m_TextureResources.find(key);if(cached!=m_TextureResources.end()&&cached->second!=m_ResourceManager->Get<TextureResource>(key)){auto& data=cached->second->GetData();if(data.gpuHandle.IsValid()){m_Renderer->DestroyTexture(data.gpuHandle);data.gpuHandle={};data.gpuHandleVersion=0;}m_TextureResources.erase(cached);m_FailedTextureGpuVersions.erase(key);}
+  return GetOrCreateTexture(key,true);
+ });
 }

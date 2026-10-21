@@ -1,6 +1,8 @@
 #pragma once
 
 #include "MaterialResource.h"
+#include "PostFxResource.h"
+#include "../ui/UIDocument.h"
 #include "MeshResource.h"
 #include "Resource.h"
 #include "ShaderResource.h"
@@ -47,6 +49,7 @@ public:
         std::uint64_t estimatedCpuBytes = 0;
     };
 
+    void SetUIDirty(const std::string& key,bool dirty){std::lock_guard<std::recursive_mutex> lock(m_Mutex);if(dirty)m_DirtyUI.insert(key);else m_DirtyUI.erase(key);}
     void SetMaterialDirty(const std::string& key,bool dirty) {std::lock_guard<std::recursive_mutex> lock(m_Mutex);if(dirty)m_DirtyMaterials.insert(key);else m_DirtyMaterials.erase(key);}
     std::size_t PumpFinalization(std::size_t maxItems);
     void ReloadEnvironmentAsync(const std::filesystem::path& path) {
@@ -195,6 +198,7 @@ public:
     }
 
     void ClearAll();
+    void DrainProjectLoads();
     std::uint64_t GetCacheEpoch()const {std::lock_guard<std::recursive_mutex> lock(m_Mutex);return m_CacheEpoch;}
 
     template <typename T>
@@ -202,6 +206,7 @@ public:
     {
         std::lock_guard<std::recursive_mutex> lock(m_Mutex);
         const std::string key = NormalizeKey<T>(path);
+        if constexpr(std::is_same_v<T,UIResource>)if(m_DirtyUI.count(key))return FindCachedResource<T>(key);
         if constexpr(std::is_same_v<T,MaterialResource>)if(m_DirtyMaterials.count(key)) {Logger::Get().Warn("Material reload deferred while editor has unsaved changes: "+key);return FindCachedResource<T>(key);}
         if (key.empty())
             return CreateFallbackResource<T>("<invalid>", "reload path does not map to a normalized key");
@@ -245,21 +250,28 @@ public:
             return;
 
         const std::filesystem::path resolvedPath = ResolvePathFromKey<T>(key);
-        if (resolvedPath.empty() || !std::filesystem::exists(resolvedPath))
-            return;
+        if (resolvedPath.empty())return;
+        const bool exists=std::filesystem::exists(resolvedPath);
+        // UI documents and style sheets can be repaired/created after a scene opens.
+        if (!exists&&!std::is_same_v<T,UIResource>)return;
 
         HotReloadWatch watch;
         watch.key = key;
         watch.path = resolvedPath;
         watch.kind = ResourceKindFor<T>();
-        watch.lastWriteTime = std::filesystem::last_write_time(resolvedPath);
+        watch.lastWriteTime = exists?std::filesystem::last_write_time(resolvedPath):std::filesystem::file_time_type::min();
         watch.fileSize =
-            std::filesystem::is_regular_file(resolvedPath)
+            exists&&std::filesystem::is_regular_file(resolvedPath)
                 ? std::filesystem::file_size(resolvedPath)
                 : 0;
         m_HotReloadWatches[key + "#" + std::to_string(static_cast<int>(watch.kind))] = watch;
+        if constexpr(std::is_same_v<T,PostFxResource>){auto resource=Get<T>(key);if(resource&&resource->GetData().definition){watch.path=PostFxLoader::SafePath(resource->GetData().definition->shader);if(std::filesystem::exists(watch.path)){watch.lastWriteTime=std::filesystem::last_write_time(watch.path);watch.fileSize=std::filesystem::file_size(watch.path);m_HotReloadWatches[key+"#hlsl"]=watch;}}}
     }
 
+    const std::vector<std::string>& PostFxAssets(bool refresh=false);
+    std::string FindPostFx(const std::string& id);
+    bool PostFxDuplicate(const std::string& id);
+    void ReloadPostFx(const std::string& key);
     void PollHotReload();
     void PollAsyncLoads();
 
@@ -277,7 +289,7 @@ public:
         CollectResourceStats(m_TextureCache, stats);
         CollectResourceStats(m_ShaderCache, stats);
         CollectResourceStats(m_MaterialCache, stats);
-        CollectResourceStats(m_EnvironmentCache, stats);
+        CollectResourceStats(m_EnvironmentCache, stats);CollectResourceStats(m_PostFxCache,stats);CollectResourceStats(m_UICache,stats);
         return stats;
     }
 
@@ -299,7 +311,7 @@ private:
         Texture,
         Shader,
         Material,
-        Environment
+        Environment,PostFx,UI
     };
 
     struct HotReloadWatch
@@ -320,7 +332,9 @@ private:
     template <typename T>
     CacheMap<T>& GetCache()
     {
-        if constexpr (std::is_same_v<T, MeshResource>)
+        if constexpr (std::is_same_v<T, UIResource>)return m_UICache;
+        else if constexpr (std::is_same_v<T, PostFxResource>)return m_PostFxCache;
+        else if constexpr (std::is_same_v<T, MeshResource>)
             return m_MeshCache;
         else if constexpr (std::is_same_v<T, TextureResource>)
             return m_TextureCache;
@@ -337,7 +351,9 @@ private:
     template <typename T>
     ResourceHandle<T> GetDefaultStorage() const
     {
-        if constexpr (std::is_same_v<T, MeshResource>)
+        if constexpr (std::is_same_v<T, UIResource>)return ResourceHandle<UIResource>{};
+        else if constexpr (std::is_same_v<T, PostFxResource>)return ResourceHandle<PostFxResource>{};
+        else if constexpr (std::is_same_v<T, MeshResource>)
             return m_DefaultMesh;
         else if constexpr (std::is_same_v<T, TextureResource>)
             return m_DefaultTexture;
@@ -354,7 +370,9 @@ private:
     template <typename T>
     std::string NormalizeKey(const std::filesystem::path& path) const
     {
-        if constexpr (std::is_same_v<T, EnvironmentResource>) {
+        if constexpr (std::is_same_v<T, UIResource>){try{auto key=AssetPaths::ToUtf8String(path);ui::SafeDocumentPath(key);return key;}catch(...){return {};}}
+        else if constexpr (std::is_same_v<T, PostFxResource>){try{auto key=AssetPaths::ToUtf8String(path);PostFxLoader::SafePath(key);return key;}catch(...){return {};}}
+        else if constexpr (std::is_same_v<T, EnvironmentResource>) {
             if(path.empty()||path.is_absolute()||path.has_root_name())return {};
             const auto raw=AssetPaths::ToUtf8String(path);if(raw.find(':')!=std::string::npos||raw.find('#')!=std::string::npos)return {};
             for(const auto& part:path)if(part=="..")return {};
@@ -371,7 +389,9 @@ private:
     template <typename T>
     std::filesystem::path ResolvePathFromKey(const std::string& key) const
     {
-        if constexpr (std::is_same_v<T, ShaderResource>)
+        if constexpr (std::is_same_v<T, UIResource>)return ui::SafeDocumentPath(key);
+        else if constexpr (std::is_same_v<T, PostFxResource>)return PostFxLoader::SafePath(key);
+        else if constexpr (std::is_same_v<T, ShaderResource>)
             return AssetPaths::ResolveShaderPath(std::filesystem::u8path(key));
         else if constexpr (std::is_same_v<T, TextureResource>)
             return AssetPaths::ResolveAssetPath(std::filesystem::u8path(key.substr(0,key.find("#embedded/"))));
@@ -386,7 +406,9 @@ private:
     {
         const std::filesystem::path resolvedPath = ResolvePathFromKey<T>(key);
 
-        if constexpr (std::is_same_v<T, MeshResource>)
+        if constexpr (std::is_same_v<T, UIResource>)return UILoader::Load(key,resolvedPath);
+        else if constexpr (std::is_same_v<T, PostFxResource>)return PostFxLoader::Load(key,resolvedPath);
+        else if constexpr (std::is_same_v<T, MeshResource>)
             return MeshLoader::Load(key, resolvedPath);
         else if constexpr (std::is_same_v<T, TextureResource>)
             return TextureLoader::Load(key, resolvedPath);
@@ -468,7 +490,9 @@ private:
     template <typename T>
     std::string ResourceTypeName() const
     {
-        if constexpr (std::is_same_v<T, MeshResource>)
+        if constexpr (std::is_same_v<T, UIResource>)return "UI Document";
+        else if constexpr (std::is_same_v<T, PostFxResource>)return "Custom PostFX";
+        else if constexpr (std::is_same_v<T, MeshResource>)
             return "Mesh";
         else if constexpr (std::is_same_v<T, TextureResource>)
             return "Texture";
@@ -485,7 +509,9 @@ private:
     template <typename T>
     ResourceKind ResourceKindFor() const
     {
-        if constexpr (std::is_same_v<T, MeshResource>)
+        if constexpr (std::is_same_v<T, UIResource>)return ResourceKind::UI;
+        else if constexpr (std::is_same_v<T, PostFxResource>)return ResourceKind::PostFx;
+        else if constexpr (std::is_same_v<T, MeshResource>)
             return ResourceKind::Mesh;
         else if constexpr (std::is_same_v<T, TextureResource>)
             return ResourceKind::Texture;
@@ -540,6 +566,8 @@ private:
         return static_cast<std::uint64_t>(resource.vertexSource.size() + resource.fragmentSource.size());
     }
 
+    std::uint64_t EstimateResourceBytes(const UIResource& r)const{return r.document?nlohmann::json(*r.document).dump().size():r.styles?nlohmann::json(*r.styles).dump().size():0;}
+    std::uint64_t EstimateResourceBytes(const PostFxResource& r)const{return r.definition?r.definition->source.size()+sizeof(PostFxDefinition):0;}
     std::uint64_t EstimateResourceBytes(const MaterialResource& resource) const
     {
         return static_cast<std::uint64_t>(
@@ -700,12 +728,15 @@ private:
     }
 
     mutable std::recursive_mutex m_Mutex;
+    CacheMap<UIResource> m_UICache;
+    CacheMap<PostFxResource> m_PostFxCache;
+    std::vector<std::string> m_PostFxKeys;bool m_PostFxScanned=false;
     CacheMap<MeshResource> m_MeshCache;
     CacheMap<TextureResource> m_TextureCache;
     CacheMap<EnvironmentResource> m_EnvironmentCache;
     CacheMap<ShaderResource> m_ShaderCache;
     CacheMap<MaterialResource> m_MaterialCache;
-    std::unordered_set<std::string> m_DirtyMaterials;
+    std::unordered_set<std::string> m_DirtyMaterials,m_DirtyUI;
     std::unordered_map<std::string, HotReloadWatch> m_HotReloadWatches;
     std::vector<AsyncTask> m_AsyncTasks;
     std::unordered_set<std::string> m_PendingAsyncKeys;

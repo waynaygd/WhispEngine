@@ -26,6 +26,8 @@ void ResourceManager::ClearAll()
     const std::size_t shaderCount = m_ShaderCache.size();
     const std::size_t materialCount = m_MaterialCache.size();
 
+    m_UICache.clear();m_DirtyUI.clear();
+    m_PostFxCache.clear();m_PostFxKeys.clear();m_PostFxScanned=false;
     m_MeshCache.clear();
     m_TextureCache.clear();
     m_EnvironmentCache.clear();
@@ -34,12 +36,25 @@ void ResourceManager::ClearAll()
     m_DirtyMaterials.clear();
     m_HotReloadWatches.clear();
     m_PendingAsyncKeys.clear();
+    ++m_CacheEpoch;
 
     Logger::Get().Info(
         "ResourceManager: cleared all caches mesh=" + std::to_string(meshCount) +
         " texture=" + std::to_string(textureCount) +
         " shader=" + std::to_string(shaderCount) +
         " material=" + std::to_string(materialCount));
+}
+
+void ResourceManager::DrainProjectLoads()
+{
+    // Finalization may schedule material dependencies. Reach a fixed point before
+    // publishing the next context so no worker resolves a key in the next project.
+    for (;;) {
+        if(m_JobSystem&&m_JobSystem->IsInitialized())m_JobSystem->WaitAll();
+        PollAsyncLoads();
+        const auto finalized=PumpFinalization(static_cast<std::size_t>(-1));
+        if(finalized==0)break;
+    }
 }
 
 void ResourceManager::PollAsyncLoads()
@@ -64,12 +79,16 @@ void ResourceManager::PollAsyncLoads()
 void ResourceManager::PollHotReload()
 {
     std::lock_guard<std::recursive_mutex> lock(m_Mutex);
+    std::vector<std::string> changedPostFx;
 
     for (auto& [watchKey, watch] : m_HotReloadWatches)
     {
         (void)watchKey;
-        if (watch.path.empty() || !std::filesystem::exists(watch.path))
+        if (watch.path.empty() || !std::filesystem::exists(watch.path)){
+            if(watch.kind==ResourceKind::UI&&watch.fileSize>0){watch.fileSize=0;(void)Reload<UIResource>(watch.key);}
+            if(watch.kind==ResourceKind::PostFx&&watch.fileSize>0){watch.fileSize=0;(void)Reload<PostFxResource>(watch.key);}
             continue;
+        }
 
         const auto currentWriteTime = std::filesystem::last_write_time(watch.path);
         const std::uintmax_t currentFileSize =
@@ -83,6 +102,8 @@ void ResourceManager::PollHotReload()
         watch.fileSize = currentFileSize;
         switch (watch.kind)
         {
+        case ResourceKind::UI:(void)Reload<UIResource>(watch.key);break;
+        case ResourceKind::PostFx:(void)Reload<PostFxResource>(watch.key);changedPostFx.push_back(watch.key);break;
         case ResourceKind::Mesh:
             (void)Reload<MeshResource>(watch.key);
             break;
@@ -102,6 +123,9 @@ void ResourceManager::PollHotReload()
 
         Logger::Get().Info("ResourceManager: hot reload detected key=" + watch.key);
     }
+    // Dependency paths can change in a manifest. Refresh after iteration so adding
+    // the new shader watch never invalidates the watch-map traversal.
+    for(const auto& key:changedPostFx)WatchForHotReload<PostFxResource>(key);
 }
 
 std::size_t ResourceManager::PumpFinalization(std::size_t maxItems)
@@ -174,3 +198,16 @@ void ResourceManager::Shutdown()
     Logger::Get().Info(
         "ResourceManager: async shutdown complete");
 }
+
+const std::vector<std::string>& ResourceManager::PostFxAssets(bool refresh){
+    if(m_PostFxScanned&&!refresh)return m_PostFxKeys;m_PostFxScanned=true;m_PostFxKeys.clear();
+    std::error_code error;auto root=AssetPaths::ResolveAssetRoot();
+    for(std::filesystem::recursive_directory_iterator it(root,std::filesystem::directory_options::skip_permission_denied,error),end;it!=end;it.increment(error)){
+        if(error){error.clear();continue;}if(it->is_symlink(error)){if(it->is_directory(error))it.disable_recursion_pending();continue;}
+        auto key=AssetPaths::ToUtf8String(it->path().lexically_relative(root));std::replace(key.begin(),key.end(),char(92),char(47));if(it->is_regular_file(error)&&key.ends_with(".postfx.json")){m_PostFxKeys.push_back(key);if(!Get<PostFxResource>(key))Load<PostFxResource>(key);WatchForHotReload<PostFxResource>(key);}
+    }
+    std::sort(m_PostFxKeys.begin(),m_PostFxKeys.end());std::map<std::string,unsigned> ids;for(auto& key:m_PostFxKeys){auto r=Get<PostFxResource>(key);if(r&&r->GetData().definition)++ids[r->GetData().definition->id];}for(auto& [id,count]:ids)if(count>1)Logger::Get().Error("Duplicate Custom PostFX effect ID: "+id);return m_PostFxKeys;
+}
+bool ResourceManager::PostFxDuplicate(const std::string& id){unsigned count=0;for(auto& key:PostFxAssets()){auto r=Get<PostFxResource>(key);if(r&&r->GetData().definition&&r->GetData().definition->id==id)++count;}return count>1;}
+std::string ResourceManager::FindPostFx(const std::string& id){std::string found;for(auto& key:PostFxAssets()){auto r=Get<PostFxResource>(key);if(r&&r->GetData().definition&&r->GetData().definition->id==id){if(!found.empty())return {};found=key;}}return found;}
+void ResourceManager::ReloadPostFx(const std::string& key){Reload<PostFxResource>(key);WatchForHotReload<PostFxResource>(key);}

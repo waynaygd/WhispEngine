@@ -1,0 +1,12 @@
+{
+  "directories": {
+    "assets": "engine/assets",
+    "scenes": "Scenes"
+  },
+  "formatVersion": 1,
+  "name": "Interactive Room",
+  "rendering": {
+    "gpuInstancing": true
+  },
+  "startupScene": "Scenes/interactive_room_ui.json"
+}

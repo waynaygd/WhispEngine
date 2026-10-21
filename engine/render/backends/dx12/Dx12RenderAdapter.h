@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
+#include <future>
 
 struct GLFWwindow;
 class Dx12RenderAdapter final : public IRenderAdapter
@@ -39,12 +40,19 @@ public:
 	RenderMeshHandle UploadMesh(const MeshData& meshData) override;
 	void DestroyMesh(RenderMeshHandle handle) override;
 	RenderTextureHandle CreateTexture2D(const TextureData& textureData) override;
+    RenderTextureHandle RenderMeshThumbnail(const MeshData&, RenderShaderHandle, RenderTextureHandle) override;
+    RenderTextureHandle CreateThumbnailTexture(const TextureData& data) override {return CreateTexture(data,false,true);}
 	void DestroyTexture(RenderTextureHandle handle) override;
 	RenderShaderHandle CreateShaderProgram(const ShaderResource& shaderResource) override;
 	void DestroyShader(RenderShaderHandle handle) override;
 	void BindShader(RenderShaderHandle handle) override;
 	void BindTexture(std::uint32_t slot, RenderTextureHandle handle) override;
 	void DrawMesh(RenderMeshHandle handle) override;
+    std::array<unsigned,2> RenderAreaSize()const override{return m_ViewportTarget.rendering?std::array<unsigned,2>{m_ViewportTarget.width,m_ViewportTarget.height}:std::array<unsigned,2>{m_Width,m_Height};}
+    void DrawRuntimeUI(const ui::DrawList&)override;
+    void SetCustomPostFx(const PostFxFrame& frame)override{m_CustomPostFx=frame;}
+    std::string CustomPostFxStatus(const std::string& key)const override;
+    void SetScreenEffects(const ScreenEffects& value)override{m_ScreenEffects=SanitizeScreenEffects(value);}
     void SetFog(const FogFrame& frame)override{m_Fog=frame;}
     FogDiagnostics GetFogDiagnostics()const override{return m_FogDiagnostics;}
     void SetAntiAliasing(AntiAliasingMode mode) override {m_AntiAliasing=AntiAliasingMode(std::clamp(int(mode),0,2));}
@@ -70,6 +78,7 @@ public:
     // Diagnostics only, after EndFrame and before Present; waits for readback.
     std::vector<std::uint8_t> ReadBackFramePixels();
     std::vector<std::uint8_t> ReadBackViewportPixels();
+    std::vector<std::uint8_t> ReadBackTexturePixels(RenderTextureHandle);
 
 
     void SetMeshRange(const RenderMeshRange& range) override {m_MeshRange=range;}
@@ -81,12 +90,15 @@ public:
     void EndShadowPass() override;
     void SetEditorVisuals(const EditorVisualFrame& f) override {m_EditorVisualFrame=f;m_EditorVisualDiagnostics={};}
     bool UploadEditorSky(const EnvironmentResource&,std::uint64_t) override;
+    void ReleaseEditorSky() override;
     EditorVisualDiagnostics GetEditorVisualDiagnostics()const override{return m_EditorVisualDiagnostics;}
     void BeginMainPass() override;
     void EndMainPass() override;
     std::uint64_t GetShadowPreviewTextureId() const override;
     std::array<unsigned,2> ProbeMsaaSupport(unsigned samples)const {std::array<unsigned,2> result{};int index=0;for(auto format:{DXGI_FORMAT_R32G32B32A32_FLOAT,DXGI_FORMAT_D32_FLOAT}){D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS data{format,samples,D3D12_MULTISAMPLE_QUALITY_LEVELS_FLAG_NONE,0};if(m_Device&&SUCCEEDED(m_Device->CheckFeatureSupport(D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS,&data,sizeof(data))))result[index]=data.NumQualityLevels;++index;}return result;}
     RenderGpuTimings GetGpuTimings() const override { return m_GpuTimings; }
+    // CPU waits only: begin-frame slot fence, swapchain Present, submitted-frame fence.
+    std::array<double,3> GetCpuWaitMs()const{return m_CpuWaitMs;}
     std::vector<float> ReadBackShadowDepth();
     unsigned GetValidationErrorCount() const;
     struct MaterialBindingRecord {unsigned frameSlot=0;std::array<std::uint64_t,5> textures{};std::uint64_t descriptor=0;unsigned availableMaps=0;};
@@ -97,6 +109,8 @@ public:
     bool SaveFrameImage(const std::string&) override;
 
 private:
+    RenderTextureHandle CreateTexture(const TextureData&, bool renderTarget, bool deferred=false);
+    std::vector<std::uint8_t> ReadBackColorPixels(ID3D12Resource*);
     GLFWwindow* m_EditorUiWindow=nullptr;
     float m_EditorUiScale=1;
     EditorVisualFrame m_EditorVisualFrame;
@@ -195,14 +209,15 @@ private:
     std::array<float,16> m_Model{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
     struct CachedInstances { const RenderInstanceData* data; std::size_t count; D3D12_VERTEX_BUFFER_VIEW view; };
     std::vector<CachedInstances> m_CachedInstances;
-    static constexpr UINT TimingQueries=98;
+    static constexpr UINT TimingStages=10,TimingPasses=16,TimingQueries=2+TimingStages*TimingPasses;
+    std::array<unsigned char,TimingPasses> m_TimeExtras{},m_TimeSlotExtras[FrameCount]{};
     Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_TimeHeap;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_TimeReadback[FrameCount];
     UINT64 m_TimeFrequency=0;
     UINT m_TimePassCount=0,m_TimeCurrentPass=UINT_MAX;
     UINT m_TimePending[FrameCount]{};
     bool m_TimeOverflow=false,m_TimeComplete[FrameCount]{};
-    RenderGpuTimings m_GpuTimings{};
+    RenderGpuTimings m_GpuTimings{};std::array<double,3> m_CpuWaitMs{};
 
 	struct UploadedMesh
 	{
@@ -332,6 +347,21 @@ private:
         UINT64 allocationBytes=0;
     };
     HdrTarget m_HdrTargets[FrameCount];
+    struct PostFxCompile {std::vector<unsigned char> vs,ps;std::string error;std::shared_ptr<const PostFxDefinition> definition;};
+    struct PostFxGpu {std::shared_ptr<const PostFxDefinition> requested,active;std::future<PostFxCompile> pending;Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;std::string error;};
+    std::map<std::string,PostFxGpu> m_PostFxGpu;
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_RuntimeUIRoot;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_RuntimeUIPso;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_RuntimeUIVertices[FrameCount];
+    UINT64 m_RuntimeUICapacity[FrameCount]{};
+    PostFxFrame m_CustomPostFx;
+    HdrTarget m_PostFxTargets[FrameCount][2];
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_PostFxConstants[FrameCount];
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_PostFxRoot;
+    std::vector<const PostFxPass*> PrepareCustomPostFx();
+    void DrawCustomPostFx(const std::vector<const PostFxPass*>&,D3D12_CPU_DESCRIPTOR_HANDLE);
+    void EnsurePostFxTarget(HdrTarget&,UINT,UINT);
+    void ReleaseCustomPostFx();
     struct FogPassResources {HdrTarget target,volume;Microsoft::WRL::ComPtr<ID3D12Resource> constants,readback;bool pending=false;};
     std::vector<FogPassResources> m_FogPasses[FrameCount];
     FogFrame m_Fog;
@@ -347,6 +377,8 @@ private:
     void CollectFogTiming(UINT);
     void ReleaseFog();
     bool m_HdrActive=false,m_HdrNative=false;
+    ScreenEffects m_ScreenEffects;
+    unsigned m_PostFxFrame=0;
     AntiAliasingMode m_AntiAliasing=AntiAliasingMode::Off;
     float m_SceneClear[4]={.08f,.08f,.12f,1};
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_OutputRoot;

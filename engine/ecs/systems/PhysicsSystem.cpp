@@ -1,6 +1,8 @@
 #include "PhysicsSystem.h"
 #include "../PhysicsQueries.h"
 #include "../World.h"
+#include "../RenderPose.h"
+#include "../TransformMath.h"
 #include "../components/ColliderComponent.h"
 #include "../components/RigidbodyComponent.h"
 #include "../components/TransformComponent.h"
@@ -29,61 +31,74 @@ struct StageTimer {
     std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
     ~StageTimer() { value += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(); }
 };
-static Vec3 Add(const Vec3&a,const Vec3&b){return {a.x+b.x,a.y+b.y,a.z+b.z};}
+static Vec3 Add(const Vec3&a,const Vec3&b){
+    return {
+        a.x+b.x,
+        a.y+b.y,
+        a.z+b.z};
+}
+
 static Vec3 Sub(const Vec3&a,const Vec3&b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
 static Vec3 Scale(const Vec3&v,float s){return {v.x*s,v.y*s,v.z*s};}
 static float Dot(const Vec3&a,const Vec3&b){return a.x*b.x+a.y*b.y+a.z*b.z;}
 static Vec3 Cross(const Vec3&a,const Vec3&b){return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};}
 static float Abs(float v){ return v >= 0.0f ? v : -v; }
 static float Sign(float v){ return v >= 0.0f ? 1.0f : -1.0f; }
-static float Clamp(float value, float minValue, float maxValue)
-{
+
+static float Clamp(float value, float minValue, float maxValue){
     return std::max(minValue, std::min(value, maxValue));
 }
-static float LengthSq(const Vec3& v){ return Dot(v, v); }
-static float Length(const Vec3& v){ return std::sqrt(LengthSq(v)); }
-static Vec3 NormalizeSafe(const Vec3& v)
-{
+
+static float LengthSq(const Vec3& v){
+    return Dot(v, v);
+}
+
+static float Length(const Vec3& v){
+    return std::sqrt(LengthSq(v));
+}
+
+static Vec3 NormalizeSafe(const Vec3& v){
     const float len = Length(v);
     if (len <= 0.000001f)
         return Vec3{ 0.0f, 1.0f, 0.0f };
     const float inv = 1.0f / len;
     return Scale(v, inv);
 }
-static float SphereRadius(const ecs::ColliderComponent& c)
-{
+
+static float SphereRadius(const ecs::ColliderComponent& c){
     return std::max(c.halfExtents.x, std::max(c.halfExtents.y, c.halfExtents.z));
 }
-static float BoundingRadius(const ecs::ColliderComponent& c)
-{
+
+static float BoundingRadius(const ecs::ColliderComponent& c){
     if (c.type == ecs::ColliderType::Sphere)
         return SphereRadius(c);
     return std::sqrt(c.halfExtents.x * c.halfExtents.x +
                      c.halfExtents.y * c.halfExtents.y +
                      c.halfExtents.z * c.halfExtents.z);
 }
-static int CellCoord(float v, float cellSize)
-{
+
+static int CellCoord(float v, float cellSize){
     return static_cast<int>(std::floor(v / cellSize));
 }
-static std::uint64_t CellKey(int x, int y, int z)
-{
+
+static std::uint64_t CellKey(int x, int y, int z){
     const std::uint64_t ux = static_cast<std::uint32_t>(x) & 0x1fffffu;
     const std::uint64_t uy = static_cast<std::uint32_t>(y) & 0x1fffffu;
     const std::uint64_t uz = static_cast<std::uint32_t>(z) & 0x1fffffu;
     return (ux << 42) | (uy << 21) | uz;
 }
-static std::uint64_t PairKey(std::size_t a, std::size_t b)
-{
+
+static std::uint64_t PairKey(std::size_t a, std::size_t b){
     const std::uint64_t lo = static_cast<std::uint64_t>(std::min(a, b));
     const std::uint64_t hi = static_cast<std::uint64_t>(std::max(a, b));
     return (hi << 32) ^ lo;
 }
-static Vec3 RotatedAabbHalfExtents(const Vec3& localHalf, const Vec3& rot)
-{
+
+static Vec3 RotatedAabbHalfExtents(const Vec3& localHalf, const Vec3& rot){
     const float cx = std::cos(rot.x), sx = std::sin(rot.x);
     const float cy = std::cos(rot.y), sy = std::sin(rot.y);
     const float cz = std::cos(rot.z), sz = std::sin(rot.z);
+
     const float r00 = cz * cy;
     const float r01 = cz * sy * sx - sz * cx;
     const float r02 = cz * sy * cx + sz * sx;
@@ -93,24 +108,25 @@ static Vec3 RotatedAabbHalfExtents(const Vec3& localHalf, const Vec3& rot)
     const float r20 = -sy;
     const float r21 = cy * sx;
     const float r22 = cy * cx;
+
     return Vec3{
         Abs(r00) * localHalf.x + Abs(r01) * localHalf.y + Abs(r02) * localHalf.z,
         Abs(r10) * localHalf.x + Abs(r11) * localHalf.y + Abs(r12) * localHalf.z,
         Abs(r20) * localHalf.x + Abs(r21) * localHalf.y + Abs(r22) * localHalf.z
     };
 }
-struct BoxAxes
-{
+
+struct BoxAxes{
     Vec3 xAxis;
     Vec3 yAxis;
     Vec3 zAxis;
 };
 
-static BoxAxes BuildBoxAxes(const Vec3& rot)
-{
+static BoxAxes BuildBoxAxes(const Vec3& rot){
     const float cx = std::cos(rot.x), sx = std::sin(rot.x);
     const float cy = std::cos(rot.y), sy = std::sin(rot.y);
     const float cz = std::cos(rot.z), sz = std::sin(rot.z);
+
     const float r00 = cz * cy;
     const float r01 = cz * sy * sx - sz * cx;
     const float r02 = cz * sy * cx + sz * sx;
@@ -120,6 +136,7 @@ static BoxAxes BuildBoxAxes(const Vec3& rot)
     const float r20 = -sy;
     const float r21 = cy * sx;
     const float r22 = cy * cx;
+
     return BoxAxes{
         Vec3{ r00, r10, r20 },
         Vec3{ r01, r11, r21 },
@@ -127,8 +144,7 @@ static BoxAxes BuildBoxAxes(const Vec3& rot)
     };
 }
 
-struct BodyRef
-{
+struct BodyRef{
     ecs::Entity entity{};
     ecs::TransformComponent* transform = nullptr;
     ecs::ColliderComponent* collider = nullptr;
@@ -136,10 +152,31 @@ struct BodyRef
     BoxAxes axes{};
     Vec3 inverseInertia{};
 };
+
+// Static/trigger children are queried in World space; dynamic bodies stay roots.
+// Root colliders retain their existing sizing convention (including auto-fit).
+struct HierarchyPhysicsPoses {
+    std::vector<ecs::TransformComponent> transforms;
+    std::vector<ecs::ColliderComponent> colliders;
+    explicit HierarchyPhysicsPoses(std::size_t capacity){transforms.reserve(capacity);colliders.reserve(capacity);}
+    BodyRef Ref(const ecs::World& world,ecs::Entity e,ecs::TransformComponent& local,ecs::ColliderComponent& collider,ecs::RigidbodyComponent* rb=nullptr){
+        if(!world.Parent(e).IsValid()){
+            if(!ecs::HasPivot(local))return {e,&local,&collider,rb,BuildBoxAxes(local.rotation)};
+            if(rb&&!rb->isStatic&&rb->simulatePhysics)throw std::runtime_error("Dynamic Rigidbody cannot use a nonzero Pivot");
+            auto canonical=ecs::RebasePivot(local,{});transforms.push_back(canonical);return {e,&transforms.back(),&collider,rb,BuildBoxAxes(local.rotation)};
+        }
+        if(rb&&!rb->isStatic&&rb->simulatePhysics)throw std::runtime_error("Dynamic Rigidbody must remain a root entity");
+        auto absolute=ecs::RebasePivot(world.WorldTransform(e),{});transforms.push_back(absolute);colliders.push_back(collider);auto& c=colliders.back();
+        c.halfExtents={c.halfExtents.x*std::abs(absolute.scale.x/local.scale.x),c.halfExtents.y*std::abs(absolute.scale.y/local.scale.y),c.halfExtents.z*std::abs(absolute.scale.z/local.scale.z)};
+        float matrix[16];ecs::BuildRenderModelMatrix(matrix,ecs::RenderPose::From(world.WorldTransform(world.Parent(e))));auto o=c.offset;
+        c.offset={matrix[0]*o.x+matrix[4]*o.y+matrix[8]*o.z,matrix[1]*o.x+matrix[5]*o.y+matrix[9]*o.z,matrix[2]*o.x+matrix[6]*o.y+matrix[10]*o.z};
+        return {e,&transforms.back(),&c,rb,BuildBoxAxes(absolute.rotation)};
+    }
+};
+
 static Vec3 InverseInertiaLocal(
     const ecs::RigidbodyComponent& rb,
-    const ecs::ColliderComponent& collider)
-{
+    const ecs::ColliderComponent& collider){
     if (rb.isStatic || rb.lockRotation || rb.mass <= 0.0001f)
         return Vec3{};
 
@@ -181,8 +218,7 @@ static Vec3 InverseInertiaLocal(
 
 static Vec3 ApplyInverseInertiaWorld(
     const BodyRef& body,
-    const Vec3& worldVector)
-{
+    const Vec3& worldVector){
     if (body.rigidbody->isStatic ||
         body.rigidbody->mass <= 0.0001f)
     {
@@ -226,17 +262,21 @@ static Vec3 ApplyInverseInertiaWorld(
 // the engine's existing world-sized collider convention.
 constexpr float contactMargin = 0.001f;
 constexpr float penetrationSlop = 0.0005f;
-static Vec3 Center(const BodyRef& b) { return Add(b.transform->position, b.collider->offset); }
-static float InvMass(const BodyRef& b)
-{
+
+static Vec3 Center(const BodyRef& b) {
+    return Add(b.transform->position, b.collider->offset);
+}
+
+static float InvMass(const BodyRef& b){
     const auto& rb = *b.rigidbody;
     return !rb.isStatic && rb.simulatePhysics && rb.mass > 0.0001f ? 1.0f / rb.mass : 0.0f;
 }
-static std::array<Vec3, 3> Axes(const BodyRef& b)
-{
+
+static std::array<Vec3, 3> Axes(const BodyRef& b){
     const auto& axes = b.axes;
     return { axes.xAxis, axes.yAxis, axes.zAxis };
 }
+
 static float Component(const Vec3& v, int i) { return i == 0 ? v.x : (i == 1 ? v.y : v.z); }
 static Vec3 ToLocal(const BodyRef& b, const Vec3& r)
 {
@@ -668,9 +708,11 @@ std::optional<RaycastHit> Raycast(const World& world,Vec3 origin,Vec3 direction,
     if(!QueryVector(direction)||LengthSq(direction)<1e-12f)throw std::runtime_error("Raycast direction must be finite and nonzero");
     if(ignore.IsValid()&&!world.IsAlive(ignore))throw std::runtime_error("Raycast ignore is dead/stale/foreign");
     direction=Scale(direction,1/Length(direction));std::optional<RaycastHit> hit;
+    HierarchyPhysicsPoses poses(world.GetAliveCount());
     for(auto e:world.Entities()){
         if(e==ignore||(include&&!include(e))||world.HasComponent<PlayerStartComponent>(e))continue;
-        auto* t=world.GetComponent<TransformComponent>(e);auto* c=world.GetComponent<ColliderComponent>(e);if(!t||!c||!QueryShape(*t,*c))continue;
+        const auto* local=world.GetComponent<TransformComponent>(e);const auto* collider=world.GetComponent<ColliderComponent>(e);if(!local||!collider||!QueryShape(*local,*collider))continue;
+        auto queryTransform=*local;auto queryCollider=*collider;auto shape=poses.Ref(world,e,queryTransform,queryCollider);auto* t=shape.transform;auto* c=shape.collider;
         const Vec3 center=Add(t->position,c->offset);float near=0,far=hit?hit->distance:distance;Vec3 normal=Scale(direction,-1);bool valid=true;
         if(c->type==ColliderType::Sphere){
             auto offset=Sub(origin,center);double x=offset.x,y=offset.y,z=offset.z,r=SphereRadius(*c);
@@ -692,7 +734,7 @@ std::optional<RaycastHit> Raycast(const World& world,Vec3 origin,Vec3 direction,
 std::vector<Entity> FindInRadius(const World& world,Vec3 center,float radius){
     world.AssertOwnerThread();QueryDistance(center,radius);std::vector<Entity> result;
     for(auto e:world.Entities())if(auto* t=world.GetComponent<TransformComponent>(e);t&&QueryVector(t->position)){
-        double x=double(t->position.x)-center.x,y=double(t->position.y)-center.y,z=double(t->position.z)-center.z;
+        auto p=world.WorldTransform(e).position;double x=double(p.x)-center.x,y=double(p.y)-center.y,z=double(p.z)-center.z;
         if(x*x+y*y+z*z<=double(radius)*radius)result.push_back(e);
     }return result;
 }
@@ -700,7 +742,8 @@ void PhysicsSystem::UpdateTriggers(World& world){
     if(m_TriggerWorld!=world.GetIdentity()){m_TriggerPairs.clear();m_TriggerWorld=world.GetIdentity();}
     bool hasTriggers=false;world.ForEach<ColliderComponent>([&](Entity,const auto& c){hasTriggers|=c.isTrigger;});
     if(!hasTriggers&&m_TriggerPairs.empty())return;
-    std::vector<BodyRef> shapes;if(hasTriggers)world.ForEach<TransformComponent,ColliderComponent>([&](Entity e,auto& t,auto& c){if(!world.HasComponent<PlayerStartComponent>(e)&&QueryShape(t,c))shapes.push_back({e,&t,&c,nullptr,BuildBoxAxes(t.rotation)});});
+    HierarchyPhysicsPoses poses(world.GetAliveCount());
+    std::vector<BodyRef> shapes;if(hasTriggers)world.ForEach<TransformComponent,ColliderComponent>([&](Entity e,auto& t,auto& c){if(!world.HasComponent<PlayerStartComponent>(e)&&QueryShape(t,c))shapes.push_back(poses.Ref(world,e,t,c));});
     std::sort(shapes.begin(),shapes.end(),[](const auto& a,const auto& b){return a.entity.index<b.entity.index;});
     decltype(m_TriggerPairs) current;
     for(std::size_t i=0;i<shapes.size();++i){if(!shapes[i].collider->isTrigger)continue;for(std::size_t j=0;j<shapes.size();++j){
@@ -734,11 +777,12 @@ void PhysicsSystem::Update(World& world, float dt)
     }
     StageTimer totalTimer{m_Statistics.totalMs};
     dt = std::min(dt, 0.05f);
+    world.ValidateHierarchy();HierarchyPhysicsPoses poses(world.GetAliveCount());
     std::vector<BodyRef> bodies;
     world.ForEach<ColliderComponent, TransformComponent, RigidbodyComponent>(
         [&](Entity e, ColliderComponent& c, TransformComponent& t, RigidbodyComponent& rb)
         {
-            if (!world.HasComponent<PlayerStartComponent>(e) && (rb.simulatePhysics || rb.isStatic)) bodies.push_back({e, &t, &c, &rb});
+            if (!world.HasComponent<PlayerStartComponent>(e) && (rb.simulatePhysics || rb.isStatic)) bodies.push_back(poses.Ref(world,e,t,c,&rb));
         });
     std::sort(bodies.begin(), bodies.end(), [](const BodyRef& a, const BodyRef& b) { return a.entity.index < b.entity.index; });
     for (auto& b : bodies) {

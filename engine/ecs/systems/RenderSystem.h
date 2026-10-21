@@ -1,6 +1,8 @@
 #pragma once
 #include <nlohmann/json.hpp>
+#include "../../ui/RuntimeUI.h"
 #include "../../render/Environment.h"
+#include "../PostProcessEvaluation.h"
 #include "../../render/SceneLights.h"
 #include "../../resources/EnvironmentResource.h"
 #include "../../resources/Resource.h"
@@ -9,6 +11,7 @@
 #include "../MathTypes.h"
 #include "../components/TransformComponent.h"
 #include "../RenderInterpolation.h"
+#include "../PlacementPreview.h"
 #include "../../render/RenderResourceHandles.h"
 #include "../../render/RenderInstanceData.h"
 #include "../../render/Shadows.h"
@@ -40,6 +43,12 @@ struct TransformComponent;
 class RenderSystem final : public ISystem
 {
 public:
+    // A transient editor view mask. Never changes ECS/runtime visibility.
+    void SetEditorIsolation(const std::vector<Entity>& entities){
+        if(entities==m_EditorIsolation)return;m_EditorIsolation=entities;
+        m_EditorIsolated.clear();m_EditorIsolated.insert(entities.begin(),entities.end());
+    }
+    void SetPlacementPreview(const std::vector<PlacementRenderItem>& items){m_PlacementItems=items;}
     void SetViewportUnlit(bool value){m_ViewportUnlit=value;}
     bool IsViewportUnlit()const{return m_ViewportUnlit;}
     ~RenderSystem() override;
@@ -54,6 +63,14 @@ public:
     void SetInterpolation(RenderInterpolation* interpolation) { m_Interpolation = interpolation; }
     void SetPhysicsDebugPose(bool enabled) { m_PhysicsDebugPose = enabled; }
     void SetShadowSettings(const ShadowSettings* settings) { m_ShadowSettings=settings; }
+    ui::DrawList BuildUIDesignerPreview(const ui::Document&,ui::Pair preview,IRenderAdapter* renderer);
+    ui::RuntimeUI& RuntimeUI(){return m_RuntimeUI;}
+    void SetUIPreview(bool value){m_UIPreview=value;}
+    const ui::DrawList& GetUIDrawList()const{return m_UIDrawList;}
+    std::size_t UIInstanceCount()const{return m_RuntimeUI.Instances().size();}
+    void SetPostFxOverrides(const PostFxRuntimeOverrides* value){m_PostFxOverrides=value;}
+    const EvaluatedPostProcess& GetEvaluatedPostProcess()const{return m_EvaluatedPostProcess;}
+    void SetAtmosphereSettings(const SceneBackground* settings){m_AtmosphereSettings=settings;}
     void SetEnvironmentSettings(const EnvironmentSettings* settings){m_EnvironmentSettings=settings;}
     void SetLightRenderingMode(LightRenderingMode mode){m_LightRenderingMode=mode;}
     void SetLightingSettings(const LightingSettings* settings) { m_LightingSettings=settings; }
@@ -66,7 +83,8 @@ public:
     struct Statistics {
         std::size_t visibleObjects=0;
         std::size_t materialCacheHits=0,materialCacheMisses=0,visibleSubmeshes=0;
-        double materialResolveMs=0;
+        double materialResolveMs=0,materialPathMs=0,materialTextureMs=0,materialShaderMs=0,runtimeUILayoutMs=0,runtimeUISubmitMs=0,gpuFinalizationMs=0;
+        std::size_t materialResolves=0,materialPathChecks=0;
         double gatherMs=0,prepareMs=0,batchMs=0,submitMs=0,shadowPrepareMs=0,shadowMs=0;
         RenderSubmissionStatistics submitted;
     };
@@ -74,6 +92,12 @@ public:
     void ReleaseGpuResources();
 
 private:
+    std::vector<Entity> m_EditorIsolation;
+    std::unordered_set<Entity,EntityHash> m_EditorIsolated;
+    std::vector<PlacementRenderItem> m_PlacementItems;
+    const PostFxRuntimeOverrides* m_PostFxOverrides=nullptr;float m_PostFxTime=0;
+    ui::RuntimeUI m_RuntimeUI;ui::DrawList m_UIDrawList;
+    std::optional<ui::FontAtlas> m_UIFont;RenderTextureHandle m_UIFontTexture;bool m_UIPreview=true;
     bool m_TraceMaterials=false;
     std::uint64_t m_ResourceCacheEpoch=0;
     std::vector<nlohmann::json> m_MaterialDiagnostics;
@@ -133,8 +157,8 @@ private:
     float m_CameraPitch = 0.0f;
     float m_CameraVerticalFovRadians = 1.04719755f;
     float m_CameraAspectRatio = 16.0f / 9.0f;
-    float m_CameraNearPlane = 0.01f;
-    float m_CameraFarPlane = 100.0f;
+    float m_CameraNearPlane = 0.1f;
+    float m_CameraFarPlane = 2000.0f;
     std::unordered_map<std::string, ResourceHandle<MeshResource>> m_MeshResources;
     std::unordered_map<std::string, ResourceHandle<TextureResource>> m_TextureResources;
     std::unordered_map<std::string, ResourceHandle<ShaderResource>> m_ShaderResources;
@@ -167,6 +191,8 @@ private:
     bool m_InstancingEnabled=true;
     bool m_ViewportUnlit=false;
     std::string m_FogWarning;
+    EvaluatedPostProcess m_EvaluatedPostProcess;
+    const SceneBackground* m_AtmosphereSettings=nullptr;
     const EnvironmentSettings* m_EnvironmentSettings=nullptr;
     std::string m_EnvironmentKey,m_RequestedEnvironment;
     ResourceHandle<EnvironmentResource> m_EnvironmentAsset;

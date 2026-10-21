@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <vector>
 #include <string>
@@ -8,6 +9,7 @@
 
 #include "ConfigLoader.h"
 #include "Time.h"
+#include "ProjectContext.h"
 #include "FixedStepClock.h"
 #include "PhysicsFrameStatistics.h"
 #include "../ecs/World.h"
@@ -42,7 +44,10 @@ public:
     Application();
     ~Application();       
 
-    bool Initialize();  
+    enum class StartupMode { LegacyWorkspace, ProjectBrowser };
+    bool Initialize(StartupMode mode=StartupMode::LegacyWorkspace);
+    bool IsProjectBrowserActive()const{return m_ProjectBrowserActive;}
+    bool OpenLegacyWorkspace(std::string* error=nullptr);
     int Run();
     void Shutdown();
     void SetUpdateMode(UpdateMode m) {
@@ -51,17 +56,25 @@ public:
 
     IWindow* GetWindow() { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
     const IWindow* GetWindow()const { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
+    ui::DrawList BuildUIDesignerPreview(const ui::Document& document,ui::Pair preview){return m_RenderSystem?m_RenderSystem->BuildUIDesignerPreview(document,preview,GetRenderAdapter()):ui::DrawList{};}
     IRenderAdapter* GetRenderAdapter(){return m_Windows.empty()?nullptr:m_Windows.front().renderer.get();}
     editor::EditorLayer& GetEditorLayer(){return m_EditorLayer;}
     void SetViewportUnlit(bool value){if(m_RenderSystem)m_RenderSystem->SetViewportUnlit(value);}
     bool IsViewportUnlit()const{return m_RenderSystem&&m_RenderSystem->IsViewportUnlit();}
+    void SetUIInputMode(const std::string&);
+    std::string GetUIInputMode()const;
+    ui::RuntimeUI& GetRuntimeUI(){return m_RenderSystem->RuntimeUI();}
+    bool IsGameplayMouseCaptured()const{return m_PlayerMouseCaptured;}
     bool IsViewportMouseCaptured()const{return m_Camera.controlsActive||m_PlayerMouseCaptured;}
-    ecs::World& GetWorld() { return m_RuntimeWorld?*m_RuntimeWorld:m_World; }
+    ecs::World& GetWorld() { return m_RuntimeWorld?*m_RuntimeWorld:(m_PrefabWorld?*m_PrefabWorld:m_World); }
+    bool IsPrefabEditing()const{return bool(m_PrefabWorld);}
+    bool BeginPrefabContext(std::unique_ptr<ecs::World>);
+    void EndPrefabContext();
     ecs::World& GetEditorWorld(){return m_World;}
     scripting::LuaRuntime& GetLuaRuntime(){return m_LuaRuntime;}
     ecs::MutationQueue& GetMutationQueue(){return m_Mutations;}
     void ApplyStructuralCommands(){if(m_Mutations.Apply(GetWorld())&&m_PhysicsSystem)m_PhysicsSystem->ResetState();}
-    const ecs::World& GetWorld() const { return m_RuntimeWorld?*m_RuntimeWorld:m_World; }
+    const ecs::World& GetWorld() const { return m_RuntimeWorld?*m_RuntimeWorld:(m_PrefabWorld?*m_PrefabWorld:m_World); }
     ResourceManager* GetResourceManager() { return m_ResourceManager.get(); }
     const ResourceManager* GetResourceManager() const { return m_ResourceManager.get(); }
     void EnterGameplayScene();
@@ -144,12 +157,22 @@ public:
     bool SaveSceneAs(const std::string& key,bool overwrite=false,std::string* error=nullptr);
     bool OpenScene(const std::string& key,std::string* error=nullptr);
     void NewScene();
+    enum class ProjectDecision { Cancel, Discard, Save };
+    bool OpenProject(const std::filesystem::path&,ProjectDecision=ProjectDecision::Cancel,std::string* error=nullptr);
+    bool CloseProject(ProjectDecision=ProjectDecision::Cancel,std::string* error=nullptr);
+    bool SetStartupScene(const std::string&,std::string* error=nullptr);
+    bool SaveProjectSettings(const ProjectSettings&,std::string* error=nullptr);
+    RenderBackend GetRenderBackend()const{return m_Config.activeBackend;}
+    bool SaveAuthoringSceneForTransition(std::string* error=nullptr);
+    std::shared_ptr<const ProjectContext> GetProject()const{return ProjectManager::Active();}
+    std::string DefaultSceneKey()const {auto p=GetProject();return p?p->sceneDirectory+"/Untitled.json":"scenes/editor_scene.json";}
     const std::string& GetSceneKey()const{return m_SceneKey;}
     SceneSettings GetSceneSettings()const;
     bool SetSceneSettings(const SceneSettings&,std::string* error=nullptr);
     ecs::Entity CreateEmptyEntity(const std::string& name="Entity");
     void NotifyEditorMutation(ecs::Entity entity={});
     void FocusEntity(ecs::Entity entity);
+    void FocusEntities(const std::vector<ecs::Entity>& entities);
     void SetCameraNavigation(float speed,float sensitivity){m_Camera.moveSpeed=std::clamp(speed,.2f,25.f);m_Camera.mouseSensitivity=std::clamp(sensitivity,.0001f,.02f);}
     float GetCameraMoveSpeed()const{return m_Camera.moveSpeed;}
     float GetCameraSensitivity()const{return m_Camera.mouseSensitivity;}
@@ -159,6 +182,14 @@ public:
 
 
 private:
+    bool m_ProjectBrowserActive=false;
+    std::string m_LegacyStartupScene;
+    friend struct ApplicationTestAccess;
+    // Optional frame observer for short integration diagnostics; called after Present.
+    std::function<void()> m_FrameObserver;
+    // resource update, Lua update, fixed simulation, ECS, world render, ImGui submit, wall.
+    std::array<double,7> m_FrameCpuMs{};
+    bool CommitProject(std::shared_ptr<const ProjectContext>,ecs::World&,const SceneSettings&,ProjectDecision,std::string*);
     void ResetPhysicsClock() {
         m_FixedClock.Reset(); m_FixedSimulationSeconds = 0;
         m_ResetPhysicsDelta = true;
@@ -168,7 +199,7 @@ private:
     void RunEcsBootstrapCheck();
     void RunResourceBootstrapCheck();
     void PreloadSceneResourcesAsync(const std::vector<EcsDemoEntityConfig>& entities);
-    void SetupEcsRuntimeDemo();
+    void SetupEcsRuntimeDemo(bool populate=true);
     void InitializeConfigHotReload();
     void PollConfigHotReload();
     bool ReloadSceneFromCurrentConfig(const char* reason);
@@ -176,8 +207,9 @@ private:
     ecs::Entity SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg);
     void UpdateEcs(float dt);
     void UpdateCameraController(float dt);
-    void UpdateGameplayInput();
+    void UpdateGameplayInput(float uiDelta);
     bool GameplayInputAllowed() const;
+    bool GameplayActionAllowed(const std::string&)const;
     bool CaptureGameplayCursor(bool);
     scripting::GameplayServices GameplayCapabilities();
     void ReleasePlayerMouse();
@@ -206,8 +238,8 @@ private:
         float yaw = 0.0f;
         float pitch = 0.0f;
         float verticalFovRadians = 1.04719755f;
-        float nearPlane = 0.01f;
-        float farPlane = 100.0f;
+        float nearPlane = 0.1f;
+        float farPlane = 2000.0f;
         float moveSpeed = 1.8f;
         float minMoveSpeed = 0.2f;
         float maxMoveSpeed = 25.0f;
@@ -269,11 +301,17 @@ private:
         float pitch = 0.0f;
     };
 
+    std::unique_ptr<ecs::World> m_PrefabWorld;
+    CameraControllerState m_PrefabSavedCamera;
+    std::vector<ecs::Entity> m_PrefabSavedDebug,m_PrefabSavedStress;
+    SceneSettings m_PrefabSavedSettings;
     CameraPose m_SavedEditorCamera{};
 
     CameraControllerState m_Camera;
     ecs::Entity m_PlayerEntity{};
     bool m_PlayerMouseCaptured = false;
+    ui::InputMode m_UIInputMode=ui::InputMode::GameOnly;
+    bool m_UIPointerConsumed=false;
     bool m_PlayerAltWasDown = false;
     bool m_DebugCollidersEnabled = false;
     bool m_PhysicsDebugPose = false;

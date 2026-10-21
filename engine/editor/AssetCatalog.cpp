@@ -2,6 +2,7 @@
 #include "AssetImport.h"
 #include "LuaAssetDependencies.h"
 #include "../core/AssetPaths.h"
+#include "../core/ProjectContext.h"
 #include "../resources/loaders/MaterialLoader.h"
 #include <fstream>
 #include <algorithm>
@@ -18,6 +19,8 @@ namespace {
 template<class F>bool Guard(F fn,std::string* error){try{fn();if(error)error->clear();return true;}catch(const std::exception& e){if(error)*error=e.what();return false;}}
 }
 AssetCatalog::AssetCatalog(){
+    Register({"UI Document","[UI]","",ecs::AssetKind::UIDocument,{".json"}});
+    Register({"Custom PostFX","[FX]","",ecs::AssetKind::PostFx,{".json"}});
     Register({"Lua Script","[Lua]","scripts",ecs::AssetKind::LuaScript,{".lua"}});
     Register({"Prefab","[PF]","prefabs",ecs::AssetKind::Prefab,{".json"}});
     Register({"Mesh","[M]","models",ecs::AssetKind::Mesh,{".obj",".fbx",".gltf",".glb"}});
@@ -35,7 +38,7 @@ void AssetCatalog::Register(AssetType type){
 void AssetCatalog::Refresh(){
     std::vector<AssetEntry> ready;std::set<std::string> dirs;
     const auto active=std::filesystem::weakly_canonical(AssetPaths::ResolveAssetRoot());
-    for(std::size_t i=0;i<types.size();++i){auto& type=types[i];const std::set<std::filesystem::path> roots=type.shaderRoot?std::set<std::filesystem::path>{AssetPaths::ResolveShaderRoot()}:std::set<std::filesystem::path>{AssetPaths::ResolveAssetRoot(),AssetImport::ProjectRoot()};for(const auto& root:roots){const auto directory=root/type.folder;
+    for(std::size_t i=0;i<types.size();++i){auto& type=types[i];if(type.shaderRoot&&ProjectManager::Active())continue;const std::set<std::filesystem::path> roots=type.shaderRoot?std::set<std::filesystem::path>{AssetPaths::ResolveShaderRoot()}:std::set<std::filesystem::path>{AssetPaths::ResolveAssetRoot(),AssetImport::ProjectRoot()};for(const auto& root:roots){const auto directory=root/type.folder;
         if(!std::filesystem::exists(directory))continue;
         if(!type.folder.empty())dirs.insert(type.folder);
         for(std::filesystem::recursive_directory_iterator walk(directory,std::filesystem::directory_options::skip_permission_denied),end;walk!=end;++walk){const auto& item=*walk;
@@ -43,6 +46,8 @@ void AssetCatalog::Refresh(){
             if(item.is_directory()&&!std::filesystem::is_symlink(item.symlink_status()))dirs.insert(DirectoryKey(item.path().lexically_relative(root)));
             if(!item.is_regular_file()||std::filesystem::is_symlink(item.symlink_status()))continue;
             if(type.kind==ecs::AssetKind::Prefab&&!item.path().filename().string().ends_with(".prefab.json"))continue;
+            if(type.kind==ecs::AssetKind::UIDocument&&!item.path().filename().string().ends_with(".ui.json"))continue;
+            if(type.kind==ecs::AssetKind::PostFx&&!item.path().filename().string().ends_with(".postfx.json"))continue;
             auto ext=item.path().extension().string();std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});
             if(std::find(type.extensions.begin(),type.extensions.end(),ext)==type.extensions.end())continue;
             auto key=AssetPaths::ToUtf8String(item.path().lexically_relative(root));std::replace(key.begin(),key.end(),'\\','/');ready.push_back({key,i});
@@ -132,7 +137,8 @@ std::string AssetCatalog::RenameDestination(const std::string& key,const std::st
 }
 AssetDependencyAudit AssetCatalog::AuditDependencies(const std::string& key){
     AssetDependencyAudit found;
-    const std::set<std::filesystem::path> roots={std::filesystem::weakly_canonical(AssetPaths::ResolveAssetRoot()),std::filesystem::weakly_canonical(AssetImport::ProjectRoot())};
+    std::set<std::filesystem::path> roots={std::filesystem::weakly_canonical(AssetPaths::ResolveAssetRoot()),std::filesystem::weakly_canonical(AssetImport::ProjectRoot())};
+    if(auto project=ProjectManager::Active())roots.insert(project->SceneRoot());
     const auto filename=AssetPaths::ToUtf8String(std::filesystem::u8path(key).filename());
     for(const auto& root:roots)try{
         for(const auto& item:std::filesystem::recursive_directory_iterator(root)){
@@ -213,5 +219,19 @@ bool AssetCatalog::DeleteAssetFile(const std::string& key,std::string* error,boo
     if(!std::filesystem::remove(path))throw std::runtime_error("File no longer exists");
 #endif
     created.erase(key);hiddenFallbacks.insert(key);++revision;
+},error);}
+bool AssetCatalog::MoveAssetFile(const std::string& from,const std::string& to,std::string* error,bool acceptDynamicRisk){return Guard([&]{
+    auto source=EditablePath(from);
+    const auto slash=from.find('/');
+    if(slash==std::string::npos||!to.starts_with(from.substr(0,slash+1))||FileSuffix(from)!=FileSuffix(to))throw std::runtime_error("Move must preserve asset category and complete extension");
+    auto destination=AssetImport::SafeTarget(AssetPaths::ResolveAssetRoot(),to);
+    if(!std::filesystem::is_directory(destination.parent_path())||std::filesystem::exists(destination))throw std::runtime_error("Choose an existing folder and a fresh filename");
+    RequireNoDependencies(from,acceptDynamicRisk);source=EditablePath(from);
+#ifdef _WIN32
+    if(!MoveFileExW(source.c_str(),destination.c_str(),MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Move failed (Windows error "+std::to_string(GetLastError())+")");
+#else
+    std::filesystem::create_hard_link(source,destination);std::filesystem::remove(source);
+#endif
+    created.erase(from);hiddenFallbacks.insert(from);++revision;
 },error);}
 }

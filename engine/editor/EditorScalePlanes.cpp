@@ -10,7 +10,7 @@ bool EditorLayer::DrawScalePlanes(Application& app,const ImVec2& origin,const Im
  if(m_PlaneScaleCaptured){
   if(!ImGui::IsMouseDown(0)){FinishTransaction(app);m_PlaneScaleCaptured=false;}
   else {auto mouse=ImGui::GetMousePos();float amount=((mouse.x-m_ScaleMouse[0])*m_ScaleDirection[0]+(mouse.y-m_ScaleMouse[1])*m_ScaleDirection[1])/(100*ImGui::GetStyle().FontScaleDpi);
-   t->scale=ScalePlane(m_ScaleOriginal.scale,m_ScalePlane,std::max(.001f,1+amount),m_Snapping?m_SnapScale:0);app.NotifyEditorMutation(m_Selection.active);}
+   auto target=m_ScaleOriginal;target.scale=ScalePlane(m_ScaleOriginal.scale,m_ScalePlane,std::max(.001f,1+amount),m_Snapping?m_SnapScale:0);if(app.GetWorld().SetWorldTransform(m_Selection.active,target,&m_EditorError))app.NotifyEditorMutation(m_Selection.active);}
  }
  const auto camera=GizmoCamera(app.GetCameraPosition(),app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),size.x/size.y,app.GetCameraNearPlane(),app.GetCameraFarPlane());
  auto geometry=BuildScalePlaneGeometry(model,camera,origin,size,ImGui::GetStyle().FontScaleDpi);
@@ -26,7 +26,7 @@ bool EditorLayer::DrawScalePlanes(Application& app,const ImVec2& origin,const Im
   draw->AddPolyline(polygon.points.data(),4,highlight?IM_COL32(255,255,180,255):colors[plane],ImDrawFlags_Closed,1.5f);
  }
  if(hovered>=0){ImGui::SetTooltip("Scale %s (local axes); one drag = one Undo. Negative signs preserved.",hovered==0?"XY":hovered==1?"XZ":"YZ");
-  if(ImGui::IsMouseClicked(0)){PushUndoBeforeChange(app,"Plane scale");m_PlaneScaleCaptured=true;m_ScalePlane=hovered;m_ScaleOriginal=*t;m_ScaleMouse={mouse.x,mouse.y};
+  if(ImGui::IsMouseClicked(0)){PushUndoBeforeChange(app,"Plane scale");m_PlaneScaleCaptured=true;m_ScalePlane=hovered;m_ScaleOriginal=app.GetWorld().WorldTransform(m_Selection.active);m_ScaleMouse={mouse.x,mouse.y};
    const auto& points=geometry.planes[hovered].points;ImVec2 c{(points[0].x+points[2].x)*.5f,(points[0].y+points[2].y)*.5f};float dx=c.x-geometry.center.x,dy=c.y-geometry.center.y,n=std::hypot(dx,dy);m_ScaleDirection={dx/std::max(1.f,n),dy/std::max(1.f,n)};
   }
  }
