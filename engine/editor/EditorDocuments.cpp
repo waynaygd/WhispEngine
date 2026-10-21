@@ -1,3 +1,4 @@
+#include "EditorTheme.h"
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -277,18 +278,19 @@ void EditorLayer::DrawDocumentTabs(Application& app){
     SyncSceneDocument(app);if(m_RestoreDocuments)RestoreDocumentSession(app);
     auto* viewport=ImGui::GetMainViewport();const float row=ImGui::GetFrameHeightWithSpacing()+8;
     ImGui::SetNextWindowPos({viewport->WorkPos.x,viewport->WorkPos.y+row});ImGui::SetNextWindowSize({viewport->WorkSize.x,row});
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(10*ImGui::GetStyle().FontScaleDpi,4*ImGui::GetStyle().FontScaleDpi));
     ImGui::Begin("Document Tabs",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings);
     std::string activate,close;
-    if(ImGui::BeginTabBar("Documents",ImGuiTabBarFlags_FittingPolicyScroll|ImGuiTabBarFlags_NoCloseWithMiddleMouseButton)){
-        for(const auto& d:m_Documents){bool open=true;auto label=(d.key.empty()?std::string("Untitled Scene"):AssetPaths::ToUtf8String(std::filesystem::u8path(d.key).filename()))+"###"+d.id;
+    if(ImGui::BeginTabBar("Documents",ImGuiTabBarFlags_TabListPopupButton|ImGuiTabBarFlags_FittingPolicyScroll|ImGuiTabBarFlags_NoCloseWithMiddleMouseButton)){
+        for(const auto& d:m_Documents){bool open=true;const char* types[]={"Scene","UI","Material","Lua","Prefab"};const char* icons[]={"◊","■","●","{}","▲"};auto label=std::string(icons[int(d.type)])+" "+(d.key.empty()?std::string("Untitled Scene"):AssetPaths::ToUtf8String(std::filesystem::u8path(d.key).filename()))+"###"+d.id;
             auto flags=(DocumentDirty(d)?ImGuiTabItemFlags_UnsavedDocument:0)|(m_ActiveDocument==d.id?ImGuiTabItemFlags_SetSelected:0)|ImGuiTabItemFlags_NoPushId;
             if(ImGui::BeginTabItem(label.c_str(),&open,flags))ImGui::EndTabItem();
             if(ImGui::IsItemClicked()&&m_ActiveDocument!=d.id)activate=d.id;
-            if(ImGui::IsItemHovered())ImGui::SetTooltip("%s\n%s",d.key.c_str(),d.canonical.c_str());
+            if(ImGui::IsItemHovered())ImGui::SetTooltip("%s | %s\n%s",types[int(d.type)],d.key.c_str(),d.canonical.c_str());
             if(!open)close=d.id;
         }ImGui::EndTabBar();
     }
-    ImGui::End();
+    ImGui::End();ImGui::PopStyleVar();
     const auto& io=ImGui::GetIO();if(!io.WantTextInput&&!app.IsViewportMouseCaptured()&&!ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel)&&io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_Tab,false)&&!m_Documents.empty()){
         auto it=std::find_if(m_Documents.begin(),m_Documents.end(),[&](auto& d){return d.id==m_ActiveDocument;});auto index=it==m_Documents.end()?0:int(it-m_Documents.begin());index=(index+(io.KeyShift?int(m_Documents.size())-1:1))%int(m_Documents.size());activate=m_Documents[index].id;
     }
@@ -314,19 +316,19 @@ void EditorLayer::DrawDocumentTabs(Application& app){
             const bool sceneNeedsSave=target->type==DocumentType::Scene&&(m_DocumentClose||target->key!=app.GetSceneKey())&&AuthoringSceneDirty();
             const bool saveDefined=!sceneNeedsSave||!app.GetSceneKey().empty();
             if(dirty){ImGui::BeginDisabled(!saveDefined);
-                if(ImGui::Button(stop?"Save and Stop":"Save")){if(m_DocumentClose?CloseDocument(app,m_PendingDocument,OpenDecision::Save):ActivateDocument(app,m_PendingDocument,OpenDecision::Save)){m_PendingDocument.clear();ImGui::CloseCurrentPopup();}}
+                if(Decision(stop?"Save and Stop":"Save")){if(m_DocumentClose?CloseDocument(app,m_PendingDocument,OpenDecision::Save):ActivateDocument(app,m_PendingDocument,OpenDecision::Save)){m_PendingDocument.clear();ImGui::CloseCurrentPopup();}}
                 ImGui::EndDisabled();if(!saveDefined&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("The untitled scene has no save destination. Cancel and use Save As first.");ImGui::SameLine();
             }
-            if(ImGui::Button(dirty?(stop?"Discard and Stop":"Discard"):"Stop")){if(m_DocumentClose?CloseDocument(app,m_PendingDocument,OpenDecision::Discard):ActivateDocument(app,m_PendingDocument,OpenDecision::Discard)){m_PendingDocument.clear();ImGui::CloseCurrentPopup();}}ImGui::SameLine();
+            if(Decision(dirty?(stop?"Discard and Stop":"Discard"):"Stop",true)){if(m_DocumentClose?CloseDocument(app,m_PendingDocument,OpenDecision::Discard):ActivateDocument(app,m_PendingDocument,OpenDecision::Discard)){m_PendingDocument.clear();ImGui::CloseCurrentPopup();}}ImGui::SameLine();
         }
         if(ImGui::Button(needed?"Cancel":"Close")){m_PendingDocument.clear();m_EditorError.clear();ImGui::CloseCurrentPopup();}
-        if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::EndPopup();
+        if(!m_EditorError.empty())ErrorText(m_EditorError.c_str());ImGui::EndPopup();
     }
     if(m_OpenDocumentPrompt){ImGui::OpenPopup("Open Document");m_OpenDocumentPrompt=false;}
     if(ImGui::BeginPopupModal("Open Document",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
         ImGui::InputText("Project-relative key",&m_OpenDocumentKey);
         if(ImGui::Button("Open")){if(OpenDocument(app,m_OpenDocumentKey)||m_DocumentPrompt)ImGui::CloseCurrentPopup();}
-        ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::EndPopup();
+        ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_EditorError.empty())ErrorText(m_EditorError.c_str());ImGui::EndPopup();
     }
     if(m_ActiveDocument.empty()){
         ImGui::SetNextWindowDockID(ImHashStr("WhispEngine.Editor.Dockspace"),ImGuiCond_FirstUseEver);
@@ -341,7 +343,7 @@ void EditorLayer::DrawScriptDocument(Application& app){
         if(m_ScriptKey!=it->canonical){try{auto path=ResolveEditableLuaScript(it->key);if(std::filesystem::file_size(path)>2*1024*1024)throw std::runtime_error("Script exceeds 2 MiB preview limit; open it externally.");std::ifstream file(path,std::ios::binary);if(!file)throw std::runtime_error("Script cannot be read");m_ScriptText.assign(std::istreambuf_iterator<char>(file),{});m_ScriptKey=it->canonical;}catch(const std::exception& e){m_ScriptText=e.what();}}
         ImGui::TextDisabled("Read-only preview. External edits keep the existing Lua hot reload workflow.");
         const auto diagnostic=app.GetLuaRuntime().Error(it->key);if(!diagnostic.empty())ImGui::TextWrapped("Lua: %s",diagnostic.c_str());
-        if(ImGui::BeginChild("Source",{0,0},ImGuiChildFlags_Borders,ImGuiWindowFlags_HorizontalScrollbar))ImGui::TextUnformatted(m_ScriptText.c_str(),m_ScriptText.c_str()+m_ScriptText.size());ImGui::EndChild();
+        if(ImGui::BeginChild("Source",{0,0},ImGuiChildFlags_Borders,ImGuiWindowFlags_HorizontalScrollbar)){ImGui::PushFont(MonoFont(),0);ImGui::TextUnformatted(m_ScriptText.c_str(),m_ScriptText.c_str()+m_ScriptText.size());ImGui::PopFont();}ImGui::EndChild();
     }ImGui::End();
 }
 void EditorLayer::PrepareWorkspacePrimaryWindow(){

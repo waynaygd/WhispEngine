@@ -1,3 +1,4 @@
+#include "EditorTheme.h"
 #include "EditorLayer.h"
 #include "InspectorControls.h"
 #include "PrecisionInputs.h"
@@ -60,7 +61,7 @@ void EditorLayer::DrawMaterialEditor(Application& app){
         if(ImGui::Begin("Material Editor",&m_ShowMaterialEditor)){ImGui::TextWrapped("Open a Material Document to edit its independent draft and preview.");if(m_SelectedAssetKind=="Material"&&ImGui::Button("Open selected asset"))OpenDocument(app,m_SelectedAsset);}ImGui::End();return;
     }
     auto* session=EnsureMaterialSession(app);auto* rm=app.GetResourceManager();auto* renderer=app.GetRenderAdapter();
-    if(!session){if(ImGui::Begin("Material Editor",&m_ShowMaterialEditor))ImGui::TextWrapped("%s",m_MaterialError.c_str());ImGui::End();return;}auto& s=*session;
+    if(!session){if(ImGui::Begin("Material Editor",&m_ShowMaterialEditor))ErrorText(m_MaterialError.c_str());ImGui::End();return;}auto& s=*session;
     const auto start=std::chrono::steady_clock::now();const auto probes=ProjectContext::LinkProbeCount();
     ImFont* font=nullptr;for(auto* f:ImGui::GetIO().Fonts->Fonts)if(std::strcmp(f->GetDebugName(),"Browser UI")==0){font=f;break;}if(font)ImGui::PushFont(font,0);
     if(ImGui::IsKeyPressed(ImGuiKey_Escape,false))FinishMaterialEdit(app,true);
@@ -70,9 +71,9 @@ void EditorLayer::DrawMaterialEditor(Application& app){
     PrepareWorkspacePrimaryWindow();
     if(ImGui::Begin("Material Preview",nullptr,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse|(m_WorkspaceFocus?ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings:0))){
         ImGui::BeginDisabled(app.IsEditorPlayMode());
-        if(ImGui::Button("Save Material"))SaveMaterialDraft(app);ImGui::SameLine();if(ImGui::Button("Revert / Reload"))ImGui::OpenPopup("Reload Material?");
-        if(ImGui::BeginPopupModal("Reload Material?",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){ImGui::TextWrapped("Discard this draft and reload %s?",m_EditingMaterial.c_str());if(ImGui::Button("Discard")){if(ReloadMaterialDraft(app))ImGui::CloseCurrentPopup();}ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_MaterialError.empty())ImGui::TextWrapped("%s",m_MaterialError.c_str());ImGui::EndPopup();}
-        ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("View"))ImGui::OpenPopup("Preview options");
+        if(ImGui::Button("Save Material"))SaveMaterialDraft(app);Inline("Revert / Reload");if(ImGui::Button("Revert / Reload"))ImGui::OpenPopup("Reload Material?");
+        if(ImGui::BeginPopupModal("Reload Material?",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){ImGui::TextWrapped("Discard this draft and reload %s?",m_EditingMaterial.c_str());if(ImGui::Button("Discard")){if(ReloadMaterialDraft(app))ImGui::CloseCurrentPopup();}ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_MaterialError.empty())ErrorText(m_MaterialError.c_str());ImGui::EndPopup();}
+        ImGui::EndDisabled();Inline("View");if(ImGui::Button("View"))ImGui::OpenPopup("Preview options");
         if(ImGui::BeginPopup("Preview options")){ImGui::SetNextItemWidth(150);ImGui::Combo("Mesh",&s.mesh,"Sphere\0Cube\0Plane\0");ImGui::SetNextItemWidth(150);ImGui::Combo("Lighting",&s.lighting,"Studio\0Neutral\0Unlit\0");ImGui::Checkbox("Dark background",&s.dark);if(ImGui::Button("Reset Camera")){s.yaw=.65f;s.pitch=.3f;s.distance=3.7f;s.panX=s.panY=0;}if(ImGui::Button("Focus Preview")){s.distance=s.mesh==1?4.8f:3.7f;s.panX=s.panY=0;}ImGui::TextWrapped("Drag LMB/RMB to orbit, wheel to zoom, MMB to pan.");ImGui::EndPopup();}
         const char* meshNames[]={"Sphere","Cube","Plane"};const char* lightNames[]={"Studio","Neutral","Unlit"};ImGui::TextWrapped("%s%s | %s / %s",m_EditingMaterial.c_str(),m_MaterialDirty?" *":"",meshNames[s.mesh],lightNames[s.lighting]);
         previewSize=ImGui::GetContentRegionAvail();previewSize.x=std::max(64.f,previewSize.x);previewSize.y=std::max(64.f,previewSize.y);const auto pos=ImGui::GetCursorScreenPos();ImGui::InvisibleButton("##PreviewOrbit",previewSize,ImGuiButtonFlags_MouseButtonLeft|ImGuiButtonFlags_MouseButtonRight|ImGuiButtonFlags_MouseButtonMiddle);previewVisible=ImGui::IsItemVisible();
@@ -111,7 +112,7 @@ void EditorLayer::DrawMaterialEditor(Application& app){
             if(key==s.draft.shaderPath){auto r=rm->PeekIndexed<ShaderResource>(key);if(!r||r->IsLoading())ImGui::TextWrapped("Loading shader: %s",key.c_str());else if(r->HasError())ImGui::TextWrapped("%s: %s",key.c_str(),r->GetErrorMessage().c_str());}
             else {auto r=rm->PeekIndexed<TextureResource>(key);if(!r||r->IsLoading())ImGui::TextWrapped("Loading map: %s",key.c_str());else if(r->HasError())ImGui::TextWrapped("Missing map (neutral fallback): %s: %s",key.c_str(),r->GetErrorMessage().c_str());}
         }
-        ImGui::EndDisabled();if(!m_MaterialError.empty())ImGui::TextWrapped("%s",m_MaterialError.c_str());
+        ImGui::EndDisabled();if(!m_MaterialError.empty())ErrorText(m_MaterialError.c_str());
         if(!ImGui::IsAnyItemActive())FinishMaterialEdit(app);
 
     }ImGui::End();}

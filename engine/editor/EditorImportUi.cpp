@@ -1,3 +1,4 @@
+#include "EditorTheme.h"
 #define NOMINMAX
 #include "EditorLayer.h"
 #include "AssetImport.h"
@@ -43,7 +44,7 @@ void EditorLayer::DrawImportDialogs(Application& app){
   ImGui::Text("Parent: %s",m_FolderParent.empty()?"Project":m_FolderParent.c_str());ImGui::InputText("Folder name",&m_NewFolderName);
   ImGui::BeginDisabled(app.IsEditorPlayMode());
   if(ImGui::Button("Create folder")){if(AssetImport::NewFolder(AssetPaths::ResolveAssetRoot(),m_FolderParent,m_NewFolderName,&m_EditorError)){m_AssetListsDirty=true;NavigateAssetFolder(m_FolderParent.empty()?m_NewFolderName:m_FolderParent+"/"+m_NewFolderName);ImGui::CloseCurrentPopup();}}
-  ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::EndPopup();
+  ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_EditorError.empty())ErrorText(m_EditorError.c_str());ImGui::EndPopup();
  }
  if(m_ImportPopup){ImGui::OpenPopup("Import Asset");m_ImportPopup=false;}
  if(ImGui::BeginPopupModal("Import Asset",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
@@ -83,7 +84,7 @@ void EditorLayer::DrawImportDialogs(Application& app){
   };
   if(ImGui::Button("Scan dependencies"))try{auto scanned=plans();m_ImportPreview.clear();for(const auto& plan:scanned){m_ImportPreview+=(plan.standaloneImage?plan.package:plan.package+"/"+plan.entry)+"\n"+std::to_string(plan.files.size())+" files, "+std::to_string(plan.bytes/1024)+" KiB\n";}m_EditorError.clear();}catch(const std::exception& e){m_ImportPreview.clear();m_EditorError=e.what();}
   if(!m_ImportPreview.empty())ImGui::TextWrapped("%s",m_ImportPreview.c_str());
-  ImGui::BeginDisabled(app.IsEditorPlayMode()||m_ImportPreview.empty());if(ImGui::Button("Import (no overwrite)"))try{
+  ImGui::BeginDisabled(app.IsEditorPlayMode()||m_ImportPreview.empty());if(Decision("Import (no overwrite)"))try{
    const auto scanned=plans();for(const auto& plan:scanned){
     if(!AssetImport::Publish(AssetImport::ProjectRoot(),plan,&m_EditorError,ModelImportMode(sceneModel?m_ModelImportMode:0)))throw std::runtime_error(m_EditorError);
     m_SelectedAsset=plan.standaloneImage?plan.package:plan.package+"/"+plan.entry;
@@ -91,7 +92,7 @@ void EditorLayer::DrawImportDialogs(Application& app){
     NavigateAssetFolder(plan.standaloneImage?m_ImportTargetFolder:plan.package);m_AssetFilter.clear();m_AssetKindFilter=0;m_AssetListsDirty=true;
     if(auto* r=app.GetResourceManager()){if(plan.package.starts_with("models/")){if(!sceneModel||m_ModelImportMode==0){m_SelectedAssetKind="Mesh";r->LoadAsync<MeshResource>(m_SelectedAsset);}}else if(plan.package.starts_with("textures/")){m_SelectedAssetKind="Texture";r->LoadAsync<TextureResource>(m_SelectedAsset);}else{m_SelectedAssetKind="Environment";r->LoadAsync<EnvironmentResource>(m_SelectedAsset);}}
    }ImGui::CloseCurrentPopup();
-  }catch(const std::exception& e){m_AssetListsDirty=true;m_EditorError=e.what();}ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::EndPopup();
+  }catch(const std::exception& e){m_AssetListsDirty=true;m_EditorError=e.what();}ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_EditorError.empty())ErrorText(m_EditorError.c_str());ImGui::EndPopup();
  }
 }
 }

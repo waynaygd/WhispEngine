@@ -1,3 +1,4 @@
+#include "EditorTheme.h"
 #include "EditorLayer.h"
 #include "EditorWidgets.h"
 #include "WidgetDesignerTools.h"
@@ -52,10 +53,10 @@ void EditorLayer::DrawUIDocumentProperties(Application& app,const std::string& k
  auto pair=[&](const char* label,ui::Pair& value,float speed,float minimum,float maximum){ImGui::TextUnformatted(label);ImGui::SetNextItemWidth(-FLT_MIN);return ImGui::DragFloat2((std::string("##")+label).c_str(),value.data(),speed,minimum,maximum);};
  ImGui::BeginDisabled(app.IsEditorPlayMode());
  try{auto& session=UIDocumentSession(app,key);if(session.pending&&!m_UIWidgetDrag&&ImGui::IsKeyPressed(ImGuiKey_Escape,false)){CancelUIDocumentEdit(app,key);m_EscapeConsumed=true;}auto edited=session.draft;bool changed=false;
-  if(ImGui::Button("Save UI"))SaveUIDocument(app,key);ImGui::SameLine();if(ImGui::Button("Undo UI"))UndoUIDocument(app,key);ImGui::SameLine();if(ImGui::Button("Redo UI"))UndoUIDocument(app,key,true);
+  if(ImGui::Button("Save UI"))SaveUIDocument(app,key);Inline("Undo UI");if(Action("Undo UI","Undo the last UI edit. No edits available when disabled.",session.pending.has_value()||!session.undo.empty()))UndoUIDocument(app,key);Inline("Redo UI");if(Action("Redo UI","Redo the last undone UI edit. No redo available when disabled.",!session.redo.empty()))UndoUIDocument(app,key,true);
   if(ImGui::Button("Reload UI from disk")){ImGui::OpenPopup("Reload UI?");}if(ImGui::BeginPopup("Reload UI?")){ImGui::TextWrapped("Discard unsaved UI changes and history?");if(ImGui::Button("Reload")){ReloadUIDocument(app,key);ImGui::CloseCurrentPopup();}ImGui::EndPopup();}
   ImGui::TextUnformatted(session.dirty?"UI Document: unsaved changes":"UI Document: saved");
-  edited=session.draft;changed|=ImGui::InputText("Canvas Name",&edited.name);changed|=ImGui::Checkbox("Canvas Enabled",&edited.enabled);changed|=pair("Reference Resolution",edited.referenceResolution,1,1,16384);ImGui::TextWrapped("Scale: With Screen Size (uniform fit)");ImGui::TextUnformatted("Document Sort Order");ImGui::SetNextItemWidth(-FLT_MIN);changed|=ImGui::DragInt("##Document Sort Order",&edited.sortOrder,1,-1000000,1000000);
+  edited=session.draft;ImGui::TextUnformatted("Canvas Name");ImGui::SetNextItemWidth(-FLT_MIN);changed|=ImGui::InputText("##Canvas Name",&edited.name);changed|=ImGui::Checkbox("Canvas Enabled",&edited.enabled);changed|=pair("Reference Resolution",edited.referenceResolution,1,1,16384);ImGui::TextWrapped("Scale: With Screen Size (uniform fit)");ImGui::TextUnformatted("Document Sort Order");ImGui::SetNextItemWidth(-FLT_MIN);changed|=ImGui::DragInt("##Document Sort Order",&edited.sortOrder,1,-1000000,1000000);
   if(hierarchy&&ImGui::BeginCombo("Add Widget","Panel / Text / Image / Progress Bar / Button")){for(const char* type:{"Panel","Text","Image","ProgressBar","Button"})if(ImGui::Selectable(type)){
     ui::Widget w;w.type=type;w.id=std::string(type)+std::to_string(edited.widgets.size());while(std::any_of(edited.widgets.begin(),edited.widgets.end(),[&](auto& n){return n.id==w.id;}))w.id+="_";
     auto parent=std::find_if(edited.widgets.begin(),edited.widgets.end(),[&](auto& n){return n.id==session.selected;});w.parent=parent!=edited.widgets.end()&&(parent->type=="Panel"||parent->type=="Button")?parent->id:edited.root;w.position={16,16};if(w.type=="Text")w.text="Text / Текст";if(edited.widgets.empty()){auto root=ui::EmptyDocument().widgets[0];edited.root=root.id;edited.widgets.push_back(root);w.parent=root.id;}session.selected=w.id;edited.widgets.push_back(w);changed=true;

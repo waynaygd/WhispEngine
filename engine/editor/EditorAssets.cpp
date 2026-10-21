@@ -1,3 +1,4 @@
+#include "EditorTheme.h"
 #include "EditorLayer.h"
 #include "ScriptEditor.h"
 #include "EditorWidgets.h"
@@ -526,7 +527,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
     }
     DrawAssetPreview(app);
     ImGui::TextDisabled("Type previews; content is indexed on Refresh, never every frame.");
-    if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());
+    if(!m_EditorError.empty())ErrorText(m_EditorError.c_str());
     }
     ImGui::End();
     }
@@ -564,7 +565,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
         ImGui::BeginDisabled(app.IsEditorPlayMode()||m_MaterialDirty);
         if(ImGui::Button("Create")){
             if(CreateMaterialAsset(app,m_AssetActionKey,&m_EditorError)){openMaterial(m_AssetActionKey);m_AssetListsDirty=true;ImGui::CloseCurrentPopup();}
-        }ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::EndPopup();
+        }ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_EditorError.empty())ErrorText(m_EditorError.c_str());ImGui::EndPopup();
     }
     const char* fileDialog=m_AssetAction==2?"Rename Asset":m_AssetAction==4?"Move Asset":"Delete Asset?";
     if(ImGui::BeginPopupModal(fileDialog,nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
@@ -598,7 +599,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
         m_AssetActionFocus=false;
         const bool dynamicAllowed=m_AssetActionWarnings.empty()||m_AssetDynamicRiskAccepted;
         ImGui::BeginDisabled(app.IsEditorPlayMode()||!m_AssetActionBlockers.empty()||!dynamicAllowed);
-        const bool clicked=ImGui::Button(rename?"Rename":"Delete");
+        const bool clicked=Decision(rename?"Rename":"Delete",!rename);
         if((clicked||enter)&&!app.IsEditorPlayMode()&&m_AssetActionBlockers.empty()&&dynamicAllowed){
             bool ok=false;
             try{
@@ -617,7 +618,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
         ImGui::EndDisabled();ImGui::SameLine();
         if(ImGui::Button("Cancel")||ImGui::IsKeyPressed(ImGuiKey_Escape,false))ImGui::CloseCurrentPopup();
         if(!rename)ImGui::SetItemDefaultFocus();
-        if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());
+        if(!m_EditorError.empty())ErrorText(m_EditorError.c_str());
         ImGui::PopTextWrapPos();ImGui::EndPopup();
     }
     // A fast retry after cancelling a drag can look like a double click on

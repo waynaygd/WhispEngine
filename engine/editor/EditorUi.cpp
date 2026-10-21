@@ -1,3 +1,4 @@
+#include "EditorTheme.h"
 #include "PrecisionInputs.h"
 #include "EditorLayer.h"
 #include "EditorWidgets.h"
@@ -56,23 +57,43 @@ bool EditorLayer::PersistPreferences(Application& app){
     p.translationSnap=m_SnapTranslation;p.rotationSnap=m_SnapRotation;p.scaleSnap=m_SnapScale;p.cameraSpeed=app.GetCameraMoveSpeed();p.cameraSensitivity=app.GetCameraSensitivity();std::string error;if(!SavePreferences(PreferencesPath(),p,&error)){m_EditorError=error;Logger::Get().Warn(error);return false;}return true;
 }
 void EditorLayer::DrawToolbar(Application& app){
-    auto* viewport=ImGui::GetMainViewport();ImGui::SetNextWindowPos(viewport->WorkPos);ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x,ImGui::GetFrameHeightWithSpacing()+8));
+    auto* viewport=ImGui::GetMainViewport();const float dpi=ImGui::GetStyle().FontScaleDpi;
+    ImGui::SetNextWindowPos(viewport->WorkPos);ImGui::SetNextWindowSize({viewport->WorkSize.x,ImGui::GetFrameHeightWithSpacing()+8});
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{10*dpi,4*dpi});
     ImGui::Begin("Main Toolbar",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings);
-    if(ImGui::Button(app.IsPrefabEditing()?"Save Prefab":"Save")){if(!SaveActiveDocument(app))Logger::Get().Error(m_EditorError);}ImGui::SameLine();
-    if(app.IsPrefabEditing()){if(ImGui::Button("Return to Scene"))BackToSceneDocument(app);ImGui::SameLine();}
-    ImGui::BeginDisabled(app.IsPrefabEditing());
-    if(!app.IsEditorPlayMode()){ImGui::BeginDisabled(!ActiveDocumentIs(DocumentType::Scene));if(ImGui::Button("Play"))app.SetEditorPlayMode(true);ImGui::EndDisabled();}else{
-        if(ImGui::Button(app.IsEditorPaused()?"Resume":"Pause"))app.SetEditorPaused(!app.IsEditorPaused());ImGui::SameLine();if(ImGui::Button("Stop"))app.SetEditorPlayMode(false);
+    const bool play=app.IsEditorPlayMode(),prefab=app.IsPrefabEditing();const bool compact=viewport->WorkSize.x<1080*dpi;
+    auto separator=[](){ImGui::SameLine();ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);ImGui::SameLine();};
+    if(Action("Save",play?"Stop Play before saving.":ActiveDocumentIs(DocumentType::Lua)?"Lua source is read-only here; edit and save it in the source editor.":"Save the active document (Ctrl+S).",!play&&!ActiveDocumentIs(DocumentType::Lua),false,58))if(!SaveActiveDocument(app))Logger::Get().Error(m_EditorError);
+    separator();
+    if(Action("Play",prefab?"Return to the Scene document before starting Play.":!ActiveDocumentIs(DocumentType::Scene)?"Activate the Scene document to start Play.":"Start the scene in an isolated Runtime World.",!play&&!prefab&&ActiveDocumentIs(DocumentType::Scene),play,55))app.SetEditorPlayMode(true);
+    ImGui::SameLine();if(Action(app.IsEditorPaused()?"Resume":"Pause","Pause/resume the running scene. Start Play first.",play,app.IsEditorPaused(),75))app.SetEditorPaused(!app.IsEditorPaused());
+    ImGui::SameLine();if(Action("Stop","Discard the Runtime World and return to editing. Start Play first.",play,false,55))app.SetEditorPlayMode(false);
+    separator();
+    auto transforms=[&](){
+        const char* blocked=play?"Stop Play to edit authored transforms.":(!ActiveDocumentIs(DocumentType::Scene)&&!ActiveDocumentIs(DocumentType::Prefab))?"Activate a Scene or Prefab document to use transform tools.":nullptr;
+        ImGui::BeginDisabled(blocked!=nullptr);
+        for(int i=0;i<3;++i){if(i)ImGui::SameLine();const char* names[]={"Move","Rotate","Scale"};if(Action(names[i],blocked?blocked:i==0?"Move selection (W)":i==1?"Rotate selection (E)":"Scale selection (R)",true,m_GizmoOperation==i,60))m_GizmoOperation=i;}
+        auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(m_Selection.active);
+        const bool localScale=m_Selection.items.size()==1&&m_GizmoOperation==2&&t&&(std::abs(t->rotation.x)+std::abs(t->rotation.y)+std::abs(t->rotation.z)>1e-6f);if(localScale)m_GizmoMode=0;
+        ImGui::SameLine();if(Action("Local",blocked?blocked:"Use local transform axes.",true,m_GizmoMode==0,52))m_GizmoMode=0;
+        ImGui::SameLine();if(Action("World",blocked?blocked:localScale?"Rotated non-uniform World scale needs unsupported shear; use Local.":"Use world transform axes.",!localScale,m_GizmoMode==1,55))m_GizmoMode=1;
+        if(compact)ImGui::NewLine();else ImGui::SameLine();
+        ImGui::Checkbox(m_GizmoOperation==1?"Rotation Snap":"Snap",m_GizmoOperation==1?&m_RotationSnapping:&m_Snapping);Help(blocked?blocked:"Snap the active transform tool. Steps remain in Transform Options.");
+        ImGui::EndDisabled();
+    };
+    if(compact){if(ImGui::Button("Tools"))ImGui::OpenPopup("Transform tools");if(ImGui::BeginPopup("Transform tools")){transforms();ImGui::EndPopup();}}else transforms();
+    separator();
+    if(ImGui::Button("Workspace"))ImGui::OpenPopup("Workspace actions");
+    if(ImGui::BeginPopup("Workspace actions")){
+        DrawWorkspaceMenu(app);
+        if(ImGui::MenuItem(m_WorkspaceFocus?"Restore Layout":"Maximize Workspace",nullptr,m_WorkspaceFocus,!m_ViewportMaximized))SetWorkspaceFocused(!m_WorkspaceFocus);
+        if(m_ViewportMaximized)ImGui::TextDisabled("Leave F11 before maximizing a workspace.");
+        if(prefab&&ImGui::MenuItem("Return to Scene"))BackToSceneDocument(app);
+        if(ImGui::MenuItem("Focus Selection","F",false,!m_Selection.items.empty()))FocusSelection(app);
+        ImGui::EndPopup();
     }
-    ImGui::EndDisabled();
-    if(app.IsPrefabEditing()&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Play belongs to the scene. Return to the Scene document before starting Play.");
-    ImGui::SameLine();ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);ImGui::SameLine();
-    ImGui::RadioButton("Move",&m_GizmoOperation,0);ImGui::SameLine();ImGui::RadioButton("Rotate",&m_GizmoOperation,1);ImGui::SameLine();ImGui::RadioButton("Scale",&m_GizmoOperation,2);ImGui::SameLine();
-    ImGui::RadioButton("Local",&m_GizmoMode,0);ImGui::SameLine();auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(m_Selection.active);const bool localScale=m_Selection.items.size()==1&&m_GizmoOperation==2&&t&&(std::abs(t->rotation.x)+std::abs(t->rotation.y)+std::abs(t->rotation.z)>1e-6f);if(localScale)m_GizmoMode=0;ImGui::BeginDisabled(localScale);ImGui::RadioButton("World",&m_GizmoMode,1);ImGui::EndDisabled();if(m_GizmoOperation==2&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Scale axes/planes use local TRS axes. Rotated world non-uniform scale requires shear and is not represented by Transform.");ImGui::SameLine();ImGui::Checkbox(m_GizmoOperation==1?"Rotation Snap":"Snap",m_GizmoOperation==1?&m_RotationSnapping:&m_Snapping);ImGui::SameLine();ImGui::Checkbox("Grid",&m_ShowGrid);ImGui::SameLine();
-    if(ImGui::Button(m_WorkspaceFocus?"Restore Layout":"Maximize Workspace"))SetWorkspaceFocused(!m_WorkspaceFocus);ImGui::SameLine();
-    if(ImGui::Button("Focus"))FocusSelection(app);ImGui::SameLine();
-    const EditorDocument* active=nullptr;for(const auto& document:m_Documents)if(document.id==m_ActiveDocument)active=&document;
-    ImGui::Text("%s%s",app.IsPrefabEditing()?m_EditingPrefab.c_str():active?(active->key.empty()?"Untitled Scene":active->key.c_str()):"Start Workspace",(active?DocumentDirty(*active):IsSceneDirty())?" *":"");ImGui::End();
+    if(!compact){ImGui::SameLine();if(Action(m_WorkspaceFocus?"Restore Layout":"Maximize Workspace","Expand the current document workspace; F11 remains the Scene viewport command.",!m_ViewportMaximized,m_WorkspaceFocus,155))SetWorkspaceFocused(!m_WorkspaceFocus);}
+    ImGui::End();ImGui::PopStyleVar();
 }
 void EditorLayer::DrawMainMenu(Application& app){
     if(!ImGui::BeginMainMenuBar())return;
@@ -239,7 +260,7 @@ void EditorLayer::DrawConsole(Application& app,IRenderAdapter* renderer){
         if(ImGui::BeginTabItem("Console")){
             auto& log=Logger::Get();if(m_ConsoleRevision!=log.Revision()){m_ConsoleMessages=log.Messages();m_ConsoleRevision=log.Revision();}
             if(ImGui::Button("Clear")){log.ClearMessages();m_ConsoleMessages.clear();m_ConsoleRevision=log.Revision();}ImGui::SameLine();ImGui::Checkbox("INFO",&m_ConsoleInfo);ImGui::SameLine();ImGui::Checkbox("WARN",&m_ConsoleWarning);ImGui::SameLine();ImGui::Checkbox("ERROR",&m_ConsoleError);ImGui::SameLine();ImGui::InputTextWithHint("##search","Search logs",&m_ConsoleFilter);
-            ImGui::BeginChild("Messages");for(const auto& entry:m_ConsoleMessages){if((entry.level=="INFO"&&!m_ConsoleInfo)||(entry.level=="WARN"&&!m_ConsoleWarning)||(entry.level=="ERROR"&&!m_ConsoleError)||!Matches(entry.message,m_ConsoleFilter))continue;ImGui::TextWrapped("[%s] %s",entry.level.c_str(),entry.message.c_str());}ImGui::EndChild();ImGui::EndTabItem();
+            ImGui::BeginChild("Messages");ImGui::PushFont(MonoFont(),0);for(const auto& entry:m_ConsoleMessages){if((entry.level=="INFO"&&!m_ConsoleInfo)||(entry.level=="WARN"&&!m_ConsoleWarning)||(entry.level=="ERROR"&&!m_ConsoleError)||!Matches(entry.message,m_ConsoleFilter))continue;ImGui::TextWrapped("[%s] %s",entry.level.c_str(),entry.message.c_str());}ImGui::PopFont();ImGui::EndChild();ImGui::EndTabItem();
         }
         if(ImGui::BeginTabItem("Diagnostics")){
             auto lights=app.GetLightDiagnostics();ImGui::Text("Editor UI %.3f / hierarchy %.3f / Inspector %.3f ms",m_Statistics.uiMs,m_Statistics.hierarchyMs,m_Statistics.inspectorMs);

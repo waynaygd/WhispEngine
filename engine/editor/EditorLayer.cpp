@@ -618,20 +618,13 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     ImGui::SameLine();DrawPlacementMenu(app);
     ImGui::SameLine();DrawViewportTools(app);
     ImGui::SameLine();
-    if(ImGui::GetContentRegionAvail().x<370*ImGui::GetStyle().FontScaleDpi)ImGui::NewLine();
-    ImGui::BeginDisabled(app.IsPrefabEditing());
-    if (ImGui::Button(playMode ? "Stop" : "Play"))
-        app.SetEditorPlayMode(!playMode);
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    ImGui::TextUnformatted(playMode ? "Play" : "Edit");
-    ImGui::SameLine();ImGui::SetNextItemWidth(85*ImGui::GetStyle().FontScaleDpi);
-    int shading=app.IsViewportUnlit()?1:0;
-    if(ImGui::Combo("##ViewportShading",&shading,"Lit\0Unlit\0"))app.SetViewportUnlit(shading==1);
-    if(!playMode){
-        ImGui::SameLine();if(ImGui::GetContentRegionAvail().x<ImGui::CalcTextSize("Game View (G)").x+ImGui::GetFrameHeight()+ImGui::GetStyle().ItemSpacing.x)ImGui::NewLine();
-        ImGui::Checkbox("Game View (G)",&m_GameView);
-        ImGui::SameLine();ImGui::Checkbox("UI Preview",&m_ShowRuntimeUI);
+    if(ImGui::GetContentRegionAvail().x<ImGui::CalcTextSize("Display").x+ImGui::GetStyle().FramePadding.x*2)ImGui::NewLine();
+    if(ImGui::Button("Display"))ImGui::OpenPopup("Viewport display");
+    if(ImGui::BeginPopup("Viewport display")){
+        int shading=app.IsViewportUnlit()?1:0;ImGui::SetNextItemWidth(140*ImGui::GetStyle().FontScaleDpi);
+        if(ImGui::Combo("Lighting",&shading,"Lit\0Unlit\0"))app.SetViewportUnlit(shading==1);
+        if(!playMode){ImGui::Checkbox("Game View (G)",&m_GameView);ImGui::Checkbox("UI Preview",&m_ShowRuntimeUI);ImGui::Checkbox("Grid",&m_ShowGrid);ImGui::Checkbox("Light Gizmos",&m_ShowLightGizmos);}
+        ImGui::EndPopup();
     }
     ImGui::Separator();
     }

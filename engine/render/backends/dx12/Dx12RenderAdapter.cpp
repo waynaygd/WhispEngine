@@ -1246,30 +1246,22 @@ bool Dx12RenderAdapter::InitializeEditorUi(IWindow* window)
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
-    // Keep the bundled editor face; fill its missing Cyrillic glyphs from the
-    // Windows monospace font. No new redistributable font dependency.
-    // The Cyrillic merge below uses an explicit reference size. ImGui 1.92
-    // requires the destination to have one too (13px is its existing default).
-    ImFontConfig defaultFont;defaultFont.SizePixels=13.f;
-    io.Fonts->AddFontDefault(&defaultFont);
-    wchar_t windowsDirectory[MAX_PATH]{};
+    // One atlas, initialized once. Segoe is the common UI face; code/logs opt
+    // into a separate monospace face. Both carry Latin and Cyrillic glyphs.
+    static const ImWchar ranges[]={0x0020,0x00ff,0x0400,0x052f,0x25a0,0x25cf,0};
+    wchar_t windowsDirectory[MAX_PATH]{};ImFont* uiFont=nullptr;
     if(GetWindowsDirectoryW(windowsDirectory,MAX_PATH)){
-        const auto font=std::filesystem::path(windowsDirectory)/"Fonts"/"consola.ttf";
-        if(std::filesystem::is_regular_file(font)){
-            static const ImWchar cyrillic[]={0x0400,0x052f,0};
-            ImFontConfig config;config.MergeMode=true;
-            io.Fonts->AddFontFromFileTTF(AssetPaths::ToUtf8String(font).c_str(),16.f,&config,cyrillic);
+        auto fonts=std::filesystem::path(windowsDirectory)/"Fonts";
+        for(const auto* name:{L"segoeui.ttf",L"arial.ttf"})if(!uiFont&&std::filesystem::is_regular_file(fonts/name)){
+            ImFontConfig config;strcpy_s(config.Name,"Browser UI");uiFont=io.Fonts->AddFontFromFileTTF(AssetPaths::ToUtf8String(fonts/name).c_str(),16,&config,ranges);
         }
-        // Optional proportional browser face in the existing atlas. Code and
-        // technical panels retain their current font; no redistributed font.
-        const auto browserFont=std::filesystem::path(windowsDirectory)/"Fonts"/"segoeui.ttf";
-        if(std::filesystem::is_regular_file(browserFont)){
-            static const ImWchar browserRanges[]={0x0020,0x00ff,0x0400,0x052f,0};
-            ImFontConfig browserConfig;strcpy_s(browserConfig.Name,"Browser UI");
-            io.Fonts->AddFontFromFileTTF(AssetPaths::ToUtf8String(browserFont).c_str(),13.f,&browserConfig,browserRanges);
-        }
+        if(std::filesystem::is_regular_file(fonts/L"consola.ttf")){ImFontConfig config;strcpy_s(config.Name,"Editor Mono");io.Fonts->AddFontFromFileTTF(AssetPaths::ToUtf8String(fonts/L"consola.ttf").c_str(),16,&config,ranges);}
     }
-
+    if(!uiFont){ImFontConfig config;config.SizePixels=16;uiFont=io.Fonts->AddFontDefault(&config);}
+    io.FontDefault=uiFont;
+    // Reserve the supported DPI sizes before the backend creates its atlas SRV.
+    io.Fonts->TexMinWidth=1024;io.Fonts->TexMinHeight=1024;
+    for(auto* font:io.Fonts->Fonts)for(float size:{16.f,24.f,36.f}){auto* baked=font->GetFontBaked(size);for(ImWchar c=32;c<256;++c)baked->FindGlyph(c);for(ImWchar c=0x400;c<=0x52f;++c)baked->FindGlyph(c);if(font==uiFont)for(ImWchar c=0x25a0;c<=0x25cf;++c)baked->FindGlyph(c);}
 
     float dpiX=1,dpiY=1;glfwGetWindowContentScale(glfwWin->GetGlfwHandle(),&dpiX,&dpiY);
     m_EditorUiWindow=glfwWin->GetGlfwHandle();m_EditorUiScale=(std::max)(dpiX,dpiY);editor::ApplyEditorTheme(m_EditorUiScale);

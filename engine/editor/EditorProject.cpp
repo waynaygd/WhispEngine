@@ -1,3 +1,4 @@
+#include "EditorTheme.h"
 #include "EditorLayer.h"
 #include "../core/Application.h"
 #include "../core/AssetPaths.h"
@@ -104,12 +105,12 @@ void EditorLayer::DrawProjectBrowser(Application& app){
         if(ImGui::Begin("Project Browser",startup?nullptr:&m_ShowProjectBrowser,flags)){
             if(startup){
                 const auto space=ImGui::GetContentRegionAvail();
-                const ImVec2 size(std::min(760.f,space.x),std::min(620.f,space.y));
+                const ImVec2 size(std::min(920.f*ImGui::GetStyle().FontScaleDpi,space.x),std::min((m_RecentProjects.empty()?500.f:660.f)*ImGui::GetStyle().FontScaleDpi,space.y));
                 const auto cursor=ImGui::GetCursorPos();
                 ImGui::SetCursorPos(ImVec2(cursor.x+(space.x-size.x)*.5f,cursor.y+(space.y-size.y)*.5f));
                 ImGui::BeginChild("Workspace chooser",size,ImGuiChildFlags_Borders|ImGuiChildFlags_AlwaysUseWindowPadding);
-                ImGui::TextColored(ImVec4(.4f,.75f,1,1),"WhispEngine");
-                ImGui::TextUnformatted("Choose a workspace to begin");
+                ImGui::PushFont(ImGui::GetIO().FontDefault,24);ImGui::TextUnformatted("WhispEngine");ImGui::PopFont();
+                ImGui::TextUnformatted("Projects and workspaces");
                 ImGui::Spacing();ImGui::Separator();ImGui::Spacing();
             }
             if(auto p=app.GetProject()){
@@ -130,14 +131,14 @@ void EditorLayer::DrawProjectBrowser(Application& app){
                 if(ImGui::BeginTabItem("Recent",nullptr,m_ProjectTab==0?ImGuiTabItemFlags_SetSelected:0)){
                     if(!m_RecentProjects.empty()&&ImGui::Button("Continue last project"))RequestProjectOpen(app,m_RecentProjects.front().descriptor);
                     const auto recent=m_RecentProjects;
-                    ImGui::BeginChild("Recent projects",ImVec2(0,250));
-                    for(const auto& entry:recent){ImGui::PushID(entry.descriptor.c_str());std::error_code ec;
-                        const bool available=std::filesystem::is_regular_file(std::filesystem::u8path(entry.descriptor),ec);
-                        if(ImGui::Selectable((entry.name+(available?"":" (unavailable)")).c_str()))RequestProjectOpen(app,entry.descriptor);
-                        ImGui::TextWrapped("%s",entry.descriptor.c_str());
+                    ImGui::BeginChild("Recent projects",ImVec2(0,std::clamp(ImGui::GetContentRegionAvail().y-120*ImGui::GetStyle().FontScaleDpi,80.f,360*ImGui::GetStyle().FontScaleDpi)));
+                    for(const auto& entry:recent){ImGui::PushID(entry.descriptor.c_str());
+                        // Availability is validated by Open, not by presentation each frame.
+                        if(ImGui::Selectable(entry.name.c_str()))RequestProjectOpen(app,entry.descriptor);
+                        ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));ImGui::TextWrapped("%s",entry.descriptor.c_str());ImGui::PopStyleColor();
                         if(ImGui::SmallButton("Remove from recent")){std::erase(m_RecentProjects,entry);PersistPreferences(app);}ImGui::PopID();
                     }
-                    if(recent.empty())ImGui::TextDisabled("No recent projects yet.");
+                    if(recent.empty())ImGui::TextWrapped("No recent projects yet. Create a New Project or open an existing .whispproject file.");
                     ImGui::EndChild();
                     ImGui::EndTabItem();
                 }
@@ -166,7 +167,7 @@ void EditorLayer::DrawProjectBrowser(Application& app){
                     ImGui::EndTabItem();
                 }ImGui::EndTabBar();m_ProjectTab=-1;
             }
-            if(!m_ProjectError.empty())ImGui::TextWrapped("%s",m_ProjectError.c_str());
+            if(!m_ProjectError.empty()){ImGui::PushStyleColor(ImGuiCol_Text,Error);ImGui::TextWrapped("%s",m_ProjectError.c_str());ImGui::PopStyleColor();}
             if(startup){
                 ImGui::Spacing();ImGui::Separator();ImGui::Spacing();
                 if(ImGui::Button("Legacy Workspace",ImVec2(180,0)))app.OpenLegacyWorkspace(&m_ProjectError);
@@ -181,14 +182,14 @@ void EditorLayer::DrawProjectBrowser(Application& app){
     if(ImGui::BeginPopupModal("Unsaved project changes",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
         ImGui::TextWrapped("Save scene, material and Project Settings edits before continuing?");
         if(app.GetSceneKey().empty()){ImGui::InputText("Save untitled as",&m_UnsavedSaveKey);ImGui::TextDisabled("Choose a fresh scene filename inside the current scene directory.");}
-        if(ImGui::Button("Save and continue")){
+        if(Decision("Save and continue")){
             if(app.GetSceneKey().empty()&&!app.IsEditorPlayMode()&&IsSceneDirty()){
                 if(app.SaveSceneAs(m_UnsavedSaveKey,false,&m_ProjectError)&&ExecuteProjectAction(app,int(Application::ProjectDecision::Save)))ImGui::CloseCurrentPopup();
             }else if(ExecuteProjectAction(app,int(Application::ProjectDecision::Save)))ImGui::CloseCurrentPopup();
         }
-        ImGui::SameLine();if(ImGui::Button("Discard")){if(ExecuteProjectAction(app,int(Application::ProjectDecision::Discard)))ImGui::CloseCurrentPopup();}
+        ImGui::SameLine();if(Decision("Discard",true)){if(ExecuteProjectAction(app,int(Application::ProjectDecision::Discard)))ImGui::CloseCurrentPopup();}
         ImGui::SameLine();if(ImGui::Button("Cancel")){m_PendingProject.clear();m_ProjectExit=false;ImGui::CloseCurrentPopup();}
-        if(!m_ProjectError.empty())ImGui::TextWrapped("%s",m_ProjectError.c_str());ImGui::EndPopup();
+        if(!m_ProjectError.empty()){ImGui::PushStyleColor(ImGuiCol_Text,Error);ImGui::TextWrapped("%s",m_ProjectError.c_str());ImGui::PopStyleColor();}ImGui::EndPopup();
     }
 }
 }

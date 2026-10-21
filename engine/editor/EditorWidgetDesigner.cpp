@@ -1,3 +1,4 @@
+#include "EditorTheme.h"
 #include "EditorLayer.h"
 #include "EditorWidgets.h"
 #include "WidgetDesignerTools.h"
@@ -28,10 +29,13 @@ bool EditorLayer::OpenUIDesigner(Application& app,const std::string& key){
  try{SyncSceneDocument(app);UIDocumentSession(app,key);if(m_UIWidgetDrag){CancelUIDocumentEdit(app,m_UIWidgetDrag->key);m_UIWidgetDrag.reset();}
   if(!m_DesignDocument.empty()){auto& old=UIDocumentSession(app,m_DesignDocument);if(old.pending)EditUIDocument(app,m_DesignDocument,old.draft,true);old.preview=m_UIPreviewSize;old.zoom=m_UIZoom;old.panX=m_UIPan.x;old.panY=m_UIPan.y;old.fit=m_UIFit;old.viewSaved=true;}
   CaptureCurrentWorkspace();m_ActiveDocument=RegisterDocument(app,DocumentType::UI,key).id;
-  m_DesignDocument=key;m_WidgetRenameId.clear();auto& view=UIDocumentSession(app,key);m_UIPreviewSize=view.preview;m_UIZoom=view.zoom;m_UIPan={view.panX,view.panY};m_UIFit=view.viewSaved?view.fit:true;m_ShowCanvasDesigner=m_ShowWidgetHierarchy=m_ShowWidgetInspector=true;
+  m_DesignDocument=key;m_WidgetRenameId.clear();auto& view=UIDocumentSession(app,key);m_UIPreviewSize=view.preview;m_UIZoom=view.zoom;m_UIPan={view.panX,view.panY};m_UIFit=view.viewSaved?view.fit:true;
   if(std::find(m_UIDesignerKeys.begin(),m_UIDesignerKeys.end(),key)==m_UIDesignerKeys.end())m_UIDesignerKeys.push_back(key);
   if(auto saved=m_Workspaces.find("ui");saved!=m_Workspaces.end())for(auto* panel:{"Canvas Designer","Widget Hierarchy","Widget Inspector"})saved->second.visible[panel]=true;
-  if(m_Workspace!=EditorWorkspace::UIDesigner)SwitchWorkspace(EditorWorkspace::UIDesigner);return true;
+  // Capture the outgoing workspace before enabling UI-only panels. Otherwise
+  // SwitchWorkspace saves those panels into the previous document layout.
+  if(m_Workspace!=EditorWorkspace::UIDesigner)SwitchWorkspace(EditorWorkspace::UIDesigner);
+  m_ShowCanvasDesigner=m_ShowWidgetHierarchy=m_ShowWidgetInspector=true;return true;
  }catch(const std::exception& e){m_EditorError=e.what();return false;}
 }
 bool EditorLayer::UIDesignerOwnsKeyboard()const{
@@ -69,7 +73,8 @@ void EditorLayer::DrawUIDesigner(Application& app){
  if(m_ShowCanvasDesigner){
   PrepareWorkspacePrimaryWindow();
   if(ImGui::Begin("Canvas Designer",&m_ShowCanvasDesigner,m_WorkspaceFocus?ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings:0)){
-   ImGui::BeginDisabled(app.IsEditorPlayMode());if(ImGui::Button("New UI Document"))newDocument();ImGui::EndDisabled();ImGui::SameLine();
+   ImGui::BeginDisabled(app.IsEditorPlayMode());if(ImGui::Button("New UI Document"))newDocument();ImGui::EndDisabled();Inline("Document",120);
+   ImGui::SetNextItemWidth(std::max(80.f*ImGui::GetStyle().FontScaleDpi,ImGui::GetContentRegionAvail().x-ImGui::CalcTextSize("Document").x-ImGui::GetStyle().ItemInnerSpacing.x));
    if(ImGui::BeginCombo("Document",m_DesignDocument.empty()?"Choose .ui.json":m_DesignDocument.c_str())){
     std::set<std::string> keys(m_UIDesignerKeys.begin(),m_UIDesignerKeys.end());for(auto& e:m_AssetCatalog.Entries())if(e.key.ends_with(".ui.json"))keys.insert(e.key);
     for(auto& key:keys)if(ImGui::Selectable(key.c_str(),key==m_DesignDocument))OpenUIDesigner(app,key);ImGui::EndCombo();
@@ -80,19 +85,19 @@ void EditorLayer::DrawUIDesigner(Application& app){
     auto& s=UIDocumentSession(app,m_DesignDocument);ImGui::TextUnformatted(s.dirty?"Unsaved UI draft (Save UI / Ctrl+S)":"UI document saved");
     ImGui::BeginDisabled(bool(m_UIWidgetDrag));bool optionsRequested=false;
     auto previewLabel="Preview: "+std::to_string(int(m_UIPreviewSize[0]))+" x "+std::to_string(int(m_UIPreviewSize[1]));
-    ImGui::SetNextItemWidth(210);
+    ImGui::SetNextItemWidth(std::min(ImGui::GetContentRegionAvail().x,ImGui::CalcTextSize(previewLabel.c_str()).x+ImGui::GetFrameHeight()+ImGui::GetStyle().FramePadding.x*2));
     if(ImGui::BeginCombo("##Preview Resolution",previewLabel.c_str())){
      for(auto size:{ui::Pair{1920,1080},ui::Pair{1600,900},ui::Pair{1280,720},ui::Pair{2560,1440},ui::Pair{1080,1920}})if(ImGui::Selectable((std::to_string(int(size[0]))+" x "+std::to_string(int(size[1]))).c_str())){m_UIPreviewSize=size;m_UIFit=true;}
      if(ImGui::Selectable("Custom Resolution..."))optionsRequested=true;ImGui::EndCombo();
     }
-    ImGui::SameLine();if(ImGui::Button("Fit"))m_UIFit=true;ImGui::SameLine();ImGui::SetNextItemWidth(115);ImGui::SliderFloat("Zoom",&m_UIZoom,.02f,4,"%.2fx");
-    ImGui::SameLine();if(ImGui::Button("Canvas Options"))optionsRequested=true;if(optionsRequested)ImGui::OpenPopup("Canvas Options");
+    Inline("Fit");if(ImGui::Button("Fit"))m_UIFit=true;Inline("Zoom",100);ImGui::SetNextItemWidth(100*ImGui::GetStyle().FontScaleDpi);ImGui::SliderFloat("Zoom",&m_UIZoom,.02f,4,"%.2fx");
+    Inline("Canvas Options");if(ImGui::Button("Canvas Options"))optionsRequested=true;if(optionsRequested)ImGui::OpenPopup("Canvas Options");
     if(ImGui::BeginPopup("Canvas Options")){
      ImGui::TextUnformatted("Preview only; Reference Resolution is in Inspector.");
      if(ImGui::DragFloat2("Custom Preview",m_UIPreviewSize.data(),1,64,8192,"%.0f",ImGuiSliderFlags_AlwaysClamp))m_UIFit=true;
      ImGui::Checkbox("Show Grid",&m_UIGrid);ImGui::Checkbox("Snap to Grid",&m_UISnap);ImGui::DragFloat("Grid Step",&m_UIGridSize,1,1,512,"%.0f",ImGuiSliderFlags_AlwaysClamp);ImGui::EndPopup();
     }
-    ImGui::EndDisabled();ImGui::TextUnformatted("Wheel: zoom | MMB: pan | Alt: bypass snap | Escape: cancel drag");
+    ImGui::EndDisabled();ImGui::TextWrapped("Wheel: zoom | MMB: pan | Alt: bypass snap | Escape: cancel drag");
     ImGui::BeginChild("Canvas Surface",{0,0},ImGuiChildFlags_Borders,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
     struct EndCanvasSurface {~EndCanvasSurface(){ImGui::EndChild();}} endCanvasSurface;
     auto area=ImGui::GetContentRegionAvail();area.x=std::max(1.f,area.x);area.y=std::max(1.f,area.y);auto start=ImGui::GetCursorScreenPos();
