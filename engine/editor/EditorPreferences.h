@@ -23,6 +23,7 @@ struct SelectionFilters {
     bool operator==(const SelectionFilters&)const=default;
 };
 struct EditorPreferences {
+    nlohmann::json documentSessions=nlohmann::json::object();
     EditorWorkspace activeWorkspace=EditorWorkspace::LevelEditing;
     std::map<std::string,WorkspaceLayout> workspaces;
     bool workspacesInitialized=false;

@@ -15,7 +15,8 @@ namespace editor {
 bool EditorLayer::OpenSceneGuarded(Application& app,const std::string& key,OpenDecision decision,std::string* error){
  if(decision==OpenDecision::Cancel)return false;
  if(IsSceneDirty()&&decision==OpenDecision::Save&&!app.SaveCurrentScene(error))return false;
- return app.OpenScene(key,error);
+ if(!app.OpenScene(key,error))return false;
+ return OpenDocument(app,key);
 }
 bool EditorLayer::RequestRecentScene(Application& app,const std::string& key){
  if(app.IsEditorPlayMode()){m_EditorError="Stop Play before opening a scene";return false;}

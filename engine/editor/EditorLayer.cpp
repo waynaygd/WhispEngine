@@ -353,7 +353,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
         ImGui::DockSpace(ImHashStr("WhispEngine.Editor.Dockspace"),ImVec2(0,0),ImGuiDockNodeFlags_KeepAliveOnly);
         DrawProjectBrowser(app);DrawViewport(app,renderer);HandleEditorShortcuts(app);return;
     }
-    ConfigureDocking();DrawToolbar(app);
+    DrawDocumentTabs(app);ConfigureDocking();DrawToolbar(app);
 
 
         m_ViewportPixelWidth = 0;
@@ -363,17 +363,18 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     m_ViewportFocused=false;m_HierarchyFocused=false;
     DrawMainMenu(app);DrawPrefabWorkflow(app);DrawSceneDialogs(app);DrawProjectBrowser(app);
     if(app.IsProjectBrowserActive())return;
-    DrawUIDesigner(app);
-    if(m_ShowProjectSettings)DrawProjectSettings(app);
-    if(m_ShowSceneSettings)DrawSceneSettings(app,renderer,dt);
-    if(m_ShowVisualSettings)DrawEditorVisualSettings(app,renderer);
+    if(!m_ActiveDocument.empty())DrawUIDesigner(app);
+    DrawScriptDocument(app);
+    if(m_ShowProjectSettings&&!m_WorkspaceFocus)DrawProjectSettings(app);
+    if(m_ShowSceneSettings&&!m_WorkspaceFocus)DrawSceneSettings(app,renderer,dt);
+    if(m_ShowVisualSettings&&!m_WorkspaceFocus)DrawEditorVisualSettings(app,renderer);
     PrepareEditorSky(app,renderer);
-    if(m_ShowConsole)DrawConsole(app,renderer);
-    if(m_ShowGameplayEvents)DrawGameplayEvents(app);
-    if(m_ShowSceneValidation)DrawSceneValidation(app);
-    if(m_ShowLuaRuntimeInspector)DrawLuaRuntimeInspector(app);
+    if(m_ShowConsole&&!m_WorkspaceFocus)DrawConsole(app,renderer);
+    if(m_ShowGameplayEvents&&!m_WorkspaceFocus)DrawGameplayEvents(app);
+    if(m_ShowSceneValidation&&!m_WorkspaceFocus)DrawSceneValidation(app);
+    if(m_ShowLuaRuntimeInspector&&!m_WorkspaceFocus)DrawLuaRuntimeInspector(app);
     ImGui::SetNextWindowSize(ImVec2(340, 330), ImGuiCond_FirstUseEver);
-    if(m_ShowPhysicsStress){
+    if(m_ShowPhysicsStress&&!m_WorkspaceFocus){
     if (ImGui::Begin("Physics Stress Test",&m_ShowPhysicsStress)) {
         static int selection = 2;
         constexpr int counts[] = {100, 250, 500, 1000};
@@ -426,14 +427,14 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     ImGui::End();
     }
 
-    if (m_ShowHierarchy)
+    if (m_ShowHierarchy&&!m_WorkspaceFocus&&!m_ActiveDocument.empty())
         DrawSceneHierarchy(app);
-    if (m_ShowInspector)
+    if (m_ShowInspector&&!m_WorkspaceFocus&&!m_ActiveDocument.empty())
         DrawInspector(app);
-    if (m_ShowStatistics)
+    if (m_ShowStatistics&&!m_WorkspaceFocus)
         DrawStatistics(app, dt);
     m_InputTextActive=ImGui::IsAnyItemActive();m_ModalActive=ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel);
-    if (m_ShowViewport)
+    if (m_ShowViewport&&!m_ActiveDocument.empty())
         DrawViewport(app, renderer);
     else
     {
@@ -444,11 +445,11 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     m_ModalActive=ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel);
     m_InputTextActive=ImGui::GetIO().WantTextInput||ImGui::IsAnyItemActive();
     HandleEditorShortcuts(app);
-    if (m_ShowAssetBrowser)
+    if (m_ShowAssetBrowser&&!m_WorkspaceFocus)
         DrawAssetBrowser(app);
-    if (m_ShowMaterialEditor)
+    if (m_ShowMaterialEditor&&!m_ActiveDocument.empty())
         DrawMaterialEditor(app);
-    if (m_ShowDemoWindow)
+    if (m_ShowDemoWindow&&!m_WorkspaceFocus)
         ImGui::ShowDemoWindow(&m_ShowDemoWindow);
 }
 
@@ -496,6 +497,7 @@ bool EditorLayer::BlocksGameplayInput()const{
 void EditorLayer::HandleEditorShortcuts(Application& app){
     const auto& io=ImGui::GetIO();if(io.WantTextInput||m_ModalActive||m_EscapeConsumed)return;
     if(UIDesignerOwnsKeyboard())return;
+    for(const auto& d:m_Documents)if(d.id==m_ActiveDocument&&d.type!=DocumentType::Scene){if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_S,false))SaveActiveDocument(app);return;}
     HandleViewportToolShortcuts(app);
     // Asset file shortcuts are handled by the browser after its widgets. Never
     // let a Delete intended for that window reach the entity command path.
@@ -510,7 +512,7 @@ void EditorLayer::HandleEditorShortcuts(Application& app){
     if(io.KeyCtrl){
         if(ImGui::IsKeyPressed(ImGuiKey_Z,false))Undo(app);
         if(ImGui::IsKeyPressed(ImGuiKey_Y,false))Redo(app);
-        if(ImGui::IsKeyPressed(ImGuiKey_S,false)){if(io.KeyShift&&!app.IsPrefabEditing()){m_SceneDialogAction=3;m_SceneDialogRequested=true;}else{std::string error;if(!app.SaveCurrentScene(&error)){m_EditorError=error;Logger::Get().Error(error);}}}
+        if(ImGui::IsKeyPressed(ImGuiKey_S,false)){if(io.KeyShift&&!app.IsPrefabEditing()){m_SceneDialogAction=3;m_SceneDialogRequested=true;}else{if(!SaveActiveDocument(app))Logger::Get().Error(m_EditorError);}}
         if(entityKeys&&ImGui::IsKeyPressed(ImGuiKey_D,false))DuplicateEntity(app,m_Selection.active);
     }
     if(io.KeyAlt&&!io.KeyCtrl&&!io.KeyShift&&(m_ViewportFocused||app.IsViewportMouseCaptured())&&!BlocksGameplayInput()&&!ImGuizmo::IsUsing()&&!ImGui::IsMouseDown(0)&&!ImGui::IsMouseDown(1)){
@@ -595,9 +597,10 @@ void EditorLayer::DrawStatistics(Application& app, float dt)
 
 void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
 {
-    const bool maximized=m_ViewportMaximized;
+    PrepareWorkspacePrimaryWindow();
+    const bool maximized=m_ViewportMaximized||m_WorkspaceFocus;
     if(maximized){
-        auto* viewport=ImGui::GetMainViewport();ImGui::SetNextWindowPos(viewport->Pos);ImGui::SetNextWindowSize(viewport->Size);
+        auto* viewport=ImGui::GetMainViewport();if(m_ViewportMaximized){ImGui::SetNextWindowPos(viewport->Pos);ImGui::SetNextWindowSize(viewport->Size);}
         ImGui::SetNextWindowViewport(viewport->ID);ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(0,0));ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize,0.f);
     }else{
         ImGui::SetNextWindowSize(ImVec2(760.0f, 520.0f), ImGuiCond_Appearing);
@@ -630,7 +633,6 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
         ImGui::Checkbox("Game View (G)",&m_GameView);
         ImGui::SameLine();ImGui::Checkbox("UI Preview",&m_ShowRuntimeUI);
     }
-
     ImGui::Separator();
     }
 
@@ -726,7 +728,8 @@ void EditorLayer::DrawMaterialEditor(Application& app)
 {
     if(m_FocusMaterial){ImGui::SetNextWindowFocus();ImGui::SetNextWindowCollapsed(false);m_FocusMaterial=false;}
     ImGui::SetNextWindowSize(ImVec2(390,480),ImGuiCond_FirstUseEver);
-    if(!ImGui::Begin("Material Editor",&m_ShowMaterialEditor)){ImGui::End();return;}
+    PrepareWorkspacePrimaryWindow();
+    if(!ImGui::Begin("Material Editor",&m_ShowMaterialEditor,m_WorkspaceFocus?ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings:0)){ImGui::End();return;}
     if(app.IsEditorPlayMode())ImGui::TextWrapped("Stop Play before modifying shared material assets.");
     ImGui::BeginDisabled(app.IsEditorPlayMode());
     auto* resources=app.GetResourceManager();auto& world=app.GetWorld();
@@ -741,11 +744,13 @@ void EditorLayer::DrawMaterialEditor(Application& app)
     if(component&&!component->materialPath.empty()) {ImGui::SameLine();if(ImGui::Button("Open entity material"))open(component->materialPath);}
     int comparison=app.GetShadingModelOverride()+1;const char* comparisonModes[]={"Material setting","Force Lambert","Force PBR"};
     if(ImGui::Combo("Scene shading comparison",&comparison,comparisonModes,3))app.SetShadingModelOverride(comparison-1);
-    if(ImGui::Button("PBR spheres demo"))app.SetupPbrDemoScene();
-    ImGui::SameLine();if(ImGui::Button("PBR textures demo"))app.SetupPbrTexturesDemoScene();
+    if(ActiveDocumentIs(DocumentType::Scene)){
+        if(ImGui::Button("PBR spheres demo"))app.SetupPbrDemoScene();
+        ImGui::SameLine();if(ImGui::Button("PBR textures demo"))app.SetupPbrTexturesDemoScene();
+    }
     unsigned mask=app.GetPbrTextureMask();const char* labels[]={"Normal mapping","MR maps","AO maps"};
     for(unsigned i=0;i<3;++i){bool enabled=(mask&(1u<<i))!=0;if(ImGui::Checkbox(labels[i],&enabled)){mask=enabled?mask|(1u<<i):mask&~(1u<<i);app.SetPbrTextureMask(mask);}if(i<2)ImGui::SameLine();}
-    if(ImGui::Button("Material slots demo"))app.SetupMaterialDemoScene();
+    if(ActiveDocumentIs(DocumentType::Scene)&&ImGui::Button("Material slots demo"))app.SetupMaterialDemoScene();
     ImGui::InputText("New asset key",&m_NewMaterialKey);
     if(ImGui::Button("Create Material")) {
         if(m_MaterialDirty)m_MaterialError="Unsaved changes: Save or Revert before creating an asset.";

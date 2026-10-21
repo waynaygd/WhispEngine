@@ -44,7 +44,7 @@ bool ValidWorkspaceIni(const std::string& ini){
             nodes.emplace(id,Node{parent,0,split!=std::string::npos,space,text.find("CentralNode=1")!=std::string::npos});
         }
     }
-    const auto root=nodes.find(WorkspaceRoot());if(!viewport&&ini.find("[Window][Canvas Designer]")==std::string::npos)return false;
+    const auto root=nodes.find(WorkspaceRoot());if(!viewport&&ini.find("[Window][Canvas Designer]")==std::string::npos&&ini.find("[Window][Material Editor]")==std::string::npos&&ini.find("[Window][Script Document]")==std::string::npos)return false;
     if(root==nodes.end()||!root->second.space||root->second.parent)return false;
     std::map<unsigned,unsigned> centers;
     for(const auto& [id,node]:nodes){if(node.central&&node.children)return false;if((node.children!=0&&node.children!=2)||(node.children==2&&!node.split)||(node.split&&node.children!=2))return false;unsigned n=id,depth=0;while(nodes.at(n).parent){if(++depth>32)return false;n=nodes.at(n).parent;}if(node.central&&++centers[n]>1)return false;}
@@ -68,6 +68,7 @@ void EditorLayer::WorkspaceDefaults(){
     if(m_Workspace==EditorWorkspace::AssetManagement){visible["Asset Browser"]=true;}
     if(m_Workspace==EditorWorkspace::GameplayDebugging){visible["Gameplay Events"]=visible["Lua Runtime Inspector"]=visible["Scene Validation"]=visible["Console / Diagnostics"]=true;}
     if(m_Workspace==EditorWorkspace::UIDesigner){for(auto& [name,value]:visible)value=false;for(const auto* name:{"Widget Hierarchy","Canvas Designer","Widget Inspector","Asset Browser"})visible[name]=true;}
+    if(m_Workspace==EditorWorkspace::Material||m_Workspace==EditorWorkspace::Script){for(auto& [name,value]:visible)value=false;visible["Asset Browser"]=visible["Console / Diagnostics"]=true;if(m_Workspace==EditorWorkspace::Material)visible["Material Editor"]=true;else visible["Lua Runtime Inspector"]=true;}
     ApplyWorkspaceVisibility(visible);
 }
 void EditorLayer::InitializeWorkspaces(const EditorPreferences& preferences){
@@ -83,7 +84,7 @@ void EditorLayer::InitializeWorkspaces(const EditorPreferences& preferences){
     if(auto saved=m_Workspaces.find(WorkspaceKeys[int(m_Workspace)]);saved!=m_Workspaces.end())ApplyWorkspaceVisibility(saved->second.visible);
 }
 bool EditorLayer::CaptureCurrentWorkspace(){
-    if(!ImGui::GetCurrentContext()||m_WorkspacePending||m_ResetLayout||m_ViewportMaximized||m_FixedDiagnosticLayout||!ImGui::DockBuilderGetNode(WorkspaceRoot()))return false;
+    if(!ImGui::GetCurrentContext()||m_WorkspacePending||m_ResetLayout||m_WorkspaceFocus||m_ViewportMaximized||m_FixedDiagnosticLayout||!ImGui::DockBuilderGetNode(WorkspaceRoot()))return false;
     std::size_t size=0;const auto* data=ImGui::SaveIniSettingsToMemory(&size);std::string ini(data,size);
     if(!ValidWorkspaceIni(ini)){m_EditorError="The current layout cannot be saved; restore this workspace's default layout.";return false;}
     m_Workspaces[WorkspaceKeys[int(m_Workspace)]]={std::move(ini),CaptureWorkspaceVisibility()};ImGui::GetIO().WantSaveIniSettings=false;return true;
@@ -113,6 +114,8 @@ void EditorLayer::BuildWorkspaceDocking(unsigned root,const ImVec2& size){
     }
     for(const auto* name:{"Scene Settings","Editor Visuals","Lua Runtime Inspector","Project Settings"})ImGui::DockBuilderDockWindow(name,right);
     for(const auto* name:{"Console / Diagnostics","Gameplay Events","Scene Validation","Material Editor","Statistics","Physics Stress Test"})ImGui::DockBuilderDockWindow(name,bottom);
+    if(m_Workspace==EditorWorkspace::Material)ImGui::DockBuilderDockWindow("Material Editor",center);
+    ImGui::DockBuilderDockWindow("Script Document",center);ImGui::DockBuilderDockWindow("Start Workspace",center);
     ImGui::DockBuilderFinish(root);
     if(m_Workspace==EditorWorkspace::Scripting||m_Workspace==EditorWorkspace::GameplayDebugging){
         if(auto* node=ImGui::DockBuilderGetNode(right))node->SelectedTabId=ImHashStr("Lua Runtime Inspector");
@@ -123,7 +126,8 @@ void EditorLayer::ConfigureDocking(){
     auto* viewport=ImGui::GetMainViewport();ImGuiViewport dock=*viewport;
     // This is a geometry-only copy for the dockspace, not a backend owner.
     dock.PlatformUserData=nullptr;dock.RendererUserData=nullptr;const float toolbar=ImGui::GetFrameHeightWithSpacing()+8;
-    dock.WorkPos.y+=toolbar;dock.WorkSize.y=std::max(1.f,dock.WorkSize.y-toolbar);const auto root=WorkspaceRoot();
+    dock.WorkPos.y+=toolbar*2;dock.WorkSize.y=std::max(1.f,dock.WorkSize.y-toolbar*2);const auto root=WorkspaceRoot();
+    if(m_WorkspaceFocus){ImGui::DockSpaceOverViewport(root,&dock,ImGuiDockNodeFlags_KeepAliveOnly);return;}
     if(m_FixedDiagnosticLayout){ImGui::DockSpaceOverViewport(root,&dock,ImGuiDockNodeFlags_PassthruCentralNode);return;}
     if(m_WorkspacePending){
         m_Workspace=m_RequestedWorkspace;if(!m_WorkspaceFirstApply)WorkspaceDefaults();ImGui::ClearIniSettings();
@@ -145,7 +149,18 @@ void EditorLayer::ConfigureDocking(){
 }
 void EditorLayer::DrawWorkspaceMenu(Application& app){
     if(!ImGui::BeginMenu("Workspaces"))return;
-    for(int i=0;i<int(WorkspaceKeys.size());++i)if(ImGui::MenuItem(WorkspaceNames[i],nullptr,m_Workspace==EditorWorkspace(i)))SwitchWorkspace(EditorWorkspace(i));
+    auto select=[&](EditorWorkspace workspace){
+        const auto type=workspace==EditorWorkspace::UIDesigner?DocumentType::UI:workspace==EditorWorkspace::Material?DocumentType::Material:workspace==EditorWorkspace::Script?DocumentType::Lua:DocumentType::Scene;
+        if(!ActiveDocumentIs(type)){
+            std::string id;for(const auto& d:m_Documents)if(d.type==type&&(type!=DocumentType::Scene||d.key==app.GetSceneKey())){id=d.id;break;}
+            if(id.empty()&&type==DocumentType::Scene)id=RegisterDocument(app,type,app.GetSceneKey()).id;
+            if(id.empty()){m_OpenDocumentKey=type==DocumentType::UI?"ui/":type==DocumentType::Material?"materials/":"scripts/";m_OpenDocumentPrompt=true;return;}
+            if(!ActivateDocument(app,id)){m_PendingDocument=id;m_DocumentClose=false;m_DocumentPrompt=true;return;}
+        }
+        SwitchWorkspace(workspace);
+    };
+    for(int i=0;i<int(WorkspaceKeys.size());++i)if(ImGui::MenuItem(WorkspaceNames[i],nullptr,m_Workspace==EditorWorkspace(i)))select(EditorWorkspace(i));
+    if(ImGui::MenuItem("Level Workspace",nullptr,m_Workspace==EditorWorkspace::LevelEditing))select(EditorWorkspace::LevelEditing);
     ImGui::Separator();ImGui::BeginDisabled(m_WorkspacePending||m_ViewportMaximized);
     if(ImGui::MenuItem("Save Current Layout"))SaveCurrentWorkspace(app);ImGui::EndDisabled();
     if(ImGui::MenuItem("Reset Current Layout"))ResetCurrentWorkspace(app);

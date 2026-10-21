@@ -15,7 +15,8 @@ nlohmann::json PreferencesToJson(const EditorPreferences& p){
     auto bookmarks=nlohmann::json::object();
     for(const auto& [scene,slots]:p.bookmarks){auto values=nlohmann::json::array();for(const auto& slot:slots){if(slot)values.push_back({{"name",slot->name},{"position",slot->position},{"yaw",slot->yaw},{"pitch",slot->pitch}});else values.push_back(nullptr);}bookmarks[scene]=std::move(values);}
     result["bookmarks"]=std::move(bookmarks);
-    result["activeWorkspace"]=WorkspaceKeys[std::clamp(int(p.activeWorkspace),0,4)];
+    result["documentSessions"]=p.documentSessions;
+    result["activeWorkspace"]=WorkspaceKeys[std::clamp(int(p.activeWorkspace),0,int(WorkspaceKeys.size())-1)];
     result["workspacesInitialized"]=p.workspacesInitialized;
     auto layouts=nlohmann::json::object();for(const auto& [key,layout]:p.workspaces)layouts[key]={{"ini",layout.ini},{"visible",layout.visible}};
     result["workspaces"]=std::move(layouts);
@@ -26,6 +27,7 @@ EditorPreferences PreferencesFromJson(const nlohmann::json& j){
     // Unavailable recent descriptors remain visible; they never prevent startup.
     if(!j.is_object()||j.value("version",0)!=1)throw std::runtime_error("Unsupported editor preferences schema");EditorPreferences p;
     // A damaged workspace never discards other editor preferences.
+    if(j.contains("documentSessions")&&j["documentSessions"].is_object()&&j["documentSessions"].dump().size()<1024*1024)p.documentSessions=j["documentSessions"];
     p.workspacesInitialized=j.contains("workspacesInitialized")&&j["workspacesInitialized"].is_boolean()&&j["workspacesInitialized"].get<bool>();
     if(j.contains("activeWorkspace")&&j["activeWorkspace"].is_string())for(int i=0;i<int(WorkspaceKeys.size());++i)if(j["activeWorkspace"]==WorkspaceKeys[i])p.activeWorkspace=EditorWorkspace(i);
     if(j.contains("workspaces")&&j["workspaces"].is_object())for(const auto* key:WorkspaceKeys){

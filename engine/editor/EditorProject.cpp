@@ -42,6 +42,7 @@ bool EditorLayer::ResolveProjectEdits(Application& app,int decision,std::string*
     return true;
 }
 void EditorLayer::ResetProjectState(IRenderAdapter* renderer){
+    StoreDocumentSession();m_Documents.clear();m_ActiveDocument.clear();m_ObservedScene="<initial>";m_DocumentProject.clear();m_PendingDocument.clear();m_DocumentPrompt=false;m_WorkspaceFocus=false;m_RestoreDocuments=true;m_ScriptKey.clear();m_ScriptText.clear();
     m_UIDocuments.clear();m_UIStyles.clear();m_DirtyUIStyles.clear();m_DesignDocument.clear();m_UIDesignerKeys.clear();m_UIWidgetDrag.reset();m_UI4Selection.clear();m_UIStyleKey.clear();m_UIStyleId.clear();m_UIClipId.clear();
     m_EventFilter={};m_SelectedGameplayEvent=0;
     m_ShowProjectSettings=m_FocusProjectSettings=false;m_ProjectSettingsBase.reset();m_ProjectSettingsDraft={};m_ProjectSettingsScenes={};m_ProjectSettingsError.clear();m_ProjectSettingsNotice.clear();

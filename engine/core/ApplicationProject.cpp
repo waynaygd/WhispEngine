@@ -49,6 +49,7 @@ bool Application::CommitProject(std::shared_ptr<const ProjectContext> next,ecs::
     m_Camera.controlsActive=false;m_Camera.previousRightMouseDown=true;
     if(m_ResourceManager)m_ResourceManager->DrainProjectLoads();
     m_LuaRuntime.Events().StopCapture();m_LuaRuntime.Events().Clear();
+    m_EditorLayer.PersistPreferences(*this);
     m_EditorLayer.ResetProjectState(GetRenderAdapter());
     if(m_RenderSystem)m_RenderSystem->ReleaseGpuResources();
     if(m_ResourceManager)m_ResourceManager->ClearAll();

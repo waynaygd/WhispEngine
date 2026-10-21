@@ -316,6 +316,7 @@ void EditorLayer::EnterRuntime(const ecs::World::CloneMap& mapping){
     m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_GizmoUndoCaptured=false;m_DuplicateDrag=false;m_LightPointerCaptured=false;m_PlaneScaleCaptured=false;
 }
 void EditorLayer::LeaveRuntime(){
+    if(ActiveDocumentIs(DocumentType::Scene))m_FocusViewportWindow=true;
     m_LuaInspection={};m_LuaInspectionCaptured=false;
     m_SurfaceMove.reset();m_EditPivot=false;m_VertexSource.reset();m_VertexTarget.reset();m_VertexSourcePicking=false;
     m_BoxSelection.reset();

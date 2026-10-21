@@ -64,6 +64,7 @@ add_library(Engine
   resources/loaders/ShaderLoader.cpp
   scene/SceneSerializer.cpp
   scene/SceneSettings.cpp
+  editor/EditorDocuments.cpp
   editor/EditorLayer.cpp
   editor/EditorProject.cpp
   editor/EditorProjectSettings.cpp

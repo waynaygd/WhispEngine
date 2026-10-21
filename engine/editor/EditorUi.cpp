@@ -31,6 +31,7 @@ const char* EntityKind(const ecs::World& w,ecs::Entity e){
 }
 void EditorLayer::InitializePreferences(Application& app){
     EditorPreferences p;std::string error;if(!LoadPreferences(PreferencesPath(),p,&error)&&!error.empty())Logger::Get().Warn(error);
+    m_DocumentSessions=p.documentSessions;
     m_RecentScenes=p.recentScenes;m_RecentProjects=p.recentProjects;
     m_Bookmarks=p.bookmarks;m_SelectionFilters=p.selectionFilters;
     m_ShowHierarchy=p.hierarchy;m_ShowInspector=p.inspector;m_ShowViewport=p.viewport;m_ShowAssetBrowser=p.assets;m_ShowMaterialEditor=p.material;m_ShowSceneSettings=p.settings;m_ShowConsole=p.console;m_ShowStatistics=p.diagnostics;
@@ -43,7 +44,8 @@ void EditorLayer::InitializePreferences(Application& app){
 bool EditorLayer::PersistPreferences(Application& app){
     // End-of-session persistence retains the last normal layout, never F11's temporary viewport.
     if(ImGui::GetCurrentContext()&&!ImGui::GetCurrentContext()->WithinFrameScope)CaptureCurrentWorkspace();
-    EditorPreferences p;p.activeWorkspace=m_Workspace;p.workspaces=m_Workspaces;p.workspacesInitialized=true;p.recentScenes=app.GetProject()?std::vector<std::string>{}:m_RecentScenes;p.recentProjects=m_RecentProjects;p.hierarchy=m_ShowHierarchy;p.inspector=m_ShowInspector;p.viewport=m_ShowViewport;p.assets=m_ShowAssetBrowser;p.material=m_ShowMaterialEditor;p.settings=m_ShowSceneSettings;p.console=m_ShowConsole;p.diagnostics=m_ShowStatistics;
+    CaptureSceneDocument(app);StoreDocumentSession();
+    EditorPreferences p;p.documentSessions=m_DocumentSessions;p.activeWorkspace=m_Workspace;p.workspaces=m_Workspaces;p.workspacesInitialized=true;p.recentScenes=app.GetProject()?std::vector<std::string>{}:m_RecentScenes;p.recentProjects=m_RecentProjects;p.hierarchy=m_ShowHierarchy;p.inspector=m_ShowInspector;p.viewport=m_ShowViewport;p.assets=m_ShowAssetBrowser;p.material=m_ShowMaterialEditor;p.settings=m_ShowSceneSettings;p.console=m_ShowConsole;p.diagnostics=m_ShowStatistics;
     p.assetGrid=m_AssetGrid;p.projectAssets=m_ProjectAssets;p.assetCardSize=m_AssetCardSize;p.backgroundOverride=m_BackgroundOverride;p.projectileTestInput=m_ProjectileTestInput;
     p.bookmarks=m_Bookmarks;p.selectionFilters=m_SelectionFilters;
     p.surfaceSnap=m_SurfaceSnap;p.alignToNormal=m_AlignToNormal;p.surfaceOffset=m_SurfaceOffset;p.surfaceRotationOffset=m_SurfaceRotationOffset;
@@ -53,18 +55,20 @@ bool EditorLayer::PersistPreferences(Application& app){
 void EditorLayer::DrawToolbar(Application& app){
     auto* viewport=ImGui::GetMainViewport();ImGui::SetNextWindowPos(viewport->WorkPos);ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x,ImGui::GetFrameHeightWithSpacing()+8));
     ImGui::Begin("Main Toolbar",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings);
-    if(ImGui::Button(app.IsPrefabEditing()?"Save Prefab":"Save")){std::string error;if(!app.SaveCurrentScene(&error)){m_EditorError=error;Logger::Get().Error(error);}}ImGui::SameLine();
+    if(ImGui::Button(app.IsPrefabEditing()?"Save Prefab":"Save")){if(!SaveActiveDocument(app))Logger::Get().Error(m_EditorError);}ImGui::SameLine();
     if(app.IsPrefabEditing()){if(ImGui::Button("Return to Scene")){if(!IsSceneDirty())ClosePrefabEditor(app);else {m_PrefabAction=2;m_PrefabConfirm=true;}}ImGui::SameLine();}
     ImGui::BeginDisabled(app.IsPrefabEditing());
-    if(!app.IsEditorPlayMode()){if(ImGui::Button("Play"))app.SetEditorPlayMode(true);}else{
+    if(!app.IsEditorPlayMode()){ImGui::BeginDisabled(!ActiveDocumentIs(DocumentType::Scene));if(ImGui::Button("Play"))app.SetEditorPlayMode(true);ImGui::EndDisabled();}else{
         if(ImGui::Button(app.IsEditorPaused()?"Resume":"Pause"))app.SetEditorPaused(!app.IsEditorPaused());ImGui::SameLine();if(ImGui::Button("Stop"))app.SetEditorPlayMode(false);
     }
     ImGui::EndDisabled();
     ImGui::SameLine();ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);ImGui::SameLine();
     ImGui::RadioButton("Move",&m_GizmoOperation,0);ImGui::SameLine();ImGui::RadioButton("Rotate",&m_GizmoOperation,1);ImGui::SameLine();ImGui::RadioButton("Scale",&m_GizmoOperation,2);ImGui::SameLine();
     ImGui::RadioButton("Local",&m_GizmoMode,0);ImGui::SameLine();auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(m_Selection.active);const bool localScale=m_Selection.items.size()==1&&m_GizmoOperation==2&&t&&(std::abs(t->rotation.x)+std::abs(t->rotation.y)+std::abs(t->rotation.z)>1e-6f);if(localScale)m_GizmoMode=0;ImGui::BeginDisabled(localScale);ImGui::RadioButton("World",&m_GizmoMode,1);ImGui::EndDisabled();if(m_GizmoOperation==2&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Scale axes/planes use local TRS axes. Rotated world non-uniform scale requires shear and is not represented by Transform.");ImGui::SameLine();ImGui::Checkbox(m_GizmoOperation==1?"Rotation Snap":"Snap",m_GizmoOperation==1?&m_RotationSnapping:&m_Snapping);ImGui::SameLine();ImGui::Checkbox("Grid",&m_ShowGrid);ImGui::SameLine();
+    if(ImGui::Button(m_WorkspaceFocus?"Restore Layout":"Maximize Workspace"))SetWorkspaceFocused(!m_WorkspaceFocus);ImGui::SameLine();
     if(ImGui::Button("Focus"))FocusSelection(app);ImGui::SameLine();
-    ImGui::Text("%s%s",app.IsPrefabEditing()?m_EditingPrefab.c_str():(app.GetSceneKey().empty()?"Untitled":app.GetSceneKey().c_str()),IsSceneDirty()?" *":"");ImGui::End();
+    const EditorDocument* active=nullptr;for(const auto& document:m_Documents)if(document.id==m_ActiveDocument)active=&document;
+    ImGui::Text("%s%s",app.IsPrefabEditing()?m_EditingPrefab.c_str():active?(active->key.empty()?"Untitled Scene":active->key.c_str()):"Start Workspace",(active?DocumentDirty(*active):IsSceneDirty())?" *":"");ImGui::End();
 }
 void EditorLayer::DrawMainMenu(Application& app){
     if(!ImGui::BeginMainMenuBar())return;
@@ -80,23 +84,25 @@ void EditorLayer::DrawMainMenu(Application& app){
         if(ImGui::MenuItem("Project Settings...",nullptr,false,bool(app.GetProject())))ShowProjectSettings(app);
         if(ImGui::MenuItem("Close Project",nullptr,false,!app.IsProjectBrowserActive()))RequestProjectOpen(app,{},true);
         ImGui::Separator();
+        if(ImGui::MenuItem("Open Document..."))m_OpenDocumentPrompt=true;
         if(ImGui::MenuItem("New Scene"))action(1);
         if(ImGui::MenuItem("Open Scene"))action(2);
         if(ImGui::BeginMenu("Recent Scenes",!m_RecentScenes.empty())){const auto recent=m_RecentScenes;for(const auto& key:recent)if(ImGui::MenuItem(key.c_str())){RequestRecentScene(app,key);}ImGui::EndMenu();}
         ImGui::EndDisabled();
-        if(ImGui::MenuItem("Save","Ctrl+S",false,!app.IsEditorPlayMode())){std::string error;if(!app.SaveCurrentScene(&error)){m_EditorError=error;Logger::Get().Error(error);}}
-        if(ImGui::MenuItem("Save As","Ctrl+Shift+S",false,!app.IsEditorPlayMode()&&!app.IsPrefabEditing()))action(3);
+        if(ImGui::MenuItem("Save","Ctrl+S",false,!app.IsEditorPlayMode())){if(!SaveActiveDocument(app))Logger::Get().Error(m_EditorError);}
+        if(ImGui::MenuItem("Save As","Ctrl+Shift+S",false,!app.IsEditorPlayMode()&&!app.IsPrefabEditing()&&ActiveDocumentIs(DocumentType::Scene)))action(3);
         if(ImGui::MenuItem("Reopen Scene",nullptr,false,!app.GetSceneKey().empty()&&!app.IsPrefabEditing())){m_SceneDialogKey=app.GetSceneKey();action(2);}
         ImGui::EndMenu();
     }
     if(ImGui::BeginMenu("Edit")){
-        if(ImGui::MenuItem("Undo","Ctrl+Z",false,CanUndo()||HasPendingTransaction()))Undo(app);
-        if(ImGui::MenuItem("Redo","Ctrl+Y",false,CanRedo()))Redo(app);
+        if(ImGui::MenuItem("Undo","Ctrl+Z",false,CanUndoActiveDocument()))UndoActiveDocument(app);
+        if(ImGui::MenuItem("Redo","Ctrl+Y",false,CanUndoActiveDocument(true)))UndoActiveDocument(app,true);
+        ImGui::BeginDisabled(!ActiveDocumentIs(DocumentType::Scene)&&!app.IsPrefabEditing());
         if(ImGui::MenuItem("Copy","Ctrl+C",false,!app.IsEditorPlayMode()))CopyEntity(app,m_Selection.active);
         if(ImGui::MenuItem("Paste","Ctrl+V",false,!app.IsEditorPlayMode()&&m_Clipboard.is_object()))PasteEntity(app);
         if(ImGui::MenuItem("Clear Selection",nullptr,false,!m_SelectionLocked)){FinishTransaction(app);ClearSelection();}
         if(ImGui::MenuItem("Duplicate","Ctrl+D",false,app.GetWorld().IsAlive(m_Selection.active)))DuplicateEntity(app,m_Selection.active);
-        if(ImGui::MenuItem("Delete selection","Delete",false,!m_Selection.items.empty()))DeleteSelection(app);ImGui::EndMenu();
+        if(ImGui::MenuItem("Delete selection","Delete",false,!m_Selection.items.empty()))DeleteSelection(app);ImGui::EndDisabled();ImGui::EndMenu();
     }
     if(ImGui::BeginMenu("View")){
         ImGui::MenuItem("Editor Visuals",nullptr,&m_ShowVisualSettings);
@@ -133,6 +139,7 @@ void EditorLayer::DrawSceneDialogs(Application& app){
     if(ImGui::IsPopupOpen("Scene error")){if(ImGui::BeginPopupModal("Scene error",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){ImGui::TextWrapped("%s",m_EditorError.c_str());if(ImGui::Button("Close"))ImGui::CloseCurrentPopup();ImGui::EndPopup();}return;}
     ImGui::SetNextWindowPos(main->GetWorkCenter(),ImGuiCond_Appearing,ImVec2(.5f,.5f));
     if(ImGui::BeginPopupModal("Scene action",nullptr,ImGuiWindowFlags_None)){
+        if(app.IsEditorPlayMode()&&m_SceneDialogAction!=3)ImGui::TextWrapped("Opening or creating a scene stops Play and discards the Runtime World. Cancel keeps Play running.");
         if(IsSceneDirty()&&m_SceneDialogAction!=3)ImGui::TextWrapped("Unsaved scene edits will be discarded. Save first, or explicitly discard.");
         if(m_SceneDialogAction==2){
             ImGui::InputTextWithHint("##sceneSearch","Search project scenes",&m_SceneSearch);

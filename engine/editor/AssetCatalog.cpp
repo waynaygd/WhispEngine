@@ -1,4 +1,5 @@
 #include "AssetCatalog.h"
+#include "SceneCatalog.h"
 #include "AssetImport.h"
 #include "LuaAssetDependencies.h"
 #include "../core/AssetPaths.h"
@@ -27,6 +28,7 @@ AssetCatalog::AssetCatalog(){
     Register({"Texture","[T]","",ecs::AssetKind::Texture,{".png",".jpg",".jpeg",".bmp",".tga",".dds"}});
     Register({"Material","[Mat]","materials",ecs::AssetKind::Material,{".json",".material"}});
     Register({"Shader","[S]","",ecs::AssetKind::Shader,{".hlsl"},true});
+    Register({"Scene Document","[Level]","scenes",ecs::AssetKind::None,{".json"}});
     Register({"Imported Scene","[Scene]","models",ecs::AssetKind::None,{".wscene"}});
     Register({"Environment","[HDR]","environments",ecs::AssetKind::Environment,{".hdr"}});
 }
@@ -38,7 +40,7 @@ void AssetCatalog::Register(AssetType type){
 void AssetCatalog::Refresh(){
     std::vector<AssetEntry> ready;std::set<std::string> dirs;
     const auto active=std::filesystem::weakly_canonical(AssetPaths::ResolveAssetRoot());
-    for(std::size_t i=0;i<types.size();++i){auto& type=types[i];if(type.shaderRoot&&ProjectManager::Active())continue;const std::set<std::filesystem::path> roots=type.shaderRoot?std::set<std::filesystem::path>{AssetPaths::ResolveShaderRoot()}:std::set<std::filesystem::path>{AssetPaths::ResolveAssetRoot(),AssetImport::ProjectRoot()};for(const auto& root:roots){const auto directory=root/type.folder;
+    for(std::size_t i=0;i<types.size();++i){auto& type=types[i];if(type.name=="Scene Document")continue;if(type.shaderRoot&&ProjectManager::Active())continue;const std::set<std::filesystem::path> roots=type.shaderRoot?std::set<std::filesystem::path>{AssetPaths::ResolveShaderRoot()}:std::set<std::filesystem::path>{AssetPaths::ResolveAssetRoot(),AssetImport::ProjectRoot()};for(const auto& root:roots){const auto directory=root/type.folder;
         if(!std::filesystem::exists(directory))continue;
         if(!type.folder.empty())dirs.insert(type.folder);
         for(std::filesystem::recursive_directory_iterator walk(directory,std::filesystem::directory_options::skip_permission_denied),end;walk!=end;++walk){const auto& item=*walk;
@@ -55,6 +57,12 @@ void AssetCatalog::Refresh(){
             auto folder=std::filesystem::u8path(key).parent_path();while(!folder.empty()){dirs.insert(DirectoryKey(folder));folder=folder.parent_path();}
         }
     }
+    }
+    SceneCatalog scenes;scenes.Refresh({AssetPaths::ResolveAssetRoot(),AssetImport::ProjectRoot()});
+    auto sceneType=std::find_if(types.begin(),types.end(),[](const auto& t){return t.name=="Scene Document";});
+    if(sceneType!=types.end())for(const auto& entry:scenes.Entries()){
+        ready.push_back({entry.key,std::size_t(sceneType-types.begin())});auto folder=std::filesystem::u8path(entry.key).parent_path();
+        while(!folder.empty()){dirs.insert(DirectoryKey(folder));folder=folder.parent_path();}
     }
     std::sort(ready.begin(),ready.end(),[](auto& a,auto& b){return a.key<b.key;});ready.erase(std::unique(ready.begin(),ready.end(),[](const auto& a,const auto& b){return a.key==b.key&&a.type==b.type;}),ready.end());entries=std::move(ready);folders=std::move(dirs);++revision;
 }

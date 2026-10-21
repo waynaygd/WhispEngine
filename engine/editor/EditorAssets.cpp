@@ -19,10 +19,7 @@
 #include "../scene/SceneSerializer.h"
 namespace editor {
 bool EditorLayer::OpenMaterial(Application& app,const std::string& key){
-    if(key.starts_with("@engine/")){m_MaterialError="Built-in material is read-only. Create a project material to customize it.";return false;}
-    m_ShowMaterialEditor=m_FocusMaterial=true;
-    if(m_MaterialDirty&&key!=m_EditingMaterial){m_MaterialError="Save or Revert the current material before switching assets";return false;}
-    m_EditingMaterial=key;m_SelectedAsset=key;m_SelectedAssetKind="Material";if(auto* r=app.GetResourceManager())r->LoadAsync<MaterialResource>(std::filesystem::u8path(key));return true;
+    return OpenDocument(app,key);
 }
 bool EditorLayer::AssignAsset(Application& app,ecs::Entity e,ecs::AssetKind kind,const std::string& key){
     if(kind==ecs::AssetKind::UIDocument)return SetProperty(app,e,ecs::ComponentId("UICanvas"),"document",key);
@@ -173,7 +170,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
     ImGui::SetNextWindowSizeConstraints(ImVec2(280,180),ImVec2(FLT_MAX,FLT_MAX));if(!ImGui::Begin("Asset Browser",&m_ShowAssetBrowser)){ImGui::End();return;}
     const auto& types=m_AssetCatalog.Types();auto* resources=app.GetResourceManager();
     BeginAssetThumbnailFrame(app);
-    auto openMaterial=[&](const std::string& key){OpenMaterial(app,key);};
+    auto openMaterial=[&](const std::string& key){OpenDocument(app,key);};
     auto action=[&](int kind,const std::string& key){m_AssetAction=kind;m_AssetActionSource=key;m_AssetActionKey=key;m_AssetActionRequested=true;m_EditorError.clear();};
     auto creationMenu=[&](const std::string& directory){
         ImGui::TextDisabled("%s",directory.empty()?"Project root":directory.c_str());
@@ -276,11 +273,12 @@ void EditorLayer::DrawAssetBrowser(Application& app){
                 draw->AddText({origin.x+4*dpi,p.y+cardImage+4*dpi+ImGui::GetTextLineHeight()},ImGui::GetColorU32(ImGuiCol_TextDisabled),state);
                 draw->PopClipRect();
             }
-            if(ImGui::IsItemHovered())ImGui::SetTooltip("%s\n%s / %s\n%s\n%s",key.c_str(),type.name.c_str(),state,thumbnail?thumbnail->error.c_str():AssetLoadError(resources,type.kind,key).c_str(),type.kind==ecs::AssetKind::Prefab?"Double-click: open Prefab Editor. Drag: create a linked instance in Viewport.":type.kind==ecs::AssetKind::LuaScript?"Double-click: open in Visual Studio 2022. Drag: assign script.":"Double-click material: open editor. Drag: assign compatible slot.");
+            if(ImGui::IsItemHovered())ImGui::SetTooltip("%s\n%s / %s\n%s\n%s",key.c_str(),type.name.c_str(),state,thumbnail?thumbnail->error.c_str():AssetLoadError(resources,type.kind,key).c_str(),type.kind==ecs::AssetKind::Prefab?"Double-click: open Prefab Editor. Drag: create a linked instance in Viewport.":type.kind==ecs::AssetKind::LuaScript?"Double-click: open Script Workspace. Drag: assign script.":"Double-click material: open editor. Drag: assign compatible slot.");
             if((type.kind!=ecs::AssetKind::None||type.name=="Imported Scene")&&ImGui::BeginDragDropSource()){AssetPayload payload{};payload.kind=type.kind;std::memcpy(payload.key,key.data(),std::min(key.size(),sizeof(payload.key)-1));ImGui::SetDragDropPayload("WHISP_ASSET",&payload,sizeof(payload));ImGui::Text("%s %s",type.icon.c_str(),name.c_str());ImGui::EndDragDropSource();}
             if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::Prefab)m_PrefabDoubleClick=key;
             if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::Material)openMaterial(key);
-            if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::LuaScript)OpenLuaScriptInVisualStudio(key,&m_EditorError);
+            if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::LuaScript)OpenDocument(app,key);
+            if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.name=="Scene Document")OpenDocument(app,key);
             if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0)&&type.kind==ecs::AssetKind::UIDocument)OpenUIDesigner(app,key);
             if(ImGui::BeginPopupContextItem("AssetActions")){
                 if(type.kind==ecs::AssetKind::UIDocument&&ImGui::MenuItem("Open in Widget Designer"))OpenUIDesigner(app,key);

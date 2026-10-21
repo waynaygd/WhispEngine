@@ -25,9 +25,10 @@ bool EditorLayer::CancelUIDocumentEdit(Application& app,const std::string& key){
  }catch(const std::exception& e){m_EditorError=e.what();return false;}
 }
 bool EditorLayer::OpenUIDesigner(Application& app,const std::string& key){
- try{UIDocumentSession(app,key);if(m_UIWidgetDrag){CancelUIDocumentEdit(app,m_UIWidgetDrag->key);m_UIWidgetDrag.reset();}
-  if(!m_DesignDocument.empty()){auto& old=UIDocumentSession(app,m_DesignDocument);if(old.pending)EditUIDocument(app,m_DesignDocument,old.draft,true);}
-  m_DesignDocument=key;m_WidgetRenameId.clear();m_UIFit=true;m_ShowCanvasDesigner=m_ShowWidgetHierarchy=m_ShowWidgetInspector=true;
+ try{SyncSceneDocument(app);UIDocumentSession(app,key);if(m_UIWidgetDrag){CancelUIDocumentEdit(app,m_UIWidgetDrag->key);m_UIWidgetDrag.reset();}
+  if(!m_DesignDocument.empty()){auto& old=UIDocumentSession(app,m_DesignDocument);if(old.pending)EditUIDocument(app,m_DesignDocument,old.draft,true);old.preview=m_UIPreviewSize;old.zoom=m_UIZoom;old.panX=m_UIPan.x;old.panY=m_UIPan.y;old.fit=m_UIFit;old.viewSaved=true;}
+  CaptureCurrentWorkspace();m_ActiveDocument=RegisterDocument(app,DocumentType::UI,key).id;
+  m_DesignDocument=key;m_WidgetRenameId.clear();auto& view=UIDocumentSession(app,key);m_UIPreviewSize=view.preview;m_UIZoom=view.zoom;m_UIPan={view.panX,view.panY};m_UIFit=view.viewSaved?view.fit:true;m_ShowCanvasDesigner=m_ShowWidgetHierarchy=m_ShowWidgetInspector=true;
   if(std::find(m_UIDesignerKeys.begin(),m_UIDesignerKeys.end(),key)==m_UIDesignerKeys.end())m_UIDesignerKeys.push_back(key);
   if(auto saved=m_Workspaces.find("ui");saved!=m_Workspaces.end())for(auto* panel:{"Canvas Designer","Widget Hierarchy","Widget Inspector"})saved->second.visible[panel]=true;
   if(m_Workspace!=EditorWorkspace::UIDesigner)SwitchWorkspace(EditorWorkspace::UIDesigner);return true;
@@ -60,7 +61,8 @@ void EditorLayer::DrawUIDesigner(Application& app){
  if(m_UIWidgetDrag&&(!m_ShowCanvasDesigner||app.IsEditorPlayMode()||ImGui::GetIO().AppFocusLost)){CancelUIDocumentEdit(app,m_UIWidgetDrag->key);m_UIWidgetDrag.reset();}
  auto newDocument=[&](){auto key="ui/Canvas-"+ecs::NewSceneIdentity()+".ui.json";if(UILoader::Save(key,ui::EmptyDocument(),&m_EditorError)){m_AssetListsDirty=true;OpenUIDesigner(app,key);}};
  if(m_ShowCanvasDesigner){
-  if(ImGui::Begin("Canvas Designer",&m_ShowCanvasDesigner)){
+  PrepareWorkspacePrimaryWindow();
+  if(ImGui::Begin("Canvas Designer",&m_ShowCanvasDesigner,m_WorkspaceFocus?ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings:0)){
    ImGui::BeginDisabled(app.IsEditorPlayMode());if(ImGui::Button("New UI Document"))newDocument();ImGui::EndDisabled();ImGui::SameLine();
    if(ImGui::BeginCombo("Document",m_DesignDocument.empty()?"Choose .ui.json":m_DesignDocument.c_str())){
     std::set<std::string> keys(m_UIDesignerKeys.begin(),m_UIDesignerKeys.end());for(auto& e:m_AssetCatalog.Entries())if(e.key.ends_with(".ui.json"))keys.insert(e.key);
@@ -129,7 +131,7 @@ void EditorLayer::DrawUIDesigner(Application& app){
    }catch(const std::exception& e){ImGui::TextWrapped("UI preview: %s",e.what());}
   }ImGui::End();
  }
- if(m_ShowWidgetHierarchy){
+ if(m_ShowWidgetHierarchy&&!m_WorkspaceFocus){
   if(ImGui::Begin("Widget Hierarchy",&m_ShowWidgetHierarchy)&&!m_DesignDocument.empty())try{
    auto& s=UIDocumentSession(app,m_DesignDocument);ImGui::SetNextItemWidth(-FLT_MIN);ImGui::InputTextWithHint("##Widget Search","Search ID / type",&m_WidgetSearch);
    ImGui::BeginDisabled(app.IsEditorPlayMode()||bool(m_UIWidgetDrag));ImGui::SetNextItemWidth(-FLT_MIN);if(ImGui::BeginCombo("##Add Widget","Add Widget...")){for(auto* type:{"Panel","Text","Image","ProgressBar","Button"})if(ImGui::Selectable(type))WidgetCommand(app,"Add",type);ImGui::EndCombo();}
@@ -149,7 +151,7 @@ void EditorLayer::DrawUIDesigner(Application& app){
    };tree(tree,"");if(reparent){s.selected=reparent->first;WidgetCommand(app,"Reparent",reparent->second);}ImGui::EndDisabled();
   }catch(const std::exception& e){ImGui::TextWrapped("UI hierarchy: %s",e.what());}ImGui::End();
  }
- if(m_ShowWidgetInspector){
+ if(m_ShowWidgetInspector&&!m_WorkspaceFocus){
   if(ImGui::Begin("Widget Inspector",&m_ShowWidgetInspector)&&!m_DesignDocument.empty())try{
    auto& s=UIDocumentSession(app,m_DesignDocument);if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::BeginDisabled(app.IsEditorPlayMode()||bool(m_UIWidgetDrag));
    if(m_WidgetRenameId!=s.selected){m_WidgetRenameId=s.selected;m_WidgetRename=s.selected;}

@@ -8,6 +8,7 @@
 #include "../scene/SceneSettings.h"
 #include "../render/RenderResourceHandles.h"
 #include "EditorPreferences.h"
+#include "EditorDocuments.h"
 #include "InputRouting.h"
 #include "SelectionSet.h"
 #include "GroupTransform.h"
@@ -44,6 +45,7 @@ namespace editor
 class EditorLayer
 {
 public:
+    bool OpenDocument(Application&,const std::string&);
     class CameraMouseFrame {
         ImGuiContext* context=nullptr;
         bool restoreMouse=false;
@@ -120,7 +122,7 @@ public:
     void ShowGameplayEvents(){m_ShowGameplayEvents=true;}
     bool SelectGameplayEventEntity(Application&,const scripting::EventEntity&);
     EditorWorkspace GetWorkspace()const{return m_Workspace;}
-    void SwitchWorkspace(EditorWorkspace value){if(int(value)>=0&&int(value)<int(WorkspaceKeys.size())){m_RequestedWorkspace=value;m_WorkspacePending=true;m_WorkspaceFirstApply=false;}}
+    void SwitchWorkspace(EditorWorkspace value){if(int(value)>=0&&int(value)<int(WorkspaceKeys.size())){CaptureCurrentWorkspace();m_RequestedWorkspace=value;m_WorkspacePending=true;m_WorkspaceFirstApply=false;}}
     bool SaveCurrentWorkspace(Application&);
     bool ResetCurrentWorkspace(Application&);
     void ResetLayout(){m_ResetLayout=true;}
@@ -183,6 +185,18 @@ public:
     bool UpdateGroupTransform(Application&,const ImportMatrix&);
     void EndGroupTransform(Application&,bool cancel=false);
     enum class OpenDecision {Cancel,Discard,Save};
+    bool ActivateDocument(Application&,const std::string&,OpenDecision decision=OpenDecision::Cancel);
+    bool CloseDocument(Application&,const std::string&,OpenDecision decision=OpenDecision::Cancel);
+    bool SaveActiveDocument(Application&);
+    bool UndoActiveDocument(Application&,bool redo=false);
+    bool CanUndoActiveDocument(bool redo=false)const;
+    bool DocumentDirty(const EditorDocument&)const;
+    const std::vector<EditorDocument>& Documents()const{return m_Documents;}
+    const std::string& ActiveDocument()const{return m_ActiveDocument;}
+    bool ActiveDocumentIs(DocumentType type)const{for(const auto& d:m_Documents)if(d.id==m_ActiveDocument)return d.type==type;return false;}
+    bool IsWorkspaceFocused()const{return m_WorkspaceFocus;}
+    void SetWorkspaceFocused(bool value){if(value==m_WorkspaceFocus)return;if(value)CaptureCurrentWorkspace();else {m_RequestedWorkspace=m_Workspace;m_WorkspacePending=true;m_WorkspaceFirstApply=false;}m_WorkspaceFocus=value;}
+    void PrepareWorkspacePrimaryWindow();
     void ReleaseAssetPreview(IRenderAdapter*);
     struct AssetThumbnail {
         RenderTextureHandle texture;
@@ -256,6 +270,7 @@ public:
     bool WidgetCommand(Application&,const std::string& command,const std::string& argument="");
     void DrawUIDesigner(Application&);
     friend struct WidgetDesignerTestAccess;
+    friend struct EditorDocumentTestAccess;
     void DrawUIDocumentProperties(Application&,const std::string&,bool hierarchy);
     void DrawUI4Properties(Application&,const std::string&,ui::Document&,ui::Widget&,bool&);
     bool EditUIStyle(Application&,const std::string&,const ui::StyleSheet&,bool finish=true);
@@ -393,6 +408,19 @@ private:
     std::string m_RequestedSky;
     std::uint64_t m_FailedSkyVersion=0;
     void ConfigureDocking();
+    EditorDocument& RegisterDocument(Application&,DocumentType,const std::string&);
+    void DrawDocumentTabs(Application&);
+    void DrawScriptDocument(Application&);
+    void SyncSceneDocument(Application&);
+    void CaptureSceneDocument(Application&);
+    void StoreDocumentSession();
+    void RestoreDocumentSession(Application&);
+    bool ResolveDocumentEdits(Application&,const EditorDocument&,OpenDecision);
+    std::vector<EditorDocument> m_Documents;
+    std::string m_ActiveDocument,m_ObservedScene="<initial>",m_DocumentProject,m_PendingDocument,m_OpenDocumentKey;
+    bool m_DocumentClose=false,m_DocumentPrompt=false,m_OpenDocumentPrompt=false,m_WorkspaceFocus=false,m_RestoreDocuments=true;
+    nlohmann::json m_DocumentSessions=nlohmann::json::object();
+    std::string m_ScriptText,m_ScriptKey;
     std::map<std::string,bool> CaptureWorkspaceVisibility();
     void ApplyWorkspaceVisibility(const std::map<std::string,bool>&);
     void WorkspaceDefaults();
@@ -515,7 +543,7 @@ private:
     int m_GizmoMode = 0;
     bool m_GameView=false,m_ProjectAssets=true,m_PlaneScaleCaptured=false;
     float m_AssetCardSize=180;
-    struct UIDocumentEdit {std::string resourceKey;ui::Document draft;nlohmann::json disk;std::vector<nlohmann::json> undo,redo;std::optional<nlohmann::json> pending;std::string selected;bool initialized=false,dirty=false;};
+    struct UIDocumentEdit {std::string resourceKey;ui::Document draft;nlohmann::json disk;std::vector<nlohmann::json> undo,redo;std::optional<nlohmann::json> pending;std::string selected;ui::Pair preview{1920,1080};float zoom=.35f,panX=0,panY=0;bool viewSaved=false,fit=true;bool initialized=false,dirty=false;};
     std::map<std::string,UIDocumentEdit> m_UIDocuments;
     struct UIStyleEdit {ui::StyleSheet draft;nlohmann::json disk;std::vector<nlohmann::json> undo,redo;std::optional<nlohmann::json> pending;};
     std::map<std::string,UIStyleEdit> m_UIStyles;std::set<std::string> m_DirtyUIStyles;
