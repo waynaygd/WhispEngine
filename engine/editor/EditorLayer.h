@@ -153,6 +153,7 @@ public:
     void MarkDirty(){m_ExternalDirty=true;}
     ecs::Entity CreateEntity(Application&,const std::string& name="Entity");
     ecs::Entity CreatePlayerStart(Application&);
+    ecs::Entity CreateCamera(Application&);
     ecs::Entity CreateFog(Application&);
     ecs::Entity CreatePostProcessVolume(Application&,bool global);
     bool DeleteEntity(Application&,ecs::Entity);

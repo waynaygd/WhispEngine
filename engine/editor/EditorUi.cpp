@@ -6,6 +6,7 @@
 #include "../core/AssetPaths.h"
 #include "../resources/ResourceManager.h"
 #include "../ecs/components/PlayerStartComponent.h"
+#include "../ecs/components/CameraComponent.h"
 #include "../ecs/components/FogComponent.h"
 #include "../ecs/components/UICanvasComponent.h"
 #include "../ecs/components/PostProcessVolumeComponent.h"
@@ -23,6 +24,7 @@ bool Matches(const std::string& text,const std::string& filter){
     return std::search(text.begin(),text.end(),filter.begin(),filter.end(),[](unsigned char a,unsigned char b){return std::tolower(a)==std::tolower(b);})!=text.end();
 }
 const char* EntityKind(const ecs::World& w,ecs::Entity e){
+    if(w.HasComponent<ecs::CameraComponent>(e))return "[Camera]";
     if(w.HasComponent<ecs::UICanvasComponent>(e))return "[UI]";
     if(w.HasComponent<ecs::PostProcessVolumeComponent>(e))return "[PPV]";
     if(w.HasComponent<ecs::PrefabInstanceComponent>(e))return "[PF]";

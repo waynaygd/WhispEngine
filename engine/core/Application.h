@@ -86,12 +86,14 @@ public:
     std::size_t GetGameplayEntityCount() const { return m_EcsDebugEntities.size(); }
     std::size_t GetActiveCollisionCount() const { return m_ActiveCollisionPairs.size(); }
     bool IsCameraControlActive() const { return m_Camera.controlsActive; }
-    const ecs::Vec3& GetCameraPosition() const { return m_Camera.position; }
-    float GetCameraYaw() const { return m_Camera.yaw; }
-    float GetCameraPitch() const { return m_Camera.pitch; }
-    float GetCameraVerticalFovRadians() const { return m_Camera.verticalFovRadians; }
-    float GetCameraNearPlane() const { return m_Camera.nearPlane; }
-    float GetCameraFarPlane() const { return m_Camera.farPlane; }
+    const ecs::CameraState& GetRenderCameraState()const{return m_RenderCameraState;}
+    ecs::Entity GetActiveCamera(){return m_EditorPlayMode?m_GameplayCamera.Active(GetWorld()):ecs::Entity{};}
+    const ecs::Vec3& GetCameraPosition() const { return m_EditorPlayMode&&m_RenderCameraState.entity.IsValid()?m_RenderCameraState.pose.position:m_Camera.position; }
+    float GetCameraYaw() const { return m_EditorPlayMode&&m_RenderCameraState.entity.IsValid()?std::atan2(m_RenderCameraState.forward.x,m_RenderCameraState.forward.z):m_Camera.yaw; }
+    float GetCameraPitch() const { return m_EditorPlayMode&&m_RenderCameraState.entity.IsValid()?std::asin(std::clamp(m_RenderCameraState.forward.y,-1.f,1.f)):m_Camera.pitch; }
+    float GetCameraVerticalFovRadians() const { return m_EditorPlayMode&&m_RenderCameraState.entity.IsValid()?m_RenderCameraState.settings.fieldOfView:m_Camera.verticalFovRadians; }
+    float GetCameraNearPlane() const { return m_EditorPlayMode&&m_RenderCameraState.entity.IsValid()?m_RenderCameraState.settings.nearClip:m_Camera.nearPlane; }
+    float GetCameraFarPlane() const { return m_EditorPlayMode&&m_RenderCameraState.entity.IsValid()?m_RenderCameraState.settings.farClip:m_Camera.farPlane; }
     bool IsEditorPlayMode() const { return m_EditorPlayMode; }
     void SetEditorPlayMode(bool enabled);
     void SetEditorPaused(bool paused);
@@ -263,6 +265,7 @@ private:
     ecs::World m_World; // Editor data and shared system/GPU-cache owner.
     std::unique_ptr<ecs::World> m_RuntimeWorld;
     scripting::GameplayCamera m_GameplayCamera;
+    ecs::CameraState m_RenderCameraState=ecs::BuildCameraState({},ecs::CameraComponent{},16.f/9.f);
     scripting::LuaRuntime m_LuaRuntime;
     ecs::World::CloneMap m_CloneMapping;
     ecs::MutationQueue m_Mutations;

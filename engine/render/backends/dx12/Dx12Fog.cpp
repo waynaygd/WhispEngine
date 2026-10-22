@@ -70,7 +70,7 @@ void Dx12RenderAdapter::ApplyFog(){
         else{srv.Format=DXGI_FORMAT_R32G32B32A32_FLOAT;m_Device->CreateShaderResourceView(nullptr,&srv,cpu);}
         const auto& s=m_Fog.settings;const auto& camera=m_Fog.camera;const auto& view=camera.view;
         std::array<float,72> constants{};auto put=[&](int slot,const auto& values){std::copy(values.begin(),values.end(),constants.begin()+slot*4);};
-        put(0,m_Camera);put(1,std::array<float,4>{view[0],view[4],view[8],0});put(2,std::array<float,4>{view[1],view[5],view[9],0});put(3,std::array<float,4>{view[2],view[6],view[10],0});
+        put(0,m_Camera);put(1,std::array<float,4>{view[0],view[4],view[8],0});put(2,std::array<float,4>{view[1],view[5],view[9],0});put(3,std::array<float,4>{view[2],view[6],view[10],camera.projection[15]});
         put(4,std::array<float,4>{camera.projection[0],camera.projection[5],camera.projection[10],camera.projection[14]});put(5,s.color);put(6,std::array<float,4>{s.startDistance,s.endDistance,s.density,float(s.mode)});put(7,std::array<float,4>{s.baseHeight,s.heightFalloff,s.heightDensity,s.maxDistance});put(8,s.scatteringColor);constants[35]=s.anisotropy;
         const auto& lights=m_LightFrames[m_FrameIndex][m_ActiveLightPass];
         put(9,std::array<float,4>{float(FogSamples(s.quality)),s.sceneLighting?1.f:0.f,s.extinction,float(std::min(lights.count,64u))});put(10,m_Lighting.directionEnabled);put(11,m_Lighting.colorIntensity);put(12,m_Lighting.ambientIntensity);put(13,m_ShadowConstants.lightVP);put(17,std::array<float,4>{shadow?1.f:0.f,m_ShadowConstants.sampling[1],m_ShadowConstants.parameters[1],m_ShadowConstants.coverage[0]});

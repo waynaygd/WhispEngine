@@ -64,11 +64,13 @@ static void Ui(){
         auto* viewport=ImGui::FindWindowByName(ui.IsViewportMaximized()?"Viewport##Maximized":"Viewport");ImGui::FocusWindow(viewport);frame();
         click(ui.IsViewportMaximized()?28:viewport->WorkRect.Min.x+25,ui.IsViewportMaximized()?8+ImGui::GetFrameHeight()*.5f:viewport->WorkRect.Min.y+ImGui::GetFrameHeight()*.5f);
         auto& popups=ImGui::GetCurrentContext()->OpenPopupStack;Check(!popups.empty()&&popups[0].Window,"Viewport Create popup opens");auto* root=popups[0].Window;
-        auto content=log();for(const char* label:{"3D Object","Empty Entity","Player","Light","Environment"})Check(content.find(label)!=std::string::npos,"Viewport contains all creation categories");
+        auto content=log();for(const char* label:{"3D Object","Empty Entity","Camera","Player","Light","Environment"})Check(content.find(label)!=std::string::npos,"Viewport contains all creation categories");
         // Query the submitted menu geometry: GetFontSize() outside the popup
         // frame may still refer to the fallback window's unscaled font.
-        const float rowStep=(root->DC.CursorPosPrevLine.y-root->DC.CursorStartPos.y)/5;
-        click(root->DC.CursorStartPos.x+40,root->DC.CursorStartPos.y+(category==4?5:category)*rowStep+root->DC.PrevLineSize.y*.5f);Check(popups.Size>=2&&popups[1].Window,"creation submenu opens");auto* menu=popups[1].Window;
+        // Camera is a new leaf after Empty Entity; UI precedes Environment.
+        const float rowStep=(root->DC.CursorPosPrevLine.y-root->DC.CursorStartPos.y)/6;
+        const int row=category==4?6:category>=2?category+1:category;
+        click(root->DC.CursorStartPos.x+40,root->DC.CursorStartPos.y+row*rowStep+root->DC.PrevLineSize.y*.5f);Check(popups.Size>=2&&popups[1].Window,"creation submenu opens");auto* menu=popups[1].Window;
         const int children=category==0?5:(category==3||category==4)?3:1;
         const float childStep=children>1?(menu->DC.CursorPosPrevLine.y-menu->DC.CursorStartPos.y)/(children-1):0;
         click(menu->DC.CursorStartPos.x+25,menu->DC.CursorStartPos.y+child*childStep+menu->DC.PrevLineSize.y*.5f);

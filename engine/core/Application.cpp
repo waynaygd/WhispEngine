@@ -849,7 +849,7 @@ void Application::UpdateCameraController(float dt)
         return;
 
     // A Lua camera lease excludes editor navigation, independent of Player presence.
-    if(m_EditorPlayMode&&m_LuaRuntime.HasCameraOwner()){
+    if(m_EditorPlayMode&&(m_LuaRuntime.HasCameraOwner()||m_GameplayCamera.Active(GetWorld()).IsValid())){
         if(m_Camera.controlsActive){
             if(!m_PlayerMouseCaptured){glfwSetInputMode(window,GLFW_CURSOR,GLFW_CURSOR_NORMAL);if(glfwRawMouseMotionSupported())glfwSetInputMode(window,GLFW_RAW_MOUSE_MOTION,GLFW_FALSE);}
             m_Camera.controlsActive=false;m_Camera.previousRightMouseDown=false;
@@ -997,12 +997,13 @@ void Application::UpdateRenderSystemCameraAspect(float aspectRatio)
     if (aspectRatio <= 0.0001f)
         aspectRatio = kFallbackAspectRatio;
 
-    m_RenderSystem->SetCameraTransform(m_Camera.position, m_Camera.yaw, m_Camera.pitch);
-    m_RenderSystem->SetCameraProjection(
-        m_Camera.verticalFovRadians,
-        aspectRatio,
-        m_Camera.nearPlane,
-        m_Camera.farPlane);
+    auto active=m_EditorPlayMode?m_GameplayCamera.Active(GetWorld()):ecs::Entity{};
+    if(active.IsValid())m_RenderCameraState=ecs::ResolveCameraState(GetWorld(),active,aspectRatio,&m_RenderInterpolation);
+    else{
+        ecs::CameraComponent c;c.fieldOfView=m_Camera.verticalFovRadians;c.nearClip=m_Camera.nearPlane;c.farClip=m_Camera.farPlane;
+        m_RenderCameraState=ecs::BuildCameraState({m_Camera.position,{1,1,1},ecs::RenderRotation({-m_Camera.pitch,m_Camera.yaw,0})},c,aspectRatio);
+    }
+    m_RenderSystem->SetCameraState(m_RenderCameraState);
 }
 
 ecs::Entity Application::SpawnGameplayEntity()
@@ -1133,7 +1134,7 @@ void Application::SetEditorPlayMode(bool enabled)
         ReleasePlayerMouse();
         if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
         m_StateMachine.Clear(*this);
-        m_LuaRuntime.Stop();m_InputManager.RestoreBindings(std::move(m_EditInputBindings));m_Mutations.Clear();m_RenderInterpolation.Clear();m_EditorLayer.LeaveRuntime();m_RuntimeWorld.reset();m_CloneMapping.clear();
+        m_LuaRuntime.Stop();m_GameplayCamera={};m_RenderCameraState.entity={};m_InputManager.RestoreBindings(std::move(m_EditInputBindings));m_Mutations.Clear();m_RenderInterpolation.Clear();m_EditorLayer.LeaveRuntime();m_RuntimeWorld.reset();m_CloneMapping.clear();
         m_Camera.position = m_SavedEditorCamera.position;
         m_Camera.yaw = m_SavedEditorCamera.yaw;
         m_Camera.pitch = m_SavedEditorCamera.pitch;
@@ -1641,6 +1642,10 @@ int Application::Run()
 
                 if(m_RenderSystem)m_RenderSystem->SetUIPreview(m_EditorPlayMode||m_EditorLayer.IsUIPreviewVisible());
                 wc.renderer->SetAntiAliasing(m_AntiAliasing);
+                // Resolve the current render pose before sky/background submission too.
+                const int cameraWidth=m_EditorLayer.GetViewportPixelWidth(),cameraHeight=m_EditorLayer.GetViewportPixelHeight();
+                if(cameraWidth>1&&cameraHeight>1)UpdateRenderSystemCameraAspect(float(cameraWidth)/cameraHeight);
+                else UpdateRenderSystemCamera(wc.window.get());
                 wc.renderer->SetEditorVisuals(m_EditorLayer.BuildVisualFrame(*this));
                 const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
                 const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();

@@ -1007,6 +1007,23 @@ struct LuaRuntime::Impl {
     });
     env["Character"] = character;
     auto camera = lua.create_table();
+    // Selecting an image source is separate from the exclusive legacy control lease.
+    auto selectionPermission=[this,owner]() {
+      auto* c=Alive(owner)?world->GetComponent<ecs::LuaScriptComponent>(owner):nullptr;
+      if(stopping||!c||!c->enabled||!c->cameraEnabled||!services.camera)
+        throw std::runtime_error("Camera selection permission missing");
+    };
+    camera.set_function("set_active",[this,selectionPermission](ecs::Entity entity) {
+      selectionPermission();
+      if(!services.camera->Select(*world,entity))throw std::runtime_error("Camera.set_active: dead, foreign, disabled or invalid Camera Entity");
+    });
+    camera.set_function("get_active",[this,selectionPermission]() -> sol::object {
+      selectionPermission();auto e=services.camera->Active(*world);
+      return e.IsValid()?sol::make_object(lua,e):sol::make_object(lua,sol::nil);
+    });
+    camera.set_function("is_active",[this,selectionPermission](ecs::Entity entity) {
+      selectionPermission();return Alive(entity)&&services.camera->Active(*world)==entity;
+    });
     camera.set_function("acquire",
                         [this, owner]() { return AcquireCamera(owner); });
     camera.set_function("release", [this, owner]() {

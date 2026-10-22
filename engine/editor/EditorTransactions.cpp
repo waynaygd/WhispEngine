@@ -7,6 +7,7 @@
 #include "../ecs/components/SceneIdentityComponent.h"
 #include "../scene/SceneSerializer.h"
 #include "../ecs/components/PlayerStartComponent.h"
+#include "../ecs/components/CameraComponent.h"
 #include "../ecs/components/FogComponent.h"
 #include "../scripting/EntityReference.h"
 #include "../scripting/Prefab.h"
@@ -177,6 +178,16 @@ void EditorLayer::SelectEntityFromUser(Application& app,ecs::Entity e){
 ecs::Entity EditorLayer::CreateEntity(Application& app,const std::string& name){
     if(app.IsEditorPlayMode())return {};
     FinishTransaction(app);auto e=app.CreateEmptyEntity(name);SelectEntityFromUser(app,e);EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Create entity",before);return e;
+}
+ecs::Entity EditorLayer::CreateCamera(Application& app){
+    if(app.IsEditorPlayMode())return {};
+    FinishTransaction(app);auto previous=m_Selection.active;
+    auto e=app.CreateEmptyEntity("Camera");app.GetWorld().AddComponent<ecs::CameraComponent>(e);
+    // Match the editor view without changing Euler conventions of ECS Transform.
+    auto& t=*app.GetWorld().GetComponent<ecs::TransformComponent>(e);
+    t.position=app.GetCameraPosition();t.rotation={-app.GetCameraPitch(),app.GetCameraYaw(),0};
+    SelectEntityFromUser(app,e);EntitySnapshot before;before.entity=e;before.world=e.world;before.previousSelection=previous;
+    CommitUndo(app,"Create Camera",before);return e;
 }
 ecs::Entity EditorLayer::CreatePlayerStart(Application& app){
     if(app.IsEditorPlayMode())return {};

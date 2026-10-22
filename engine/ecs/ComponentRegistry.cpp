@@ -17,6 +17,7 @@
 #include "components/TransformComponent.h"
 #include "components/VelocityComponent.h"
 #include "components/PlayerComponent.h"
+#include "components/CameraComponent.h"
 #include "components/LuaScriptComponent.h"
 #include "../resources/MaterialSerialization.h"
 #include "../scene/LightSerialization.h"
@@ -135,6 +136,18 @@ ComponentRegistry Build(){
         for(auto i=values.begin();i!=values.end();++i){const auto& v=i.value();if(i.key().size()>128||!(v.is_boolean()||v.is_number()||v.is_string()||(v.is_array()&&v.size()==3)||scripting::ValidEntityReference(v)))Fail("Invalid Lua property: "+i.key());if(v.is_string()&&v.get_ref<const std::string&>().size()>1024)Fail("Lua string too long");if(v.is_array())for(const auto& x:v)if(!x.is_number()||!std::isfinite(x.get<double>()))Fail("Invalid Lua vector");if(v.is_number()&&!std::isfinite(v.get<double>()))Fail("Nonfinite Lua property");}
         scriptLoad(w,e,j);w.GetComponent<LuaScriptComponent>(e)->properties=std::move(values);
     };r.Register(script);
+    auto camera=Descriptor<CameraComponent>("Camera","Camera");
+    Field<CameraComponent>(camera,"enabled","Enabled",&CameraComponent::enabled,PropertyKind::Boolean);
+    Field<CameraComponent>(camera,"projection","Projection",&CameraComponent::projection,PropertyKind::Integer,0,1).choices={"Perspective","Orthographic"};
+    Field<CameraComponent>(camera,"fieldOfView","Vertical FOV (rad)",&CameraComponent::fieldOfView,PropertyKind::Number,.017453293f,3.1241394f);
+    Field<CameraComponent>(camera,"orthographicSize","Orthographic size",&CameraComponent::orthographicSize,PropertyKind::Number,.001f,100000).tooltip="Full vertical span in world units";
+    Field<CameraComponent>(camera,"nearClip","Near clip",&CameraComponent::nearClip,PropertyKind::Number,.001f,999999);
+    Field<CameraComponent>(camera,"farClip","Far clip",&CameraComponent::farClip,PropertyKind::Number,.002f,1000000);
+    Field<CameraComponent>(camera,"priority","Priority",&CameraComponent::priority,PropertyKind::Integer,-1000000,1000000);
+    Complete(camera);auto cameraLoad=camera.deserialize;auto cameraSave=camera.serialize;
+    camera.deserialize=[cameraLoad](World& w,Entity e,const Json& j){cameraLoad(w,e,j);ValidateCamera(*w.GetComponent<CameraComponent>(e));};
+    camera.serialize=[cameraSave](const World& w,Entity e){ValidateCamera(*w.GetComponent<CameraComponent>(e));return cameraSave(w,e);};
+    r.Register(camera);
     auto tag=Descriptor<TagComponent>("Tag","Name");Field<TagComponent>(tag,"name","Name",&TagComponent::name,PropertyKind::String);Complete(tag);r.Register(tag);
     auto identity=Descriptor<SceneIdentityComponent>("SceneIdentity","Scene identity");identity.addable=identity.removable=false;Field<SceneIdentityComponent>(identity,"value","Persistent ID",&SceneIdentityComponent::value,PropertyKind::String).readOnly=true;Complete(identity);r.Register(identity);
     auto prefab=Descriptor<PrefabInstanceComponent>("PrefabInstance","Prefab instance");prefab.addable=prefab.removable=false;
@@ -298,13 +311,14 @@ bool ComponentRegistry::Add(World& w,Entity e,ComponentTypeId id,std::string* er
     if(id==ComponentId("Rigidbody")&&w.Parent(e).IsValid())Fail("Add Rigidbody at a root, set Static, then parent it");
     if(id==ComponentId("Rigidbody")&&w.HasComponent<TransformComponent>(e)&&HasPivot(w.LocalTransform(e)))Fail("Reset Pivot before adding Rigidbody, then choose Static before editing Pivot");
     const bool light=id==ComponentId("DirectionalLight")||id==ComponentId("PointLight")||id==ComponentId("SpotLight");if(light&&GetLightParameters(w,e))Fail("Entity already has a light component");
-    if((light||id==ComponentId("MeshRenderer")||id==ComponentId("Rigidbody")||id==ComponentId("Collider")||id==ComponentId("PostProcessVolume"))&&!w.HasComponent<TransformComponent>(e))w.AddComponent<TransformComponent>(e);d->add(w,e);},error);}
-bool ComponentRegistry::Remove(World& w,Entity e,ComponentTypeId id,std::string* error)const{return Checked([&]{w.AssertOwnerThread();auto* d=Find(id);if(!w.IsAlive(e)||!d||!d->removable||!d->has(w,e))Fail("Invalid entity/component remove");if(id==ComponentId("Transform")&&(w.Parent(e).IsValid()||!w.Children(e).empty()))Fail("Unparent hierarchy before removing Transform");if(id==ComponentId("Transform")&&(GetLightParameters(w,e)||w.HasComponent<MeshRendererComponent>(e)||w.HasComponent<RigidbodyComponent>(e)||w.HasComponent<ColliderComponent>(e)||w.HasComponent<PostProcessVolumeComponent>(e)))Fail("Remove dependent render/light/physics components before Transform");d->remove(w,e);},error);}
+    if((light||id==ComponentId("MeshRenderer")||id==ComponentId("Rigidbody")||id==ComponentId("Collider")||id==ComponentId("PostProcessVolume")||id==ComponentId("Camera"))&&!w.HasComponent<TransformComponent>(e))w.AddComponent<TransformComponent>(e);d->add(w,e);},error);}
+bool ComponentRegistry::Remove(World& w,Entity e,ComponentTypeId id,std::string* error)const{return Checked([&]{w.AssertOwnerThread();auto* d=Find(id);if(!w.IsAlive(e)||!d||!d->removable||!d->has(w,e))Fail("Invalid entity/component remove");if(id==ComponentId("Transform")&&(w.Parent(e).IsValid()||!w.Children(e).empty()))Fail("Unparent hierarchy before removing Transform");if(id==ComponentId("Transform")&&(GetLightParameters(w,e)||w.HasComponent<MeshRendererComponent>(e)||w.HasComponent<RigidbodyComponent>(e)||w.HasComponent<ColliderComponent>(e)||w.HasComponent<PostProcessVolumeComponent>(e)||w.HasComponent<CameraComponent>(e)))Fail("Remove dependent render/light/physics components before Transform");d->remove(w,e);},error);}
 bool ComponentRegistry::Reset(World& w,Entity e,ComponentTypeId id,std::string* error)const{return Checked([&]{w.AssertOwnerThread();auto* d=Find(id);if(!w.IsAlive(e)||!d||!d->has(w,e)||!d->removable)Fail("Invalid component reset");if(id==ComponentId("Transform")){std::string message;if(!w.SetLocalTransform(e,TransformComponent{},&message))Fail(message);return;}if(id==ComponentId("Rigidbody")&&w.Parent(e).IsValid())Fail("Unparent before resetting a Rigidbody to dynamic defaults");if(id==ComponentId("Rigidbody")&&w.HasComponent<TransformComponent>(e)&&HasPivot(w.LocalTransform(e)))Fail("Reset Pivot before resetting Rigidbody to dynamic defaults");d->reset(w,e);},error);}
 bool ComponentRegistry::Get(const World& w,Entity e,ComponentTypeId id,const std::string& key,PropertyValue& value,std::string* error)const{return Checked([&]{w.AssertOwnerThread();auto* d=Find(id);if(!w.IsAlive(e)||!d||!d->has(w,e))Fail("Dead/foreign entity or absent component");for(const auto& p:d->properties)if(p.key==key){value=p.get(w,e);return;}Fail("Unknown property: "+key);},error);}
 bool ComponentRegistry::Set(World& w,Entity e,ComponentTypeId id,const std::string& key,const PropertyValue& v,std::string* error)const{return Checked([&]{w.AssertOwnerThread();auto* d=Find(id);if(!w.IsAlive(e)||!d||!d->has(w,e))Fail("Dead/foreign entity or absent component");const PropertyDescriptor* p=nullptr;for(const auto& item:d->properties)if(item.key==key)p=&item;if(!p||p->readOnly)Fail("Unknown/readonly property: "+key);Validate(*p,v);
     if(id==ComponentId("Transform")){auto t=w.LocalTransform(e);if(key=="position")t.position=std::get<Vec3>(v);else if(key=="rotation")t.rotation=std::get<Vec3>(v);else if(key=="scale")t.scale=std::get<Vec3>(v);else if(key=="pivot")t=RebasePivot(t,std::get<Vec3>(v));std::string message;if(!w.SetLocalTransform(e,t,&message))Fail(message);return;}
     auto previous=p->get(w,e);p->set(w,e,v);if(id==ComponentId("Rigidbody")){try{w.ValidateHierarchy();}catch(...){p->set(w,e,previous);throw;}}
+    if(id==ComponentId("Camera")){try{ValidateCamera(*w.GetComponent<CameraComponent>(e));}catch(...){p->set(w,e,previous);throw;}}
     if(auto* light=GetLightParameters(w,e))*light=SanitizeLight(*light);if(auto* b=w.GetComponent<BoundsBounceComponent>(e)){if(b->minX>b->maxX)std::swap(b->minX,b->maxX);if(b->minY>b->maxY)std::swap(b->minY,b->maxY);}
 },error);}
 nlohmann::json ComponentRegistry::Capture(const World& w,Entity e)const{if(!w.IsAlive(e))Fail("Cannot capture foreign/dead entity");auto j=nlohmann::json::object();for(const auto& d:components)if(d.has(w,e))j[d.key]=d.serialize(w,e);return j;}
@@ -317,7 +331,7 @@ void ComponentRegistry::Restore(World& w,Entity e,const nlohmann::json& j)const{
         if(!w.HasComponent<CharacterMovementComponent>(e))w.AddComponent<CharacterMovementComponent>(e);
         w.GetComponent<CharacterMovementComponent>(e)->moveSpeed=legacy;
     }
-    if(w.HasComponent<TransformComponent>(e)==false&&(GetLightParameters(w,e)||w.HasComponent<MeshRendererComponent>(e)||w.HasComponent<RigidbodyComponent>(e)||w.HasComponent<ColliderComponent>(e)||w.HasComponent<PostProcessVolumeComponent>(e)))Fail("Render/light/physics entity requires Transform");
+    if(w.HasComponent<TransformComponent>(e)==false&&(GetLightParameters(w,e)||w.HasComponent<MeshRendererComponent>(e)||w.HasComponent<RigidbodyComponent>(e)||w.HasComponent<ColliderComponent>(e)||w.HasComponent<PostProcessVolumeComponent>(e)||w.HasComponent<CameraComponent>(e)))Fail("Render/light/physics entity requires Transform");
     int lights=int(w.HasComponent<DirectionalLightComponent>(e))+int(w.HasComponent<PointLightComponent>(e))+int(w.HasComponent<SpotLightComponent>(e));if(lights>1)Fail("Multiple light component types on one entity");
 }
 bool ComponentRegistry::ValidateAssetKey(const std::string& key,AssetKind kind,std::string* error){return Checked([&]{if(key.empty())return;

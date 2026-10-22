@@ -11,6 +11,7 @@
 #include "../MathTypes.h"
 #include "../components/TransformComponent.h"
 #include "../RenderInterpolation.h"
+#include "../CameraState.h"
 #include "../PlacementPreview.h"
 #include "../../render/RenderResourceHandles.h"
 #include "../../render/RenderInstanceData.h"
@@ -56,6 +57,8 @@ public:
     const char* Name() const override { return "RenderSystem"; }
     void Update(World& world, float dt) override;
     void SetRenderAdapter(IRenderAdapter* renderer);
+    void SetCameraState(const CameraState& state);
+    const CameraState& GetCameraState()const{return m_RenderCamera;}
     void SetCameraTransform(const Vec3& position, float yawRadians, float pitchRadians);
     void SetCameraProjection(float verticalFovRadians, float aspectRatio, float nearPlane, float farPlane);
     void SetResourceManager(ResourceManager* resourceManager) { m_ResourceManager = resourceManager; }
@@ -152,6 +155,8 @@ private:
     IRenderAdapter* m_Renderer = nullptr;
     IRenderAdapter* m_ResourceOwnerRenderer = nullptr;
     ResourceManager* m_ResourceManager = nullptr;
+    CameraState m_RenderCamera=BuildCameraState({{0,0,-2.25f}},CameraComponent{},16.f/9.f);
+    void RebuildLegacyCamera();
     Vec3 m_CameraPosition{ 0.0f, 0.0f, -2.25f };
     float m_CameraYaw = 0.0f;
     float m_CameraPitch = 0.0f;
