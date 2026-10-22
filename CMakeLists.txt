@@ -528,6 +528,12 @@ add_custom_target(HierarchyDemoAssets
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/parent_child_demo.json ${CMAKE_BINARY_DIR}/assets/scenes/parent_child_demo.json)
 
 add_executable(WhispEngine WhispEngine.cpp)
+if(WIN32)
+    enable_language(RC)
+    target_sources(WhispEngine PRIVATE engine/platform/branding/WhispEngine.rc)
+    # RC resolves quoted icon filenames through its include search path.
+    target_include_directories(WhispEngine PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/engine/platform/branding")
+endif()
 add_dependencies(WhispEngine HierarchyDemoAssets)
 add_custom_target(LuaGameplayAssets ALL
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/interactive_room_ui4.json ${CMAKE_BINARY_DIR}/assets/scenes/interactive_room_ui4.json

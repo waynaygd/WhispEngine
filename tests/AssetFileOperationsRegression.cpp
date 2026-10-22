@@ -42,6 +42,13 @@ static void Cpu(){
     Fixture fixture;const auto active=AssetPaths::ResolveAssetRoot(),source=fixture.base/"engine/assets";
     const std::string old="scripts/previous.lua";Write(active/old,"return {}\n");Write(source/old,"-- authoring copy\nreturn {}\n");
     AssetCatalog catalog;auto& error=lastError;
+    Write(active/"scripts/gameplay/module.lua","return {value=1}");Write(active/"scripts/module_importer.lua","local M=Script.require('gameplay.module');return {}");
+    Check(!AssetCatalog::AuditDependencies("scripts/gameplay/module.lua").confirmed.empty(),"literal import participates in existing dependency audit");
+    Check(!catalog.DeleteAssetFile("scripts/gameplay/module.lua",&error)&&!catalog.RenameAssetFile("scripts/gameplay/module.lua","scripts/gameplay/renamed.lua",&error),"imports protect module delete and rename without an Entity attachment");
+    fs::remove(active/"scripts/module_importer.lua");Write(active/"scripts/module_importer.lua","local M=Script.require(name);return {}");
+    Check(!AssetCatalog::AuditDependencies("scripts/gameplay/module.lua").dynamic.empty()&&!catalog.DeleteAssetFile("scripts/gameplay/module.lua",&error),"dynamic imports require existing explicit risk decision");
+    fs::remove(active/"scripts/module_importer.lua");Check(catalog.DeleteAssetFile("scripts/gameplay/module.lua",&error),"unreferenced plain module supports normal file workflow");
+
     Check(catalog.RenameAssetFile(old,"scripts/renamed.lua",&error),"previous-session Lua can be renamed");
     Check(!fs::exists(active/old)&&Read(source/old)=="-- authoring copy\nreturn {}\n","rename changes active root only");
     catalog.Refresh();Check(std::none_of(catalog.Entries().begin(),catalog.Entries().end(),[&](const auto& row){return row.key==old;}),"old source fallback does not reappear after active rename");

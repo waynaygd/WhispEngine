@@ -204,6 +204,7 @@ AssetDependencyAudit AssetCatalog::AuditDependencies(const std::string& key){
                 detail::LuaDependencies lua;
                 try{lua=detail::AnalyzeLuaDependencies(data);}catch(const std::exception& failure){throw std::runtime_error("Lua dependency audit failed: "+relative+": "+failure.what());}
                 for(const auto& value:lua.values)if(ContainsReference(value,key)){referenced=true;break;}
+                if(key.starts_with("scripts/"))for(const auto& warning:lua.moduleDynamic)found.dynamic.push_back(AssetPaths::ToUtf8String(item.path())+": "+warning);
                 if(key.starts_with("prefabs/"))for(const auto& warning:lua.dynamic)found.dynamic.push_back(AssetPaths::ToUtf8String(item.path())+": "+warning);
             }else{
                 // Conservative text audit, never execute Lua or rewrite source.

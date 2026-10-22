@@ -341,7 +341,7 @@ void EditorLayer::DrawScriptDocument(Application& app){
     if(ImGui::Begin("Script Document",nullptr,m_WorkspaceFocus?ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings:0)){
         ImGui::TextUnformatted(it->key.c_str());if(ImGui::Button("Open in Visual Studio"))OpenLuaScriptInVisualStudio(it->key,&m_EditorError);ImGui::SameLine();if(ImGui::Button("Reload file"))m_ScriptKey.clear();
         if(m_ScriptKey!=it->canonical){try{auto path=ResolveEditableLuaScript(it->key);if(std::filesystem::file_size(path)>2*1024*1024)throw std::runtime_error("Script exceeds 2 MiB preview limit; open it externally.");std::ifstream file(path,std::ios::binary);if(!file)throw std::runtime_error("Script cannot be read");m_ScriptText.assign(std::istreambuf_iterator<char>(file),{});m_ScriptKey=it->canonical;}catch(const std::exception& e){m_ScriptText=e.what();}}
-        ImGui::TextDisabled("Read-only preview. External edits keep the existing Lua hot reload workflow.");
+        ImGui::TextDisabled("Read-only Behaviour / Module preview. Open externally to edit; saved dependencies reload during Play.");
         const auto diagnostic=app.GetLuaRuntime().Error(it->key);if(!diagnostic.empty())ImGui::TextWrapped("Lua: %s",diagnostic.c_str());
         if(ImGui::BeginChild("Source",{0,0},ImGuiChildFlags_Borders,ImGuiWindowFlags_HorizontalScrollbar)){ImGui::PushFont(MonoFont(),0);ImGui::TextUnformatted(m_ScriptText.c_str(),m_ScriptText.c_str()+m_ScriptText.size());ImGui::PopFont();}ImGui::EndChild();
     }ImGui::End();
