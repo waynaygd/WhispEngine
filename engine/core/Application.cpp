@@ -1003,6 +1003,7 @@ void Application::UpdateRenderSystemCameraAspect(float aspectRatio)
         ecs::CameraComponent c;c.fieldOfView=m_Camera.verticalFovRadians;c.nearClip=m_Camera.nearPlane;c.farClip=m_Camera.farPlane;
         m_RenderCameraState=ecs::BuildCameraState({m_Camera.position,{1,1,1},ecs::RenderRotation({-m_Camera.pitch,m_Camera.yaw,0})},c,aspectRatio);
     }
+    m_RenderSystem->SetCameraAttachmentsEnabled(m_EditorPlayMode);
     m_RenderSystem->SetCameraState(m_RenderCameraState);
 }
 
@@ -1111,16 +1112,26 @@ void Application::SetEditorPlayMode(bool enabled)
         m_SavedEditorCamera.yaw = m_Camera.yaw;
         m_SavedEditorCamera.pitch = m_Camera.pitch;
         const auto start=std::chrono::steady_clock::now();
-        auto runtime=m_World.CloneData(&m_CloneMapping);
+        ecs::World::CloneMap mapping;
+        std::unique_ptr<ecs::World> runtime;
+        ecs::Entity playerEntity;ecs::TransformComponent spawnPoint;bool prefabSpawn=false;
+        m_PlayError.clear();
+        try{
+            runtime=m_World.CloneData(&mapping);
+            playerEntity=ecs::SpawnPlayer(*runtime,&spawnPoint,&prefabSpawn);
+        }catch(const std::exception& failure){
+            m_PlayError=std::string("Cannot start Play: ")+failure.what();
+            Logger::Get().Error(m_PlayError);return;
+        }
+        m_CloneMapping=std::move(mapping);
         m_EditDebugEntities=m_EcsDebugEntities;m_EditStressEntities=m_StressEntities;
         m_EditLighting=m_LightingSettings;m_EditEnvironment=m_EnvironmentSettings;m_EditShadows=m_ShadowSettings;m_EditBackground=m_Background;m_EditAntiAliasing=m_AntiAliasing;
         auto map=[&](std::vector<ecs::Entity>& entities){std::erase_if(entities,[&](auto e){return !m_CloneMapping.contains(e);});for(auto& e:entities)e=m_CloneMapping.at(e);};
         map(m_EcsDebugEntities);map(m_StressEntities);
         m_EditorLayer.EnterRuntime(m_CloneMapping);
         m_RuntimeWorld=std::move(runtime);
-        ecs::TransformComponent spawnPoint;
-        m_PlayerEntity=ecs::SpawnPlayer(*m_RuntimeWorld,&spawnPoint);
-        if(m_RuntimeWorld->IsAlive(m_PlayerEntity)){
+        m_PlayerEntity=playerEntity;
+        if(!prefabSpawn&&m_RuntimeWorld->IsAlive(m_PlayerEntity)){
             const auto& t=*m_RuntimeWorld->GetComponent<ecs::TransformComponent>(m_PlayerEntity);
             const auto& player=*m_RuntimeWorld->GetComponent<ecs::PlayerComponent>(m_PlayerEntity);
             m_Camera.position=ecs::PlayerEyePosition(t.position,player.eyeHeight,m_RuntimeWorld->GetComponent<ecs::ColliderComponent>(m_PlayerEntity)->halfExtents.y);
@@ -1131,6 +1142,7 @@ void Application::SetEditorPlayMode(bool enabled)
         m_StateMachine.Clear(*this);RequestStateChange(std::make_unique<LoadingState>());m_StateMachine.ApplyPending(*this);
         m_LastCloneMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
     }else{
+        m_PlayerEntity={};m_PlayError.clear();
         ReleasePlayerMouse();
         if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
         m_StateMachine.Clear(*this);

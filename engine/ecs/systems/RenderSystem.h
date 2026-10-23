@@ -58,6 +58,7 @@ public:
     void Update(World& world, float dt) override;
     void SetRenderAdapter(IRenderAdapter* renderer);
     void SetCameraState(const CameraState& state);
+    void SetCameraAttachmentsEnabled(bool enabled){m_CameraAttachmentsEnabled=enabled;}
     const CameraState& GetCameraState()const{return m_RenderCamera;}
     void SetCameraTransform(const Vec3& position, float yawRadians, float pitchRadians);
     void SetCameraProjection(float verticalFovRadians, float aspectRatio, float nearPlane, float farPlane);
@@ -156,6 +157,7 @@ private:
     IRenderAdapter* m_ResourceOwnerRenderer = nullptr;
     ResourceManager* m_ResourceManager = nullptr;
     CameraState m_RenderCamera=BuildCameraState({{0,0,-2.25f}},CameraComponent{},16.f/9.f);
+    bool m_CameraAttachmentsEnabled=false;
     void RebuildLegacyCamera();
     Vec3 m_CameraPosition{ 0.0f, 0.0f, -2.25f };
     float m_CameraYaw = 0.0f;

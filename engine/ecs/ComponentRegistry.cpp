@@ -18,6 +18,7 @@
 #include "components/VelocityComponent.h"
 #include "components/PlayerComponent.h"
 #include "components/CameraComponent.h"
+#include "components/CameraAttachmentComponent.h"
 #include "components/LuaScriptComponent.h"
 #include "../resources/MaterialSerialization.h"
 #include "../scene/LightSerialization.h"
@@ -136,6 +137,11 @@ ComponentRegistry Build(){
         for(auto i=values.begin();i!=values.end();++i){const auto& v=i.value();if(i.key().size()>128||!(v.is_boolean()||v.is_number()||v.is_string()||(v.is_array()&&v.size()==3)||scripting::ValidEntityReference(v)))Fail("Invalid Lua property: "+i.key());if(v.is_string()&&v.get_ref<const std::string&>().size()>1024)Fail("Lua string too long");if(v.is_array())for(const auto& x:v)if(!x.is_number()||!std::isfinite(x.get<double>()))Fail("Invalid Lua vector");if(v.is_number()&&!std::isfinite(v.get<double>()))Fail("Nonfinite Lua property");}
         scriptLoad(w,e,j);w.GetComponent<LuaScriptComponent>(e)->properties=std::move(values);
     };r.Register(script);
+    auto attachment=Descriptor<CameraAttachmentComponent>("CameraAttachment","Camera Attachment");
+    Field<CameraAttachmentComponent>(attachment,"enabled","Enabled",&CameraAttachmentComponent::enabled,PropertyKind::Boolean);
+    Field<CameraAttachmentComponent>(attachment,"localPosition","Local Position",&CameraAttachmentComponent::localPosition,PropertyKind::Vector).tooltip="Camera-relative visual offset; physics Transform is unchanged";
+    Field<CameraAttachmentComponent>(attachment,"localRotation","Local Rotation (rad)",&CameraAttachmentComponent::localRotation,PropertyKind::Vector).tooltip="Euler radians Rz*Ry*Rx, using ECS signs; no legacy pitch conversion";
+    Complete(attachment);r.Register(attachment);
     auto camera=Descriptor<CameraComponent>("Camera","Camera");
     Field<CameraComponent>(camera,"enabled","Enabled",&CameraComponent::enabled,PropertyKind::Boolean);
     Field<CameraComponent>(camera,"projection","Projection",&CameraComponent::projection,PropertyKind::Integer,0,1).choices={"Perspective","Orthographic"};
@@ -237,13 +243,15 @@ ComponentRegistry Build(){
         PropertyKind::Boolean
     );
 
-    Field<PlayerStartComponent>(playerStart,"controllerScript","Controller script",&PlayerStartComponent::controllerScript,PropertyKind::Asset,0,0,AssetKind::LuaScript);
+    Field<PlayerStartComponent>(playerStart,"playerPrefab","Player Prefab",&PlayerStartComponent::playerPrefab,PropertyKind::Asset,0,0,AssetKind::Prefab).tooltip="Spawn this ordinary prefab at Play. None uses the legacy character settings below. Invalid assignments stop Play with an error.";
+    Field<PlayerStartComponent>(playerStart,"controllerScript","Controller script",&PlayerStartComponent::controllerScript,PropertyKind::Asset,0,0,AssetKind::LuaScript).section="Legacy (no Player Prefab)";
     Field<PlayerStartComponent>(playerStart,"characterHeight","Character Height",&PlayerStartComponent::characterHeight,PropertyKind::Number,.2f,10.f).set=[](World& w,Entity e,const PropertyValue& v){
         auto& c=*w.GetComponent<PlayerStartComponent>(e);c.characterHeight=std::get<float>(v);c.eyeHeight=std::min(c.eyeHeight,c.characterHeight);
     };
     Field<PlayerStartComponent>(playerStart,"eyeHeight","Eye Height",&PlayerStartComponent::eyeHeight,PropertyKind::Number,0.f,10.f).set=[](World& w,Entity e,const PropertyValue& v){
         auto& c=*w.GetComponent<PlayerStartComponent>(e);const auto height=std::get<float>(v);if(height>c.characterHeight)Fail("Eye Height must not exceed Character Height");c.eyeHeight=height;
     };
+    for(auto& p:playerStart.properties)if(p.key!="enabled"&&p.key!="playerPrefab")p.section="Legacy (no Player Prefab)";
     Complete(playerStart);
     r.Register(playerStart);
 
@@ -311,8 +319,8 @@ bool ComponentRegistry::Add(World& w,Entity e,ComponentTypeId id,std::string* er
     if(id==ComponentId("Rigidbody")&&w.Parent(e).IsValid())Fail("Add Rigidbody at a root, set Static, then parent it");
     if(id==ComponentId("Rigidbody")&&w.HasComponent<TransformComponent>(e)&&HasPivot(w.LocalTransform(e)))Fail("Reset Pivot before adding Rigidbody, then choose Static before editing Pivot");
     const bool light=id==ComponentId("DirectionalLight")||id==ComponentId("PointLight")||id==ComponentId("SpotLight");if(light&&GetLightParameters(w,e))Fail("Entity already has a light component");
-    if((light||id==ComponentId("MeshRenderer")||id==ComponentId("Rigidbody")||id==ComponentId("Collider")||id==ComponentId("PostProcessVolume")||id==ComponentId("Camera"))&&!w.HasComponent<TransformComponent>(e))w.AddComponent<TransformComponent>(e);d->add(w,e);},error);}
-bool ComponentRegistry::Remove(World& w,Entity e,ComponentTypeId id,std::string* error)const{return Checked([&]{w.AssertOwnerThread();auto* d=Find(id);if(!w.IsAlive(e)||!d||!d->removable||!d->has(w,e))Fail("Invalid entity/component remove");if(id==ComponentId("Transform")&&(w.Parent(e).IsValid()||!w.Children(e).empty()))Fail("Unparent hierarchy before removing Transform");if(id==ComponentId("Transform")&&(GetLightParameters(w,e)||w.HasComponent<MeshRendererComponent>(e)||w.HasComponent<RigidbodyComponent>(e)||w.HasComponent<ColliderComponent>(e)||w.HasComponent<PostProcessVolumeComponent>(e)||w.HasComponent<CameraComponent>(e)))Fail("Remove dependent render/light/physics components before Transform");d->remove(w,e);},error);}
+    if((light||id==ComponentId("MeshRenderer")||id==ComponentId("Rigidbody")||id==ComponentId("Collider")||id==ComponentId("PostProcessVolume")||id==ComponentId("Camera")||id==ComponentId("CameraAttachment"))&&!w.HasComponent<TransformComponent>(e))w.AddComponent<TransformComponent>(e);d->add(w,e);},error);}
+bool ComponentRegistry::Remove(World& w,Entity e,ComponentTypeId id,std::string* error)const{return Checked([&]{w.AssertOwnerThread();auto* d=Find(id);if(!w.IsAlive(e)||!d||!d->removable||!d->has(w,e))Fail("Invalid entity/component remove");if(id==ComponentId("Transform")&&(w.Parent(e).IsValid()||!w.Children(e).empty()))Fail("Unparent hierarchy before removing Transform");if(id==ComponentId("Transform")&&(GetLightParameters(w,e)||w.HasComponent<MeshRendererComponent>(e)||w.HasComponent<RigidbodyComponent>(e)||w.HasComponent<ColliderComponent>(e)||w.HasComponent<PostProcessVolumeComponent>(e)||w.HasComponent<CameraComponent>(e)||w.HasComponent<CameraAttachmentComponent>(e)))Fail("Remove dependent render/light/physics components before Transform");d->remove(w,e);},error);}
 bool ComponentRegistry::Reset(World& w,Entity e,ComponentTypeId id,std::string* error)const{return Checked([&]{w.AssertOwnerThread();auto* d=Find(id);if(!w.IsAlive(e)||!d||!d->has(w,e)||!d->removable)Fail("Invalid component reset");if(id==ComponentId("Transform")){std::string message;if(!w.SetLocalTransform(e,TransformComponent{},&message))Fail(message);return;}if(id==ComponentId("Rigidbody")&&w.Parent(e).IsValid())Fail("Unparent before resetting a Rigidbody to dynamic defaults");if(id==ComponentId("Rigidbody")&&w.HasComponent<TransformComponent>(e)&&HasPivot(w.LocalTransform(e)))Fail("Reset Pivot before resetting Rigidbody to dynamic defaults");d->reset(w,e);},error);}
 bool ComponentRegistry::Get(const World& w,Entity e,ComponentTypeId id,const std::string& key,PropertyValue& value,std::string* error)const{return Checked([&]{w.AssertOwnerThread();auto* d=Find(id);if(!w.IsAlive(e)||!d||!d->has(w,e))Fail("Dead/foreign entity or absent component");for(const auto& p:d->properties)if(p.key==key){value=p.get(w,e);return;}Fail("Unknown property: "+key);},error);}
 bool ComponentRegistry::Set(World& w,Entity e,ComponentTypeId id,const std::string& key,const PropertyValue& v,std::string* error)const{return Checked([&]{w.AssertOwnerThread();auto* d=Find(id);if(!w.IsAlive(e)||!d||!d->has(w,e))Fail("Dead/foreign entity or absent component");const PropertyDescriptor* p=nullptr;for(const auto& item:d->properties)if(item.key==key)p=&item;if(!p||p->readOnly)Fail("Unknown/readonly property: "+key);Validate(*p,v);
@@ -331,7 +339,7 @@ void ComponentRegistry::Restore(World& w,Entity e,const nlohmann::json& j)const{
         if(!w.HasComponent<CharacterMovementComponent>(e))w.AddComponent<CharacterMovementComponent>(e);
         w.GetComponent<CharacterMovementComponent>(e)->moveSpeed=legacy;
     }
-    if(w.HasComponent<TransformComponent>(e)==false&&(GetLightParameters(w,e)||w.HasComponent<MeshRendererComponent>(e)||w.HasComponent<RigidbodyComponent>(e)||w.HasComponent<ColliderComponent>(e)||w.HasComponent<PostProcessVolumeComponent>(e)||w.HasComponent<CameraComponent>(e)))Fail("Render/light/physics entity requires Transform");
+    if(w.HasComponent<TransformComponent>(e)==false&&(GetLightParameters(w,e)||w.HasComponent<MeshRendererComponent>(e)||w.HasComponent<RigidbodyComponent>(e)||w.HasComponent<ColliderComponent>(e)||w.HasComponent<PostProcessVolumeComponent>(e)||w.HasComponent<CameraComponent>(e)||w.HasComponent<CameraAttachmentComponent>(e)))Fail("Render/light/physics entity requires Transform");
     int lights=int(w.HasComponent<DirectionalLightComponent>(e))+int(w.HasComponent<PointLightComponent>(e))+int(w.HasComponent<SpotLightComponent>(e));if(lights>1)Fail("Multiple light component types on one entity");
 }
 bool ComponentRegistry::ValidateAssetKey(const std::string& key,AssetKind kind,std::string* error){return Checked([&]{if(key.empty())return;

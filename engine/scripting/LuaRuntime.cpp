@@ -1,3 +1,4 @@
+#include "../ecs/components/CameraAttachmentComponent.h"
 #include "LuaRuntime.h"
 #include "LuaModulePath.h"
 
@@ -668,7 +669,7 @@ struct LuaRuntime::Impl {
       int i = 1;
       for (auto e : world->Entities())
         if (auto* t = world->GetComponent<ecs::TagComponent>(e);
-            Alive(e) && t && t->name == tag)
+            Alive(e) && ((t && t->name == tag) || (tag == "Player" && world->HasComponent<ecs::PlayerComponent>(e))))
           list[i++] = e;
       return list;
     });
@@ -1013,6 +1014,19 @@ struct LuaRuntime::Impl {
       if(stopping||!c||!c->enabled||!c->cameraEnabled||!services.camera)
         throw std::runtime_error("Camera selection permission missing");
     };
+    camera.set_function("attach",[this,selectionPermission](ecs::Entity entity,ecs::Vec3 position,ecs::Vec3 rotation) {
+      selectionPermission();Transform(entity);Vector(position);Vector(rotation);
+      ecs::CameraAttachmentComponent value{true,position,rotation};
+      if(!ecs::ValidCameraAttachment(value))throw std::runtime_error("Invalid Camera Attachment offsets");
+      mutations.Enqueue(entity.world,[entity,value](ecs::World& w){
+        if(!w.IsAlive(entity)||!w.HasComponent<ecs::TransformComponent>(entity))return;
+        if(auto* current=w.GetComponent<ecs::CameraAttachmentComponent>(entity))*current=value;
+        else w.AddComponent<ecs::CameraAttachmentComponent>(entity,value);
+      });
+    });
+    camera.set_function("detach",[this,selectionPermission](ecs::Entity entity) {
+      selectionPermission();Transform(entity);mutations.Remove<ecs::CameraAttachmentComponent>(entity);
+    });
     camera.set_function("set_active",[this,selectionPermission](ecs::Entity entity) {
       selectionPermission();
       if(!services.camera->Select(*world,entity))throw std::runtime_error("Camera.set_active: dead, foreign, disabled or invalid Camera Entity");

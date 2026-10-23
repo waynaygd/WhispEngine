@@ -2,6 +2,7 @@
 #include "RenderSystem.h"
 #include "../components/UICanvasComponent.h"
 #include "../LightGather.h"
+#include "../CameraAttachments.h"
 
 #include "../World.h"
 #include "../components/MaterialComponent.h"
@@ -261,7 +262,8 @@ namespace ecs {
                         if(resource==m_MeshResources.end())return;
                         const auto& mesh=resource->second->GetData().meshData;
                         const auto count=std::max(std::size_t(1),mesh.submeshes.size());
-                        const auto pose=m_Interpolation?m_Interpolation->ResolveWorld(world,entity):RenderPose::From(world.WorldTransform(entity));
+                        const auto attachment=m_CameraAttachmentsEnabled?CameraAttachmentPose(world,entity,m_RenderCamera,m_Interpolation):std::optional<RenderPose>{};
+                        const auto pose=attachment?*attachment:m_Interpolation?m_Interpolation->ResolveWorld(world,entity):RenderPose::From(world.WorldTransform(entity));
                         bool visible=false,casts=false;
                         for(std::size_t slot=0;slot<count;++slot) {
                             RenderSnapshot snapshot{};

@@ -344,7 +344,11 @@ void EditorLayer::DrawInspector(Application& app){
                 const bool advanced=group=="Advanced";if(advanced&&!m_InspectorSearch.empty())ImGui::SetNextItemOpen(true,ImGuiCond_Always);
                 if(advanced&&!ImGui::TreeNode("Advanced"))continue;
                 if(!group.empty()&&!advanced)inspector::Section(group.c_str());
+                const bool unusedLegacy=d.key=="PlayerStart"&&group=="Legacy (no Player Prefab)"&&!world.GetComponent<ecs::PlayerStartComponent>(e)->playerPrefab.empty();
+                if(unusedLegacy)ImGui::TextDisabled("Unused while Player Prefab is assigned.");
+                ImGui::BeginDisabled(unusedLegacy);
                 if(inspector::BeginProperties("Properties")){for(const auto& p:d.properties)if(PropertyGroup(d,p)==group)drawProperty(p);ImGui::EndTable();}
+                ImGui::EndDisabled();
                 if(advanced)ImGui::TreePop();
             }
         }
@@ -415,9 +419,13 @@ void EditorLayer::DrawInspector(Application& app){
             if(ImGui::Button("-90 deg"))RotateSelectedQuarter(app,m_RotateAxis,-1,m_GizmoMode==1);ImGui::SameLine();if(ImGui::Button("+90 deg"))RotateSelectedQuarter(app,m_RotateAxis,1,m_GizmoMode==1);ImGui::EndDisabled();
             ImGui::TextWrapped("Rz*Ry*Rx; Local: R*Q, World: Q*R. Euler gimbal lock remains.");ImGui::TreePop();
         }
+        if(d.key=="CameraAttachment")ImGui::TextWrapped("Play-only visual attachment to the final camera. Descendant meshes follow; physics, raycasts and collider debug shapes keep their ECS Transform. Edit Mode shows the authored pose.");
         if(d.key=="PlayerStart"){
+            if(!world.GetComponent<ecs::PlayerStartComponent>(e)->playerPrefab.empty())ImGui::TextWrapped("Prefab workflow: the prefab defines components, controller and camera. World position replaces root placement; full marker rotation precedes prefab rotation. Prefab scale/pivot are retained; marker scale is ignored. Legacy settings below are unused.");
+            else{
             auto half=ecs::PlayerBodyHalfExtents(*world.GetComponent<ecs::PlayerStartComponent>(e));
             ImGui::TextWrapped("Position marks the feet. Player size: %.2f x %.2f x %.2f. Scale is ignored. Y rotation sets facing; X sets camera pitch. The body stays upright.",half.x*2,half.y*2,half.z*2);
+            }
         }
         if(d.key=="PointLight"||d.key=="SpotLight")ImGui::TextWrapped("Point/Spot shadows are a reserved flag. Range is in world units; Transform scale is ignored.");
         if(d.key=="DirectionalLight"||d.key=="SpotLight")ImGui::TextWrapped("Outgoing rays follow Transform local +Z; Inspector rotation is in degrees (stored radians).");

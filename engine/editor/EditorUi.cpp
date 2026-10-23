@@ -96,6 +96,11 @@ void EditorLayer::DrawToolbar(Application& app){
     }
     if(!compact){ImGui::SameLine();if(Action(m_WorkspaceFocus?"Restore Layout":"Maximize Workspace","Expand the current document workspace; F11 remains the Scene viewport command.",!m_ViewportMaximized,m_WorkspaceFocus,155))SetWorkspaceFocused(!m_WorkspaceFocus);}
     ImGui::End();ImGui::PopStyleVar();
+    if(!app.GetPlayError().empty()){
+        bool visible=true;ImGui::SetNextWindowSize({520*dpi,0},ImGuiCond_Appearing);
+        if(ImGui::Begin("Play failed",&visible,ImGuiWindowFlags_AlwaysAutoResize))ImGui::TextWrapped("%s",app.GetPlayError().c_str());
+        ImGui::End();if(!visible)app.DismissPlayError();
+    }
 }
 void EditorLayer::DrawMainMenu(Application& app){
     if(!ImGui::BeginMainMenuBar())return;
