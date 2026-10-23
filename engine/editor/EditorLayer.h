@@ -359,7 +359,7 @@ private:
     std::shared_ptr<const ProjectContext> m_ProjectSettingsBase;
     ProjectSettings m_ProjectSettingsDraft;
     SceneCatalog m_ProjectSettingsScenes;
-    std::string m_ProjectSettingsError,m_ProjectSettingsNotice;
+    std::string m_ProjectSettingsError,m_ProjectSettingsNotice,m_ProjectSettingsSearch;
     struct PrefabFileSnapshot {std::string key;std::optional<nlohmann::json> contents,expected;};
     struct EntitySnapshot {
         ecs::Entity entity{},previousSelection{};

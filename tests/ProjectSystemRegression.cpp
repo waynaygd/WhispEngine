@@ -37,6 +37,13 @@ void Script(const ProjectContext& p,int marker){
 int main(int argc,char** argv){try{
     ScopedEditorPreferenceRestore preferences;Fixture fixture;
     auto a=ProjectManager::Create(fixture.root,"HospitalDemo"),b=ProjectManager::Create(fixture.root,"WhispTest");
+    {
+        auto config=ProjectManager::Create(fixture.root,"SettingsFixture");
+        auto data=config->descriptor;data["future"]={{"value",42}};Text(config->descriptorPath,data.dump());config=ProjectManager::Prepare(config->descriptorPath);
+        auto values=config->Settings();values.name="Renamed";auto saved=ProjectManager::WithSettings(*config,values);Check(saved->descriptor.at("future").at("value")==42,"unknown manifest fields preserved");Check(ProjectManager::Prepare(saved->descriptorPath)->name=="Renamed","typed settings reopen");
+        auto invalid=values;invalid.name="";bool rejected=false;try{ProjectManager::WithSettings(*saved,invalid);}catch(...){rejected=true;}Check(rejected,"invalid typed settings rejected");
+        fs::permissions(saved->descriptorPath,(fs::perms::owner_write|fs::perms::group_write|fs::perms::others_write),fs::perm_options::remove);rejected=false;try{ProjectManager::WithSettings(*saved,values);}catch(...){rejected=true;}fs::permissions(saved->descriptorPath,(fs::perms::owner_write|fs::perms::group_write|fs::perms::others_write),fs::perm_options::add);Check(rejected,"read-only manifest write refused");Check(ProjectManager::Prepare(saved->descriptorPath)->descriptor==saved->descriptor,"failed write keeps manifest intact");
+    }
     Script(*a,11);Script(*b,22);
     Text(fixture.root/"hospital.obj","v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
     Text(fixture.root/"test.obj","v 0 0 0\nv 3 0 0\nv 0 2 0\nf 1 2 3\n");
@@ -214,6 +221,15 @@ int main(int argc,char** argv){try{
             Check(app.OpenProject(b->descriptorPath,D::Discard,&error),error);app.Run();
             Check(!app.IsEditorPlayMode()&&!app.IsViewportMouseCaptured(),"DX12 switch releases Play/Pause/cursor");
         }
+        ui.ShowProjectSettings(app);app.SetFrameLimit(3);app.Run();
+        auto settingsDocument=[&]{for(const auto& d:ui.Documents())if(d.type==editor::DocumentType::ProjectSettings)return d.id;return std::string();};
+        auto settingsID=settingsDocument();Check(!settingsID.empty(),"settings registered as document");auto documentCount=ui.Documents().size();ui.ShowProjectSettings(app);Check(ui.Documents().size()==documentCount,"settings reopening reuses tab");
+        auto settingsName=app.GetProject()->name;ui.ProjectSettingsDraft().name=settingsName+" Edited";Check(ui.ProjectSettingsDirty(),"settings draft dirty");
+        Check(!ui.CloseDocument(app,settingsID),"dirty settings close requires decision");Check(!ui.CloseDocument(app,settingsID,editor::EditorLayer::OpenDecision::Cancel),"settings Cancel retains draft");
+        Check(ui.SaveActiveDocument(app),"active document Save writes manifest");Check(ProjectManager::Prepare(app.GetProject()->descriptorPath)->name==settingsName+" Edited","settings persisted across descriptor reopen");
+        ui.ProjectSettingsDraft().name="Discard this";Check(ui.CloseDocument(app,settingsID,editor::EditorLayer::OpenDecision::Discard),"settings Discard closes tab");Check(!ui.ProjectSettingsDirty()&&app.GetProject()->name==settingsName+" Edited","discard keeps published settings");
+        ui.ShowProjectSettings(app);app.Run();Check(ImGui::FindWindowByName("Project Settings")->Active,"dockable settings window");
+        ui.ProjectSettingsDraft().name="";Check(!ui.SaveActiveDocument(app)&&ui.ProjectSettingsDirty(),"invalid settings stay dirty after Save failure");ui.RevertProjectSettings(app);
         Check(dx->GetValidationErrorCount()==0,"DX12 validation ERROR/CORRUPTION zero");
         ui.MarkDirty();glfwSetWindowShouldClose(window->GetGlfwHandle(),GLFW_TRUE);app.SetFrameLimit(2);app.Run();
         popup=ImGui::FindWindowByName("Unsaved project changes");Check(popup&&popup->Active,"dirty project window close prompts");

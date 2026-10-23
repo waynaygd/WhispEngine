@@ -16,6 +16,14 @@ std::atomic_uint64_t sequence{0};
 thread_local std::uint64_t linkProbes=0;
 std::string Utf8(const fs::path& p) { auto s=p.generic_u8string(); return {s.begin(),s.end()}; }
 void Write(const fs::path& path,const nlohmann::json& json,bool replace) {
+    if(replace&&fs::exists(path)){
+#ifdef _WIN32
+        const auto attributes=GetFileAttributesW(path.c_str());
+        if(attributes==INVALID_FILE_ATTRIBUTES||(attributes&FILE_ATTRIBUTE_READONLY))throw std::runtime_error("Project descriptor is read-only or unavailable: "+Utf8(path));
+#else
+        if((fs::status(path).permissions()&(fs::perms::owner_write|fs::perms::group_write|fs::perms::others_write))==fs::perms::none)throw std::runtime_error("Project descriptor is read-only: "+Utf8(path));
+#endif
+    }
     auto temp=path; temp += ".tmp-"+std::to_string(++sequence);
     if(fs::exists(temp))throw std::runtime_error("Project temporary file already exists");
     bool owned=false;

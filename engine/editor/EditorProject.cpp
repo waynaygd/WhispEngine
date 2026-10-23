@@ -43,7 +43,7 @@ void EditorLayer::ResetProjectState(IRenderAdapter* renderer){
     m_AssetDoubleClick.clear();m_PrefabActionKey.clear();m_PrefabConfirm=false;m_PrefabCreatePopup=false;m_PrefabAction=0;m_PrefabActionEntity={};m_PrefabRoot={};m_EditingPrefab.clear();m_PrefabDiskBase={};m_PrefabHistory.reset();
     m_UIDocuments.clear();m_UIStyles.clear();m_DirtyUIStyles.clear();m_DesignDocument.clear();m_UIDesignerKeys.clear();m_UIWidgetDrag.reset();m_UI4Selection.clear();m_UIStyleKey.clear();m_UIStyleId.clear();m_UIClipId.clear();
     m_EventFilter={};m_SelectedGameplayEvent=0;
-    m_ShowProjectSettings=m_FocusProjectSettings=false;m_ProjectSettingsBase.reset();m_ProjectSettingsDraft={};m_ProjectSettingsScenes={};m_ProjectSettingsError.clear();m_ProjectSettingsNotice.clear();
+    m_ShowProjectSettings=m_FocusProjectSettings=false;m_ProjectSettingsBase.reset();m_ProjectSettingsDraft={};m_ProjectSettingsScenes={};m_ProjectSettingsError.clear();m_ProjectSettingsNotice.clear();m_ProjectSettingsSearch.clear();
     CancelPlacement();m_PlacementCancelled=false;
     if(ImGui::GetCurrentContext()){ImGui::ClearActiveID();ImGui::ClearDragDrop();}
     if(renderer)renderer->ReleaseEditorSky();m_RequestedSky.clear();m_FailedSkyVersion=0;

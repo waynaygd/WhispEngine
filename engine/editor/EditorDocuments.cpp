@@ -39,7 +39,7 @@ EditorWorkspace WorkspaceFor(DocumentType type){
 EditorDocument& EditorLayer::RegisterDocument(Application& app,DocumentType type,const std::string& key){
     const auto project=ProjectIdentity(app);
     const auto path=type==DocumentType::Scene?(key.empty()?std::filesystem::path{}:app.GetProject()?app.GetProject()->ResolveScene(key):AssetPaths::ResolveAssetPath(key)):AssetPaths::ResolveAssetPath(key);
-    const auto canonical=key.empty()?std::string("untitled"):Canonical(path);
+    const auto canonical=type==DocumentType::ProjectSettings?project:key.empty()?std::string("untitled"):Canonical(path);
     for(auto& d:m_Documents)if(d.project==project&&d.type==type&&d.canonical==canonical)return d;
     static std::uint64_t serial=0;
     EditorDocument document;document.type=type;document.project=project;document.key=key;document.canonical=canonical;document.id="Document-"+std::to_string(++serial);
@@ -74,6 +74,7 @@ void EditorLayer::SyncSceneDocument(Application& app){
     }
 }
 bool EditorLayer::DocumentDirty(const EditorDocument& d)const{
+    if(d.type==DocumentType::ProjectSettings)return ProjectSettingsDirty();
     if(d.type==DocumentType::Prefab)return m_PrefabHistory&&d.key==m_EditingPrefab&&IsSceneDirty();
     if(d.type==DocumentType::Scene)return d.key==m_ObservedScene&&AuthoringSceneDirty();
     if(d.type==DocumentType::Material)return d.key==m_EditingMaterial&&m_MaterialDirty;
@@ -83,6 +84,7 @@ bool EditorLayer::DocumentDirty(const EditorDocument& d)const{
 bool EditorLayer::ResolveDocumentEdits(Application& app,const EditorDocument& d,OpenDecision decision){
     if(!DocumentDirty(d))return true;
     if(decision==OpenDecision::Cancel)return false;
+    if(d.type==DocumentType::ProjectSettings){if(decision==OpenDecision::Discard){RevertProjectSettings(app);return true;}if(!SaveProjectSettingsDraft(app)){m_EditorError=m_ProjectSettingsError;return false;}return true;}
     if(d.type==DocumentType::Prefab)return decision==OpenDecision::Save?SavePrefabEditor(app):ClosePrefabEditor(app,true);
     if(d.type==DocumentType::Scene){
         if(decision==OpenDecision::Save)return app.SaveAuthoringSceneForTransition(&m_EditorError);
@@ -134,6 +136,7 @@ bool EditorLayer::ActivateDocument(Application& app,const std::string& id,OpenDe
     const auto destination=id;
     auto it=std::find_if(m_Documents.begin(),m_Documents.end(),[&](auto& d){return d.id==destination;});if(it==m_Documents.end()||it->project!=ProjectIdentity(app)){m_EditorError="Document is no longer available in this project.";return false;}
     const auto target=*it;const auto previous=m_ActiveDocument;
+    if(target.type==DocumentType::ProjectSettings){m_ShowProjectSettings=m_FocusProjectSettings=true;}
     if(destination==m_ActiveDocument&&(target.type!=DocumentType::Prefab||app.IsPrefabEditing()&&m_EditingPrefab==target.key))return true;
     FinishTransaction(app);FinishMaterialEdit(app);
     // Stage destination data before leaving the source context or resolving edits.
@@ -176,6 +179,7 @@ bool EditorLayer::ActivateDocument(Application& app,const std::string& id,OpenDe
     const auto requested=m_WorkspacePending?m_RequestedWorkspace:m_Workspace;
     const auto workspace=(target.type==DocumentType::Scene||target.type==DocumentType::Prefab)&&int(requested)<=int(EditorWorkspace::GameplayDebugging)?requested:WorkspaceFor(target.type);
     if(requested!=workspace)SwitchWorkspace(workspace);
+    if(target.type==DocumentType::ProjectSettings)m_ShowProjectSettings=m_FocusProjectSettings=true;
     return true;
 }
 bool EditorLayer::OpenDocument(Application& app,const std::string& input){
@@ -211,6 +215,7 @@ bool EditorLayer::CloseDocument(Application& app,const std::string& id,OpenDecis
     if(active)SetWorkspaceFocused(false);
     if(target.type==DocumentType::UI&&m_DesignDocument==target.key){auto& view=UIDocumentSession(app,target.key);view.preview=m_UIPreviewSize;view.zoom=m_UIZoom;view.panX=m_UIPan.x;view.panY=m_UIPan.y;view.fit=m_UIFit;view.viewSaved=true;}
     std::erase_if(m_Documents,[&](const auto& d){return d.id==closing;});
+    if(target.type==DocumentType::ProjectSettings)m_ShowProjectSettings=false;
     if(target.type==DocumentType::UI){std::erase(m_UIDesignerKeys,target.key);if(m_DesignDocument==target.key)m_DesignDocument.clear();}
     if(active){
         std::string next;if(target.type==DocumentType::Prefab)for(const auto& d:m_Documents)if(d.id==target.returnDocument)next=d.id;
@@ -220,6 +225,7 @@ bool EditorLayer::CloseDocument(Application& app,const std::string& id,OpenDecis
     StoreDocumentSession();return true;
 }
 bool EditorLayer::SaveActiveDocument(Application& app){
+    if(ActiveDocumentIs(DocumentType::ProjectSettings))return SaveProjectSettingsDraft(app);
     if(app.IsPrefabEditing())return SavePrefabEditor(app,true);
     for(const auto& d:m_Documents)if(d.id==m_ActiveDocument){if(d.type==DocumentType::Lua)return true;if(d.type==DocumentType::Scene)return app.SaveCurrentScene(&m_EditorError);return ResolveDocumentEdits(app,d,OpenDecision::Save);}
     return app.SaveCurrentScene(&m_EditorError);
@@ -256,8 +262,8 @@ void EditorLayer::RestoreDocumentSession(Application& app){
     const auto active=saved->contains("active")&&(*saved)["active"].is_string()?(*saved)["active"].get<std::string>():std::string();std::string activate;
     // Reopening scenes registers navigation only; only the active scene may load a world.
     for(const auto& row:*rows){if(m_Documents.size()>=64)break;try{
-        auto key=row.at("key").get<std::string>();int type=row.at("type").get<int>();if(type<0||type>int(DocumentType::Prefab)||key.empty()||!ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::None))continue;
-        auto kind=DocumentType(type);auto path=kind==DocumentType::Scene&&app.GetProject()?app.GetProject()->ResolveScene(key):AssetPaths::ResolveAssetPath(key);if(!std::filesystem::is_regular_file(path))continue;
+        auto key=row.at("key").get<std::string>();int type=row.at("type").get<int>();if(type<0||type>int(DocumentType::ProjectSettings)||key.empty()||!ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::None))continue;
+        auto kind=DocumentType(type);if(kind==DocumentType::ProjectSettings){auto& restored=RegisterDocument(app,kind,key);if(key==active)activate=restored.id;m_ShowProjectSettings=true;continue;}auto path=kind==DocumentType::Scene&&app.GetProject()?app.GetProject()->ResolveScene(key):AssetPaths::ResolveAssetPath(key);if(!std::filesystem::is_regular_file(path))continue;
         if(kind==DocumentType::UI){auto& s=UIDocumentSession(app,key);if(row.contains("view")){try{const auto& v=row["view"];auto preview=v.at("preview").get<ui::Pair>();float zoom=v.at("zoom"),x=v.at("panX"),y=v.at("panY");if(std::isfinite(zoom)&&zoom>=.02f&&zoom<=4&&std::isfinite(x)&&std::isfinite(y)&&std::isfinite(preview[0])&&std::isfinite(preview[1])&&preview[0]>=64&&preview[1]>=64&&preview[0]<=8192&&preview[1]<=8192){s.preview=preview;s.zoom=zoom;s.panX=x;s.panY=y;s.viewSaved=true;s.fit=false;}auto selected=v.value("selected",s.draft.root);if(std::any_of(s.draft.widgets.begin(),s.draft.widgets.end(),[&](auto& w){return w.id==selected;}))s.selected=selected;}catch(...){}}}
         auto& document=RegisterDocument(app,kind,key);
         if(kind==DocumentType::Scene&&row.contains("scene"))try{auto& v=row["scene"];auto camera=v.at("camera").get<std::array<float,3>>();float yaw=v.at("yaw"),pitch=v.at("pitch");if(std::isfinite(yaw)&&std::isfinite(pitch)&&std::all_of(camera.begin(),camera.end(),[](float x){return std::isfinite(x);})){document.camera=camera;document.yaw=yaw;document.pitch=pitch;document.cameraValid=v.value("valid",false);}if(v.contains("selection")&&v["selection"].is_array()&&v["selection"].size()<4096)document.selection=v["selection"].get<std::vector<std::string>>();document.gizmo=std::clamp(v.value("gizmo",0),0,2);document.grid=v.value("grid",true);document.gameView=v.value("gameView",false);}catch(...){}
@@ -282,7 +288,7 @@ void EditorLayer::DrawDocumentTabs(Application& app){
     ImGui::Begin("Document Tabs",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings);
     std::string activate,close;
     if(ImGui::BeginTabBar("Documents",ImGuiTabBarFlags_TabListPopupButton|ImGuiTabBarFlags_FittingPolicyScroll|ImGuiTabBarFlags_NoCloseWithMiddleMouseButton)){
-        for(const auto& d:m_Documents){bool open=true;const char* types[]={"Scene","UI","Material","Lua","Prefab"};const char* icons[]={"◊","■","●","{}","▲"};auto label=std::string(icons[int(d.type)])+" "+(d.key.empty()?std::string("Untitled Scene"):AssetPaths::ToUtf8String(std::filesystem::u8path(d.key).filename()))+"###"+d.id;
+        for(const auto& d:m_Documents){bool open=true;const char* types[]={"Scene","UI","Material","Lua","Prefab","Project Settings"};const char* icons[]={"◊","■","●","{}","▲","⚙"};auto label=std::string(icons[int(d.type)])+" "+(d.type==DocumentType::ProjectSettings?std::string("Project Settings"):d.key.empty()?std::string("Untitled Scene"):AssetPaths::ToUtf8String(std::filesystem::u8path(d.key).filename()))+"###"+d.id;
             auto flags=(DocumentDirty(d)?ImGuiTabItemFlags_UnsavedDocument:0)|(m_ActiveDocument==d.id?ImGuiTabItemFlags_SetSelected:0)|ImGuiTabItemFlags_NoPushId;
             if(ImGui::BeginTabItem(label.c_str(),&open,flags))ImGui::EndTabItem();
             if(ImGui::IsItemClicked()&&m_ActiveDocument!=d.id)activate=d.id;

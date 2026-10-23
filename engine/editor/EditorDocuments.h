@@ -3,7 +3,7 @@
 #include <array>
 #include <vector>
 namespace editor {
-enum class DocumentType {Scene, UI, Material, Lua, Prefab};
+enum class DocumentType {Scene, UI, Material, Lua, Prefab, ProjectSettings};
 struct EditorDocument {
     DocumentType type=DocumentType::Scene;
     std::string project,key,canonical,id;
