@@ -1,0 +1,14 @@
+{
+  "version": 4,
+  "name": "Default primitive PBR",
+  "shaderPath": "dx12/textured.hlsl",
+  "texturePath": "defaults/texture",
+  "baseColor": [1, 1, 1, 1],
+  "shadingModel": "PBR",
+  "metallic": 0,
+  "roughness": 0.6,
+  "surfaceMode": "Opaque",
+  "doubleSided": false,
+  "castShadows": true,
+  "receiveShadows": true
+}

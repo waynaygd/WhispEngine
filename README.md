@@ -52,7 +52,9 @@ The ECS layer is located in `engine/ecs`.
 ## Scene config
 
 The ECS demo scene is usually loaded from `ecsDemo.sceneFile` in `engine/config/app.json`.
-The default scene is `engine/assets/scenes/pz3_demo_scene.json`.
+The editor starts in Project Browser. Standalone demos are in `test_projects/`: open `interactive_room/InteractiveRoom.whispproject` or `legacy_workspace/LegacyWorkspace.whispproject`. The latter preserves the original PZ3 startup scene. See [test project instructions](test_projects/README.md).
+
+Demo compatibility fixtures are staged only by `WHISP_STAGE_TEST_PROJECTS` (default ON for existing regression workflows). Set it OFF when building the editor without demo data. Source engine built-ins remain in `engine/assets`; game data no longer lives there.
 
 Each entity can define:
 

@@ -19,6 +19,7 @@
 #endif
 #include <fstream>
 #include <iostream>
+#include <initializer_list>
 #include <thread>
 static void Check(bool condition,const char* message){if(!condition)throw std::runtime_error(message);}
 struct RegressionExtension {float gain=1;};
@@ -32,8 +33,14 @@ static void Extension(){
 }
 static void Cpu(){
     Extension();
-    const auto& registry=ecs::ComponentRegistry::Builtins();Check(registry.Components().size()==17,"builtin component coverage including Fog, LuaScript and player components");
-    for(const char* key:{"Fog","PlayerStart","Player","CharacterMovement"}){const auto* component=registry.Find(key);Check(component&&component->id==ecs::ComponentId(key),"player component stable descriptor");}
+    const auto& registry=ecs::ComponentRegistry::Builtins();
+    const std::initializer_list<const char*> builtinKeys={
+        "Tag","SceneIdentity","PrefabInstance","Transform","MeshRenderer","Material",
+        "UICanvas","PostProcessVolume","Rigidbody","Collider","Velocity","BoundsBounce",
+        "DirectionalLight","PointLight","SpotLight","Fog","LuaScript","PlayerStart",
+        "Player","CharacterMovement","Camera","CameraAttachment"};
+    Check(registry.Components().size()==builtinKeys.size(),"exact builtin component coverage");
+    for(const char* key:builtinKeys){const auto* component=registry.Find(key);Check(component&&component->id==ecs::ComponentId(key),"builtin component stable descriptor");}
     const auto* script=registry.Find("LuaScript");Check(script&&script->id==ecs::ComponentId("LuaScript")&&script->properties.size()==4,"LuaScript stable descriptor, asset/enabled and explicit input/camera permissions");
     ecs::World a,b;auto e=a.CreateEntity(),other=b.CreateEntity();Check(e.index==other.index&&e.generation==other.generation&&e!=other,"World identity in Entity equality");Check(!a.IsAlive(other)&&!b.IsAlive(e),"foreign handles cannot alias");
     std::string error;Check(registry.Add(a,e,ecs::ComponentId("Transform"),&error),"registry add");Check(!registry.Add(a,other,ecs::ComponentId("Transform"),&error),"registry foreign add");

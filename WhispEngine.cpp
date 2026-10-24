@@ -1,4 +1,5 @@
 ﻿#include "core/Application.h"
+#include "core/AssetPaths.h"
 #include "editor/SunSynchronization.h"
 #include "core/Logger.h"
 #include <cstring>
@@ -25,9 +26,21 @@ int main(int argc, char** argv)
         legacy|=std::strcmp(argv[i],"--legacy")==0||std::strcmp(argv[i],"--interactive-room")==0;
         projectArgument|=std::strcmp(argv[i],"--project")==0;
     }
-    if (!app.Initialize(legacy&&!projectArgument?Application::StartupMode::LegacyWorkspace:Application::StartupMode::ProjectBrowser))
+    if (!app.Initialize(Application::StartupMode::ProjectBrowser))
         return -1;
 
+    if(legacy&&!projectArgument){
+        bool room=false;for(int i=1;i<argc;++i)room|=std::strcmp(argv[i],"--interactive-room")==0;
+        const auto relative=room?std::filesystem::path("interactive_room/InteractiveRoom.whispproject"):std::filesystem::path("legacy_workspace/LegacyWorkspace.whispproject");
+        std::filesystem::path descriptor;
+        for(auto base:{AssetPaths::GetExecutableDirectory(),std::filesystem::current_path()}){
+            for(;!base.empty();){auto candidate=base/"test_projects"/relative;if(std::filesystem::is_regular_file(candidate)){descriptor=candidate;break;}auto parent=base.parent_path();if(parent==base)break;base=parent;}
+            if(!descriptor.empty())break;
+        }
+        std::string error;if(descriptor.empty()||!app.OpenProject(descriptor,Application::ProjectDecision::Discard,&error)){
+            Logger::Get().Error("Cannot open standalone test project: "+error);app.Shutdown();return 1;
+        }
+    }
     bool overlap=false;int lightObjects=100;
     for(int i=1;i<argc;++i){if(std::strcmp(argv[i],"--light-overlap")==0)overlap=true;if(std::strcmp(argv[i],"--light-objects")==0&&i+1<argc)lightObjects=std::atoi(argv[++i]);}
     // Optional repeatable visual smoke/benchmark run. Normal startup is unchanged.
@@ -52,7 +65,7 @@ int main(int argc, char** argv)
             continue;
         }
         if(std::strcmp(argv[i],"--interactive-room")==0){
-            std::string error;if(!app.OpenScene("scenes/interactive_room.json",&error)){Logger::Get().Error(error);app.Shutdown();return 1;}
+            // Project startup is resolved by ProjectContext above (or explicit --project).
             app.SetEditorCameraPose({-1.85f,1.65f,-5.4f},0,0);
         }
         else

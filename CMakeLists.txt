@@ -65,6 +65,19 @@ add_subdirectory(engine)
 option(WHISP_BUILD_PHYSICS_TESTS "Build headless rigid-body regression scenarios" OFF)
 if (WHISP_BUILD_PHYSICS_TESTS)
   enable_testing()
+  add_executable(RepositoryProjectsRegression tests/RepositoryProjectsRegression.cpp)
+  target_link_libraries(RepositoryProjectsRegression PRIVATE Engine DearImGui ImGuizmo)
+  if(TARGET Tracy::TracyClient)
+    target_link_libraries(RepositoryProjectsRegression PRIVATE Tracy::TracyClient)
+  endif()
+  add_test(NAME RepositoryProjectsRegression COMMAND RepositoryProjectsRegression)
+  set_tests_properties(RepositoryProjectsRegression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" RUN_SERIAL TRUE)
+  if(ENABLE_DX12)
+    target_compile_definitions(RepositoryProjectsRegression PRIVATE ENABLE_DX12=1)
+    add_test(NAME RepositoryProjectsDx12Regression COMMAND RepositoryProjectsRegression --dx12)
+    set_tests_properties(RepositoryProjectsDx12Regression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" RUN_SERIAL TRUE ENVIRONMENT "WHISP_DX12_DEBUG=1")
+    add_dependencies(RepositoryProjectsRegression MaterialShaderSources EditorPrimitiveFixtures)
+  endif()
   add_executable(ProjectCoreRegression tests/ProjectCoreRegression.cpp engine/core/ProjectContext.cpp)
   target_include_directories(ProjectCoreRegression PRIVATE engine)
   target_link_libraries(ProjectCoreRegression PRIVATE WhispEngineJson)
@@ -595,9 +608,29 @@ if (WHISP_BUILD_PHYSICS_TESTS)
 
 endif()
 
-add_custom_target(HierarchyDemoAssets
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets/scenes
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/parent_child_demo.json ${CMAKE_BINARY_DIR}/assets/scenes/parent_child_demo.json)
+# Editor primitives, environment fixtures and the FPS template belong to the engine.
+# Stage them even when standalone demo projects and regression builds are disabled.
+add_custom_target(EngineBuiltinAssets ALL
+  COMMAND ${CMAKE_COMMAND}
+    "-DENGINE_ASSET_SOURCE_ROOT=${CMAKE_SOURCE_DIR}/engine/assets"
+    "-DENGINE_ASSET_OUTPUT_ROOT=${CMAKE_BINARY_DIR}/assets"
+    -P ${CMAKE_SOURCE_DIR}/cmake/StageEngineAssets.cmake
+  VERBATIM)
+
+# Demo data is optional, explicit test/compatibility staging, never an engine source root.
+option(WHISP_STAGE_TEST_PROJECTS "Stage standalone project data for legacy/regression fixtures" ON)
+if(WHISP_STAGE_TEST_PROJECTS)
+  add_custom_target(TestProjectFixtures ALL
+    COMMAND ${CMAKE_COMMAND}
+      "-DPROJECT_SOURCE_ROOT=${CMAKE_SOURCE_DIR}/test_projects"
+      "-DFIXTURE_OUTPUT_ROOT=${CMAKE_BINARY_DIR}/assets"
+      -P ${CMAKE_SOURCE_DIR}/cmake/StageTestProjects.cmake
+    VERBATIM)
+else()
+  add_custom_target(TestProjectFixtures)
+endif()
+add_custom_target(HierarchyDemoAssets)
+add_dependencies(HierarchyDemoAssets TestProjectFixtures)
 
 add_executable(WhispEngine WhispEngine.cpp)
 if(WIN32)
@@ -606,28 +639,18 @@ if(WIN32)
     # RC resolves quoted icon filenames through its include search path.
     target_include_directories(WhispEngine PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/engine/platform/branding")
 endif()
-add_dependencies(WhispEngine HierarchyDemoAssets)
-add_custom_target(LuaGameplayAssets ALL
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/interactive_room_ui4.json ${CMAKE_BINARY_DIR}/assets/scenes/interactive_room_ui4.json
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets/scenes
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/interactive_room_interactive_ui.json ${CMAKE_BINARY_DIR}/assets/scenes/interactive_room_interactive_ui.json
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/engine/assets/ui ${CMAKE_BINARY_DIR}/assets/ui
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/interactive_room_ui.json ${CMAKE_BINARY_DIR}/assets/scenes/interactive_room_ui.json
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/engine/assets/postfx ${CMAKE_BINARY_DIR}/assets/postfx
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/engine/assets/scripts ${CMAKE_BINARY_DIR}/assets/scripts
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/engine/assets/prefabs ${CMAKE_BINARY_DIR}/assets/prefabs
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets/scenes
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/lua_wave_demo.json ${CMAKE_BINARY_DIR}/assets/scenes/lua_wave_demo.json
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/interactive_room.json ${CMAKE_BINARY_DIR}/assets/scenes/interactive_room.json
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/prefab_cabinet_demo.json ${CMAKE_BINARY_DIR}/assets/scenes/prefab_cabinet_demo.json)
+add_dependencies(WhispEngine EngineBuiltinAssets HierarchyDemoAssets)
+add_custom_target(LuaGameplayAssets)
+add_dependencies(LuaGameplayAssets TestProjectFixtures)
 add_dependencies(WhispEngine LuaGameplayAssets)
 option(WHISP_BUILD_LUA_TESTS "Build embedded Lua gameplay regressions" ON)
 if(WHISP_BUILD_LUA_TESTS)
   enable_testing()
   add_executable(LuaScriptingRegression tests/LuaScriptingRegression.cpp)
   target_link_libraries(LuaScriptingRegression PRIVATE Engine)
+  add_dependencies(LuaScriptingRegression LuaGameplayAssets)
   add_test(NAME LuaScriptingRegression COMMAND LuaScriptingRegression)
-  set_tests_properties(LuaScriptingRegression PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 90)
+  set_tests_properties(LuaScriptingRegression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" TIMEOUT 90)
 endif()
 target_link_libraries(WhispEngine PRIVATE Engine)
 
@@ -718,10 +741,8 @@ add_custom_target(MaterialShaderSources ALL
     ${CMAKE_SOURCE_DIR}/engine/shaders/dx12/light_cull.hlsl
     ${CMAKE_BINARY_DIR}/shaders/dx12/light_cull.hlsl
   VERBATIM)
-add_custom_target(FogAssets ALL
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets/scenes
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/scenes/fog_diagnostic.json ${CMAKE_BINARY_DIR}/assets/scenes/fog_diagnostic.json
-)
+add_custom_target(FogAssets)
+add_dependencies(FogAssets TestProjectFixtures)
 add_dependencies(WhispEngine MaterialShaderSources FogAssets)
 if(TARGET GpuInstancingRegression)
   add_dependencies(GpuInstancingRegression MaterialShaderSources)
@@ -773,19 +794,8 @@ if(TARGET MaterialSystemRegression)
 endif()
 
 # Keep generated stage-2 fixtures current even when the engine does not relink.
-add_custom_target(PbrTextureFixtures ALL)
-foreach(asset
-    textures/pbr_base.png textures/pbr_normal.png textures/pbr_orm.png
-    textures/pbr_control.jpg textures/pbr_control.dds textures/pbr_control_bc3.dds
-    models/pbr_textures.gltf models/pbr_textures_embedded.gltf models/pbr_textures_uv1.gltf
-    materials/pbr_textures.material.json)
-  get_filename_component(asset_folder ${asset} DIRECTORY)
-  add_custom_command(TARGET PbrTextureFixtures POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets/${asset_folder}
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      ${CMAKE_SOURCE_DIR}/engine/assets/${asset} ${CMAKE_BINARY_DIR}/assets/${asset}
-    VERBATIM)
-endforeach()
+add_custom_target(PbrTextureFixtures)
+add_dependencies(PbrTextureFixtures TestProjectFixtures)
 add_dependencies(WhispEngine PbrTextureFixtures)
 if(TARGET PbrTexturesRegression)
   add_dependencies(PbrTexturesRegression PbrTextureFixtures)
@@ -854,9 +864,8 @@ if(WHISP_BUILD_PHYSICS_TESTS AND ENABLE_DX12)
 endif()
 
 if(WHISP_BUILD_PHYSICS_TESTS AND ENABLE_DX12)
-    add_custom_target(EditorPrimitiveFixtures
-      COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/engine/assets/models/primitives ${CMAKE_BINARY_DIR}/assets/models/primitives
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/materials/default_primitive.material.json ${CMAKE_BINARY_DIR}/assets/materials/default_primitive.material.json)
+    add_custom_target(EditorPrimitiveFixtures)
+    add_dependencies(EditorPrimitiveFixtures EngineBuiltinAssets)
     add_custom_target(EditorLevelFixtures
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/environments/editor24_known_sun.hdr ${CMAKE_BINARY_DIR}/assets/environments/editor24_known_sun.hdr
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/assets/environments/editor24_known_sun.sun.json ${CMAKE_BINARY_DIR}/assets/environments/editor24_known_sun.sun.json)

@@ -65,7 +65,11 @@ static void Interact(Application& app,ecs::Entity cube){
  auto& ui=app.GetEditorLayer();auto& t=*app.GetWorld().GetComponent<ecs::TransformComponent>(cube);Check(app.SetEditorCameraPose({0,0,-6},0,0),"interaction camera");app.SetFrameCaptureOutput({});app.SetFrameLimit(1);
  for(int plane=0;plane<3;++plane){t.rotation=plane==0?ecs::Vec3{}:plane==1?ecs::Vec3{1.57079633f,0,0}:ecs::Vec3{0,1.57079633f,0};t.scale={-2,3,-.7f};ui.SelectEntity(cube);SyntheticEditorInput::Position(-1000,-1000);app.Run();VerifyDrawnPlanes(app,t);
   auto geometry=Geometry(app,t);auto polygon=geometry.planes[plane];Check(polygon.visible,"interaction plane visible");ImVec2 point{};for(auto p:polygon.points){point.x+=p.x*.25f;point.y+=p.y*.25f;}auto original=t.scale;auto history=ui.UndoCount();
-  auto begin=[&]{SyntheticEditorInput::Position(point.x,point.y);app.Run();SyntheticEditorInput::Button(0,true);app.Run();Check(ui.HasPlaneScaleCapture()&&ui.GetCapturedScalePlane()==plane&&!ImGuizmo::IsUsing(),"plane capture excludes ImGuizmo axis capture");};
+  auto begin=[&]{
+   // Undo/Redo can change the drawn geometry. Pick the current frame's plane,
+   // after a released-input frame, rather than reusing the first drag's pixels.
+   SyntheticEditorInput::Position(-1000,-1000);app.Run();geometry=Geometry(app,*app.GetWorld().GetComponent<ecs::TransformComponent>(cube));polygon=geometry.planes[plane];point={};for(auto p:polygon.points){point.x+=p.x*.25f;point.y+=p.y*.25f;}Check(polygon.visible&&editor::HitScalePlane(polygon,point),"current drawn plane has a hittable center");
+   SyntheticEditorInput::Position(point.x,point.y);app.Run();SyntheticEditorInput::Button(0,true);app.Run();Check(ui.HasPlaneScaleCapture()&&ui.GetCapturedScalePlane()==plane&&!ImGuizmo::IsUsing(),"plane capture excludes ImGuizmo axis capture");};
   auto drag=[&]{float dx=point.x-geometry.center.x,dy=point.y-geometry.center.y,n=std::hypot(dx,dy);SyntheticEditorInput::Position(point.x+dx/n*35,point.y+dy/n*35);app.Run();Check(!ImGuizmo::IsUsing(),"axis remains inactive during plane drag");};
   begin();drag();auto changed=t.scale;float oldValues[3]={original.x,original.y,original.z},newValues[3]={changed.x,changed.y,changed.z};
   for(int axis=0;axis<3;++axis){bool affected=axis==editor::ScalePlaneAxes[plane][0]||axis==editor::ScalePlaneAxes[plane][1];Check(affected?std::abs(newValues[axis])>std::abs(oldValues[axis])&&std::signbit(newValues[axis])==std::signbit(oldValues[axis]):newValues[axis]==oldValues[axis],"only intended signed scale components change");}
