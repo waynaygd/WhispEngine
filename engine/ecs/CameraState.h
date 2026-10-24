@@ -35,9 +35,8 @@ inline CameraState BuildCameraState(RenderPose pose,CameraComponent settings,flo
     for(int col=0;col<4;++col)for(int row=0;row<4;++row)for(int k=0;k<4;++k)s.viewProjection[col*4+row]+=p[k*4+row]*v[col*4+k];
     return s;
 }
-inline CameraState ResolveCameraState(const World& world,Entity entity,float aspect,const RenderInterpolation* interpolation=nullptr) {
-    auto* c=world.GetComponent<CameraComponent>(entity);
-    if(!c||!c->enabled)throw std::runtime_error("Camera: dead, foreign, disabled or absent CameraComponent");
+inline RenderPose ResolveCameraPose(const World& world,Entity entity,const RenderInterpolation* interpolation=nullptr) {
+    if(!world.HasComponent<TransformComponent>(entity))throw std::runtime_error("Camera: dead, foreign or absent Transform");
     // Translation obeys existing hierarchy/pivot/scale semantics. Orientation is
     // a composition of local rotations only: scale never flips or stretches view.
     auto pose=interpolation?interpolation->ResolveWorld(world,entity):RenderPose::From(world.WorldTransform(entity));
@@ -47,6 +46,11 @@ inline CameraState ResolveCameraState(const World& world,Entity entity,float asp
         if(++depth>256)throw std::runtime_error("Camera hierarchy depth exceeds 256");
         rotation=CameraCompose(local(p),rotation);
     }
-    pose.rotation=rotation;return BuildCameraState(pose,*c,aspect,entity);
+    pose.rotation=rotation;return pose;
+}
+inline CameraState ResolveCameraState(const World& world,Entity entity,float aspect,const RenderInterpolation* interpolation=nullptr) {
+    auto* c=world.GetComponent<CameraComponent>(entity);
+    if(!c||!c->enabled)throw std::runtime_error("Camera: dead, foreign, disabled or absent CameraComponent");
+    return BuildCameraState(ResolveCameraPose(world,entity,interpolation),*c,aspect,entity);
 }
 }

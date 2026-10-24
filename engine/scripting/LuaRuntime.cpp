@@ -1009,11 +1009,22 @@ struct LuaRuntime::Impl {
     env["Character"] = character;
     auto camera = lua.create_table();
     // Selecting an image source is separate from the exclusive legacy control lease.
-    auto selectionPermission=[this,owner]() {
+    auto selectionPermission=[this,owner](bool requireHost=true) {
       auto* c=Alive(owner)?world->GetComponent<ecs::LuaScriptComponent>(owner):nullptr;
-      if(stopping||!c||!c->enabled||!c->cameraEnabled||!services.camera)
+      if(stopping||!c||!c->enabled||!c->cameraEnabled||(requireHost&&!services.camera))
         throw std::runtime_error("Camera selection permission missing");
     };
+    // Logical pose, including inactive/disabled cameras. Selection and projection
+    // do not affect spatial queries; interpolation belongs exclusively to render.
+    auto spatial=[this,selectionPermission](ecs::Entity entity){
+      selectionPermission(false);Transform(entity);
+      if(!world->HasComponent<ecs::CameraComponent>(entity))throw std::runtime_error("Camera spatial query requires CameraComponent");
+      return ecs::BuildCameraState(ecs::ResolveCameraPose(*world,entity),ecs::CameraComponent{},1.f,entity);
+    };
+    camera.set_function("get_position",[spatial](ecs::Entity e){return spatial(e).pose.position;});
+    camera.set_function("get_forward",[spatial](ecs::Entity e){return spatial(e).forward;});
+    camera.set_function("get_right",[spatial](ecs::Entity e){return spatial(e).right;});
+    camera.set_function("get_up",[spatial](ecs::Entity e){return spatial(e).up;});
     camera.set_function("attach",[this,selectionPermission](ecs::Entity entity,ecs::Vec3 position,ecs::Vec3 rotation) {
       selectionPermission();Transform(entity);Vector(position);Vector(rotation);
       ecs::CameraAttachmentComponent value{true,position,rotation};

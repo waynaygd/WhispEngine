@@ -104,6 +104,38 @@ static void LuaSelection(Fixture& files){
     lua.Stop();camera={};w.GetComponent<CameraComponent>(a)->enabled=w.GetComponent<CameraComponent>(b)->enabled=false;
     auto empty=files.Write("empty.lua","return {on_start=function(self) assert(Camera.get_active()==nil);assert(not Camera.is_active(self.entity));assert(Camera.acquire());Camera.rotate(0,.1) end}");World legacy;Actor(legacy,empty);lua.Start(legacy,{},host);lua.Update(0);Check(lua.Error(empty).empty()&&!camera.Active(legacy).IsValid(),"legacy APIs and nil selection without Camera Entity");lua.Stop();
 }
+static void LuaSpatial(Fixture& files){
+    World w;auto parent=CameraEntity(w,{2,3,4}),cameraEntity=CameraEntity(w,{.2f,1.5f,.3f});w.RemoveComponent<CameraComponent>(parent);Check(w.SetParent(cameraEntity,parent,false),"spatial camera parenting");auto other=CameraEntity(w);w.GetComponent<CameraComponent>(other)->priority=10;
+    std::array<Entity,4> probes;for(auto& e:probes){e=w.CreateEntity();w.AddComponent<TransformComponent>(e);}
+    auto target=w.CreateEntity();w.AddComponent<TransformComponent>(target);w.AddComponent<ColliderComponent>(target).autoFitFromMesh=false;
+    auto path=files.Write("spatial.lua",R"(return {fields={camera={type='entity'},p={type='entity'},f={type='entity'},r={type='entity'},u={type='entity'},target={type='entity'}},on_update=function(self)
+      local phase=World.get_position(self.entity).x
+      if phase==1 then World.set_local_position(self.camera,Vec3.new(.3,1.2,.5));World.set_local_rotation(self.camera,Vec3.new(.2,.3,.4)) end
+      if phase==2 then World.set_position(self.camera,Vec3.new(3,4,5));World.set_rotation(self.camera,Vec3.new(.1,.2,.3)) end
+      local p=Camera.get_position(self.camera);local f=Camera.get_forward(self.camera);local r=Camera.get_right(self.camera);local u=Camera.get_up(self.camera)
+      assert(math.abs(f.x*f.x+f.y*f.y+f.z*f.z-1)<.0001 and math.abs(r.x*r.x+r.y*r.y+r.z*r.z-1)<.0001 and math.abs(u.x*u.x+u.y*u.y+u.z*u.z-1)<.0001)
+      World.set_position(self.p,p);World.set_position(self.f,f);World.set_position(self.r,r);World.set_position(self.u,u)
+      if phase==3 then local hit=Physics.raycast(p,f,10,self.entity);assert(hit and hit.entity==self.target) end
+    end})");
+    auto actor=Actor(w,path);auto& properties=w.GetComponent<LuaScriptComponent>(actor)->properties;properties={{"camera",Ref(w,cameraEntity)},{"p",Ref(w,probes[0])},{"f",Ref(w,probes[1])},{"r",Ref(w,probes[2])},{"u",Ref(w,probes[3])},{"target",Ref(w,target)}};
+    scripting::GameplayCamera hostCamera;scripting::GameplayServices host;host.camera=&hostCamera;scripting::LuaRuntime lua;lua.Start(w,{},host);
+    auto nearVec=[&](Vec3 a,Vec3 b,const char* message){Near(a.x,b.x,message);Near(a.y,b.y,message);Near(a.z,b.z,message);};
+    auto verify=[&]{lua.Update(0);Check(lua.Error(path).empty(),lua.Error(path));auto state=BuildCameraState(ResolveCameraPose(w,cameraEntity),{},1);const Vec3 expected[]={state.pose.position,state.forward,state.right,state.up};for(int i=0;i<4;++i)nearVec(w.WorldTransform(probes[i]).position,expected[i],"Lua spatial matches current camera math");};
+    for(int i=0;i<24;++i){auto& t=*w.GetComponent<TransformComponent>(parent);t.rotation={i*.07f,i*.13f,-i*.09f};t.position={float(i),3,4};t.scale=i%2?Vec3{2,2,2}:Vec3{-2,-2,-2};w.GetComponent<TransformComponent>(cameraEntity)->rotation={-.3f,i*.03f,.4f};verify();Check(!lua.HasCameraOwner()&&hostCamera.Active(w)==other,"inactive camera read requires no acquire lease");}
+    w.GetComponent<TransformComponent>(cameraEntity)->rotation={};w.GetComponent<TransformComponent>(parent)->scale={2,3,4};verify();
+    w.GetComponent<CameraComponent>(cameraEntity)->enabled=false;verify();w.GetComponent<CameraComponent>(cameraEntity)->enabled=true;
+    w.GetComponent<TransformComponent>(parent)->scale={2,2,2};w.GetComponent<TransformComponent>(actor)->position.x=1;verify();nearVec(w.LocalTransform(cameraEntity).position,{.3f,1.2f,.5f},"local camera setter");
+    w.GetComponent<TransformComponent>(actor)->position.x=2;verify();nearVec(w.WorldTransform(cameraEntity).position,{3,4,5},"world camera setter");
+    auto pose=ResolveCameraPose(w,cameraEntity);float matrix[16];BuildRenderModelMatrix(matrix,pose);w.GetComponent<TransformComponent>(target)->position={pose.position.x+matrix[8]*5,pose.position.y+matrix[9]*5,pose.position.z+matrix[10]*5};w.GetComponent<TransformComponent>(actor)->position.x=3;verify();
+    // Gameplay queries stay at the simulation pose while render interpolation lags.
+    w.AddComponent<RigidbodyComponent>(parent).useGravity=false;w.AddComponent<ColliderComponent>(parent);RenderInterpolation interpolation;interpolation.BeginTick(w);w.GetComponent<TransformComponent>(parent)->position.x+=4;interpolation.EndTick(w);interpolation.SetFrame(w,true,.25);w.GetComponent<TransformComponent>(actor)->position.x=0;verify();auto rendered=ResolveCameraState(w,cameraEntity,1,&interpolation);Check(std::abs(rendered.pose.position.x-w.WorldTransform(probes[0]).position.x)>1,"spatial query is not interpolated render pose");
+    World foreign;auto foreignCamera=CameraEntity(foreign);bool foreignRejected=false;try{ResolveCameraPose(w,foreignCamera);}catch(const std::exception&){foreignRejected=true;}Check(foreignRejected,"foreign pose rejected");
+    w.DestroyEntity(cameraEntity);auto replacement=CameraEntity(w);lua.Update(0);Check(!lua.Error(path).empty(),"destroyed/generation-stale Lua camera diagnosed");Check(w.IsAlive(replacement),"stale query never affects replacement");lua.Stop();
+    for(const auto* command:{"Camera.get_forward(self.entity)","Camera.get_position(nil)","World.destroy(self.entity);Camera.get_up(self.entity)"}){auto key=files.Write("bad-spatial.lua",std::string("return {on_start=function(self) ")+command+" end}");World bad;Actor(bad,key);lua.Start(bad,{},host);lua.Update(0);Check(!lua.Error(key).empty(),"invalid spatial query diagnosed");lua.Stop();}
+    auto noHost=files.Write("spatial-no-host.lua","return {on_start=function(self) local f=Camera.get_forward(self.entity);assert(f.z==1) end}");World standalone;auto own=Actor(standalone,noHost);standalone.AddComponent<CameraComponent>(own);lua.Start(standalone);lua.Update(0);Check(lua.Error(noHost).empty(),"logical query needs no selection host");lua.Stop();
+    auto noTransform=files.Write("spatial-no-transform.lua","return {on_start=function(self) Camera.get_position(self.entity) end}");World missing;auto incomplete=Actor(missing,noTransform);missing.AddComponent<CameraComponent>(incomplete);missing.RemoveComponent<TransformComponent>(incomplete);lua.Start(missing,{},host);lua.Update(0);Check(lua.Error(noTransform).find("Transform")!=std::string::npos,"camera without Transform diagnosed");lua.Stop();
+    auto denied=files.Write("spatial-denied.lua","return {on_start=function(self) Camera.get_right(self.entity) end}");World deniedWorld;auto deniedActor=Actor(deniedWorld,denied);deniedWorld.GetComponent<LuaScriptComponent>(deniedActor)->cameraEnabled=false;lua.Start(deniedWorld,{},host);lua.Update(0);Check(lua.Error(denied).find("permission")!=std::string::npos,"spatial camera permission required");lua.Stop();
+}
 #if defined(ENABLE_DX12)
 static void Native(Fixture& files){
     Application app;Check(app.Initialize(),"initialize native DX12 editor");SyntheticEditorInput input;
@@ -116,16 +148,18 @@ static void Native(Fixture& files){
     Check(ui.SetProperty(app,b,ComponentId("Transform"),"position",Vec3{5,0,-7}),ui.GetError());
     Check(ui.SetProperty(app,b,ComponentId("Camera"),"projection",1),ui.GetError());Check(ui.SetProperty(app,b,ComponentId("Camera"),"orthographicSize",6.f),ui.GetError());
     auto cube=ui.CreatePrimitive(app,"cube");app.GetWorld().GetComponent<TransformComponent>(cube)->position={0,0,0};ui.ClearSelection();
+    app.GetWorld().AddComponent<ColliderComponent>(cube).autoFitFromMesh=false;auto probeP=app.GetWorld().CreateEntity(),probeF=app.GetWorld().CreateEntity();app.GetWorld().AddComponent<TransformComponent>(probeP);app.GetWorld().AddComponent<TransformComponent>(probeF);
     auto settings=app.GetSceneSettings();settings.environment.enabled=false;settings.shadows.enabled=false;settings.antiAliasing=AntiAliasingMode::FxaaHigh;Check(app.SetSceneSettings(settings),"native settings");app.SetViewportUnlit(true);
-    auto script=files.Write("native.lua","return {fields={a={type='entity'},b={type='entity'}},on_start=function(self) Camera.set_active(self.a) end,on_update=function(self) if not self.sent and World.get_position(self.entity).x>0 then World.send_event(self.entity,'switch',0);self.sent=true end;if self.sent and not self.moved and World.get_position(self.entity).x>1 then World.set_position(self.b,Vec3.new(0,0,-7));self.moved=true end end,on_event=function(self,event) if event.type=='switch' then Camera.set_active(self.b) end end}");
-    auto actor=Actor(app.GetWorld(),script);app.GetWorld().GetComponent<LuaScriptComponent>(actor)->properties={{"a",Ref(app.GetWorld(),a)},{"b",Ref(app.GetWorld(),b)}};
+    auto script=files.Write("native.lua","return {fields={a={type='entity'},b={type='entity'},p={type='entity'},f={type='entity'},target={type='entity'}},on_start=function(self) Camera.set_active(self.a) end,on_update=function(self) if not self.sent and World.get_position(self.entity).x>0 then World.send_event(self.entity,'switch',0);self.sent=true end;if self.sent and not self.moved and World.get_position(self.entity).x>1 then World.set_position(self.b,Vec3.new(0,0,-7));self.moved=true end;local c=Camera.get_active();local p=Camera.get_position(c);local f=Camera.get_forward(c);World.set_position(self.p,p);World.set_position(self.f,f);if c==self.a then local hit=Physics.raycast(p,f,50,self.entity);assert(hit and hit.entity==self.target) end end,on_event=function(self,event) if event.type=='switch' then Camera.set_active(self.b) end end}");
+    auto actor=Actor(app.GetWorld(),script);app.GetWorld().GetComponent<LuaScriptComponent>(actor)->properties={{"a",Ref(app.GetWorld(),a)},{"b",Ref(app.GetWorld(),b)},{"p",Ref(app.GetWorld(),probeP)},{"f",Ref(app.GetWorld(),probeF)},{"target",Ref(app.GetWorld(),cube)}};
     auto authored=SceneSerializer::CaptureWorld(app.GetWorld(),app.GetSceneSettings());auto editorPosition=app.GetCameraPosition();frame();Check(!app.GetRenderCameraState().entity.IsValid(),"Edit uses independent editor camera");
     app.SetEditorPlayMode(true);app.SetEditorPaused(true);app.GetLuaRuntime().Update(0);frame(12);auto ra=app.MapToRuntime(a),rb=app.MapToRuntime(b),ractor=app.MapToRuntime(actor);
     Check(app.GetActiveCamera()==ra&&app.GetRenderCameraState().entity==ra,"Play renders Lua selected Camera Entity");
+    auto verifySpatial=[&]{Check(app.GetLuaRuntime().Error(script).empty(),app.GetLuaRuntime().Error(script));auto p=app.GetWorld().WorldTransform(app.MapToRuntime(probeP)).position,f=app.GetWorld().WorldTransform(app.MapToRuntime(probeF)).position;auto state=app.GetRenderCameraState();Near(p.x,state.pose.position.x,"native Lua origin and renderer X");Near(p.z,state.pose.position.z,"native Lua origin and renderer Z");Near(f.x,state.forward.x,"native Lua ray and rendered optical X");Near(f.y,state.forward.y,"native Lua ray and rendered optical Y");Near(f.z,state.forward.z,"native Lua ray and rendered optical Z");};verifySpatial();
     auto* gpu=dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter());auto first=gpu->ReadBackHdrPixels();Check(first.size()==360*240*4,"native HDR camera readback: "+std::to_string(first.size()));
-    app.GetWorld().GetComponent<TransformComponent>(ractor)->position.x=1;app.GetLuaRuntime().Update(0);app.GetLuaRuntime().Update(0);frame(12);Check(app.GetRenderCameraState().entity==rb&&app.GetRenderCameraState().projection[15]==1,"runtime switches to Orthographic");
+    app.GetWorld().GetComponent<TransformComponent>(ractor)->position.x=1;app.GetLuaRuntime().Update(0);app.GetLuaRuntime().Update(0);frame(12);Check(app.GetRenderCameraState().entity==rb&&app.GetRenderCameraState().projection[15]==1,"runtime switches to Orthographic");verifySpatial();
     auto second=gpu->ReadBackHdrPixels();Check(second.size()==first.size(),"same render target after source switch");double difference=0;for(std::size_t i=0;i<first.size();i+=4)difference+=std::abs(first[i]-second[i]);Check(difference>1,"camera switch changes actual image");
-    app.GetWorld().GetComponent<TransformComponent>(ractor)->position.x=2;app.GetLuaRuntime().Update(0);frame();auto moved=gpu->ReadBackHdrPixels();difference=0;for(std::size_t i=0;i<moved.size();i+=4)difference+=std::abs(moved[i]-second[i]);Check(difference>1,"Lua World camera Transform changes rendered image");
+    app.GetWorld().GetComponent<TransformComponent>(ractor)->position.x=2;app.GetLuaRuntime().Update(0);frame();auto moved=gpu->ReadBackHdrPixels();difference=0;for(std::size_t i=0;i<moved.size();i+=4)difference+=std::abs(moved[i]-second[i]);Check(difference>1,"Lua World camera Transform changes rendered image");verifySpatial();
     // The orthographic path must also reconstruct depth and parallel fog rays.
     auto fogEntity=app.GetWorld().CreateEntity();app.GetWorld().AddComponent<TransformComponent>(fogEntity);
     auto& fog=app.GetWorld().AddComponent<FogComponent>(fogEntity);fog.startDistance=0;fog.endDistance=20;fog.baseHeight=1;fog.sceneLighting=false;fog.maxDistance=30;
@@ -172,6 +206,6 @@ int main(int argc,char** argv){ScopedEditorPreferenceRestore preferences;try{Fix
 #if defined(ENABLE_DX12)
     if(argc>1&&std::string(argv[1])=="--dx12")Native(files);else
 #endif
-    {ComponentsAndProjection(files);ParentingAndSelection();LuaSelection(files);}
+    {ComponentsAndProjection(files);ParentingAndSelection();LuaSelection(files);LuaSpatial(files);}
     std::cout<<"Camera System: "<<checks<<" checks passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
