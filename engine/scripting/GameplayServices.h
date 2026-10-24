@@ -34,6 +34,8 @@ struct GameplayCamera {
     }
 };
 struct GameplayServices {
+    // Request only. The host owns the queue and publishes at a frame boundary.
+    std::function<bool(const std::string&)> loadScene;
     std::function<bool()> inputAllowed;
     std::function<bool(const std::string&)> pressed,released;
     std::function<ecs::Vec3()> mouseDelta;

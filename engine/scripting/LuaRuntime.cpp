@@ -764,6 +764,11 @@ struct LuaRuntime::Impl {
               std::isfinite(amount))
             Enqueue({e, {}, type, amount, owner});
         });
+    api.set_function("load_scene",[this,owner](const std::string& key){
+      if(stopping||!Alive(owner)||!services.loadScene)
+        throw std::runtime_error("World.load_scene requires active Play");
+      return services.loadScene(key);
+    });
     env["World"] = api;
     auto physics = lua.create_table();
     physics.set_function(

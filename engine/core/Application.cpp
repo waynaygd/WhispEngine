@@ -17,6 +17,7 @@
 #include "../ecs/components/VelocityComponent.h"
 #include "../ecs/components/PlayerStartComponent.h"
 #include "../ecs/PlayerSpawn.h"
+#include "RuntimeLevel.h"
 #include "../ecs/components/PlayerComponent.h"
 #include "../ecs/components/CharacterMovementComponent.h"
 #include "../ecs/systems/BoundsBounceSystem.h"
@@ -47,6 +48,7 @@
 #include <array>
 #include <sstream>
 #include <unordered_set>
+#include <utility>
 
 Application::Application() = default;
 Application::~Application() = default;
@@ -1122,11 +1124,13 @@ void Application::SetEditorPlayMode(bool enabled)
         ecs::Entity playerEntity;ecs::TransformComponent spawnPoint;bool prefabSpawn=false;SceneSettings startupSettings;
         m_PlayError.clear();
         try{
-            runtime=m_World.CloneData(&mapping);
-            if(m_PlayStartupMap){auto project=GetProject();const auto key=project->maps.gameStartupMap.empty()?project->startupScene:project->maps.gameStartupMap;std::string error;if(!SceneSerializer::LoadWorld(project->ResolveScene(key),*runtime,startupSettings,&error))throw std::runtime_error("Game Startup Map '"+key+"': "+error);mapping.clear();}
-            playerEntity=ecs::SpawnPlayer(*runtime,&spawnPoint,&prefabSpawn,GetProject()?&GetProject()->maps:nullptr);
+            auto project=GetProject();std::string key;
+            if(m_PlayStartupMap)key=project->maps.gameStartupMap.empty()?project->startupScene:project->maps.gameStartupMap;
+            auto level=PrepareRuntimeLevel(m_World,project.get(),key);
+            runtime=std::move(level.world);mapping=std::move(level.mapping);startupSettings=level.settings;
+            playerEntity=level.player;spawnPoint=level.spawn;prefabSpawn=level.prefabSpawn;
         }catch(const std::exception& failure){
-            m_PlayError=std::string("Cannot start Play: ")+failure.what();
+            m_PlayError=std::string("Cannot start Play: ")+(m_PlayStartupMap?"Game Startup Map: ":"")+failure.what();
             Logger::Get().Error(m_PlayError);return;
         }
         m_CloneMapping=std::move(mapping);
@@ -1160,10 +1164,61 @@ void Application::SetEditorPlayMode(bool enabled)
         m_EcsDebugEntities=std::move(m_EditDebugEntities);m_StressEntities=std::move(m_EditStressEntities);
         m_LightingSettings=m_EditLighting;m_EnvironmentSettings=m_EditEnvironment;m_ShadowSettings=m_EditShadows;m_Background=m_EditBackground;m_AntiAliasing=m_EditAntiAliasing;
     }
+    m_PendingLevelTravel.clear();m_LevelTravelError.clear();
     m_EditorPlayMode=enabled;m_EditorPaused=false;ResetPhysicsClock();m_ActiveCollisionPairs.clear();
     if(m_PhysicsSystem){m_PhysicsSystem->ResetState();m_PhysicsSystem->SetEnabled(enabled);}
     m_EditorLayer.PruneSelection(*this);
     Logger::Get().Info(enabled?"Editor: Play isolated Runtime World":"Editor: Stop discarded Runtime World");
+}
+bool Application::RequestLevelTravel(const std::string& key){
+    if(!m_EditorPlayMode||!m_RuntimeWorld)throw std::runtime_error("Level Travel requires active Play");
+    auto project=GetProject();if(!project)throw std::runtime_error("Level Travel requires an open project");
+    if(key.empty()||key.size()>1024)throw std::runtime_error("Invalid Level Travel scene path");
+    (void)project->ResolveScene(key); // Existing containment, link and extension validation.
+    if(!m_PendingLevelTravel.empty())return false; // First accepted request wins.
+    m_PendingLevelTravel=key;return true;
+}
+void Application::ApplyLevelTravel(){
+    if(!m_EditorPlayMode||m_PendingLevelTravel.empty())return;
+    auto key=std::exchange(m_PendingLevelTravel,{});PreparedRuntimeLevel level;
+    try{level=PrepareRuntimeLevel(m_World,GetProject().get(),key);}
+    catch(const std::exception& failure){
+        m_LevelTravelError="Level Travel '"+key+"' failed: "+failure.what();
+        Logger::Get().Error(m_LevelTravelError);return;
+    }
+    // No callbacks are active here. Retire against the OLD World before publication.
+    m_LuaRuntime.Stop();ReleasePlayerMouse();m_StateMachine.Clear(*this);
+    m_InputManager.RestoreBindings(m_EditInputBindings);
+    m_PlayerAltWasDown=false;m_ProjectileInput={};
+    if(m_Camera.controlsActive){
+        if(auto* native=dynamic_cast<GlfwWindow*>(GetWindow()))if(auto* window=native->GetGlfwHandle()){
+            glfwSetInputMode(window,GLFW_CURSOR,GLFW_CURSOR_NORMAL);
+            if(glfwRawMouseMotionSupported())glfwSetInputMode(window,GLFW_RAW_MOUSE_MOTION,GLFW_FALSE);
+        }
+        m_Camera.controlsActive=false;m_Camera.previousRightMouseDown=true;
+    }
+    m_Mutations.Clear();m_RenderInterpolation.Clear();m_ActiveCollisionPairs.clear();
+    if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
+    // Restore then resuspend authored history, dropping all transient runtime handles.
+    m_EditorLayer.LeaveRuntime();m_EditorLayer.EnterRuntime({});
+    m_RuntimeWorld=std::move(level.world);m_CloneMapping.clear();m_PlayerEntity=level.player;
+    m_EcsDebugEntities.clear();m_StressEntities.clear();
+    SetSceneSettings(level.settings);ResetPhysicsClock();
+    m_Camera.position=m_SavedEditorCamera.position;m_Camera.yaw=m_SavedEditorCamera.yaw;m_Camera.pitch=m_SavedEditorCamera.pitch;
+    if(!level.prefabSpawn&&m_RuntimeWorld->IsAlive(m_PlayerEntity)){
+        const auto& t=*m_RuntimeWorld->GetComponent<ecs::TransformComponent>(m_PlayerEntity);
+        const auto& player=*m_RuntimeWorld->GetComponent<ecs::PlayerComponent>(m_PlayerEntity);
+        m_Camera.position=ecs::PlayerEyePosition(t.position,player.eyeHeight,m_RuntimeWorld->GetComponent<ecs::ColliderComponent>(m_PlayerEntity)->halfExtents.y);
+        m_Camera.yaw=t.rotation.y;m_Camera.pitch=std::clamp(level.spawn.rotation.x,-kMaxCameraPitch,kMaxCameraPitch);
+    }
+    m_GameplayCamera={};m_GameplayCamera.position=m_Camera.position;m_GameplayCamera.yaw=m_Camera.yaw;m_GameplayCamera.pitch=m_Camera.pitch;
+    m_RenderCameraState=ecs::BuildCameraState({},ecs::CameraComponent{},16.f/9.f);
+    if(m_RenderSystem)m_RenderSystem->SetCameraState(m_RenderCameraState);
+    m_LevelTravelError.clear();
+    m_LuaRuntime.Start(*m_RuntimeWorld,[this](const std::string& action){return GameplayActionAllowed(action)&&m_InputManager.FrameDown(action);},GameplayCapabilities());
+    RequestStateChange(std::make_unique<LoadingState>());m_StateMachine.ApplyPending(*this);
+    m_EditorLayer.PruneSelection(*this);
+    Logger::Get().Info("Level Travel loaded: "+key);
 }
 void Application::SetEditorPaused(bool paused){
     if(!m_EditorPlayMode||m_EditorPaused==paused)return;m_EditorPaused=paused;if(paused)m_LuaRuntime.SuspendInput();
@@ -1519,6 +1574,7 @@ int Application::Run()
         {
             ZoneScopedN("GameUpdate");
 
+            ApplyLevelTravel();
             if(m_EditorPlayMode)UpdateGameplayInput(dt);
             if(m_EditorPlayMode)m_LuaRuntime.DispatchUIEvents();
             const auto luaStart=std::chrono::steady_clock::now();
@@ -1816,6 +1872,7 @@ void Application::UpdateGameplayInput(float uiDelta)
 scripting::GameplayServices Application::GameplayCapabilities()
 {
     scripting::GameplayServices host;
+    host.loadScene=[this](const std::string& key){return RequestLevelTravel(key);};
     host.inputAllowed=[this]{return GameplayInputAllowed();};
     host.pressed=[this](const std::string& a){return GameplayActionAllowed(a)&&m_InputManager.FramePressed(a);};
     host.released=[this](const std::string& a){return GameplayActionAllowed(a)&&m_InputManager.FrameReleased(a);};

@@ -97,6 +97,7 @@ public:
     bool IsEditorPlayMode() const { return m_EditorPlayMode; }
     void SetEditorPlayMode(bool enabled);
     bool PlayFromGameStartupMap();
+    const std::string& GetLevelTravelError()const{return m_LevelTravelError;}
     const std::string& GetPlayError() const { return m_PlayError; }
     void DismissPlayError() { m_PlayError.clear(); }
     void SetEditorPaused(bool paused);
@@ -218,6 +219,8 @@ private:
     bool GameplayActionAllowed(const std::string&)const;
     bool CaptureGameplayCursor(bool);
     scripting::GameplayServices GameplayCapabilities();
+    bool RequestLevelTravel(const std::string&);
+    void ApplyLevelTravel();
     void ReleasePlayerMouse();
     void UpdateRenderSystemCamera(IWindow* window);
     void UpdateRenderSystemCameraAspect(float aspectRatio);
@@ -318,6 +321,7 @@ private:
     ecs::Entity m_PlayerEntity{};
     std::string m_PlayError;
     bool m_PlayStartupMap=false;
+    std::string m_PendingLevelTravel,m_LevelTravelError;
     bool m_PlayerMouseCaptured = false;
     ui::InputMode m_UIInputMode=ui::InputMode::GameOnly;
     bool m_UIPointerConsumed=false;
