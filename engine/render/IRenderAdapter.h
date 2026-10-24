@@ -48,6 +48,12 @@ public:
     virtual std::array<unsigned,2> RenderAreaSize()const{return {0,0};}
     virtual void DrawRuntimeUI(const ui::DrawList&) {}
     virtual std::uint64_t GetViewportTextureId() const { return 0; }
+    // One editor auxiliary view, time-multiplexed with the main scene pass.
+    virtual bool SupportsCameraPreview()const{return false;}
+    virtual bool BeginCameraPreview(int,int,const float*){return false;}
+    virtual void EndCameraPreview(){}
+    virtual std::uint64_t GetCameraPreviewTextureId()const{return 0;}
+    virtual void ReleaseCameraPreview(){}
     virtual std::uint64_t GetTexturePreviewId(RenderTextureHandle)const{return 0;}
     // Called before scene rendering. The caller owns the returned cached texture.
     virtual RenderTextureHandle RenderMeshThumbnail(const MeshData&, RenderShaderHandle, RenderTextureHandle) { return {}; }

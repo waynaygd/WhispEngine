@@ -321,6 +321,7 @@ private:
     ecs::Entity m_PlayerEntity{};
     std::string m_PlayError;
     bool m_PlayStartupMap=false;
+    unsigned m_CameraPreviewFrame=0;
     std::string m_PendingLevelTravel,m_LevelTravelError;
     bool m_PlayerMouseCaptured = false;
     ui::InputMode m_UIInputMode=ui::InputMode::GameOnly;

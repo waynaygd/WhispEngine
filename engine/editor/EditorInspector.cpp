@@ -243,6 +243,7 @@ void EditorLayer::DrawInspector(Application& app){
     if(m_Selection.items.size()>1){DrawBulkInspector(app);ImGui::End();return;}
     m_BulkUiSelection.clear();m_BulkText.clear();
     const auto* tag=world.GetComponent<ecs::TagComponent>(e);if(m_Selection.items.size()>1)ImGui::TextUnformatted("Active Entity:");ImGui::SeparatorText(tag?tag->name.c_str():"Entity");
+    DrawCameraPreview(app,e);
     const nlohmann::json* prefabProperties=nullptr;bool prefabPlacement=false;
     if(auto root=scripting::PrefabRoot(world,e);root.IsValid()){
         const auto* sourceLink=world.GetComponent<ecs::PrefabInstanceComponent>(root);

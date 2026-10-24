@@ -313,6 +313,7 @@ bool EditorLayer::IsPointInsideViewport(double x, double y) const
 
 void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
 {
+    m_CameraPreviewRequest={};
     ZoneScopedN("EditorLayer");
     UpdateLuaRuntimeInspector(app,ImGui::GetTime());
     // Keep prepared prefab data throughout one drag, but never render a stale
@@ -623,7 +624,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     if(ImGui::BeginPopup("Viewport display")){
         int shading=app.IsViewportUnlit()?1:0;ImGui::SetNextItemWidth(140*ImGui::GetStyle().FontScaleDpi);
         if(ImGui::Combo("Lighting",&shading,"Lit\0Unlit\0"))app.SetViewportUnlit(shading==1);
-        if(!playMode){ImGui::Checkbox("Game View (G)",&m_GameView);ImGui::Checkbox("UI Preview",&m_ShowRuntimeUI);ImGui::Checkbox("Grid",&m_ShowGrid);ImGui::Checkbox("Light Gizmos",&m_ShowLightGizmos);}
+        if(!playMode){ImGui::Checkbox("Game View (G)",&m_GameView);ImGui::Checkbox("UI Preview",&m_ShowRuntimeUI);ImGui::Checkbox("Grid",&m_ShowGrid);ImGui::Checkbox("Light Gizmos",&m_ShowLightGizmos);ImGui::SameLine();ImGui::Checkbox("Camera Gizmos",&m_ShowCameraGizmos);}
         ImGui::EndPopup();
     }
     ImGui::Separator();
@@ -699,6 +700,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     auto* iconDraw=ImGui::GetWindowDrawList();
     iconLayers.Split(iconDraw,2);
     iconLayers.SetCurrentChannel(iconDraw,1);
+    DrawCameraGizmos(app,contentMin,viewportSize);
     DrawLightGizmos(app,renderer,contentMin,viewportSize);
     DrawPlayerStartGizmos(app,contentMin,viewportSize);
     DrawFogGizmos(app,contentMin,viewportSize);

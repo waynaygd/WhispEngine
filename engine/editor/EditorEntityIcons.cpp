@@ -1,5 +1,6 @@
 #include "EditorLayer.h"
 #include "EntityIcons.h"
+#include "../ecs/components/CameraComponent.h"
 #include "LightGizmoMath.h"
 #include "../core/Application.h"
 #include <imgui.h>
@@ -13,6 +14,7 @@ void EditorLayer::DrawEntityIcons(Application& app, const ImVec2& origin, const 
         app.GetCameraVerticalFovRadians(), size.x / size.y, app.GetCameraNearPlane(), app.GetCameraFarPlane());
     std::vector<EntityIconCandidate> icons;
     world.ForEach<ecs::TransformComponent>([&](ecs::Entity entity, const auto& transform) {
+        if(world.HasComponent<ecs::CameraComponent>(entity))return;
         if (!HasEntityIcon(world, entity)||!EditorEntityVisible(app,entity)) return;
         if (auto projected = ProjectGizmo(world.WorldTransform(entity).position, camera)) icons.push_back({entity, *projected});
     });

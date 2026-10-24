@@ -142,6 +142,9 @@ public:
     bool BlocksGameplayInput()const;
     bool OwnsViewportKeyboard()const{return m_ViewportFocused&&!BlocksCamera();}
     void SetLightGizmosVisible(bool v){m_ShowLightGizmos=v;}
+    struct CameraPreviewRequest {ecs::Entity entity{};int width=0,height=0;};
+    const CameraPreviewRequest& GetCameraPreviewRequest()const{return m_CameraPreviewRequest;}
+    void SetCameraToolsVisible(bool gizmos,bool frustum,bool preview){m_ShowCameraGizmos=gizmos;m_ShowCameraFrustum=frustum;m_ShowCameraPreview=preview;}
     void EnterRuntime(const ecs::World::CloneMap&);
     void LeaveRuntime();
     void ResetHistory(){m_LuaInspection={};m_LuaInspectionCaptured=false;m_SceneValidation={};m_SelectedValidation=-1;m_SurfaceMove.reset();m_EditPivot=false;m_VertexSource.reset();m_VertexTarget.reset();m_VertexSourcePicking=false;m_BoxSelection.reset();m_SelectionLocked=false;m_BulkSession.reset();m_BulkUiSelection.clear();m_BulkText.clear();ExitIsolation();CancelPlacement();m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
@@ -485,6 +488,11 @@ private:
     void DrawImportDialogs(Application& app);
     void DrawMaterialEditor(Application& app);
     void DrawLightGizmos(Application&,IRenderAdapter*,const ImVec2&,const ImVec2&);
+    void DrawCameraGizmos(Application&,const ImVec2&,const ImVec2&);
+    void DrawCameraPreview(Application&,ecs::Entity);
+    CameraPreviewRequest m_CameraPreviewRequest;
+    ecs::Entity m_CameraPreviewSource{};
+    bool m_ShowCameraGizmos=true,m_ShowCameraFrustum=true,m_ShowCameraPreview=true;
     bool DrawViewportCreateMenu(Application&);
     bool DrawPlacementMenu(Application&);
     void DrawPlacementTarget(Application&,const ImVec2&,const ImVec2&);

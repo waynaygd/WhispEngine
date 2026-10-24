@@ -1443,6 +1443,35 @@ bool Dx12RenderAdapter::EnsureViewportResources(UINT width, UINT height)
     return true;
 }
 
+bool Dx12RenderAdapter::BeginCameraPreview(int width,int height,const float* clear){
+    if(!m_FrameRecording||m_ViewportTarget.rendering||m_HdrActive||m_CameraPreviewRendering)return false;
+    std::swap(m_ViewportTarget,m_CameraPreviewTarget);
+    try{
+        if(BeginViewportRender(width,height,clear)){m_CameraPreviewRendering=true;return true;}
+    }catch(...){std::swap(m_ViewportTarget,m_CameraPreviewTarget);throw;}
+    std::swap(m_ViewportTarget,m_CameraPreviewTarget);return false;
+}
+void Dx12RenderAdapter::EndCameraPreview(){
+    if(!m_CameraPreviewRendering)return;
+    EndViewportRender();std::swap(m_ViewportTarget,m_CameraPreviewTarget);m_CameraPreviewRendering=false;
+}
+void Dx12RenderAdapter::ReleaseCameraPreview(){
+    if(m_CameraPreviewRendering)EndCameraPreview();
+    auto& t=m_CameraPreviewTarget;
+    if(!t.color&&t.srvDescriptorIndex==UINT_MAX)return;
+    if(m_FrameRecording){
+        // ImGui may already have recorded this SRV earlier in the current UI
+        // frame. Retain descriptors AND resources through this frame's fence.
+        for(auto* resource:{static_cast<IUnknown*>(t.color.Get()),static_cast<IUnknown*>(t.depth.Get()),static_cast<IUnknown*>(t.rtvHeap.Get()),static_cast<IUnknown*>(t.dsvHeap.Get())})
+            if(resource)m_RetiredResources[m_FrameIndex].emplace_back(resource);
+        if(t.srvDescriptorIndex!=UINT_MAX)m_RetiredTextureDescriptors[m_FrameIndex].push_back(t.srvDescriptorIndex);
+        t={};
+    }else{
+        WaitForGpu();std::swap(m_ViewportTarget,m_CameraPreviewTarget);
+        ReleaseViewportResources();std::swap(m_ViewportTarget,m_CameraPreviewTarget);
+    }
+}
+
 bool Dx12RenderAdapter::BeginViewportRender(int width, int height, const float* clearColor)
 {
     const UINT targetWidth = static_cast<UINT>(width > 1 ? width : 1);
@@ -2243,6 +2272,7 @@ void Dx12RenderAdapter::Shutdown()
     m_UploadedTextures.clear();
     m_BoundMaps={};m_TextureParameters={1,1,0,1};m_MaterialTables.clear();m_LastMaterialTable={};m_MaterialTableCount=0;m_EnvironmentTable={};m_FrameConstantsDirty=true;
     m_UploadedShaders.clear();
+    ReleaseCameraPreview();
     ReleaseViewportResources();
     m_FreeTextureDescriptorIndices.clear();
     m_FreeImGuiDescriptorIndices.clear();

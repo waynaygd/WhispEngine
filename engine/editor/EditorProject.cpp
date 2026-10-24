@@ -38,6 +38,7 @@ bool EditorLayer::ResolveProjectEdits(Application& app,int decision,std::string*
     return true;
 }
 void EditorLayer::ResetProjectState(IRenderAdapter* renderer){
+    if(renderer)renderer->ReleaseCameraPreview();m_CameraPreviewRequest={};m_CameraPreviewSource={};
     ReleaseMaterialEditor(renderer);m_MaterialSessions.clear();
     StoreDocumentSession();m_Documents.clear();m_ActiveDocument.clear();m_ObservedScene="<initial>";m_DocumentProject.clear();m_PendingDocument.clear();m_DocumentPrompt=false;m_WorkspaceFocus=false;m_RestoreDocuments=true;m_ScriptKey.clear();m_ScriptText.clear();
     m_AssetDoubleClick.clear();m_PrefabActionKey.clear();m_PrefabConfirm=false;m_PrefabCreatePopup=false;m_PrefabAction=0;m_PrefabActionEntity={};m_PrefabRoot={};m_EditingPrefab.clear();m_PrefabDiskBase={};m_PrefabHistory.reset();

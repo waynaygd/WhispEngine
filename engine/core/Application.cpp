@@ -1724,31 +1724,50 @@ int Application::Run()
                 wc.renderer->SetEditorVisuals(m_EditorLayer.BuildVisualFrame(*this));
                 const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
                 const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();
+                const auto preview=m_EditorLayer.GetCameraPreviewRequest();
+                auto* previewCamera=GetWorld().GetComponent<ecs::CameraComponent>(preview.entity);
+                bool previewEligible=(&wc==&m_Windows.front())&&!m_EditorPlayMode&&wc.editorUiAvailable&&wc.renderer->SupportsCameraPreview()&&preview.width>1&&preview.height>1&&previewCamera&&previewCamera->enabled&&ecs::ValidCamera(*previewCamera)&&GetWorld().HasComponent<ecs::TransformComponent>(preview.entity);
+                ecs::CameraState previewState;
+                if(previewEligible)try{previewState=ecs::ResolveCameraState(GetWorld(),preview.entity,float(preview.width)/preview.height);}
+                catch(const std::exception& failure){previewEligible=false;Logger::Get().Warn(std::string("Camera Preview: ")+failure.what());}
+                const bool previewFrame=previewEligible&&(m_CameraPreviewFrame++%4==0);
+                if(!previewEligible){if(&wc==&m_Windows.front())m_CameraPreviewFrame=0;wc.renderer->ReleaseCameraPreview();}
                 const bool renderSceneToViewport =
                     !m_ProjectBrowserActive && wc.editorUiAvailable &&
-                    viewportWidth > 1 &&
-                    viewportHeight > 1 &&
-                    wc.renderer->BeginViewportRender(viewportWidth, viewportHeight, wc.clear);
+                    (previewFrame||(viewportWidth > 1 && viewportHeight > 1)) &&
+                    (previewFrame?wc.renderer->BeginCameraPreview(preview.width,preview.height,wc.clear):wc.renderer->BeginViewportRender(viewportWidth, viewportHeight, wc.clear));
 
                 if (renderSceneToViewport)
                 {
                     if (m_RenderSystem != nullptr)
                     {
                         m_RenderSystem->SetRenderAdapter(wc.renderer.get());
-                        UpdateRenderSystemCameraAspect(static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight));
+                        if(previewFrame){
+                            const auto& state=previewState;
+                            m_RenderSystem->SetCameraState(state);m_RenderSystem->SetDebugCollidersEnabled(false);
+                            m_RenderSystem->SetEditorIsolation({});m_RenderSystem->SetPlacementPreview({});
+                            auto visuals=m_EditorLayer.BuildVisualFrame(*this);visuals.game=true;visuals.showGrid=false;
+                            static_cast<SceneBackground&>(visuals.settings)=m_Background;
+                            visuals.camera={state.pose.position.x,state.pose.position.y,state.pose.position.z};
+                            visuals.right={state.right.x,state.right.y,state.right.z};visuals.up={state.up.x,state.up.y,state.up.z};visuals.forward={state.forward.x,state.forward.y,state.forward.z};
+                            visuals.aspect=state.aspect;visuals.tanHalfFov=state.settings.projection==ecs::CameraProjection::Orthographic?0.f:std::tan(state.settings.fieldOfView*.5f);
+                            visuals.nearPlane=state.settings.nearClip;visuals.farPlane=state.settings.farClip;wc.renderer->SetEditorVisuals(visuals);
+                        }else UpdateRenderSystemCameraAspect(static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight));
                     }
 
                     {
                         ZoneScopedN("WorldSystems");
                         m_RenderInterpolation.SetFrame(GetWorld(), IsSimulationRunning(),
                             m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
-                        editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);
+                        if(!previewFrame)editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);
                         const auto renderStart=std::chrono::steady_clock::now();
-                        m_World.UpdateFrameSystemsOn(GetWorld(),dt);
+                        if(previewFrame){if(m_RenderSystem)m_RenderSystem->Update(GetWorld(),dt);}
+                        else m_World.UpdateFrameSystemsOn(GetWorld(),dt);
                         if(m_FrameObserver)m_FrameCpuMs[4]+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-renderStart).count();
                     }
-                    m_StateMachine.Render(*this, *wc.renderer);
-                    wc.renderer->EndViewportRender();
+                    if(!previewFrame)m_StateMachine.Render(*this, *wc.renderer);
+                    if(previewFrame){wc.renderer->EndCameraPreview();if(m_RenderSystem)m_RenderSystem->SetCameraState(m_RenderCameraState);wc.renderer->SetEditorVisuals(m_EditorLayer.BuildVisualFrame(*this));}
+                    else wc.renderer->EndViewportRender();
                 }
 
                 wc.renderer->Clear(wc.clear[0], wc.clear[1], wc.clear[2], wc.clear[3]);

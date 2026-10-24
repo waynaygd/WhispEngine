@@ -87,6 +87,7 @@ add_library(Engine
   editor/EditorVertexSnap.cpp
   editor/EditorPlacement.cpp
   editor/EditorFogGizmos.cpp
+  editor/EditorCameraTools.cpp
   editor/EditorPostProcess.cpp
   editor/EditorEntityIcons.cpp
   editor/EditorVisualSettings.cpp
