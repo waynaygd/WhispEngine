@@ -45,8 +45,8 @@ void EditorLayer::DrawProjectSettings(Application& app){
     if(app.IsEditorPlayMode())ImGui::TextDisabled("Stop Play to edit or save Project Settings.");
     const float footer=ImGui::GetFrameHeightWithSpacing()*3.5f;
     ImGui::BeginChild("Categories",ImVec2(std::min(150.f,ImGui::GetContentRegionAvail().x*.3f),-footer),ImGuiChildFlags_Borders);
-    const char* categories[]={"Project / General","Rendering","Physics (read-only)","Startup / Runtime (read-only)"};
-    for(int i=0;i<4;++i)if(ImGui::Selectable(categories[i],m_ProjectSettingsCategory==i))m_ProjectSettingsCategory=i;
+    const char* categories[]={"Project / General","Rendering","Physics (read-only)","Startup / Runtime (read-only)","Project / Maps & Modes"};
+    for(int i=0;i<5;++i)if(ImGui::Selectable(categories[i],m_ProjectSettingsCategory==i))m_ProjectSettingsCategory=i;
     ImGui::EndChild();ImGui::SameLine();ImGui::BeginChild("Settings",ImVec2(0,-footer));
     ImGui::PushItemWidth(std::max(120.f,ImGui::GetContentRegionAvail().x*.62f));
     if(m_ProjectSettingsCategory==0){
@@ -55,8 +55,8 @@ void EditorLayer::DrawProjectSettings(Application& app){
         const auto match=[&](const char* name){auto value=std::string(name),filter=m_ProjectSettingsSearch;for(auto& c:value)c=char(std::tolower(static_cast<unsigned char>(c)));for(auto& c:filter)c=char(std::tolower(static_cast<unsigned char>(c)));return value.find(filter)!=std::string::npos;};
         if(match("Project Name"))ImGui::InputText("Project Name",&m_ProjectSettingsDraft.name);
         if(ImGui::IsItemHovered())ImGui::SetTooltip("Display name only. Project folder and descriptor filename stay the same.");
-        if(match("Startup Scene")){
-        ImGui::InputText("Startup Scene",&m_ProjectSettingsDraft.startupScene);
+        if(match("Editor Startup Map")){
+        ImGui::InputText("Editor Startup Map",&m_ProjectSettingsDraft.startupScene);
         if(ImGui::IsItemHovered())ImGui::SetTooltip("Project-relative scene path, for example Scenes/Main.json. Applied the next time this project opens.");
         if(ImGui::Button("Choose Scene..."))ImGui::OpenPopup("StartupScenePicker");ImGui::SameLine();
         if(ImGui::Button("Refresh Scenes")){try{m_ProjectSettingsScenes.Refresh({});m_ProjectSettingsError.clear();}catch(const std::exception& e){m_ProjectSettingsError=e.what();}}
@@ -87,6 +87,20 @@ void EditorLayer::DrawProjectSettings(Application& app){
         ImGui::SeparatorText("Physics");ImGui::Text("Fixed timestep: %.6f seconds (%.0f Hz)",FixedStepClock::TickSeconds,1/FixedStepClock::TickSeconds);
         ImGui::TextWrapped("Read-only: the existing physics clock uses a fixed engine timestep. Project-level gravity and solver controls are not supported.");
         ImGui::TextWrapped("Physics settings in the engine startup configuration are separate from this project descriptor.");
+    }else if(m_ProjectSettingsCategory==4){
+        ImGui::SeparatorText("Maps & Modes");ImGui::BeginDisabled(app.IsEditorPlayMode());
+        auto scene=[&](const char* label,std::string& value,bool optional){ImGui::PushID(label);ImGui::TextUnformatted(label);if(ImGui::BeginCombo("##map",value.empty()?"Editor Startup fallback":value.c_str())){if(optional&&ImGui::Selectable("None (Editor Startup fallback)"))value.clear();for(const auto& entry:m_ProjectSettingsScenes.Entries())if(ImGui::Selectable(entry.key.c_str(),value==entry.key))value=entry.key;ImGui::EndCombo();}if(!value.empty()){if(optional&&ImGui::SmallButton("Clear"))value.clear();ImGui::SameLine();if(ImGui::SmallButton("Open map"))OpenDocument(app,value);}ImGui::PopID();};
+        scene("Editor Startup Map",m_ProjectSettingsDraft.startupScene,false);scene("Game Startup Map",m_ProjectSettingsDraft.maps.gameStartupMap,true);
+        ImGui::TextWrapped("Editor opens its startup map. Ordinary Play uses the current scene. Game Startup preview uses the separate game map; empty falls back to Editor Startup.");
+        auto& maps=m_ProjectSettingsDraft.maps;
+        if(ImGui::BeginCombo("Default GameMode",maps.defaultGameMode.empty()?"None (compatibility)":maps.defaultGameMode.c_str())){if(ImGui::Selectable("None"))maps.defaultGameMode.clear();for(const auto& [id,mode]:maps.modes)if(ImGui::Selectable(id.c_str(),id==maps.defaultGameMode))maps.defaultGameMode=id;ImGui::EndCombo();}
+        if(ImGui::Button("Create Default GameMode")){maps.modes.try_emplace("Default");maps.defaultGameMode="Default";}
+        ecs::PropertyDescriptor property;property.kind=ecs::PropertyKind::Asset;property.asset=ecs::AssetKind::Prefab;
+        ImGui::PushID("ProjectPlayer");ImGui::TextUnformatted("Project Default Player Prefab");DrawInspectorResource(property,maps.defaultPlayerPrefab);ImGui::PopID();
+        std::string effective=maps.defaultPlayerPrefab;
+        if(auto mode=maps.modes.find(maps.defaultGameMode);mode!=maps.modes.end()){ImGui::Checkbox("Auto Spawn Player",&mode->second.autoSpawnPlayer);ImGui::PushID("ModePlayer");ImGui::TextUnformatted("GameMode Player Prefab (empty inherits project)");DrawInspectorResource(property,mode->second.defaultPlayerPrefab);ImGui::PopID();if(!mode->second.defaultPlayerPrefab.empty())effective=mode->second.defaultPlayerPrefab;}
+        ImGui::TextWrapped("Effective default: %s",effective.empty()?"None":effective.c_str());ImGui::TextWrapped("Requires an enabled PlayerStart using GameMode Default. No implicit player is created without a marker.");
+        ImGui::EndDisabled();
     }else{
         ImGui::SeparatorText("Startup / Runtime");
         ImGui::TextWrapped("Startup Scene is selected once in General and loads when the project opens. Saving its path does not replace the scene you are editing.");

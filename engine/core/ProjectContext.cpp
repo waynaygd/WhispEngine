@@ -106,6 +106,13 @@ std::shared_ptr<const ProjectContext> ProjectManager::Prepare(const fs::path& pa
     }
     p->assetDirectory=j.at("directories").at("assets").get<std::string>();p->sceneDirectory=j.at("directories").at("scenes").get<std::string>();
     p->startupScene=j.at("startupScene").get<std::string>();
+    if(j.contains("mapsAndModes")){
+        const auto& m=j.at("mapsAndModes");if(!m.is_object())throw std::runtime_error("mapsAndModes must be an object");
+        p->maps.gameStartupMap=m.value("gameStartupMap",std::string());p->maps.defaultGameMode=m.value("defaultGameMode",std::string());p->maps.defaultPlayerPrefab=m.value("defaultPlayerPrefab",std::string());
+        if(m.contains("modes")){if(!m.at("modes").is_object())throw std::runtime_error("GameModes must be an object");for(auto it=m.at("modes").begin();it!=m.at("modes").end();++it){ProjectContext::ValidateName(it.key());if(!it.value().is_object())throw std::runtime_error("Invalid GameMode: "+it.key());p->maps.modes[it.key()]={it.value().value("defaultPlayerPrefab",std::string()),it.value().value("autoSpawnPlayer",true)};}}
+        if(!p->maps.gameStartupMap.empty())p->ResolveScene(p->maps.gameStartupMap);
+        auto prefab=[&](const std::string& key){if(key.empty())return;if(!key.ends_with(".prefab.json"))throw std::runtime_error("Expected Player Prefab: "+key);p->ResolveAsset(key);};prefab(p->maps.defaultPlayerPrefab);for(const auto& [id,mode]:p->maps.modes)prefab(mode.defaultPlayerPrefab);
+    }
     auto assets=p->AssetRoot(), scenes=p->SceneRoot();
     auto a=assets.lexically_relative(scenes),s=scenes.lexically_relative(assets);
     if(a.empty()||a=="."||*a.begin()!=".."||s.empty()||*s.begin()!="..")throw std::runtime_error("Asset and scene directories must be separate");
@@ -146,6 +153,12 @@ std::shared_ptr<const ProjectContext> ProjectManager::WithSettings(const Project
     current.close(); // Windows cannot atomically replace a descriptor held open by this stream.
     auto next=std::make_shared<ProjectContext>(context);next->name=settings.name;next->startupScene=settings.startupScene;next->gpuInstancing=settings.gpuInstancing;
     next->descriptor["name"]=settings.name;next->descriptor["startupScene"]=settings.startupScene;next->descriptor["rendering"]["gpuInstancing"]=settings.gpuInstancing;
+    next->maps=settings.maps;
+    auto& maps=next->descriptor["mapsAndModes"];maps["gameStartupMap"]=settings.maps.gameStartupMap;maps["defaultGameMode"]=settings.maps.defaultGameMode;maps["defaultPlayerPrefab"]=settings.maps.defaultPlayerPrefab;
+    if(!settings.maps.gameStartupMap.empty()&&!fs::is_regular_file(context.ResolveScene(settings.maps.gameStartupMap)))throw std::runtime_error("Game Startup Map missing: "+settings.maps.gameStartupMap);
+    auto prefab=[&](const std::string& key){if(key.empty())return;if(!key.ends_with(".prefab.json")||!fs::is_regular_file(context.ResolveAsset(key)))throw std::runtime_error("Player Prefab missing or invalid: "+key);};prefab(settings.maps.defaultPlayerPrefab);
+    if(!settings.maps.defaultGameMode.empty()&&!settings.maps.modes.contains(settings.maps.defaultGameMode))throw std::runtime_error("Missing GameMode: "+settings.maps.defaultGameMode);
+    for(const auto& [id,mode]:settings.maps.modes){ProjectContext::ValidateName(id);prefab(mode.defaultPlayerPrefab);maps["modes"][id]["defaultPlayerPrefab"]=mode.defaultPlayerPrefab;maps["modes"][id]["autoSpawnPlayer"]=mode.autoSpawnPlayer;}
     ProjectContext::CheckNoLinks(context.descriptorPath);Write(context.descriptorPath,next->descriptor,true);return next;
 }
 std::shared_ptr<const ProjectContext> ProjectManager::Active(){return active.load();}

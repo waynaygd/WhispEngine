@@ -2,12 +2,24 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <map>
 #include <nlohmann/json.hpp>
 
 // Immutable after publication. The editor owns transitions; resource workers only read.
+struct GameModeSettings {
+    std::string defaultPlayerPrefab;
+    bool autoSpawnPlayer=true;
+    bool operator==(const GameModeSettings&)const=default;
+};
+struct MapsAndModesSettings {
+    std::string gameStartupMap,defaultGameMode,defaultPlayerPrefab;
+    std::map<std::string,GameModeSettings> modes;
+    bool operator==(const MapsAndModesSettings&)const=default;
+};
 struct ProjectSettings {
     std::string name,startupScene;
     bool gpuInstancing=true;
+    MapsAndModesSettings maps;
     bool operator==(const ProjectSettings&)const=default;
 };
 struct ProjectContext {
@@ -17,7 +29,8 @@ struct ProjectContext {
     std::filesystem::path descriptorPath, root;
     nlohmann::json descriptor;
     bool gpuInstancing=true;
-    ProjectSettings Settings()const{return {name,startupScene,gpuInstancing};}
+    MapsAndModesSettings maps;
+    ProjectSettings Settings()const{return {name,startupScene,gpuInstancing,maps};}
     static void ValidateName(const std::string&);
     std::filesystem::path Resolve(const std::string& relative) const;
     std::filesystem::path AssetRoot() const;

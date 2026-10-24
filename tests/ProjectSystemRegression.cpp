@@ -39,8 +39,9 @@ int main(int argc,char** argv){try{
     auto a=ProjectManager::Create(fixture.root,"HospitalDemo"),b=ProjectManager::Create(fixture.root,"WhispTest");
     {
         auto config=ProjectManager::Create(fixture.root,"SettingsFixture");
-        auto data=config->descriptor;data["future"]={{"value",42}};Text(config->descriptorPath,data.dump());config=ProjectManager::Prepare(config->descriptorPath);
-        auto values=config->Settings();values.name="Renamed";auto saved=ProjectManager::WithSettings(*config,values);Check(saved->descriptor.at("future").at("value")==42,"unknown manifest fields preserved");Check(ProjectManager::Prepare(saved->descriptorPath)->name=="Renamed","typed settings reopen");
+        auto data=config->descriptor;data["future"]={{"value",42}};data["mapsAndModes"]={{"future",17},{"modes",{{"Default",{{"futureMode",23}}}}}};Text(config->descriptorPath,data.dump());config=ProjectManager::Prepare(config->descriptorPath);
+        auto values=config->Settings();values.name="Renamed";values.maps.gameStartupMap="Scenes/Main.json";values.maps.defaultGameMode="Default";values.maps.modes["Default"]={"",false};auto saved=ProjectManager::WithSettings(*config,values);Check(saved->descriptor.at("future").at("value")==42,"unknown manifest fields preserved");Check(saved->descriptor.at("mapsAndModes").at("future")==17&&saved->descriptor.at("mapsAndModes").at("modes").at("Default").at("futureMode")==23,"unknown nested mode fields preserved");Check(ProjectManager::Prepare(saved->descriptorPath)->name=="Renamed","typed settings reopen");Check(ProjectManager::Prepare(saved->descriptorPath)->maps==values.maps,"Maps and Modes typed persistence");
+        auto unsafe=values;unsafe.maps.gameStartupMap="../escape.json";bool unsafeRejected=false;try{ProjectManager::WithSettings(*saved,unsafe);}catch(...){unsafeRejected=true;}Check(unsafeRejected,"unsafe Game Startup path rejected");
         auto invalid=values;invalid.name="";bool rejected=false;try{ProjectManager::WithSettings(*saved,invalid);}catch(...){rejected=true;}Check(rejected,"invalid typed settings rejected");
         fs::permissions(saved->descriptorPath,(fs::perms::owner_write|fs::perms::group_write|fs::perms::others_write),fs::perm_options::remove);rejected=false;try{ProjectManager::WithSettings(*saved,values);}catch(...){rejected=true;}fs::permissions(saved->descriptorPath,(fs::perms::owner_write|fs::perms::group_write|fs::perms::others_write),fs::perm_options::add);Check(rejected,"read-only manifest write refused");Check(ProjectManager::Prepare(saved->descriptorPath)->descriptor==saved->descriptor,"failed write keeps manifest intact");
     }
@@ -121,7 +122,7 @@ int main(int argc,char** argv){try{
     auto be=ui.CreateEntity(app,"Script");app.GetWorld().AddComponent<ecs::LuaScriptComponent>(be).scriptPath="scripts/controller.lua";
     runLua(22);Check(app.OpenProject(a->descriptorPath,D::Discard,&error),error);Check(!app.IsEditorPlayMode(),"Play switch stops runtime");
     Check(app.CloseProject(D::Discard,&error),error);
-    auto moved=fixture.root/fs::u8path("Перенос Hospital Demo");fs::rename(a->root,moved);
+    auto moved=fixture.root/fs::u8path("\xD0\x9F\xD0\xB5\xD1\x80\xD0\xB5\xD0\xBD\xD0\xBE\xD1\x81\x20\x48\x6F\x73\x70\x69\x74\x61\x6C\x20\x44\x65\x6D\x6F");fs::rename(a->root,moved);
     Check(app.OpenProject(moved/"HospitalDemo.whispproject",D::Discard,&error),error);
     Check(!AssetPaths::ResolveAssetPath("scripts/controller.lua").empty(),"portable script reference");
     Check(scripting::SpawnPrefab(app.GetWorld(),prefab,{}).IsValid(),"portable prefab reference");
@@ -230,6 +231,15 @@ int main(int argc,char** argv){try{
         ui.ProjectSettingsDraft().name="Discard this";Check(ui.CloseDocument(app,settingsID,editor::EditorLayer::OpenDecision::Discard),"settings Discard closes tab");Check(!ui.ProjectSettingsDirty()&&app.GetProject()->name==settingsName+" Edited","discard keeps published settings");
         ui.ShowProjectSettings(app);app.Run();Check(ImGui::FindWindowByName("Project Settings")->Active,"dockable settings window");
         ui.ProjectSettingsDraft().name="";Check(!ui.SaveActiveDocument(app)&&ui.ProjectSettingsDirty(),"invalid settings stay dirty after Save failure");ui.RevertProjectSettings(app);
+        ui.ShowProjectSettings(app);app.SetFrameLimit(3);app.Run();
+        for(auto* panel:GImGui->Windows)if(panel->ParentWindow&&std::string(panel->ParentWindow->Name)=="Project Settings"&&std::string(panel->Name).find("Categories")!=std::string::npos)ImGui::ActivateItemByID(panel->GetID("Project / Maps & Modes"));
+        app.Run();const std::string gameMapKey="Scenes/GamePreview.json";ecs::World gameMap;auto gameOnly=gameMap.CreateEntity();gameMap.AddComponent<ecs::TransformComponent>(gameOnly);gameMap.AddComponent<ecs::TagComponent>(gameOnly).name="GameMapOnly";Check(SceneSerializer::SaveWorld(app.GetProject()->ResolveScene(gameMapKey),gameMap,&error),error);ui.ProjectSettingsDraft().maps.gameStartupMap=gameMapKey;ui.ProjectSettingsDraft().maps.defaultGameMode="Default";ui.ProjectSettingsDraft().maps.modes["Default"]={"",true};Check(ui.SaveActiveDocument(app),"Maps and Modes document Save");Check(ProjectManager::Prepare(app.GetProject()->descriptorPath)->maps.gameStartupMap==gameMapKey,"Game Startup Map saved from actual settings document");
+        auto previewBefore=SceneSerializer::CaptureWorld(app.GetWorld(),app.GetSceneSettings());auto previewUndo=ui.UndoCount();
+        Check(app.PlayFromGameStartupMap(),app.GetPlayError());app.SetEditorPaused(true);app.SetFrameLimit(4);app.Run();bool actualGameMap=false;app.GetWorld().ForEach<ecs::TagComponent>([&](auto,const auto& tag){actualGameMap|=tag.name=="GameMapOnly";});Check(actualGameMap&&app.GetWorld().GetAliveCount()==1,"preview loads configured game map rather than current scene");app.SetEditorPlayMode(false);
+        Check(SceneSerializer::CaptureWorld(app.GetWorld(),app.GetSceneSettings())==previewBefore&&ui.UndoCount()==previewUndo,"Game Startup preview restores authoring data and undo");
+        app.SetEditorPlayMode(true);bool wrongMap=false;app.GetWorld().ForEach<ecs::TagComponent>([&](auto,const auto& tag){wrongMap|=tag.name=="GameMapOnly";});Check(app.IsEditorPlayMode()&&!wrongMap,"ordinary Play ignores configured Game Startup Map");app.SetEditorPlayMode(false);
+        const auto gamePath=app.GetProject()->ResolveScene(gameMapKey);auto heldPath=gamePath;heldPath+=".held";fs::rename(gamePath,heldPath);const bool missingPreview=app.PlayFromGameStartupMap();fs::rename(heldPath,gamePath);Check(!missingPreview&&!app.IsEditorPlayMode()&&app.GetPlayError().find("Game Startup Map")!=std::string::npos,"missing game map cancels Play with diagnostic");Check(SceneSerializer::CaptureWorld(app.GetWorld(),app.GetSceneSettings())==previewBefore&&ui.UndoCount()==previewUndo,"failed game-map preview preserves authored World and Undo");app.DismissPlayError();
+
         Check(dx->GetValidationErrorCount()==0,"DX12 validation ERROR/CORRUPTION zero");
         ui.MarkDirty();glfwSetWindowShouldClose(window->GetGlfwHandle(),GLFW_TRUE);app.SetFrameLimit(2);app.Run();
         popup=ImGui::FindWindowByName("Unsaved project changes");Check(popup&&popup->Active,"dirty project window close prompts");

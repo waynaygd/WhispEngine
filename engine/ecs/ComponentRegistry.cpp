@@ -243,6 +243,7 @@ ComponentRegistry Build(){
         PropertyKind::Boolean
     );
 
+    Field<PlayerStartComponent>(playerStart,"spawnMode","Spawn Mode",&PlayerStartComponent::spawnMode,PropertyKind::Integer,0,3).choices={"Compatibility (saved scenes)","Legacy","Prefab Override","GameMode Default"};
     Field<PlayerStartComponent>(playerStart,"playerPrefab","Player Prefab",&PlayerStartComponent::playerPrefab,PropertyKind::Asset,0,0,AssetKind::Prefab).tooltip="Spawn this ordinary prefab at Play. None uses the legacy character settings below. Invalid assignments stop Play with an error.";
     Field<PlayerStartComponent>(playerStart,"controllerScript","Controller script",&PlayerStartComponent::controllerScript,PropertyKind::Asset,0,0,AssetKind::LuaScript).section="Legacy (no Player Prefab)";
     Field<PlayerStartComponent>(playerStart,"characterHeight","Character Height",&PlayerStartComponent::characterHeight,PropertyKind::Number,.2f,10.f).set=[](World& w,Entity e,const PropertyValue& v){
@@ -251,7 +252,7 @@ ComponentRegistry Build(){
     Field<PlayerStartComponent>(playerStart,"eyeHeight","Eye Height",&PlayerStartComponent::eyeHeight,PropertyKind::Number,0.f,10.f).set=[](World& w,Entity e,const PropertyValue& v){
         auto& c=*w.GetComponent<PlayerStartComponent>(e);const auto height=std::get<float>(v);if(height>c.characterHeight)Fail("Eye Height must not exceed Character Height");c.eyeHeight=height;
     };
-    for(auto& p:playerStart.properties)if(p.key!="enabled"&&p.key!="playerPrefab")p.section="Legacy (no Player Prefab)";
+    for(auto& p:playerStart.properties)if(p.key!="enabled"&&p.key!="playerPrefab"&&p.key!="spawnMode")p.section="Legacy (no Player Prefab)";
     Complete(playerStart);
     r.Register(playerStart);
 

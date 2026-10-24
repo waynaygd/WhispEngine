@@ -344,10 +344,10 @@ void EditorLayer::DrawInspector(Application& app){
                 const bool advanced=group=="Advanced";if(advanced&&!m_InspectorSearch.empty())ImGui::SetNextItemOpen(true,ImGuiCond_Always);
                 if(advanced&&!ImGui::TreeNode("Advanced"))continue;
                 if(!group.empty()&&!advanced)inspector::Section(group.c_str());
-                const bool unusedLegacy=d.key=="PlayerStart"&&group=="Legacy (no Player Prefab)"&&!world.GetComponent<ecs::PlayerStartComponent>(e)->playerPrefab.empty();
+                const bool unusedLegacy=d.key=="PlayerStart"&&group=="Legacy (no Player Prefab)"&&world.GetComponent<ecs::PlayerStartComponent>(e)->spawnMode!=1&&!world.GetComponent<ecs::PlayerStartComponent>(e)->playerPrefab.empty();
                 if(unusedLegacy)ImGui::TextDisabled("Unused while Player Prefab is assigned.");
                 ImGui::BeginDisabled(unusedLegacy);
-                if(inspector::BeginProperties("Properties")){for(const auto& p:d.properties)if(PropertyGroup(d,p)==group)drawProperty(p);ImGui::EndTable();}
+                if(inspector::BeginProperties("Properties")){for(const auto& p:d.properties)if(PropertyGroup(d,p)==group){if(d.key=="PlayerStart"){const auto& start=*world.GetComponent<ecs::PlayerStartComponent>(e);const bool legacy=start.spawnMode==1||(start.spawnMode==0&&start.playerPrefab.empty());if(p.key=="playerPrefab"&&(start.spawnMode==1||start.spawnMode==3))continue;if(p.section=="Legacy (no Player Prefab)"&&!legacy)continue;}drawProperty(p);}ImGui::EndTable();}
                 ImGui::EndDisabled();
                 if(advanced)ImGui::TreePop();
             }
@@ -421,7 +421,8 @@ void EditorLayer::DrawInspector(Application& app){
         }
         if(d.key=="CameraAttachment")ImGui::TextWrapped("Play-only visual attachment to the final camera. Descendant meshes follow; physics, raycasts and collider debug shapes keep their ECS Transform. Edit Mode shows the authored pose.");
         if(d.key=="PlayerStart"){
-            if(!world.GetComponent<ecs::PlayerStartComponent>(e)->playerPrefab.empty())ImGui::TextWrapped("Prefab workflow: the prefab defines components, controller and camera. World position replaces root placement; full marker rotation precedes prefab rotation. Prefab scale/pivot are retained; marker scale is ignored. Legacy settings below are unused.");
+            if(world.GetComponent<ecs::PlayerStartComponent>(e)->spawnMode==3)ImGui::TextWrapped("GameMode Default: resolves mode prefab, then project fallback before Lua starts. Requires an enabled marker and Auto Spawn.");
+            else if(world.GetComponent<ecs::PlayerStartComponent>(e)->spawnMode!=1&&!world.GetComponent<ecs::PlayerStartComponent>(e)->playerPrefab.empty())ImGui::TextWrapped("Prefab workflow: the prefab defines components, controller and camera. World position replaces root placement; full marker rotation precedes prefab rotation. Prefab scale/pivot are retained; marker scale is ignored. Legacy settings below are unused.");
             else{
             auto half=ecs::PlayerBodyHalfExtents(*world.GetComponent<ecs::PlayerStartComponent>(e));
             ImGui::TextWrapped("Position marks the feet. Player size: %.2f x %.2f x %.2f. Scale is ignored. Y rotation sets facing; X sets camera pitch. The body stays upright.",half.x*2,half.y*2,half.z*2);

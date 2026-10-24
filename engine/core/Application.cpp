@@ -1089,6 +1089,11 @@ bool Application::IsInputActionActive(const std::string& action) const
     return m_InputManager.IsActionActive(action);
 }
 
+bool Application::PlayFromGameStartupMap(){
+    if(!GetProject()){m_PlayError="Game Startup preview requires an open project";return false;}
+    if(IsEditorPlayMode()||IsPrefabEditing())return false;
+    m_PlayStartupMap=true;SetEditorPlayMode(true);m_PlayStartupMap=false;return IsEditorPlayMode();
+}
 void Application::SetEditorPlayMode(bool enabled)
 {
     if(enabled&&IsPrefabEditing())return;
@@ -1114,11 +1119,12 @@ void Application::SetEditorPlayMode(bool enabled)
         const auto start=std::chrono::steady_clock::now();
         ecs::World::CloneMap mapping;
         std::unique_ptr<ecs::World> runtime;
-        ecs::Entity playerEntity;ecs::TransformComponent spawnPoint;bool prefabSpawn=false;
+        ecs::Entity playerEntity;ecs::TransformComponent spawnPoint;bool prefabSpawn=false;SceneSettings startupSettings;
         m_PlayError.clear();
         try{
             runtime=m_World.CloneData(&mapping);
-            playerEntity=ecs::SpawnPlayer(*runtime,&spawnPoint,&prefabSpawn);
+            if(m_PlayStartupMap){auto project=GetProject();const auto key=project->maps.gameStartupMap.empty()?project->startupScene:project->maps.gameStartupMap;std::string error;if(!SceneSerializer::LoadWorld(project->ResolveScene(key),*runtime,startupSettings,&error))throw std::runtime_error("Game Startup Map '"+key+"': "+error);mapping.clear();}
+            playerEntity=ecs::SpawnPlayer(*runtime,&spawnPoint,&prefabSpawn,GetProject()?&GetProject()->maps:nullptr);
         }catch(const std::exception& failure){
             m_PlayError=std::string("Cannot start Play: ")+failure.what();
             Logger::Get().Error(m_PlayError);return;
@@ -1130,6 +1136,7 @@ void Application::SetEditorPlayMode(bool enabled)
         map(m_EcsDebugEntities);map(m_StressEntities);
         m_EditorLayer.EnterRuntime(m_CloneMapping);
         m_RuntimeWorld=std::move(runtime);
+        if(m_PlayStartupMap)SetSceneSettings(startupSettings);
         m_PlayerEntity=playerEntity;
         if(!prefabSpawn&&m_RuntimeWorld->IsAlive(m_PlayerEntity)){
             const auto& t=*m_RuntimeWorld->GetComponent<ecs::TransformComponent>(m_PlayerEntity);

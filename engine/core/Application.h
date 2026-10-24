@@ -96,6 +96,7 @@ public:
     float GetCameraFarPlane() const { return m_EditorPlayMode&&m_RenderCameraState.entity.IsValid()?m_RenderCameraState.settings.farClip:m_Camera.farPlane; }
     bool IsEditorPlayMode() const { return m_EditorPlayMode; }
     void SetEditorPlayMode(bool enabled);
+    bool PlayFromGameStartupMap();
     const std::string& GetPlayError() const { return m_PlayError; }
     void DismissPlayError() { m_PlayError.clear(); }
     void SetEditorPaused(bool paused);
@@ -316,6 +317,7 @@ private:
     CameraControllerState m_Camera;
     ecs::Entity m_PlayerEntity{};
     std::string m_PlayError;
+    bool m_PlayStartupMap=false;
     bool m_PlayerMouseCaptured = false;
     ui::InputMode m_UIInputMode=ui::InputMode::GameOnly;
     bool m_UIPointerConsumed=false;

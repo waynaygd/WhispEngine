@@ -173,7 +173,7 @@ void EditorLayer::DrawPlayerStartGizmos(Application& app,const ImVec2& origin,co
         if(!EditorEntityVisible(app,e))return;
         const bool selected=IsSelected(e);const ImU32 color=start.enabled?IM_COL32(80,235,255,255):IM_COL32(155,160,165,255);
         const auto half=ecs::PlayerBodyHalfExtents(start);
-        const bool prefab=!start.playerPrefab.empty();
+        const bool prefab=start.spawnMode==2||start.spawnMode==3||(start.spawnMode==0&&!start.playerPrefab.empty());
         const auto center=ecs::PlayerBodyCenter(t.position,half.y),eye=prefab?t.position:ecs::PlayerEyePosition(center,ecs::PlayerEyeHeight(start),half.y);
         const auto q=ecs::RenderRotation(t.rotation);
         V forward=prefab?V{2*(q.x*q.z+q.w*q.y),2*(q.y*q.z-q.w*q.x),1-2*(q.x*q.x+q.y*q.y)}:PlayerStartGizmoDirection(t);
@@ -340,7 +340,7 @@ void EditorLayer::SelectViewportRectangle(Application& app,std::array<float,4> r
         }else if(auto* collider=world.GetComponent<ecs::ColliderComponent>(e)){
             const auto center=Add(pose.position,collider->offset),half=collider->halfExtents;
             for(int i=0;i<8;++i)corners[i]=Add(center,V{(i&1?1:-1)*half.x,(i&2?1:-1)*half.y,(i&4?1:-1)*half.z});projected=projectedBounds(corners);
-        }else if(auto* start=world.GetComponent<ecs::PlayerStartComponent>(e);start&&start->playerPrefab.empty()){
+        }else if(auto* start=world.GetComponent<ecs::PlayerStartComponent>(e);start&&(start->spawnMode==1||(start->spawnMode==0&&start->playerPrefab.empty()))){
             std::array<float,16> model;ecs::BuildRenderModelMatrix(model.data(),pose);
             for(int i=0;i<8;++i){V p{(i&1?1.f:-1.f)*.3f,i&2?start->characterHeight:0.f,(i&4?1.f:-1.f)*.3f};corners[i]={model[0]*p.x+model[4]*p.y+model[8]*p.z+model[12],model[1]*p.x+model[5]*p.y+model[9]*p.z+model[13],model[2]*p.x+model[6]*p.y+model[10]*p.z+model[14]};}projected=projectedBounds(corners);
         }else if(auto point=ProjectGizmo(pose.position,camera)){

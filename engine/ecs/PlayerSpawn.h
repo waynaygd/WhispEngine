@@ -11,6 +11,7 @@
 #include "events/EventBus.h"
 #include "../scripting/Prefab.h"
 #include "TransformMath.h"
+#include "../core/ProjectContext.h"
 #include <cmath>
 #include <algorithm>
 namespace ecs {
@@ -32,15 +33,20 @@ inline Vec3 PlayerBoxPoint(const TransformComponent& start,Vec3 local,float half
  auto center=PlayerBodyCenter(start.position,halfHeight);
  return {center.x+c*local.x+s*local.z,center.y+local.y,center.z-s*local.x+c*local.z};
 }
-inline Entity SpawnPlayer(World& world,TransformComponent* spawnPoint=nullptr,bool* prefabSpawn=nullptr){
+inline Entity SpawnPlayer(World& world,TransformComponent* spawnPoint=nullptr,bool* prefabSpawn=nullptr,const MapsAndModesSettings* maps=nullptr){
  if(prefabSpawn)*prefabSpawn=false;
  Entity chosen;TransformComponent spawn;PlayerStartComponent settings;
  // Collect handles before adding/removing entities.
  auto markers=world.Entities();
  for(auto e:markers){auto* s=world.GetComponent<PlayerStartComponent>(e);auto* t=world.GetComponent<TransformComponent>(e);
   if(!chosen.IsValid()&&s&&s->enabled&&t){chosen=e;spawn=world.WorldTransform(e);settings=*s;}}
+ bool autoSpawn=true;std::string defaultPrefab;
+ if(maps){defaultPrefab=maps->defaultPlayerPrefab;if(!maps->defaultGameMode.empty()){auto mode=maps->modes.find(maps->defaultGameMode);if(mode==maps->modes.end())throw std::runtime_error("Missing GameMode: "+maps->defaultGameMode);autoSpawn=mode->second.autoSpawnPlayer;if(!mode->second.defaultPlayerPrefab.empty())defaultPrefab=mode->second.defaultPlayerPrefab;}}
  Entity player;
- if(chosen.IsValid()){
+ if(chosen.IsValid()&&autoSpawn){
+  if(settings.spawnMode==1)settings.playerPrefab.clear();
+  if(settings.spawnMode==2&&settings.playerPrefab.empty())throw std::runtime_error("PlayerStart Prefab Override requires a Prefab");
+  if(settings.spawnMode==3){settings.playerPrefab=defaultPrefab;if(settings.playerPrefab.empty())throw std::runtime_error("GameMode Default has no effective Player Prefab");}
   if(spawnPoint)*spawnPoint=spawn;
   if(!settings.playerPrefab.empty()){
    try{
