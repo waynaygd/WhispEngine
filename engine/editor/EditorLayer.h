@@ -578,9 +578,9 @@ private:
     std::string m_UI4Selection,m_UIStyleKey,m_UIStyleId,m_UIClipId,m_UIClipNameDraft,m_UIClipNameSource;
 
     UIDocumentEdit& UIDocumentSession(Application&,const std::string&);
-    bool m_ShowRuntimeUI=true;
+    bool m_ShowRuntimeUI=false;
     bool m_ShowWidgetHierarchy=false,m_ShowCanvasDesigner=false,m_ShowWidgetInspector=false;
-    std::string m_DesignDocument,m_WidgetSearch,m_WidgetRename,m_WidgetRenameId;std::vector<std::string> m_UIDesignerKeys;
+    std::string m_DesignDocument,m_WidgetSearch,m_WidgetRename,m_WidgetRenameId,m_WidgetInlineId;bool m_WidgetRenameFocus=false;std::vector<std::string> m_UIDesignerKeys;
     ui::Pair m_UIPreviewSize{1920,1080};float m_UIZoom=.35f,m_UIGridSize=16;
     struct UIDesignerPoint {float x=0,y=0;};
     UIDesignerPoint m_UIPan{},m_UICanvasOrigin{};bool m_UIFit=true,m_UIGrid=true,m_UISnap=false;

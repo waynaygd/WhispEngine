@@ -1,4 +1,5 @@
 #include "WidgetDesignerTools.h"
+#include <cctype>
 #include <set>
 #include <cmath>
 #include <stdexcept>
@@ -24,6 +25,8 @@ void Reparent(ui::Document& d,const std::string& id,const std::string& parent,ui
  auto r=Rectangle(d,id,canvas),p=Rectangle(d,parent,canvas);auto next=d;auto& w=const_cast<ui::Widget&>(Find(next,id));w.parent=parent;SetRectangle(w,r,p);CheckDocument(next);d=std::move(next);
 }
 void Rename(ui::Document& d,const std::string& id,const std::string& name){
+ if(name.empty()||std::all_of(name.begin(),name.end(),[](unsigned char c){return std::isspace(c);}))throw std::runtime_error("Widget ID cannot be empty or whitespace");
+ if(name.size()>128||!ui::ValidUTF8(name)||std::any_of(name.begin(),name.end(),[](unsigned char c){return c<32||c==127;}))throw std::runtime_error("Widget ID must be valid UTF-8, at most 128 bytes, without control characters");
  if(name==id)return;if(std::any_of(d.widgets.begin(),d.widgets.end(),[&](auto& w){return w.id==name;}))throw std::runtime_error("Widget ID already exists");
  auto next=d;const_cast<ui::Widget&>(Find(next,id)).id=name;for(auto& w:next.widgets)if(w.parent==id)w.parent=name;if(next.root==id)next.root=name;for(auto& clip:next.animations)if(clip.widget==id)clip.widget=name;for(auto& required:next.requiredWidgets)if(required==id)required=name;CheckDocument(next);d=std::move(next);
 }

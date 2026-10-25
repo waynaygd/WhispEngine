@@ -29,7 +29,7 @@ bool EditorLayer::OpenUIDesigner(Application& app,const std::string& key){
  try{SyncSceneDocument(app);UIDocumentSession(app,key);if(m_UIWidgetDrag){CancelUIDocumentEdit(app,m_UIWidgetDrag->key);m_UIWidgetDrag.reset();}
   if(!m_DesignDocument.empty()){auto& old=UIDocumentSession(app,m_DesignDocument);if(old.pending)EditUIDocument(app,m_DesignDocument,old.draft,true);old.preview=m_UIPreviewSize;old.zoom=m_UIZoom;old.panX=m_UIPan.x;old.panY=m_UIPan.y;old.fit=m_UIFit;old.viewSaved=true;}
   CaptureCurrentWorkspace();m_ActiveDocument=RegisterDocument(app,DocumentType::UI,key).id;
-  m_DesignDocument=key;m_WidgetRenameId.clear();auto& view=UIDocumentSession(app,key);m_UIPreviewSize=view.preview;m_UIZoom=view.zoom;m_UIPan={view.panX,view.panY};m_UIFit=view.viewSaved?view.fit:true;
+  m_DesignDocument=key;m_WidgetInlineId.clear();m_WidgetRenameId.clear();auto& view=UIDocumentSession(app,key);m_UIPreviewSize=view.preview;m_UIZoom=view.zoom;m_UIPan={view.panX,view.panY};m_UIFit=view.viewSaved?view.fit:true;
   if(std::find(m_UIDesignerKeys.begin(),m_UIDesignerKeys.end(),key)==m_UIDesignerKeys.end())m_UIDesignerKeys.push_back(key);
   if(auto saved=m_Workspaces.find("ui");saved!=m_Workspaces.end())for(auto* panel:{"Canvas Designer","Widget Hierarchy","Widget Inspector"})saved->second.visible[panel]=true;
   // Capture the outgoing workspace before enabling UI-only panels. Otherwise
@@ -64,7 +64,7 @@ bool EditorLayer::WidgetCommand(Application& app,const std::string& command,cons
    auto parent=widgets::Find(next,id).parent;std::vector<ui::Widget*> siblings;for(auto& w:next.widgets)if(w.parent==parent)siblings.push_back(&w);
    std::sort(siblings.begin(),siblings.end(),[](auto a,auto b){return std::tie(a->zOrder,a->id)<std::tie(b->zOrder,b->id);});auto it=std::find_if(siblings.begin(),siblings.end(),[&](auto* w){return w->id==id;});auto index=int(it-siblings.begin()),target=index+(command=="Earlier"?-1:1);if(target<0||target>=int(siblings.size()))return false;std::swap(siblings[index],siblings[target]);for(int i=0;i<int(siblings.size());++i)siblings[i]->zOrder=i;
   }else return false;
-  if(!EditUIDocument(app,m_DesignDocument,next))return false;s.selected=selected;m_EditorError.clear();return true;
+  if(!EditUIDocument(app,m_DesignDocument,next))return false;if(command=="Rename"&&s.lockedWidgets.erase(id))s.lockedWidgets.insert(selected);s.selected=selected;m_EditorError.clear();return true;
  }catch(const std::exception& e){m_EditorError=e.what();return false;}
 }
 void EditorLayer::DrawUIDesigner(Application& app){
@@ -144,7 +144,12 @@ void EditorLayer::DrawUIDesigner(Application& app){
  }
  if(m_ShowWidgetHierarchy&&!m_WorkspaceFocus){
   if(ImGui::Begin("Widget Hierarchy",&m_ShowWidgetHierarchy)&&!m_DesignDocument.empty())try{
-   auto& s=UIDocumentSession(app,m_DesignDocument);ImGui::SetNextItemWidth(-FLT_MIN);ImGui::InputTextWithHint("##Widget Search","Search ID / type",&m_WidgetSearch);
+   auto& s=UIDocumentSession(app,m_DesignDocument);
+   if(!app.IsEditorPlayMode()&&!m_UIWidgetDrag&&!ImGui::GetIO().WantTextInput&&!ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel)&&ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&ImGui::IsKeyPressed(ImGuiKey_F2,false)&&!s.selected.empty()){
+    m_WidgetInlineId=s.selected;m_WidgetRenameId=s.selected;m_WidgetRename=s.selected;m_WidgetRenameFocus=true;
+   }
+   if(app.IsEditorPlayMode()||(!m_WidgetInlineId.empty()&&s.selected!=m_WidgetInlineId))m_WidgetInlineId.clear();
+   ImGui::SetNextItemWidth(-FLT_MIN);ImGui::InputTextWithHint("##Widget Search","Search ID / type",&m_WidgetSearch);
    ImGui::BeginDisabled(app.IsEditorPlayMode()||bool(m_UIWidgetDrag));ImGui::SetNextItemWidth(-FLT_MIN);if(ImGui::BeginCombo("##Add Widget","Add Widget...")){for(auto* type:{"Panel","Text","Image","ProgressBar","Button"})if(ImGui::Selectable(type))WidgetCommand(app,"Add",type);ImGui::EndCombo();}
    if(ImGui::Button("Duplicate"))WidgetCommand(app,"Duplicate");ImGui::SameLine();if(ImGui::Button("Delete"))WidgetCommand(app,"Delete");
    if(ImGui::Button("Earlier"))WidgetCommand(app,"Earlier");ImGui::SameLine();if(ImGui::Button("Later"))WidgetCommand(app,"Later");
@@ -163,11 +168,18 @@ void EditorLayer::DrawUIDesigner(Application& app){
    };
    auto tree=[&](auto&& self,const std::string& parent)->void{
     std::vector<const ui::Widget*> children;for(auto& w:document.widgets)if(w.parent==parent)children.push_back(&w);std::sort(children.begin(),children.end(),[](auto a,auto b){return std::tie(a->zOrder,a->id)<std::tie(b->zOrder,b->id);});
-    for(auto* w:children){if(!hasMatch(hasMatch,*w))continue;bool leaf=std::none_of(document.widgets.begin(),document.widgets.end(),[&](auto& child){return child.parent==w->id;});ImGui::PushID(w->id.c_str());lockButton(w->id);if(!m_WidgetSearch.empty())ImGui::SetNextItemOpen(true);auto flags=ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_DefaultOpen|ImGuiTreeNodeFlags_SpanAvailWidth|(s.selected==w->id?ImGuiTreeNodeFlags_Selected:0)|(leaf?ImGuiTreeNodeFlags_Leaf:0);bool open=ImGui::TreeNodeEx("Widget",flags,"%s (%s)%s",w->id.c_str(),w->type.c_str(),w->visible?"":" [hidden]");if(ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen())s.selected=w->id;if(ImGui::IsItemHovered())ImGui::SetTooltip("%s (%s)",w->id.c_str(),w->type.c_str());
+    for(auto* w:children){if(!hasMatch(hasMatch,*w))continue;bool leaf=std::none_of(document.widgets.begin(),document.widgets.end(),[&](auto& child){return child.parent==w->id;});ImGui::PushID(w->id.c_str());lockButton(w->id);if(!m_WidgetSearch.empty())ImGui::SetNextItemOpen(true);auto flags=ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_DefaultOpen|ImGuiTreeNodeFlags_SpanAvailWidth|(s.selected==w->id?ImGuiTreeNodeFlags_Selected:0)|(leaf?ImGuiTreeNodeFlags_Leaf:0);bool editing=m_WidgetInlineId==w->id;
+     bool open=ImGui::TreeNodeEx("Widget",flags,"%s",editing?"":(w->id+" ("+w->type+")"+(w->visible?"":" [hidden]")).c_str());
+     if(editing){ImGui::SameLine();ImGui::SetNextItemWidth(-FLT_MIN);if(m_WidgetRenameFocus){ImGui::SetKeyboardFocusHere();m_WidgetRenameFocus=false;}
+      const bool enter=ImGui::InputText("##Inline Widget ID",&m_WidgetRename,ImGuiInputTextFlags_EnterReturnsTrue|ImGuiInputTextFlags_AutoSelectAll);
+      if((ImGui::IsItemActive()||ImGui::IsItemDeactivated())&&ImGui::IsKeyPressed(ImGuiKey_Escape,false)){m_WidgetInlineId.clear();m_WidgetRename=s.selected;m_EscapeConsumed=true;}
+      else if(enter){s.selected=w->id;if(WidgetCommand(app,"Rename",m_WidgetRename))m_WidgetInlineId.clear();else m_WidgetRenameFocus=true;}
+      if(!m_EditorError.empty())ImGui::SetTooltip("%s",m_EditorError.c_str());
+     }else {if(ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen())s.selected=w->id;if(ImGui::IsItemHovered())ImGui::SetTooltip("%s (%s)",w->id.c_str(),w->type.c_str());
      if(ImGui::BeginPopupContextItem("Widget actions")){s.selected=w->id;const bool locked=s.lockedWidgets.contains(w->id);if(ImGui::MenuItem(locked?"Unlock":"Lock"))WidgetCommand(app,locked?"Unlock":"Lock");ImGui::EndPopup();}
      if(w->id!=document.root&&ImGui::BeginDragDropSource()){ImGui::SetDragDropPayload("WHISP_UI_WIDGET",w->id.c_str(),w->id.size()+1);ImGui::TextUnformatted(w->id.c_str());ImGui::EndDragDropSource();}
      if(ImGui::BeginDragDropTarget()){if(auto* payload=ImGui::AcceptDragDropPayload("WHISP_UI_WIDGET"))reparent={{static_cast<const char*>(payload->Data),w->id}};ImGui::EndDragDropTarget();}
-     if(open){self(self,w->id);ImGui::TreePop();}ImGui::PopID();
+     }if(open){self(self,w->id);ImGui::TreePop();}ImGui::PopID();
     }
    };tree(tree,"");if(reparent){s.selected=reparent->first;WidgetCommand(app,"Reparent",reparent->second);}ImGui::EndDisabled();
   }catch(const std::exception& e){ImGui::TextWrapped("UI hierarchy: %s",e.what());}ImGui::End();
@@ -176,7 +188,8 @@ void EditorLayer::DrawUIDesigner(Application& app){
   if(ImGui::Begin("Widget Inspector",&m_ShowWidgetInspector)&&!m_DesignDocument.empty())try{
    auto& s=UIDocumentSession(app,m_DesignDocument);if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::BeginDisabled(app.IsEditorPlayMode()||bool(m_UIWidgetDrag));
    if(m_WidgetRenameId!=s.selected){m_WidgetRenameId=s.selected;m_WidgetRename=s.selected;}
-   ImGui::TextUnformatted("Widget ID");ImGui::SetNextItemWidth(-FLT_MIN);ImGui::InputText("##Widget ID",&m_WidgetRename);if(ImGui::Button("Rename ID"))WidgetCommand(app,"Rename",m_WidgetRename);
+   ImGui::TextUnformatted("Widget ID");ImGui::SetNextItemWidth(-FLT_MIN);if(ImGui::InputText("##Widget ID",&m_WidgetRename,ImGuiInputTextFlags_EnterReturnsTrue))WidgetCommand(app,"Rename",m_WidgetRename);
+   if((ImGui::IsItemActive()||ImGui::IsItemDeactivated())&&ImGui::IsKeyPressed(ImGuiKey_Escape,false)){m_WidgetRename=s.selected;m_EscapeConsumed=true;}
    if(!s.selected.empty()){
     ImGui::TextUnformatted("Anchor Preset");ImGui::SetNextItemWidth(-FLT_MIN);if(ImGui::BeginCombo("##Anchor Preset","Preserve rectangle")){for(int i=0;i<12;++i)if(ImGui::Selectable(Anchors[i]))WidgetCommand(app,"Anchor",std::to_string(i));ImGui::EndCombo();}
     ImGui::TextUnformatted("Pivot Preset");ImGui::SetNextItemWidth(-FLT_MIN);if(ImGui::BeginCombo("##Pivot Preset","Preserve rectangle")){for(int i=0;i<9;++i)if(ImGui::Selectable(Anchors[i]))WidgetCommand(app,"Pivot",std::to_string(i));ImGui::EndCombo();}

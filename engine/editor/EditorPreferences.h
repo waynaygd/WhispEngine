@@ -41,6 +41,7 @@ struct EditorPreferences {
     nlohmann::json browserSessions=nlohmann::json::object();
     bool visualPanel=false,backgroundOverride=false,projectileTestInput=false;
     bool grid=true,lightGizmos=true,xray=false,snapping=false,rotationSnapping=false,physicsStress=false;
+    bool uiPreview=false;
     bool cameraGizmos=true,cameraFrustum=true,cameraPreview=true;
     bool surfaceSnap=true,alignToNormal=false;
     float surfaceOffset=0,surfaceRotationOffset=0;

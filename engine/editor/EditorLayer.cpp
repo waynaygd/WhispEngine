@@ -498,7 +498,8 @@ bool EditorLayer::BlocksGameplayInput()const{
 void EditorLayer::HandleEditorShortcuts(Application& app){
     const auto& io=ImGui::GetIO();if(io.WantTextInput||m_ModalActive||m_EscapeConsumed)return;
     if(UIDesignerOwnsKeyboard())return;
-    for(const auto& d:m_Documents)if(d.id==m_ActiveDocument&&d.type!=DocumentType::Scene){if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_S,false))SaveActiveDocument(app);if(d.type==DocumentType::Material&&io.KeyCtrl){if(ImGui::IsKeyPressed(ImGuiKey_Z,false))UndoActiveDocument(app,io.KeyShift);if(ImGui::IsKeyPressed(ImGuiKey_Y,false))UndoActiveDocument(app,true);}return;}
+    for(const auto& d:m_Documents)if(d.id==m_ActiveDocument&&d.type!=DocumentType::Scene&&d.type!=DocumentType::Prefab){if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_S,false))SaveActiveDocument(app);if(d.type==DocumentType::Material&&io.KeyCtrl){if(ImGui::IsKeyPressed(ImGuiKey_Z,false))UndoActiveDocument(app,io.KeyShift);if(ImGui::IsKeyPressed(ImGuiKey_Y,false))UndoActiveDocument(app,true);}return;}
+    if(!app.IsEditorPlayMode()&&OwnsViewportKeyboard()&&!io.WantCaptureKeyboard&&!app.IsCameraControlActive()&&io.KeyCtrl&&!io.KeyAlt&&!io.KeyShift&&ImGui::IsKeyPressed(ImGuiKey_U,false)){m_ShowRuntimeUI=!m_ShowRuntimeUI;PersistPreferences(app);}
     HandleViewportToolShortcuts(app);
     // Asset file shortcuts are handled by the browser after its widgets. Never
     // let a Delete intended for that window reach the entity command path.
@@ -523,9 +524,11 @@ void EditorLayer::HandleEditorShortcuts(Application& app){
     if(!EditorHotkeysAllowed(app.IsEditorPlayMode(),OwnsViewportKeyboard(),io.WantCaptureKeyboard,app.IsCameraControlActive()))return;
     if(!io.KeyCtrl&&!io.KeyAlt&&!m_InputTextActive&&ImGui::IsKeyPressed(ImGuiKey_G,false))m_GameView=!m_GameView;
     if(ImGui::IsKeyPressed(ImGuiKey_F,false))FocusSelection(app);
-    if(ImGui::IsKeyPressed(ImGuiKey_W,false))m_GizmoOperation=0;
-    if(ImGui::IsKeyPressed(ImGuiKey_E,false))m_GizmoOperation=1;
-    if(ImGui::IsKeyPressed(ImGuiKey_R,false))m_GizmoOperation=2;
+    if(!io.KeyCtrl&&!io.KeyAlt&&!io.KeyShift){
+        if(ImGui::IsKeyPressed(ImGuiKey_W,false))m_GizmoOperation=0;
+        if(ImGui::IsKeyPressed(ImGuiKey_E,false))m_GizmoOperation=1;
+        if(ImGui::IsKeyPressed(ImGuiKey_R,false))m_GizmoOperation=2;
+    }
 
 }
 
@@ -624,7 +627,7 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     if(ImGui::BeginPopup("Viewport display")){
         int shading=app.IsViewportUnlit()?1:0;ImGui::SetNextItemWidth(140*ImGui::GetStyle().FontScaleDpi);
         if(ImGui::Combo("Lighting",&shading,"Lit\0Unlit\0"))app.SetViewportUnlit(shading==1);
-        if(!playMode){ImGui::Checkbox("Game View (G)",&m_GameView);ImGui::Checkbox("UI Preview",&m_ShowRuntimeUI);ImGui::Checkbox("Grid",&m_ShowGrid);ImGui::Checkbox("Light Gizmos",&m_ShowLightGizmos);ImGui::SameLine();ImGui::Checkbox("Camera Gizmos",&m_ShowCameraGizmos);}
+        if(!playMode){ImGui::Checkbox("Game View (G)",&m_GameView);if(ImGui::Checkbox("UI Preview (Ctrl+U)",&m_ShowRuntimeUI))PersistPreferences(app);ImGui::Checkbox("Grid",&m_ShowGrid);ImGui::Checkbox("Light Gizmos",&m_ShowLightGizmos);ImGui::SameLine();ImGui::Checkbox("Camera Gizmos",&m_ShowCameraGizmos);}
         ImGui::EndPopup();
     }
     ImGui::Separator();

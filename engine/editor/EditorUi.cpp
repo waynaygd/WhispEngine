@@ -41,7 +41,7 @@ void EditorLayer::InitializePreferences(Application& app){
     m_AssetView=p.assetView;m_AssetTree=p.assetTree;m_AssetTreeWidth=p.assetTreeWidth;m_AssetDetails=p.assetDetails;m_AssetNavigation.projectSearch=p.assetSearchAll;m_BrowserSessions=p.browserSessions;
     m_AssetGrid=m_AssetView==0;m_ProjectAssets=p.projectAssets;m_AssetCardSize=p.assetCardSize;m_BackgroundOverride=p.backgroundOverride;m_ProjectileTestInput=p.projectileTestInput;
     m_SurfaceSnap=p.surfaceSnap;m_AlignToNormal=p.alignToNormal;m_SurfaceOffset=p.surfaceOffset;m_SurfaceRotationOffset=p.surfaceRotationOffset;
-    m_ShowVisualSettings=p.visualPanel;m_VisualSettings=p.visuals;m_ShowGrid=p.grid;m_ShowLightGizmos=p.lightGizmos;m_ShowCameraGizmos=p.cameraGizmos;m_ShowCameraFrustum=p.cameraFrustum;m_ShowCameraPreview=p.cameraPreview;m_LightXray=p.xray;m_LightXrayMode=p.lightXrayMode;m_TransformPrecision=p.transformPrecision;m_RotationSnapping=p.rotationSnapping;m_ShowPhysicsStress=p.physicsStress;m_Snapping=p.snapping;m_GizmoOperation=p.operation;m_GizmoMode=p.space;
+    m_ShowRuntimeUI=p.uiPreview;m_ShowVisualSettings=p.visualPanel;m_VisualSettings=p.visuals;m_ShowGrid=p.grid;m_ShowLightGizmos=p.lightGizmos;m_ShowCameraGizmos=p.cameraGizmos;m_ShowCameraFrustum=p.cameraFrustum;m_ShowCameraPreview=p.cameraPreview;m_LightXray=p.xray;m_LightXrayMode=p.lightXrayMode;m_TransformPrecision=p.transformPrecision;m_RotationSnapping=p.rotationSnapping;m_ShowPhysicsStress=p.physicsStress;m_Snapping=p.snapping;m_GizmoOperation=p.operation;m_GizmoMode=p.space;
     m_SnapTranslation=p.translationSnap;m_SnapRotation=p.rotationSnap;m_SnapScale=p.scaleSnap;app.SetCameraNavigation(p.cameraSpeed,p.cameraSensitivity);
     InitializeWorkspaces(p);
 }
@@ -55,7 +55,7 @@ bool EditorLayer::PersistPreferences(Application& app){
     p.assetGrid=m_AssetGrid;p.projectAssets=m_ProjectAssets;p.assetCardSize=m_AssetCardSize;p.backgroundOverride=m_BackgroundOverride;p.projectileTestInput=m_ProjectileTestInput;
     p.bookmarks=m_Bookmarks;p.selectionFilters=m_SelectionFilters;
     p.surfaceSnap=m_SurfaceSnap;p.alignToNormal=m_AlignToNormal;p.surfaceOffset=m_SurfaceOffset;p.surfaceRotationOffset=m_SurfaceRotationOffset;
-    p.visualPanel=m_ShowVisualSettings;p.visuals=m_VisualSettings;p.grid=m_ShowGrid;p.lightGizmos=m_ShowLightGizmos;p.cameraGizmos=m_ShowCameraGizmos;p.cameraFrustum=m_ShowCameraFrustum;p.cameraPreview=m_ShowCameraPreview;p.xray=m_LightXray;p.lightXrayMode=m_LightXrayMode;p.transformPrecision=m_TransformPrecision;p.rotationSnapping=m_RotationSnapping;p.physicsStress=m_ShowPhysicsStress;p.snapping=m_Snapping;p.operation=m_GizmoOperation;p.space=m_GizmoMode;
+    p.uiPreview=m_ShowRuntimeUI;p.visualPanel=m_ShowVisualSettings;p.visuals=m_VisualSettings;p.grid=m_ShowGrid;p.lightGizmos=m_ShowLightGizmos;p.cameraGizmos=m_ShowCameraGizmos;p.cameraFrustum=m_ShowCameraFrustum;p.cameraPreview=m_ShowCameraPreview;p.xray=m_LightXray;p.lightXrayMode=m_LightXrayMode;p.transformPrecision=m_TransformPrecision;p.rotationSnapping=m_RotationSnapping;p.physicsStress=m_ShowPhysicsStress;p.snapping=m_Snapping;p.operation=m_GizmoOperation;p.space=m_GizmoMode;
     p.translationSnap=m_SnapTranslation;p.rotationSnap=m_SnapRotation;p.scaleSnap=m_SnapScale;p.cameraSpeed=app.GetCameraMoveSpeed();p.cameraSensitivity=app.GetCameraSensitivity();std::string error;if(!SavePreferences(PreferencesPath(),p,&error)){m_EditorError=error;Logger::Get().Warn(error);return false;}return true;
 }
 void EditorLayer::DrawToolbar(Application& app){
@@ -207,6 +207,10 @@ void EditorLayer::DrawSceneHierarchy(Application& app){
     auto& world=app.GetWorld();
     ImGui::InputTextWithHint("##filter","Search entities",&m_HierarchyFilter);
     const auto entities=world.Entities();PruneSelection(app);
+    if(!app.IsEditorPlayMode()&&!ImGui::GetIO().WantTextInput&&!m_ModalActive&&ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&ImGui::IsKeyPressed(ImGuiKey_F2,false)&&world.IsAlive(m_Selection.active)){
+        m_RenameTarget=m_Selection.active;auto* tag=world.GetComponent<ecs::TagComponent>(m_RenameTarget);m_RenameBuffer=tag?tag->name:"Entity";m_RenameRequested=true;
+    }
+    if(app.IsEditorPlayMode()||!world.IsAlive(m_RenameTarget))m_RenameTarget={};
     std::unordered_map<ecs::Entity,std::vector<ecs::Entity>,ecs::EntityHash> children;
     std::unordered_set<ecs::Entity,ecs::EntityHash> matches;
     for(auto e:entities){children[world.Parent(e)].push_back(e);auto* tag=world.GetComponent<ecs::TagComponent>(e);
@@ -225,7 +229,7 @@ void EditorLayer::DrawSceneHierarchy(Application& app){
         const auto& row=rows[index];const auto e=row.entity;const auto* tag=world.GetComponent<ecs::TagComponent>(e);
         ImGui::PushID(int(e.index));ImGui::PushID(int(e.generation));if(row.depth)ImGui::Indent(row.depth*ImGui::GetStyle().IndentSpacing);
         const std::string label=std::string(EntityKind(world,e))+" "+(tag&&!tag->name.empty()?tag->name:"Entity "+std::to_string(e.index));
-        const std::string rowLabel=label+(e==m_Selection.active?" [Active]":"")+"###EntityRow";
+        const std::string rowLabel=(m_RenameTarget==e?std::string{}:label+(e==m_Selection.active?" [Active]":""))+"###EntityRow";
         if(!m_HierarchyFilter.empty())ImGui::SetNextItemOpen(true);
         ImGui::TreeNodeEx(rowLabel.c_str(),ImGuiTreeNodeFlags_NoTreePushOnOpen|ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_SpanAvailWidth|ImGuiTreeNodeFlags_DefaultOpen|(row.branch?0:ImGuiTreeNodeFlags_Leaf)|(IsSelected(e)?ImGuiTreeNodeFlags_Selected:0));
         // Keep the current Inspector while dragging another entity into one of
@@ -238,7 +242,7 @@ void EditorLayer::DrawSceneHierarchy(Application& app){
         acceptParent(e);
         if(ImGui::BeginDragDropSource()){ImGui::SetDragDropPayload("WHISP_ENTITY",&e,sizeof(e));ImGui::TextUnformatted(label.c_str());ImGui::TextDisabled(m_HierarchyKeepLocal?"Keep Local Transform":"Keep World Transform");ImGui::EndDragDropSource();}
         if(ImGui::BeginPopupContextItem("EntityActions")){
-            if(ImGui::MenuItem("Focus")){if(IsSelected(e))FocusSelection(app);else app.FocusEntity(e);}if(ImGui::MenuItem("Rename")){m_RenameTarget=e;m_RenameBuffer=tag?tag->name:"Entity";m_RenameRequested=true;}
+            if(ImGui::MenuItem("Focus")){if(IsSelected(e))FocusSelection(app);else app.FocusEntity(e);}if(ImGui::MenuItem("Rename","F2",false,!app.IsEditorPlayMode())){m_RenameTarget=e;m_RenameBuffer=tag?tag->name:"Entity";m_RenameRequested=true;}
             ImGui::BeginDisabled(app.IsEditorPlayMode());
             if(ImGui::MenuItem("Create Child"))CreateChild(app,e);
             if(ImGui::MenuItem("Create Prefab...",nullptr,false,!app.IsPrefabEditing())){SelectEntity(e);m_PrefabCreatePopup=true;}
@@ -249,15 +253,16 @@ void EditorLayer::DrawSceneHierarchy(Application& app){
             if(ImGui::MenuItem("Drop to Floor")){if(!IsSelected(e))SelectEntity(e);DropSelectionToFloor(app);}
             if(ImGui::MenuItem("Delete selection")){if(!IsSelected(e))SelectEntity(e);DeleteSelection(app);}ImGui::EndDisabled();ImGui::EndPopup();
         }
+        if(m_RenameTarget==e){
+            ImGui::SameLine();ImGui::SetNextItemWidth(-FLT_MIN);if(m_RenameRequested){ImGui::SetKeyboardFocusHere();m_RenameRequested=false;}
+            if(ImGui::InputText("##Entity name",&m_RenameBuffer,ImGuiInputTextFlags_EnterReturnsTrue)&&RenameEntity(app,e,m_RenameBuffer))m_RenameTarget={};
+            if((ImGui::IsItemActive()||ImGui::IsItemDeactivated())&&ImGui::IsKeyPressed(ImGuiKey_Escape,false)){m_RenameTarget={};m_EscapeConsumed=true;}
+        }
         if(row.depth)ImGui::Unindent(row.depth*ImGui::GetStyle().IndentSpacing);ImGui::PopID();ImGui::PopID();
     }
     ImGui::Selectable("Scene Root",false);if(ImGui::IsItemHovered())ImGui::SetTooltip("Drop an Entity here to remove its Parent (Keep World by default).");acceptParent({});
     if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());
     if(!m_SelectionLocked&&ImGui::IsWindowHovered()&&ImGui::IsMouseClicked(0)&&!ImGui::IsAnyItemHovered()&&!m_LightPointerCaptured&&!ImGuizmo::IsUsing()&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)){FinishTransaction(app);ClearSelection();ImGui::ClearActiveID();}
-    if(m_RenameRequested){ImGui::OpenPopup("Rename entity");m_RenameRequested=false;}
-    if(ImGui::BeginPopupModal("Rename entity",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
-        ImGui::InputText("Name",&m_RenameBuffer);if(ImGui::Button("Rename")){if(RenameEntity(app,m_RenameTarget,m_RenameBuffer))ImGui::CloseCurrentPopup();}ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();ImGui::EndPopup();
-    }
     ImGui::TextDisabled("%zu entities",world.GetAliveCount());ImGui::End();m_Statistics.hierarchyMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
 }
 void EditorLayer::DrawConsole(Application& app,IRenderAdapter* renderer){

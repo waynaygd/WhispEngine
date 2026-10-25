@@ -1,4 +1,5 @@
 #include "EditorLayer.h"
+#include "EntityNaming.h"
 #include "SunSynchronization.h"
 #include <imgui.h>
 #include <ImGuizmo.h>
@@ -177,12 +178,12 @@ void EditorLayer::SelectEntityFromUser(Application& app,ecs::Entity e){
 }
 ecs::Entity EditorLayer::CreateEntity(Application& app,const std::string& name){
     if(app.IsEditorPlayMode())return {};
-    FinishTransaction(app);auto e=app.CreateEmptyEntity(name);SelectEntityFromUser(app,e);EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Create entity",before);return e;
+    FinishTransaction(app);auto e=app.CreateEmptyEntity(EntityNames(app.GetWorld()).Claim(name));SelectEntityFromUser(app,e);EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Create entity",before);return e;
 }
 ecs::Entity EditorLayer::CreateCamera(Application& app){
     if(app.IsEditorPlayMode())return {};
     FinishTransaction(app);auto previous=m_Selection.active;
-    auto e=app.CreateEmptyEntity("Camera");app.GetWorld().AddComponent<ecs::CameraComponent>(e);
+    auto e=app.CreateEmptyEntity(EntityNames(app.GetWorld()).Claim("Camera"));app.GetWorld().AddComponent<ecs::CameraComponent>(e);
     // Match the editor view without changing Euler conventions of ECS Transform.
     auto& t=*app.GetWorld().GetComponent<ecs::TransformComponent>(e);
     t.position=app.GetCameraPosition();t.rotation={-app.GetCameraPitch(),app.GetCameraYaw(),0};
@@ -192,13 +193,13 @@ ecs::Entity EditorLayer::CreateCamera(Application& app){
 ecs::Entity EditorLayer::CreatePlayerStart(Application& app){
     if(app.IsEditorPlayMode())return {};
     FinishTransaction(app);auto previous=m_Selection.active;
-    auto e=app.CreateEmptyEntity("PlayerStart");app.GetWorld().AddComponent<ecs::PlayerStartComponent>(e);
+    auto e=app.CreateEmptyEntity(EntityNames(app.GetWorld()).Claim("PlayerStart"));app.GetWorld().AddComponent<ecs::PlayerStartComponent>(e);
     SelectEntityFromUser(app,e);EntitySnapshot before;before.entity=e;before.world=e.world;before.previousSelection=previous;
     CommitUndo(app,"Create Player Start",before);return e;
 }
 ecs::Entity EditorLayer::CreateFog(Application& app){
     if(app.IsEditorPlayMode())return {};FinishTransaction(app);auto previous=m_Selection.active;
-    auto e=app.CreateEmptyEntity("Fog");app.GetWorld().AddComponent<ecs::FogComponent>(e);SelectEntityFromUser(app,e);
+    auto e=app.CreateEmptyEntity(EntityNames(app.GetWorld()).Claim("Fog"));app.GetWorld().AddComponent<ecs::FogComponent>(e);SelectEntityFromUser(app,e);
     EntitySnapshot before;before.entity=e;before.world=e.world;before.previousSelection=previous;CommitUndo(app,"Create Fog",before);return e;
 }
 bool EditorLayer::DeleteEntity(Application& app,ecs::Entity e){
@@ -241,7 +242,6 @@ ecs::Entity EditorLayer::CreateCopies(Application& app,nlohmann::json values,std
         const auto id=ecs::NewSceneIdentity();
         if(components.contains("SceneIdentity"))identities[components["SceneIdentity"]["value"].get<std::string>()]=id;
         components["SceneIdentity"]={{"value",id}};
-        if(components.contains("Tag"))components["Tag"]["name"]=components["Tag"]["name"].get<std::string>()+" Copy";
     }
     auto remap=[&](auto&& self,nlohmann::json& value)->void{
         if(value.is_object()&&value.contains("$entity")&&scripting::ValidEntityReference(value)){
@@ -259,7 +259,8 @@ ecs::Entity EditorLayer::CreateCopies(Application& app,nlohmann::json values,std
             else {auto components=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),created[i]);components["Transform"]=values[i]["__world"];ecs::ComponentRegistry::Builtins().Restore(app.GetWorld(),created[i],components);}
         }
         if(!app.GetWorld().SetParents(parents,false,&m_EditorError))throw std::runtime_error(m_EditorError);
-        for(auto e:created)app.NotifyEditorMutation(e);
+        EntityNames names(app.GetWorld(),created);
+        for(auto e:created){if(auto* tag=app.GetWorld().GetComponent<ecs::TagComponent>(e))tag->name=names.Claim(tag->name,app.GetWorld().Parent(e),true);app.NotifyEditorMutation(e);}
     }catch(const std::exception& ex){
         for(auto& item:before.related)app.DestroySceneEntity(item.entity);m_EditorError=ex.what();return {};
     }
@@ -284,14 +285,14 @@ ecs::Entity EditorLayer::CreatePrimitive(Application& app,const std::string& typ
 }
 ecs::Entity EditorLayer::CreateModelEntity(Application& app,const std::string& key,const std::string& name){
     if(app.IsEditorPlayMode()||key.empty()||!ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::Mesh,&m_EditorError))return {};
-    FinishTransaction(app);auto e=app.CreateEmptyEntity(name);
+    FinishTransaction(app);auto e=app.CreateEmptyEntity(EntityNames(app.GetWorld()).Claim(name));
     auto& mesh=app.GetWorld().AddComponent<ecs::MeshRendererComponent>(e);mesh.meshPath=key;
     app.GetWorld().AddComponent<ecs::MaterialComponent>(e);SelectEntityFromUser(app,e);
     EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Create model",before);app.NotifyEditorMutation(e);return e;
 }
 
 bool EditorLayer::RenameEntity(Application& app,ecs::Entity e,const std::string& name){
-    FinishTransaction(app);if(!app.GetWorld().IsAlive(e))return false;auto before=CaptureSelectedEntity(app,e);
+    FinishTransaction(app);if(app.IsEditorPlayMode()||!app.GetWorld().IsAlive(e))return false;auto before=CaptureSelectedEntity(app,e);
     if(!app.GetWorld().HasComponent<ecs::TagComponent>(e))app.GetWorld().AddComponent<ecs::TagComponent>(e);
     if(!ecs::ComponentRegistry::Builtins().Set(app.GetWorld(),e,ecs::ComponentId("Tag"),"name",name,&m_EditorError))return false;CommitUndo(app,"Rename entity",std::move(before));return true;
 }

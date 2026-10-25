@@ -1,4 +1,5 @@
 #include "EditorLayer.h"
+#include "EntityNaming.h"
 #include "../core/Application.h"
 namespace editor {
 void EditorLayer::FocusSelection(Application& app){PruneSelection(app);app.FocusEntities(m_Selection.items);}
@@ -64,7 +65,7 @@ bool EditorLayer::ReparentEntity(Application& app,ecs::Entity child,ecs::Entity 
     if(!app.GetWorld().SetParent(child,parent,keepWorld,&m_EditorError))return false;app.NotifyEditorMutation(child);CommitUndo(app,parent.IsValid()?"Reparent":"Unparent",std::move(before));return true;
 }
 ecs::Entity EditorLayer::CreateChild(Application& app,ecs::Entity parent){
-    if(app.IsEditorPlayMode()||!app.GetWorld().IsAlive(parent))return {};FinishTransaction(app);auto e=app.CreateEmptyEntity("Child");
+    if(app.IsEditorPlayMode()||!app.GetWorld().IsAlive(parent))return {};FinishTransaction(app);auto e=app.CreateEmptyEntity(EntityNames(app.GetWorld()).Claim("Child",parent));
     if(!app.GetWorld().SetParent(e,parent,false,&m_EditorError)){app.DestroySceneEntity(e);return {};}
     SelectEntityFromUser(app,e);EntitySnapshot before;before.entity=e;before.world=e.world;CommitUndo(app,"Create Child",before);return e;
 }

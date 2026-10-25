@@ -287,7 +287,7 @@ void EditorLayer::DrawDocumentTabs(Application& app){
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(10*ImGui::GetStyle().FontScaleDpi,4*ImGui::GetStyle().FontScaleDpi));
     ImGui::Begin("Document Tabs",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings);
     std::string activate,close;
-    if(ImGui::BeginTabBar("Documents",ImGuiTabBarFlags_TabListPopupButton|ImGuiTabBarFlags_FittingPolicyScroll|ImGuiTabBarFlags_NoCloseWithMiddleMouseButton)){
+    if(ImGui::BeginTabBar("Documents",ImGuiTabBarFlags_TabListPopupButton|ImGuiTabBarFlags_FittingPolicyScroll)){
         for(const auto& d:m_Documents){bool open=true;const char* types[]={"Scene","UI","Material","Lua","Prefab","Project Settings"};const char* icons[]={"◊","■","●","{}","▲","⚙"};auto label=std::string(icons[int(d.type)])+" "+(d.type==DocumentType::ProjectSettings?std::string("Project Settings"):d.key.empty()?std::string("Untitled Scene"):AssetPaths::ToUtf8String(std::filesystem::u8path(d.key).filename()))+"###"+d.id;
             auto flags=(DocumentDirty(d)?ImGuiTabItemFlags_UnsavedDocument:0)|(m_ActiveDocument==d.id?ImGuiTabItemFlags_SetSelected:0)|ImGuiTabItemFlags_NoPushId;
             if(ImGui::BeginTabItem(label.c_str(),&open,flags))ImGui::EndTabItem();
