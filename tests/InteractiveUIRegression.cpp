@@ -75,7 +75,7 @@ int main(){ScopedEditorPreferenceRestore preferences;try{
  Owned doc(ui::SafeDocumentPath("ui/ui3-owned.ui.json")),script(scripting::SafeAsset("scripts/ui3-owned.lua",".lua"));
  Owned red(AssetPaths::ResolveAssetOutputPath("textures/ui3-owned-red.tga")),blue(AssetPaths::ResolveAssetOutputPath("textures/ui3-owned-blue.tga"));Tga(red,false);Tga(blue,true);script.Write(Script);
  std::string error;Check(UILoader::Save("ui/ui3-owned.ui.json",document,&error),error);
- Application app;Check(app.Initialize(),"editor initialize");SyntheticEditorInput editorInput;ApplicationTestAccess::FrameDelta(app,1.f/60);app.NewScene();auto& editor=app.GetEditorLayer();editor.SetFixedDiagnosticLayout(true);editor.SetDiagnosticViewport(400,300);editor.SetGameView(true);editor.SetGridVisible(false);
+ Application app;Check(app.Initialize(),"editor initialize");SyntheticEditorInput editorInput;ApplicationTestAccess::FrameDelta(app,1.f/60);app.NewScene();auto& editor=app.GetEditorLayer();editor.SetFixedDiagnosticLayout(true);editor.SetDiagnosticViewport(400,300);editor.SetGameView(true);editor.SetUIPreviewVisible(true);editor.SetGridVisible(false);
  auto settings=app.GetSceneSettings();settings.background.background=EditorBackground::Solid;settings.background.solid={0,0,0};settings.environment.enabled=false;settings.shadows.enabled=false;Check(app.SetSceneSettings(settings),"fixture settings");
  auto canvas=editor.CreateUICanvas(app,"ui/ui3-owned.ui.json");Check(canvas.IsValid(),"Canvas created");auto& behaviour=app.GetWorld().AddComponent<LuaScriptComponent>(canvas);behaviour.scriptPath="scripts/ui3-owned.lua";behaviour.inputEnabled=true;
  const auto authored=SceneSerializer::CaptureWorld(app.GetWorld(),app.GetSceneSettings());const auto disk=nlohmann::json(document);
