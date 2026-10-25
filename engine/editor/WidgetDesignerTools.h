@@ -8,6 +8,8 @@ ui::Rect Rectangle(const ui::Document&,const std::string&,ui::Rect canvas);
 ui::Rect ParentRectangle(const ui::Document&,const ui::Widget&,ui::Rect canvas);
 void SetRectangle(ui::Widget&,ui::Rect rectangle,ui::Rect parent);
 void Reparent(ui::Document&,const std::string& id,const std::string& parent,ui::Rect canvas);
+enum class Drop { Before, Inside, After };
+void Move(ui::Document&,const std::string& id,const std::string& target,Drop,ui::Rect canvas);
 void Rename(ui::Document&,const std::string& id,const std::string& name);
 std::string Duplicate(ui::Document&,const std::string& id);
 void Delete(ui::Document&,const std::string& id);

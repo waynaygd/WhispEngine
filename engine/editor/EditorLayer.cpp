@@ -363,6 +363,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     m_ViewportHasBounds = false;
     m_ViewportFocused=false;m_HierarchyFocused=false;
     DrawMainMenu(app);DrawPrefabWorkflow(app);DrawSceneDialogs(app);DrawProjectBrowser(app);
+    DrawRuntimeErrors();
     if(app.IsProjectBrowserActive())return;
     if(!m_ActiveDocument.empty())DrawUIDesigner(app);
     DrawScriptDocument(app);

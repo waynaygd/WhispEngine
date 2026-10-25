@@ -446,6 +446,7 @@ private:
     bool CaptureCurrentWorkspace();
     void InitializeWorkspaces(const EditorPreferences&);
     void DrawWorkspaceMenu(Application&);
+    void DrawRuntimeErrors();
     void DrawConsole(Application&,IRenderAdapter*);
     void DrawGameplayEvents(Application&);
     void DrawSceneValidation(Application&);
@@ -662,6 +663,10 @@ private:
     int m_AssetKindFilter=0,m_SceneDialogAction=0;
     ecs::Entity m_RenameTarget{};
     bool m_SceneDialogRequested=false,m_RenameRequested=false,m_ConsoleInfo=true,m_ConsoleWarning=true,m_ConsoleError=true;
+    Logger::RuntimeSummary m_LastRuntimeErrors;
+    std::uint64_t m_ConsoleTargetSequence=0;
+    bool m_ShowRuntimeErrors=false;
+    std::uint64_t m_RuntimeErrorSession=0;
     std::uint64_t m_ConsoleRevision=UINT64_MAX;
     std::vector<Logger::Entry> m_ConsoleMessages;
     std::vector<std::string> m_EnvironmentAssets;

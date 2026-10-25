@@ -58,16 +58,19 @@ bool EditorLayer::WidgetCommand(Application& app,const std::string& command,cons
   }else if(command=="Delete"){widgets::Delete(next,id);selected=next.root;}
   else if(command=="Duplicate")selected=widgets::Duplicate(next,id);
   else if(command=="Rename"){widgets::Rename(next,id,argument);selected=argument;}
+  else if(command=="Before"||command=="After"||command=="Inside")widgets::Move(next,id,argument,command=="Before"?widgets::Drop::Before:command=="After"?widgets::Drop::After:widgets::Drop::Inside,widgets::Canvas(next,m_UIPreviewSize));
   else if(command=="Reparent")widgets::Reparent(next,id,argument,widgets::Canvas(next,m_UIPreviewSize));
   else if(command=="Anchor"||command=="Pivot"){if(ui::ManagedByLayout(next,widgets::Find(next,id)))throw std::runtime_error("Parent Layout controls this Widget; enable Ignore Parent Layout first");widgets::Preset(next,id,command=="Anchor"?std::stoi(argument):-1,command=="Pivot"?std::stoi(argument):-1,widgets::Canvas(next,m_UIPreviewSize));}
   else if(command=="Earlier"||command=="Later"){
-   auto parent=widgets::Find(next,id).parent;std::vector<ui::Widget*> siblings;for(auto& w:next.widgets)if(w.parent==parent)siblings.push_back(&w);
-   std::sort(siblings.begin(),siblings.end(),[](auto a,auto b){return std::tie(a->zOrder,a->id)<std::tie(b->zOrder,b->id);});auto it=std::find_if(siblings.begin(),siblings.end(),[&](auto* w){return w->id==id;});auto index=int(it-siblings.begin()),target=index+(command=="Earlier"?-1:1);if(target<0||target>=int(siblings.size()))return false;std::swap(siblings[index],siblings[target]);for(int i=0;i<int(siblings.size());++i)siblings[i]->zOrder=i;
+   auto parent=widgets::Find(next,id).parent;std::vector<std::string> siblings;for(auto& w:next.widgets)if(w.parent==parent)siblings.push_back(w.id);
+   auto it=std::find(siblings.begin(),siblings.end(),id);auto index=int(it-siblings.begin()),target=index+(command=="Earlier"?-1:1);if(target<0||target>=int(siblings.size()))return false;
+   widgets::Move(next,id,siblings[target],command=="Earlier"?widgets::Drop::Before:widgets::Drop::After,widgets::Canvas(next,m_UIPreviewSize));
   }else return false;
   if(!EditUIDocument(app,m_DesignDocument,next))return false;if(command=="Rename"&&s.lockedWidgets.erase(id))s.lockedWidgets.insert(selected);s.selected=selected;m_EditorError.clear();return true;
  }catch(const std::exception& e){m_EditorError=e.what();return false;}
 }
 void EditorLayer::DrawUIDesigner(Application& app){
+ if(auto* payload=ImGui::GetDragDropPayload();payload&&payload->IsDataType("WHISP_UI_WIDGET")&&ImGui::IsKeyPressed(ImGuiKey_Escape,false)){ImGui::ClearDragDrop();ImGui::ClearActiveID();m_EscapeConsumed=true;}
  if(m_UIWidgetDrag&&(!m_ShowCanvasDesigner||app.IsEditorPlayMode()||ImGui::GetIO().AppFocusLost)){CancelUIDocumentEdit(app,m_UIWidgetDrag->key);m_UIWidgetDrag.reset();}
  auto newDocument=[&](){auto key="ui/Canvas-"+ecs::NewSceneIdentity()+".ui.json";if(UILoader::Save(key,ui::EmptyDocument(),&m_EditorError)){m_AssetListsDirty=true;OpenUIDesigner(app,key);}};
  if(m_ShowCanvasDesigner){
@@ -154,7 +157,7 @@ void EditorLayer::DrawUIDesigner(Application& app){
    if(ImGui::Button("Duplicate"))WidgetCommand(app,"Duplicate");ImGui::SameLine();if(ImGui::Button("Delete"))WidgetCommand(app,"Delete");
    if(ImGui::Button("Earlier"))WidgetCommand(app,"Earlier");ImGui::SameLine();if(ImGui::Button("Later"))WidgetCommand(app,"Later");
    // Traverse a stable copy: commands can replace the draft while a tree is being drawn.
-   const auto document=s.draft;std::optional<std::pair<std::string,std::string>> reparent;
+   const auto document=s.draft;std::optional<std::tuple<std::string,std::string,std::string>> reparent;
    auto matches=[&](const ui::Widget& w){auto value=w.id+" "+w.type,needle=m_WidgetSearch;std::transform(value.begin(),value.end(),value.begin(),[](unsigned char c){return char(std::tolower(c));});std::transform(needle.begin(),needle.end(),needle.begin(),[](unsigned char c){return char(std::tolower(c));});return value.find(needle)!=std::string::npos;};
    auto hasMatch=[&](auto&& self,const ui::Widget& w)->bool{if(matches(w))return true;for(auto& child:document.widgets)if(child.parent==w.id&&self(self,child))return true;return false;};
    auto lockButton=[&](const std::string& id){
@@ -167,7 +170,7 @@ void EditorLayer::DrawUIDesigner(Application& app){
     ImGui::SameLine();
    };
    auto tree=[&](auto&& self,const std::string& parent)->void{
-    std::vector<const ui::Widget*> children;for(auto& w:document.widgets)if(w.parent==parent)children.push_back(&w);std::sort(children.begin(),children.end(),[](auto a,auto b){return std::tie(a->zOrder,a->id)<std::tie(b->zOrder,b->id);});
+    std::vector<const ui::Widget*> children;for(auto& w:document.widgets)if(w.parent==parent)children.push_back(&w);
     for(auto* w:children){if(!hasMatch(hasMatch,*w))continue;bool leaf=std::none_of(document.widgets.begin(),document.widgets.end(),[&](auto& child){return child.parent==w->id;});ImGui::PushID(w->id.c_str());lockButton(w->id);if(!m_WidgetSearch.empty())ImGui::SetNextItemOpen(true);auto flags=ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_DefaultOpen|ImGuiTreeNodeFlags_SpanAvailWidth|(s.selected==w->id?ImGuiTreeNodeFlags_Selected:0)|(leaf?ImGuiTreeNodeFlags_Leaf:0);bool editing=m_WidgetInlineId==w->id;
      bool open=ImGui::TreeNodeEx("Widget",flags,"%s",editing?"":(w->id+" ("+w->type+")"+(w->visible?"":" [hidden]")).c_str());
      if(editing){ImGui::SameLine();ImGui::SetNextItemWidth(-FLT_MIN);if(m_WidgetRenameFocus){ImGui::SetKeyboardFocusHere();m_WidgetRenameFocus=false;}
@@ -178,22 +181,27 @@ void EditorLayer::DrawUIDesigner(Application& app){
      }else {if(ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen())s.selected=w->id;if(ImGui::IsItemHovered())ImGui::SetTooltip("%s (%s)",w->id.c_str(),w->type.c_str());
      if(ImGui::BeginPopupContextItem("Widget actions")){s.selected=w->id;const bool locked=s.lockedWidgets.contains(w->id);if(ImGui::MenuItem(locked?"Unlock":"Lock"))WidgetCommand(app,locked?"Unlock":"Lock");ImGui::EndPopup();}
      if(w->id!=document.root&&ImGui::BeginDragDropSource()){ImGui::SetDragDropPayload("WHISP_UI_WIDGET",w->id.c_str(),w->id.size()+1);ImGui::TextUnformatted(w->id.c_str());ImGui::EndDragDropSource();}
-     if(ImGui::BeginDragDropTarget()){if(auto* payload=ImGui::AcceptDragDropPayload("WHISP_UI_WIDGET"))reparent={{static_cast<const char*>(payload->Data),w->id}};ImGui::EndDragDropTarget();}
+     if(ImGui::BeginDragDropTarget()){
+      if(auto* payload=ImGui::AcceptDragDropPayload("WHISP_UI_WIDGET",ImGuiDragDropFlags_AcceptBeforeDelivery|ImGuiDragDropFlags_AcceptNoDrawDefaultRect)){
+       auto lo=ImGui::GetItemRectMin(),hi=ImGui::GetItemRectMax();float fraction=(ImGui::GetMousePos().y-lo.y)/std::max(1.f,hi.y-lo.y);
+       bool container=w->type=="Panel"||w->type=="Button";
+       auto drop=fraction<.28f?widgets::Drop::Before:fraction>.72f?widgets::Drop::After:container?widgets::Drop::Inside:fraction<.5f?widgets::Drop::Before:widgets::Drop::After;
+       std::string source=static_cast<const char*>(payload->Data),reason;bool valid=true;
+       try{auto candidate=document;widgets::Move(candidate,source,w->id,drop,widgets::Canvas(document,m_UIPreviewSize));}catch(const std::exception& e){valid=false;reason=e.what();}
+       auto* draw=ImGui::GetWindowDrawList();auto color=ImGui::GetColorU32(valid?ImGuiCol_DragDropTarget:ImGuiCol_PlotHistogram);
+       if(drop==widgets::Drop::Inside||!valid)draw->AddRect(lo,hi,color,2.f,2.f);
+       else {float y=drop==widgets::Drop::Before?lo.y:hi.y;draw->AddLine({lo.x,y},{hi.x,y},color,3);}
+       ImGui::SetTooltip("%s",valid?(drop==widgets::Drop::Inside?"Move inside":drop==widgets::Drop::Before?"Insert before":"Insert after"):reason.c_str());
+       if(payload->IsDelivery()&&valid&&!ImGui::IsKeyDown(ImGuiKey_Escape))reparent={{source,w->id,drop==widgets::Drop::Inside?"Inside":drop==widgets::Drop::Before?"Before":"After"}};
+      }ImGui::EndDragDropTarget();}
      }if(open){self(self,w->id);ImGui::TreePop();}ImGui::PopID();
     }
-   };tree(tree,"");if(reparent){s.selected=reparent->first;WidgetCommand(app,"Reparent",reparent->second);}ImGui::EndDisabled();
+   };tree(tree,"");if(reparent){s.selected=std::get<0>(*reparent);WidgetCommand(app,std::get<2>(*reparent),std::get<1>(*reparent));}ImGui::EndDisabled();
   }catch(const std::exception& e){ImGui::TextWrapped("UI hierarchy: %s",e.what());}ImGui::End();
  }
  if(m_ShowWidgetInspector&&!m_WorkspaceFocus){
   if(ImGui::Begin("Widget Inspector",&m_ShowWidgetInspector)&&!m_DesignDocument.empty())try{
    auto& s=UIDocumentSession(app,m_DesignDocument);if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::BeginDisabled(app.IsEditorPlayMode()||bool(m_UIWidgetDrag));
-   if(m_WidgetRenameId!=s.selected){m_WidgetRenameId=s.selected;m_WidgetRename=s.selected;}
-   ImGui::TextUnformatted("Widget ID");ImGui::SetNextItemWidth(-FLT_MIN);if(ImGui::InputText("##Widget ID",&m_WidgetRename,ImGuiInputTextFlags_EnterReturnsTrue))WidgetCommand(app,"Rename",m_WidgetRename);
-   if((ImGui::IsItemActive()||ImGui::IsItemDeactivated())&&ImGui::IsKeyPressed(ImGuiKey_Escape,false)){m_WidgetRename=s.selected;m_EscapeConsumed=true;}
-   if(!s.selected.empty()){
-    ImGui::TextUnformatted("Anchor Preset");ImGui::SetNextItemWidth(-FLT_MIN);if(ImGui::BeginCombo("##Anchor Preset","Preserve rectangle")){for(int i=0;i<12;++i)if(ImGui::Selectable(Anchors[i]))WidgetCommand(app,"Anchor",std::to_string(i));ImGui::EndCombo();}
-    ImGui::TextUnformatted("Pivot Preset");ImGui::SetNextItemWidth(-FLT_MIN);if(ImGui::BeginCombo("##Pivot Preset","Preserve rectangle")){for(int i=0;i<9;++i)if(ImGui::Selectable(Anchors[i]))WidgetCommand(app,"Pivot",std::to_string(i));ImGui::EndCombo();}
-   }
    // The UI.1 property editor is shared with the UICanvas scene inspector.
    DrawUIDocumentProperties(app,m_DesignDocument,false);ImGui::EndDisabled();
   }catch(const std::exception& e){ImGui::TextWrapped("UI inspector: %s",e.what());}ImGui::End();

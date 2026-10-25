@@ -1123,6 +1123,7 @@ void Application::SetEditorPlayMode(bool enabled)
         std::unique_ptr<ecs::World> runtime;
         ecs::Entity playerEntity;ecs::TransformComponent spawnPoint;bool prefabSpawn=false;SceneSettings startupSettings;
         m_PlayError.clear();
+        Logger::Get().BeginRuntimeSession();
         try{
             auto project=GetProject();std::string key;
             if(m_PlayStartupMap)key=project->maps.gameStartupMap.empty()?project->startupScene:project->maps.gameStartupMap;
@@ -1131,7 +1132,7 @@ void Application::SetEditorPlayMode(bool enabled)
             playerEntity=level.player;spawnPoint=level.spawn;prefabSpawn=level.prefabSpawn;
         }catch(const std::exception& failure){
             m_PlayError=std::string("Cannot start Play: ")+(m_PlayStartupMap?"Game Startup Map: ":"")+failure.what();
-            Logger::Get().Error(m_PlayError);return;
+            Logger::Get().Error(m_PlayError);Logger::Get().EndRuntimeSession();return;
         }
         m_CloneMapping=std::move(mapping);
         m_EditDebugEntities=m_EcsDebugEntities;m_EditStressEntities=m_StressEntities;
@@ -1157,7 +1158,7 @@ void Application::SetEditorPlayMode(bool enabled)
         ReleasePlayerMouse();
         if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
         m_StateMachine.Clear(*this);
-        m_LuaRuntime.Stop();m_GameplayCamera={};m_RenderCameraState.entity={};m_InputManager.RestoreBindings(std::move(m_EditInputBindings));m_Mutations.Clear();m_RenderInterpolation.Clear();m_EditorLayer.LeaveRuntime();m_RuntimeWorld.reset();m_CloneMapping.clear();
+        m_LuaRuntime.Stop();Logger::Get().EndRuntimeSession();m_GameplayCamera={};m_RenderCameraState.entity={};m_InputManager.RestoreBindings(std::move(m_EditInputBindings));m_Mutations.Clear();m_RenderInterpolation.Clear();m_EditorLayer.LeaveRuntime();m_RuntimeWorld.reset();m_CloneMapping.clear();
         m_Camera.position = m_SavedEditorCamera.position;
         m_Camera.yaw = m_SavedEditorCamera.yaw;
         m_Camera.pitch = m_SavedEditorCamera.pitch;
@@ -1267,7 +1268,7 @@ void Application::UpdateEcs(float dt)
 
 bool Application::Initialize(StartupMode mode)
 {
-    Logger::Get().Initialize("engine.log");
+    Logger::Get().Initialize("engine.log");Logger::Get().ClearRuntimeSession();
     Logger::Get().Info("Application Initialize");
 
     if (!ValidateAssetDependencyAvailability())

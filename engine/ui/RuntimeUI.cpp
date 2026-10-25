@@ -1,4 +1,5 @@
 #include "RuntimeUI.h"
+#include "../core/Logger.h"
 #include "../ecs/components/UICanvasComponent.h"
 #include "../ecs/components/SceneIdentityComponent.h"
 #include "../resources/ResourceManager.h"
@@ -60,7 +61,7 @@ void RuntimeUI::Sync(const ecs::World& source,ResourceManager& resources){
  for(auto e:source.Entities())if(auto* c=source.GetComponent<ecs::UICanvasComponent>(e);c&&!c->document.empty()){
   live.insert(e);auto [at,added]=documents.try_emplace(c->document);
   if(added){at->second=resources.Get<UIResource>(c->document);if(!at->second)at->second=resources.Load<UIResource>(c->document);resources.WatchForHotReload<UIResource>(c->document);}
-  auto asset=at->second;if(!asset||!asset->GetData().document){instances.erase(e);continue;}
+  auto asset=at->second;if(!asset||!asset->GetData().document){if(asset&&asset->HasError()&&Logger::Get().RuntimeSessionActive())Logger::Get().Diagnostic("ERROR","Runtime UI","Sync",c->document+": "+asset->GetErrorMessage());instances.erase(e);continue;}
   auto& i=instances[e];const bool replacement=i.asset!=asset||i.resource!=c->document;
   if(replacement||i.version!=asset->GetVersion()){
    auto next=*asset->GetData().document;
@@ -142,6 +143,14 @@ bool RuntimeUI::Pointer(float x,float y,float width,float height,bool down,bool 
 }
 DrawList RuntimeUI::Build(const ecs::World& source,ResourceManager& resources,float width,float height,const FontAtlas& atlas,RenderTextureHandle font,const TextureResolver& textures){
  Sync(source,resources);DrawList out;out.width=width;out.height=height;
- for(auto e:order){out.errors.insert(out.errors.end(),instances.at(e).styles.errors.begin(),instances.at(e).styles.errors.end());auto draw=LayoutDocument(instances.at(e).state,width,height,atlas,font,textures);unsigned offset=unsigned(out.vertices.size());if(offset+draw.vertices.size()>131072){out.errors.push_back("UI vertex budget exceeded");break;}out.vertices.insert(out.vertices.end(),draw.vertices.begin(),draw.vertices.end());for(auto command:draw.commands){command.first+=offset;out.commands.push_back(command);}out.errors.insert(out.errors.end(),draw.errors.begin(),draw.errors.end());}return out;
+ for(auto e:order){out.errors.insert(out.errors.end(),instances.at(e).styles.errors.begin(),instances.at(e).styles.errors.end());auto draw=LayoutDocument(instances.at(e).state,width,height,atlas,font,textures);unsigned offset=unsigned(out.vertices.size());if(offset+draw.vertices.size()>131072){out.errors.push_back("UI vertex budget exceeded");break;}out.vertices.insert(out.vertices.end(),draw.vertices.begin(),draw.vertices.end());for(auto command:draw.commands){command.first+=offset;out.commands.push_back(command);}out.errors.insert(out.errors.end(),draw.errors.begin(),draw.errors.end());}if(!out.errors.empty()&&Logger::Get().RuntimeSessionActive()){
+  // Loading is a normal resource state, not a completed-session error.
+  std::set<std::string> pending;
+  for(auto e:order)for(auto& w:instances.at(e).state.widgets){
+   if(w.type=="Image"&&!w.texture.empty()){auto asset=resources.Get<TextureResource>(w.texture);if(!asset||asset->IsLoading())pending.insert("Missing or loading Image texture: "+w.texture);}
+   if(!w.styleAsset.empty()){auto asset=resources.Get<UIResource>(w.styleAsset);if(!asset||asset->IsLoading())pending.insert("Missing/invalid UI Style: "+w.styleAsset);}
+  }
+  for(auto& error:out.errors)if(!pending.contains(error))Logger::Get().Diagnostic("WARN","Runtime UI","Build",error);
+ }return out;
 }
 }

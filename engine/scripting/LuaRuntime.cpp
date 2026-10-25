@@ -371,7 +371,11 @@ struct LuaRuntime::Impl {
       loadFailures.insert(path);
     else
       loadFailures.erase(path);
-    Logger::Get().Error("Lua [" + path + "] " + errors[path]);
+    // Lua's diagnostic format provides a real source line when present. Never infer it from arbitrary logs.
+    int line=0;std::string source=path;
+    auto colon=message.find(":");
+    if(colon!=std::string::npos){auto end=message.find(":",colon+1);if(end!=std::string::npos&&end>colon+1){auto number=message.substr(colon+1,end-colon-1);if(number.size()<9&&std::all_of(number.begin(),number.end(),[](char c){return c>='0'&&c<='9';})){line=std::stoi(number);source=message.substr(0,colon);}}}
+    Logger::Get().Diagnostic("ERROR",source,callback,"Lua [" + path + "] " + errors[path],line,message);
   }
   sol::environment Environment() {
     sol::environment env(lua, sol::create);

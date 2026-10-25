@@ -23,15 +23,7 @@ bool EditorLayer::UndoUIStyle(Application& app,const std::string& key,bool redo)
  if(app.IsEditorPlayMode())return false;auto& s=UIStyleSession(app,key);if(s.pending)EditUIStyle(app,key,s.draft,true);auto& from=redo?s.redo:s.undo;auto& to=redo?s.undo:s.redo;if(from.empty())return false;auto next=from.back().get<ui::StyleSheet>();from.pop_back();to.push_back(s.draft);s.draft=next;auto* rm=app.GetResourceManager();rm->Get<UIResource>(key)->ReplaceData(UIResource{{},std::make_shared<ui::StyleSheet>(next)},ResourceLoadState::Loaded,false);rm->SetUIDirty(key,nlohmann::json(next)!=s.disk);if(nlohmann::json(next)!=s.disk)m_DirtyUIStyles.insert(key);else m_DirtyUIStyles.erase(key);return true;
  }catch(const std::exception& e){m_EditorError=e.what();return false;}}
 void EditorLayer::DrawUI4Properties(Application& app,const std::string& key,ui::Document& d,ui::Widget& w,bool& changed){
- ImGui::SeparatorText("Layout");
- changed|=ImGui::Checkbox("Ignore Parent Layout",&w.ignoreLayout);bool managed=ui::ManagedByLayout(d,w);if(managed)ImGui::TextWrapped("Position / anchors / size are managed by Parent Layout. Enable Ignore Parent Layout to drag manually. Authored transforms are retained.");
- if(w.type=="Panel"){
-  changed|=ImGui::Combo("Layout Mode",&w.layout,"Manual\0Vertical\0Horizontal\0Stack\0");
-  if(w.layout){changed|=ImGui::DragFloat("Spacing",&w.spacing,1,0,10000,"%.1f",ImGuiSliderFlags_AlwaysClamp);changed|=ImGui::DragFloat4("Padding L T R B",w.padding.data(),1,0,10000,"%.1f",ImGuiSliderFlags_AlwaysClamp);changed|=ImGui::SliderFloat2("Layout Alignment X Y",w.alignment.data(),0,1);changed|=ImGui::Checkbox("Reverse Order",&w.reverse);changed|=ImGui::Checkbox("Stretch Children",&w.stretchChildren);changed|=ImGui::Checkbox("Auto Width",&w.autoSize[0]);changed|=ImGui::Checkbox("Auto Height",&w.autoSize[1]);}
- }
- if(managed){changed|=ImGui::DragFloat2("Content Fixed Size",w.size.data(),1,0,100000,"%.1f",ImGuiSliderFlags_AlwaysClamp);changed|=ImGui::Checkbox("Stretch Width",&w.stretch[0]);changed|=ImGui::Checkbox("Stretch Height",&w.stretch[1]);}
- if(w.type=="Button")changed|=ImGui::DragFloat("State Transition Seconds",&w.transitionDuration,.01f,0,10,"%.2f",ImGuiSliderFlags_AlwaysClamp);
- ImGui::SeparatorText("Shared Style");auto selected=key+"/"+w.id;if(m_UI4Selection!=selected){m_UI4Selection=selected;m_UIStyleKey=w.styleAsset;m_UIStyleId=w.styleId;}
+ if(ImGui::CollapsingHeader("Styles")){auto selected=key+"/"+w.id;if(m_UI4Selection!=selected){m_UI4Selection=selected;m_UIStyleKey=w.styleAsset;m_UIStyleId=w.styleId;}
  ImGui::InputText("Style Asset",&m_UIStyleKey);ImGui::InputText("Style ID",&m_UIStyleId);
  if(ImGui::Button("Apply Style"))try{auto loaded=UILoader::Load(m_UIStyleKey,{});if(!loaded.success||!loaded.data.styles||!loaded.data.styles->styles.contains(m_UIStyleId)||loaded.data.styles->styles.at(m_UIStyleId).type!=w.type)throw std::runtime_error("Style missing or incompatible");w.styleAsset=m_UIStyleKey;w.styleId=m_UIStyleId;w.styleOverrides.clear();changed=true;}catch(const std::exception& e){m_EditorError=e.what();}
  ImGui::SameLine();if(ImGui::Button("Clear Style")){w.styleAsset.clear();w.styleId.clear();w.styleOverrides.clear();m_UIStyleKey.clear();m_UIStyleId.clear();changed=true;}
@@ -60,7 +52,8 @@ void EditorLayer::DrawUI4Properties(Application& app,const std::string& key,ui::
    }
   }catch(const std::exception& e){ImGui::TextWrapped("Style: %s",e.what());}
  }
- ImGui::SeparatorText("Animation Clips");
+ }
+ if(ImGui::CollapsingHeader("Animations")){
  if(ImGui::BeginCombo("Clip",m_UIClipId.c_str())){for(auto& c:d.animations)if(ImGui::Selectable(c.id.c_str(),c.id==m_UIClipId))m_UIClipId=c.id;ImGui::EndCombo();}
  if(ImGui::Button("New Animation")){ui::AnimationClip clip;clip.id="Animation";while(std::any_of(d.animations.begin(),d.animations.end(),[&](auto& c){return c.id==clip.id;}))clip.id+="_";clip.widget=w.id;d.animations.push_back(clip);m_UIClipId=clip.id;changed=true;}
  auto at=std::find_if(d.animations.begin(),d.animations.end(),[&](auto& c){return c.id==m_UIClipId;});if(at!=d.animations.end()){
@@ -77,6 +70,7 @@ void EditorLayer::DrawUI4Properties(Application& app,const std::string& key,ui::
   changed|=ImGui::Checkbox("Loop",&clip.loop);if(!clip.loop)clip.pingPong=false;if(clip.loop)changed|=ImGui::Checkbox("Ping Pong",&clip.pingPong);
   auto id=clip.id;if(ImGui::Button("Play Preview")){app.GetRuntimeUI().Preview(d,*app.GetResourceManager());app.GetRuntimeUI().PreviewPlay(id);}ImGui::SameLine();if(ImGui::Button("Stop Preview"))app.GetRuntimeUI().PreviewStop();
   if(ImGui::Button("Delete Clip")){std::erase_if(d.animations,[&](auto& c){return c.id==id;});m_UIClipId.clear();changed=true;}
+ }
  }
 }
 }

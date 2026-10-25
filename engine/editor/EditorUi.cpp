@@ -141,7 +141,7 @@ void EditorLayer::DrawMainMenu(Application& app){
     if(ImGui::BeginMenu("View")){
         ImGui::MenuItem("Editor Visuals",nullptr,&m_ShowVisualSettings);
         ImGui::MenuItem("Game View (shared viewport)","G",&m_GameView);
-        ImGui::MenuItem("Scene Hierarchy",nullptr,&m_ShowHierarchy);ImGui::MenuItem("Inspector",nullptr,&m_ShowInspector);ImGui::MenuItem("Viewport",nullptr,&m_ShowViewport);ImGui::MenuItem("Asset Browser",nullptr,&m_ShowAssetBrowser);ImGui::MenuItem("Material Editor",nullptr,&m_ShowMaterialEditor);ImGui::MenuItem("Scene Settings / Lighting",nullptr,&m_ShowSceneSettings);ImGui::MenuItem("Console / Diagnostics",nullptr,&m_ShowConsole);ImGui::MenuItem("Gameplay Events",nullptr,&m_ShowGameplayEvents);ImGui::MenuItem("Scene Validation",nullptr,&m_ShowSceneValidation);ImGui::MenuItem("Lua Runtime Inspector",nullptr,&m_ShowLuaRuntimeInspector);ImGui::MenuItem("Statistics",nullptr,&m_ShowStatistics);ImGui::MenuItem("Physics Stress Test",nullptr,&m_ShowPhysicsStress);
+        ImGui::MenuItem("Scene Hierarchy",nullptr,&m_ShowHierarchy);ImGui::MenuItem("Inspector",nullptr,&m_ShowInspector);ImGui::MenuItem("Viewport",nullptr,&m_ShowViewport);ImGui::MenuItem("Asset Browser",nullptr,&m_ShowAssetBrowser);ImGui::MenuItem("Material Editor",nullptr,&m_ShowMaterialEditor);ImGui::MenuItem("Scene Settings / Lighting",nullptr,&m_ShowSceneSettings);ImGui::MenuItem("Console / Diagnostics",nullptr,&m_ShowConsole);ImGui::MenuItem("Runtime Errors",nullptr,&m_ShowRuntimeErrors);ImGui::MenuItem("Gameplay Events",nullptr,&m_ShowGameplayEvents);ImGui::MenuItem("Scene Validation",nullptr,&m_ShowSceneValidation);ImGui::MenuItem("Lua Runtime Inspector",nullptr,&m_ShowLuaRuntimeInspector);ImGui::MenuItem("Statistics",nullptr,&m_ShowStatistics);ImGui::MenuItem("Physics Stress Test",nullptr,&m_ShowPhysicsStress);
         ImGui::MenuItem("Canvas Designer",nullptr,&m_ShowCanvasDesigner);ImGui::MenuItem("Widget Hierarchy",nullptr,&m_ShowWidgetHierarchy);ImGui::MenuItem("Widget Inspector",nullptr,&m_ShowWidgetInspector);
         DrawWorkspaceMenu(app);
         ImGui::Separator();if(ImGui::MenuItem("Reset Layout"))ResetCurrentWorkspace(app);
@@ -265,14 +265,46 @@ void EditorLayer::DrawSceneHierarchy(Application& app){
     if(!m_SelectionLocked&&ImGui::IsWindowHovered()&&ImGui::IsMouseClicked(0)&&!ImGui::IsAnyItemHovered()&&!m_LightPointerCaptured&&!ImGuizmo::IsUsing()&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)){FinishTransaction(app);ClearSelection();ImGui::ClearActiveID();}
     ImGui::TextDisabled("%zu entities",world.GetAliveCount());ImGui::End();m_Statistics.hierarchyMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
 }
+void EditorLayer::DrawRuntimeErrors(){
+ auto& log=Logger::Get();auto session=log.RuntimeSessionId();
+ if(log.RuntimeSessionActive()||!session){m_RuntimeErrorSession=0;m_ShowRuntimeErrors=false;m_LastRuntimeErrors={};return;}
+ if(session!=m_RuntimeErrorSession)m_LastRuntimeErrors=log.RuntimeErrors();
+ const auto& summary=m_LastRuntimeErrors;
+ // Observe completion once. Closing this non-modal window does not reopen it on every frame.
+ if(summary.active||!summary.session){m_RuntimeErrorSession=0;m_ShowRuntimeErrors=false;}
+ else if(summary.session!=m_RuntimeErrorSession){m_RuntimeErrorSession=summary.session;m_ShowRuntimeErrors=summary.total>0;}
+ if(!m_ShowRuntimeErrors)return;
+ ImGui::SetNextWindowSize({640,380},ImGuiCond_FirstUseEver);
+ if(ImGui::Begin("Runtime Errors",&m_ShowRuntimeErrors)){
+  ImGui::Text("Session %llu: %llu occurrences / %zu issues",(unsigned long long)summary.session,(unsigned long long)summary.total,summary.issues.size());
+  if(summary.dropped||summary.truncated)ImGui::TextWrapped("Bounded summary: %llu dropped messages, %llu truncated text fields",(unsigned long long)summary.dropped,(unsigned long long)summary.truncated);
+  if(ImGui::Button("Copy All"))ImGui::SetClipboardText(summary.Copy().c_str());
+  ImGui::TextWrapped("Original entries remain in Console / Diagnostics until its bounded history is cleared or overwritten.");
+  ImGui::BeginChild("Runtime issues");
+  if(m_ConsoleRevision!=log.Revision()){m_ConsoleMessages=log.Messages();m_ConsoleRevision=log.Revision();}
+  const auto& messages=m_ConsoleMessages;
+  for(std::size_t i=0;i<summary.issues.size();++i){auto& e=summary.issues[i];ImGui::PushID(int(i));
+   auto title="["+e.level+"] "+e.source+(e.line?":"+std::to_string(e.line):"")+(e.callback.empty()?"":" / "+e.callback);
+   ImGui::SeparatorText(title.c_str());ImGui::TextWrapped("%s",e.message.c_str());
+   ImGui::Text("Occurrences: %llu | First / last Unix time: %.3f / %.3f",(unsigned long long)e.count,e.firstTime,e.lastTime);
+   bool available=std::any_of(messages.begin(),messages.end(),[&](auto& row){return row.sequence==e.firstSequence;});
+   ImGui::BeginDisabled(!available);if(ImGui::SmallButton("Show in Console")){m_WorkspaceFocus=false;m_ShowConsole=true;m_ConsoleInfo=m_ConsoleWarning=m_ConsoleError=true;m_ConsoleFilter.clear();m_ConsoleTargetSequence=e.firstSequence;ImGui::SetWindowFocus("Console / Diagnostics");}ImGui::EndDisabled();
+   if(!available&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Original entry was cleared or overwritten in Console history.");ImGui::SameLine();
+   if(ImGui::SmallButton("Copy Error"))ImGui::SetClipboardText(summary.Copy(i).c_str());
+   if((!e.firstTrace.empty()||!e.lastTrace.empty())&&ImGui::TreeNode("Stack traceback")){ImGui::TextWrapped("%s",e.firstTrace.c_str());if(e.lastTrace!=e.firstTrace){ImGui::SeparatorText("Last occurrence");ImGui::TextWrapped("%s",e.lastTrace.c_str());}ImGui::TreePop();}
+   ImGui::PopID();
+  }ImGui::EndChild();
+ }ImGui::End();
+}
+
 void EditorLayer::DrawConsole(Application& app,IRenderAdapter* renderer){
     ImGui::SetNextWindowSizeConstraints(ImVec2(240,130),ImVec2(FLT_MAX,FLT_MAX));
     if(!ImGui::Begin("Console / Diagnostics",&m_ShowConsole)){ImGui::End();return;}
     if(ImGui::BeginTabBar("ConsoleTabs")){
-        if(ImGui::BeginTabItem("Console")){
+        if(ImGui::BeginTabItem("Console",nullptr,m_ConsoleTargetSequence?ImGuiTabItemFlags_SetSelected:ImGuiTabItemFlags_None)){
             auto& log=Logger::Get();if(m_ConsoleRevision!=log.Revision()){m_ConsoleMessages=log.Messages();m_ConsoleRevision=log.Revision();}
             if(ImGui::Button("Clear")){log.ClearMessages();m_ConsoleMessages.clear();m_ConsoleRevision=log.Revision();}ImGui::SameLine();ImGui::Checkbox("INFO",&m_ConsoleInfo);ImGui::SameLine();ImGui::Checkbox("WARN",&m_ConsoleWarning);ImGui::SameLine();ImGui::Checkbox("ERROR",&m_ConsoleError);ImGui::SameLine();ImGui::InputTextWithHint("##search","Search logs",&m_ConsoleFilter);
-            ImGui::BeginChild("Messages");ImGui::PushFont(MonoFont(),0);for(const auto& entry:m_ConsoleMessages){if((entry.level=="INFO"&&!m_ConsoleInfo)||(entry.level=="WARN"&&!m_ConsoleWarning)||(entry.level=="ERROR"&&!m_ConsoleError)||!Matches(entry.message,m_ConsoleFilter))continue;ImGui::TextWrapped("[%s] %s",entry.level.c_str(),entry.message.c_str());}ImGui::PopFont();ImGui::EndChild();ImGui::EndTabItem();
+            ImGui::BeginChild("Messages");ImGui::PushFont(MonoFont(),0);for(const auto& entry:m_ConsoleMessages){if((entry.level=="INFO"&&!m_ConsoleInfo)||(entry.level=="WARN"&&!m_ConsoleWarning)||(entry.level=="ERROR"&&!m_ConsoleError)||!Matches(entry.message,m_ConsoleFilter))continue;ImGui::TextWrapped("[%s] %s",entry.level.c_str(),entry.message.c_str());if(m_ConsoleTargetSequence==entry.sequence){ImGui::SetScrollHereY(.5f);m_ConsoleTargetSequence=0;}}ImGui::PopFont();ImGui::EndChild();ImGui::EndTabItem();
         }
         if(ImGui::BeginTabItem("Diagnostics")){
             auto lights=app.GetLightDiagnostics();ImGui::Text("Editor UI %.3f / hierarchy %.3f / Inspector %.3f ms",m_Statistics.uiMs,m_Statistics.hierarchyMs,m_Statistics.inspectorMs);

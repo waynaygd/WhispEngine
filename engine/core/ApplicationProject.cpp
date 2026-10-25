@@ -39,6 +39,7 @@ bool Application::CommitProject(std::shared_ptr<const ProjectContext> next,ecs::
     if(m_World.IsIterating()||GetWorld().IsIterating()){if(error)*error="Project changes require an ECS phase boundary";return false;}
     if(!m_EditorLayer.ResolveProjectEdits(*this,static_cast<int>(decision),error))return false;
     SetEditorPlayMode(false);m_StateMachine.Clear(*this);m_LuaRuntime.Stop();ReleasePlayerMouse();
+    Logger::Get().ClearRuntimeSession();
     m_PlayerAltWasDown=false;m_ProjectileInput={};m_InputManager.ResetMouseDelta();
     if(auto* native=dynamic_cast<GlfwWindow*>(GetWindow()))if(auto* window=native->GetGlfwHandle()){
         glfwSetInputMode(window,GLFW_CURSOR,GLFW_CURSOR_NORMAL);
