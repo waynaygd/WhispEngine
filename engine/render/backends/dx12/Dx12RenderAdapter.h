@@ -103,6 +103,8 @@ public:
     EditorVisualDiagnostics GetEditorVisualDiagnostics()const override{return m_EditorVisualDiagnostics;}
     void BeginMainPass() override;
     void EndMainPass() override;
+    void DrawParticles(const ParticleDrawList&) override;
+    ParticleGpuStatistics GetParticleStatistics()const override{return m_ParticleStats;}
     bool BeginViewmodelPass() override;
     void EndViewmodelPass() override;
     std::uint64_t GetShadowPreviewTextureId() const override;
@@ -367,6 +369,12 @@ private:
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_RuntimeUIPso;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_RuntimeUIVertices[FrameCount];
     UINT64 m_RuntimeUICapacity[FrameCount]{};
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_ParticleRoot;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_ParticlePso[4];
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_ParticleVertices[FrameCount],m_ParticleReadback[FrameCount];
+    Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_ParticleQueries;
+    UINT64 m_ParticleCapacity[FrameCount]{},m_ParticleUsed=0;unsigned m_ParticleQueryCount[FrameCount]{};
+    ParticleGpuStatistics m_ParticleStats;void ParticleFrame();void ReleaseParticles();
     PostFxFrame m_CustomPostFx;
     HdrTarget m_PostFxTargets[FrameCount][2];
     Microsoft::WRL::ComPtr<ID3D12Resource> m_PostFxConstants[FrameCount];

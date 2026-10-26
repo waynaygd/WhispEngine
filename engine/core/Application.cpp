@@ -451,6 +451,7 @@ void Application::SetupEcsRuntimeDemo(bool populate)
     m_PhysicsSystem->SetEnabled(m_EditorPlayMode);
     m_RenderSystem = &m_World.AddSystem<ecs::RenderSystem>();
     m_RenderSystem->SetResourceManager(m_ResourceManager.get());
+    m_RenderSystem->SetParticles(&m_LuaRuntime.Particles());
     m_RenderSystem->SetPostFxOverrides(&m_LuaRuntime.PostFxOverrides());
     m_RenderSystem->SetInterpolation(&m_RenderInterpolation);
     m_RenderSystem->SetPhysicsDebugPose(m_PhysicsDebugPose);
@@ -1722,6 +1723,7 @@ int Application::Run()
                 const int cameraWidth=m_EditorLayer.GetViewportPixelWidth(),cameraHeight=m_EditorLayer.GetViewportPixelHeight();
                 if(cameraWidth>1&&cameraHeight>1)UpdateRenderSystemCameraAspect(float(cameraWidth)/cameraHeight);
                 else UpdateRenderSystemCamera(wc.window.get());
+                if(&wc==&m_Windows.front()&&IsSimulationRunning())m_LuaRuntime.Particles().Update(GetWorld(),dt,m_RenderCameraState);
                 wc.renderer->SetEditorVisuals(m_EditorLayer.BuildVisualFrame(*this));
                 const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
                 const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();

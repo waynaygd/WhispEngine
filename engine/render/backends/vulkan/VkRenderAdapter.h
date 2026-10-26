@@ -30,6 +30,8 @@ public:
     bool BeginViewmodelPass() override;
     void EndViewmodelPass() override;
     void DrawRuntimeUI(const ui::DrawList&) override;
+    void DrawParticles(const ParticleDrawList&) override;
+    ParticleGpuStatistics GetParticleStatistics()const override{return m_ParticleStats;}
     std::array<unsigned,2> RenderAreaSize()const override {return {m_SwapExtent.width,m_SwapExtent.height};}
     void EnableReadback(bool value=true){m_ReadbackEnabled=value;}
     std::vector<unsigned char> ReadBackPixels();
@@ -69,6 +71,9 @@ private:
     std::map<std::uint64_t,Mesh> m_Meshes;
     std::map<std::uint64_t,Texture> m_Textures;
     std::vector<Mesh> m_RetiredMeshes[2];std::vector<Texture> m_RetiredTextures[2];
+    Buffer m_ParticleBuffers[2];VkDeviceSize m_ParticleUsed=0;VkPipeline m_ParticlePso[2]{};
+    VkQueryPool m_ParticleQueries=VK_NULL_HANDLE;unsigned m_ParticleQueryCount[2]{};float m_TimestampPeriod=0;
+    ParticleGpuStatistics m_ParticleStats;void ParticleFrame();
     Buffer m_Readback[2],m_UIBuffers[2];VkDeviceSize m_UIUsed=0;int m_LastReadback=0;
     VkDescriptorSetLayout m_TextureLayout=VK_NULL_HANDLE;VkDescriptorPool m_TexturePool=VK_NULL_HANDLE;VkSampler m_TextureSampler=VK_NULL_HANDLE;
     VkPipelineLayout m_SceneLayout=VK_NULL_HANDLE;

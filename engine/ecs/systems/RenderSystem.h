@@ -9,6 +9,7 @@
 #include "../../resources/Resource.h"
 
 #include "ISystem.h"
+#include "ParticleSystem.h"
 #include "../MathTypes.h"
 #include "../components/TransformComponent.h"
 #include "../RenderInterpolation.h"
@@ -72,6 +73,7 @@ public:
     const ui::FontCache& UIFonts()const{return m_UIFonts;}
     ui::DrawList BuildUIDesignerPreview(const ui::Document&,ui::Pair preview,IRenderAdapter* renderer);
     ui::RuntimeUI& RuntimeUI(){return m_RuntimeUI;}
+    void SetParticles(ParticleSystem* particles){m_Particles=particles;}
     void SetUIPreview(bool value){m_UIPreview=value;}
     const ui::DrawList& GetUIDrawList()const{return m_UIDrawList;}
     std::size_t UIInstanceCount()const{return m_RuntimeUI.Instances().size();}
@@ -99,6 +101,8 @@ public:
     void ReleaseGpuResources();
 
 private:
+    ParticleSystem* m_Particles=nullptr;
+    ParticleDrawList m_WorldParticles,m_FirstPersonParticles;
     std::vector<Entity> m_EditorIsolation;
     std::unordered_set<Entity,EntityHash> m_EditorIsolated;
     std::vector<PlacementRenderItem> m_PlacementItems;

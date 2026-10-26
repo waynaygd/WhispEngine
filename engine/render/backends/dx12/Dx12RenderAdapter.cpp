@@ -1923,6 +1923,7 @@ void Dx12RenderAdapter::BeginFrame()
         WaitForSingleObject(m_FenceEvent,INFINITE);
     }
     m_CpuWaitMs[0]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-slotWaitStart).count();
+    ParticleFrame();
     m_RetiredResources[m_FrameIndex].clear();
     for(auto descriptor:m_RetiredTextureDescriptors[m_FrameIndex])m_FreeTextureDescriptorIndices.push_back(descriptor);
     m_RetiredTextureDescriptors[m_FrameIndex].clear();
@@ -2248,6 +2249,7 @@ void Dx12RenderAdapter::Shutdown()
 
     m_FrameRecording=false;
     ReleaseSceneLights();
+    ReleaseParticles();
     m_RuntimeUIPso.Reset();m_RuntimeUIRoot.Reset();for(auto& buffer:m_RuntimeUIVertices)buffer.Reset();std::fill(std::begin(m_RuntimeUICapacity),std::end(m_RuntimeUICapacity),0);
     ReleaseCustomPostFx();ReleaseFog();ReleaseEditorVisuals();ReleaseEnvironment();m_CachedBrdfGpu.Reset();ReleaseHdrTargets();m_OutputPso.Reset();m_OutputRoot.Reset();
     ReleaseShadowResources();m_ShadowVs.Reset();m_ShadowInstanceVs.Reset();m_ShadowPso.Reset();m_ShadowInstancePso.Reset();m_ShadowDoublePso.Reset();m_ShadowDoubleInstancePso.Reset();m_ShadowMirrorPso.Reset();m_ShadowMirrorInstancePso.Reset();m_ShadowRoot.Reset();

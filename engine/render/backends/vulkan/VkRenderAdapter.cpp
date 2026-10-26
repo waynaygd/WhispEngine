@@ -961,7 +961,7 @@ void VkRenderAdapter::BeginFrame()
 {
     int width=0,height=0;glfwGetFramebufferSize(static_cast<GlfwWindow*>(m_Window)->GetGlfwHandle(),&width,&height);m_Skip=width<=0||height<=0;if(m_Skip)return;
     if(unsigned(width)!=m_SwapExtent.width||unsigned(height)!=m_SwapExtent.height)RecreateWindow();
-    vkWaitForFences(m_Device, 1, &m_InFlight[m_Frame], VK_TRUE, UINT64_MAX);RetireSubmission();m_UIUsed=0;m_Statistics={};
+    vkWaitForFences(m_Device, 1, &m_InFlight[m_Frame], VK_TRUE, UINT64_MAX);RetireSubmission();ParticleFrame();m_UIUsed=0;m_Statistics={};
     VkResult r = vkAcquireNextImageKHR(m_Device, m_Swapchain, UINT64_MAX,
         m_ImageAvailable[m_Frame], VK_NULL_HANDLE, &m_ImageIndex);
 
@@ -975,6 +975,7 @@ void VkRenderAdapter::BeginFrame()
 
     VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     VK_ThrowIfFailed(vkBeginCommandBuffer(m_CmdBuffers[m_ImageIndex], &bi), "vkBeginCommandBuffer failed");
+    if(m_ParticleQueries)vkCmdResetQueryPool(m_CmdBuffers[m_ImageIndex],m_ParticleQueries,m_Frame*16,16);
 }
 
 void VkRenderAdapter::Clear(float r, float g, float b, float a)

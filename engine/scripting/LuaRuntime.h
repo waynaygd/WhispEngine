@@ -1,5 +1,6 @@
 #pragma once
 #include "../ecs/World.h"
+#include "../ecs/systems/ParticleSystem.h"
 #include "../ecs/events/EventBus.h"
 #include "GameplayServices.h"
 #include "../resources/PostFxResource.h"
@@ -26,6 +27,7 @@ public:
     bool ClearPostFx(const std::string&);
     const PostFxRuntimeOverrides& PostFxOverrides()const;
     GameplayEventHistory& Events();
+    ecs::ParticleSystem& Particles();
     void Update(float dt);
     void DispatchUIEvents();
     void FixedUpdate(float dt);

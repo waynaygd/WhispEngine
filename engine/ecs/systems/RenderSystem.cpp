@@ -380,6 +380,8 @@ namespace ecs {
                 }
                 m_Statistics.shadowMs=elapsed(start);
             }
+            if(m_Particles)m_Particles->Build(world,m_RenderCamera,m_Interpolation,[this](const std::string& key){return GetOrCreateTexture(key);},m_WorldParticles,m_FirstPersonParticles);
+            else {m_WorldParticles.vertices.clear();m_WorldParticles.commands.clear();m_FirstPersonParticles.vertices.clear();m_FirstPersonParticles.commands.clear();}
             m_Renderer->BeginMainPass();
             {
                 ZoneScopedN("RenderSubmit");
@@ -397,8 +399,10 @@ namespace ecs {
                     for(std::size_t i=batch.begin;i<batch.begin+batch.count;++i)SubmitRenderPacket(m_RenderPackets[i]);
                 };
                 for(const auto& batch:m_Batches)if(m_RenderPackets[batch.begin].renderMode==MeshRenderMode::World)submitBatch(batch);
-                if(m_Statistics.viewmodelSubmeshes&&m_Renderer->BeginViewmodelPass()){
+                m_Renderer->DrawParticles(m_WorldParticles);
+                if((m_Statistics.viewmodelSubmeshes||!m_FirstPersonParticles.vertices.empty())&&m_Renderer->BeginViewmodelPass()){
                     for(const auto& batch:m_Batches)if(m_RenderPackets[batch.begin].renderMode==MeshRenderMode::FirstPerson)submitBatch(batch);
+                    m_Renderer->DrawParticles(m_FirstPersonParticles);
                     m_Renderer->EndViewmodelPass();
                 }
                 m_Statistics.submitMs=elapsed(start);
