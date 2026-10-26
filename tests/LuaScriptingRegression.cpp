@@ -4,6 +4,7 @@
 #include "core/Application.h"
 #include "core/Logger.h"
 #include "editor/ScriptEditor.h"
+#include "editor/LuaAssetDependencies.h"
 #include "ecs/components/LuaScriptComponent.h"
 #include "ecs/components/SceneIdentityComponent.h"
 #include "ecs/components/TransformComponent.h"
@@ -26,6 +27,7 @@ const char* counter=R"(return {
  on_destroy=function(self) Log.info("destroyed counter") end
 })";
 }
+#include "LuaModulesRegression.inl"
 int main(){
     auto original=std::filesystem::current_path();
     try{
@@ -37,6 +39,7 @@ int main(){
         for(const char* key:{"","../outside.lua","C:/outside.lua","scripts/missing.lua","scripts/wrong.txt"}){
             bool rejected=false;try{(void)editor::ResolveEditableLuaScript(key);}catch(const std::exception&){rejected=true;}Check(rejected,"Open Script rejects unsafe, empty or missing asset");
         }
+        Modules();
         Write("scripts/counter.lua",counter);
         ecs::World world;auto a=Actor(world,"scripts/counter.lua");auto b=Actor(world,"scripts/counter.lua");world.GetComponent<ecs::LuaScriptComponent>(b)->properties["speed"]=2;
         scripting::LuaRuntime lua;Check(lua.ReloadScript("scripts/counter.lua"),"load counter");lua.Start(world);lua.Update(.02f);

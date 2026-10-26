@@ -37,6 +37,7 @@ int main(){ScopedEditorPreferenceRestore restore;Fixture fixture;try{
  auto* native=dynamic_cast<GlfwWindow*>(app.GetWindow())->GetGlfwHandle();glfwHideWindow(native);SyntheticEditorInput input;
  Check(app.OpenProject(descriptor,Application::ProjectDecision::Discard,&error),error);
  auto& ui=app.GetEditorLayer();auto& world=app.GetWorld();auto* gpu=dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter());
+ ui.SwitchWorkspace(EditorWorkspace::LevelEditing);app.SetFrameLimit(3);Check(app.Run()==0,"activate Level fixture");Check(ui.ResetCurrentWorkspace(app),"reset persisted viewport layout");app.SetFrameLimit(3);Check(app.Run()==0,"apply Level fixture");
  ui.GetSelectionFilters()={};ui.SetLightGizmosVisible(true);ui.GetVisualSettings().enabled=true;ui.SetGameView(false);ui.SetSnapping(false);ui.SetGridVisible(false);ui.SetGizmoOperation(0);
  auto frame=[&](unsigned n=3){app.SetFrameLimit(n);Check(app.Run()==0,"editor frames");};
  auto point=[&](ImVec2 p){SyntheticEditorInput::Position(p.x,p.y);frame();};

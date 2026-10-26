@@ -23,6 +23,12 @@ EditorVisualFrame EditorLayer::BuildVisualFrame(const Application& app)const{
     }}
     f.aspect=float(std::max(1,width))/std::max(1,height);f.tanHalfFov=std::tan(app.GetCameraVerticalFovRadians()*.5f);f.nearPlane=app.GetCameraNearPlane();f.farPlane=app.GetCameraFarPlane();
     const auto p=app.GetCameraPosition();f.camera={p.x,p.y,p.z};const auto c=GizmoCamera(p,app.GetCameraYaw(),app.GetCameraPitch(),app.GetCameraVerticalFovRadians(),f.aspect,f.nearPlane,f.farPlane);
+    if(f.play&&app.GetRenderCameraState().entity.IsValid()){
+        const auto& state=app.GetRenderCameraState();auto right=state.right,up=state.up,forward=state.forward;
+        f.right={right.x,right.y,right.z};f.up={up.x,up.y,up.z};f.forward={forward.x,forward.y,forward.z};
+        f.tanHalfFov=state.settings.projection==ecs::CameraProjection::Orthographic?0.f:std::tan(state.settings.fieldOfView*.5f);
+        f.nearPlane=state.settings.nearClip;f.farPlane=state.settings.farClip;return f;
+    }
     f.right={c.view[0],c.view[4],c.view[8]};f.up={c.view[1],c.view[5],c.view[9]};f.forward={c.view[2],c.view[6],c.view[10]};return f;
 }
 void EditorLayer::PrepareEditorSky(Application& app,IRenderAdapter* renderer){

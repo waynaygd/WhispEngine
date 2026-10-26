@@ -173,10 +173,12 @@ void EditorLayer::DrawPlayerStartGizmos(Application& app,const ImVec2& origin,co
         if(!EditorEntityVisible(app,e))return;
         const bool selected=IsSelected(e);const ImU32 color=start.enabled?IM_COL32(80,235,255,255):IM_COL32(155,160,165,255);
         const auto half=ecs::PlayerBodyHalfExtents(start);
-        const auto center=ecs::PlayerBodyCenter(t.position,half.y),eye=ecs::PlayerEyePosition(center,ecs::PlayerEyeHeight(start),half.y);
-        V forward=ecs::PlayerLookDirection(t);
+        const bool prefab=start.spawnMode==2||start.spawnMode==3||(start.spawnMode==0&&!start.playerPrefab.empty());
+        const auto center=ecs::PlayerBodyCenter(t.position,half.y),eye=prefab?t.position:ecs::PlayerEyePosition(center,ecs::PlayerEyeHeight(start),half.y);
+        const auto q=ecs::RenderRotation(t.rotation);
+        V forward=prefab?V{2*(q.x*q.z+q.w*q.y),2*(q.y*q.z-q.w*q.x),1-2*(q.x*q.x+q.y*q.y)}:PlayerStartGizmoDirection(t);
         V tip=Add(eye,Scale(forward,1.1f));line(eye,tip,color);
-        V right{std::cos(t.rotation.y),0,-std::sin(t.rotation.y)};
+        V right{1-2*(q.y*q.y+q.z*q.z),2*(q.x*q.y+q.w*q.z),2*(q.x*q.z-q.w*q.y)};
         line(tip,Add(Sub(tip,Scale(forward,.2f)),Scale(right,.12f)),color);line(tip,Sub(Sub(tip,Scale(forward,.2f)),Scale(right,.12f)),color);
         auto p=project(t.position);
         if(p){
@@ -184,11 +186,12 @@ void EditorLayer::DrawPlayerStartGizmos(Application& app,const ImVec2& origin,co
             draw->AddCircleFilled(ImVec2(p->x,p->y-24),6,IM_COL32(10,15,20,240));draw->AddCircleFilled(ImVec2(p->x,p->y-24),4,color);
             auto stroke=[&](ImVec2 a,ImVec2 b){draw->AddLine(a,b,IM_COL32(10,15,20,240),6);draw->AddLine(a,b,color,3);};
             stroke(ImVec2(p->x,p->y-18),ImVec2(p->x,p->y-9));stroke(ImVec2(p->x-8,p->y-15),ImVec2(p->x+8,p->y-15));stroke(ImVec2(p->x,p->y-9),ImVec2(p->x-6,p->y));stroke(ImVec2(p->x,p->y-9),ImVec2(p->x+6,p->y));
-            if(selected)draw->AddText(ImVec2(p->x+12,p->y-28),color,"PlayerStart (feet)");
+            if(selected)draw->AddText(ImVec2(p->x+12,p->y-28),color,prefab?"PlayerStart (prefab origin)":"PlayerStart (feet)");
             auto depth=ProjectGizmo(t.position,camera);
             if(CanViewportSelect(app,e)&&mouse.x>=p->x-12&&mouse.x<=p->x+12&&mouse.y>=p->y-32&&mouse.y<=p->y+5&&(*depth)[2]<nearest){hit=e;nearest=(*depth)[2];}
         }
         if(!selected)return;
+        if(prefab){line(Add(t.position,V{-.2f,0,0}),Add(t.position,V{.2f,0,0}),color);line(Add(t.position,V{0,0,-.2f}),Add(t.position,V{0,0,.2f}),color);return;}
         std::array<V,8> corners;auto h=half;
         for(int i=0;i<8;++i)corners[i]=ecs::PlayerBoxPoint(t,{i&1?h.x:-h.x,i&2?h.y:-h.y,i&4?h.z:-h.z},h.y);
         for(int i=0;i<8;++i)for(int bit:{1,2,4})if(!(i&bit))line(corners[i],corners[i|bit],color);
@@ -337,7 +340,7 @@ void EditorLayer::SelectViewportRectangle(Application& app,std::array<float,4> r
         }else if(auto* collider=world.GetComponent<ecs::ColliderComponent>(e)){
             const auto center=Add(pose.position,collider->offset),half=collider->halfExtents;
             for(int i=0;i<8;++i)corners[i]=Add(center,V{(i&1?1:-1)*half.x,(i&2?1:-1)*half.y,(i&4?1:-1)*half.z});projected=projectedBounds(corners);
-        }else if(auto* start=world.GetComponent<ecs::PlayerStartComponent>(e)){
+        }else if(auto* start=world.GetComponent<ecs::PlayerStartComponent>(e);start&&(start->spawnMode==1||(start->spawnMode==0&&start->playerPrefab.empty()))){
             std::array<float,16> model;ecs::BuildRenderModelMatrix(model.data(),pose);
             for(int i=0;i<8;++i){V p{(i&1?1.f:-1.f)*.3f,i&2?start->characterHeight:0.f,(i&4?1.f:-1.f)*.3f};corners[i]={model[0]*p.x+model[4]*p.y+model[8]*p.z+model[12],model[1]*p.x+model[5]*p.y+model[9]*p.z+model[13],model[2]*p.x+model[6]*p.y+model[10]*p.z+model[14]};}projected=projectedBounds(corners);
         }else if(auto point=ProjectGizmo(pose.position,camera)){

@@ -148,7 +148,7 @@ Vulkan shader/backend не переписан. Он сохраняет преж�
 
 ## 15. Изменённые файлы и воспроизведение
 
-Новые: `engine/render/Lighting.h`, `engine/shaders/dx12/textured_unlit.hlsl`, `engine/assets/models/lighting_sphere.gltf`, `tests/LightingRegression.cpp`, `tests/RunLightingDiagnostics.ps1`, `tests/SummarizeLightingDiagnostics.py`, этот отчёт.
+Новые: `engine/render/Lighting.h`, `engine/shaders/dx12/textured_unlit.hlsl`, `test_projects/legacy_workspace/Assets/models/lighting_sphere.gltf`, `tests/LightingRegression.cpp`, `tests/RunLightingDiagnostics.ps1`, `tests/SummarizeLightingDiagnostics.py`, этот отчёт.
 
 Изменены: `CMakeLists.txt`, `WhispEngine.cpp`, `engine/core/Application.h/.cpp`, `engine/core/RenderDiagnosticSample.h`, `engine/ecs/systems/RenderSystem.h/.cpp`, `engine/editor/EditorLayer.cpp`, `engine/render/IRenderAdapter.h`, `engine/render/RenderInstanceData.h`, `engine/render/backends/dx12/Dx12RenderAdapter.h/.cpp`, `engine/resources/MeshData.h`, `engine/resources/loaders/MeshLoader.cpp`, `engine/shaders/dx12/textured.hlsl`, `tests/GpuInstancingRegression.cpp`.
 

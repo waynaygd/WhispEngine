@@ -1,4 +1,5 @@
 #pragma once
+#include "../scripting/LuaModulePath.h"
 #include <cctype>
 #include <stdexcept>
 #include <string>
@@ -40,9 +41,18 @@ inline std::vector<LuaToken> LuaTokens(const std::string& source){
         else {tokens.push_back({std::string(1,c),false,tokenLine});++at;}
     }return tokens;
 }
-struct LuaDependencies {std::vector<std::string> values,dynamic;};
+struct LuaDependencies {std::vector<std::string> values,dynamic,moduleDynamic;};
 inline LuaDependencies AnalyzeLuaDependencies(const std::string& source){
     auto tokens=LuaTokens(source);LuaDependencies result;
+    // Resolve only proven literal imports; never execute source during file operations.
+    for(std::size_t i=2;i<tokens.size();++i){
+        const bool bracket=i+1<tokens.size()&&tokens[i-2].text=="Script"&&tokens[i-1].text=="["&&tokens[i].literal&&tokens[i+1].text=="]";
+        if(tokens[i].text!="require"||tokens[i-2].text!="Script"||(!bracket&&tokens[i-1].text!="."))continue;
+        auto open=i+(bracket?2:1);
+        if(open+2<tokens.size()&&tokens[open].text=="("&&tokens[open+1].literal&&tokens[open+2].text==")"){
+            try{result.values.push_back(scripting::LuaModuleKey(tokens[open+1].text));}catch(...){}
+        }else result.moduleDynamic.push_back("line "+std::to_string(tokens[i].line)+": dynamic Script.require dependency cannot be proven; imports are not automatically rewritten by Rename.");
+    }
     // Includes direct paths, schema defaults, and other literal assignments.
     for(std::size_t i=0;i<tokens.size();++i)if(tokens[i].literal){std::string value=tokens[i].text;result.values.push_back(value);std::size_t end=i;while(end+2<tokens.size()&&!tokens[end+1].literal&&tokens[end+1].text==".."&&tokens[end+2].literal){end+=2;value+=tokens[end].text;result.values.push_back(tokens[end].text);}if(end!=i)result.values.push_back(value);i=end;}
     for(std::size_t i=0;i<tokens.size();++i){

@@ -1,4 +1,5 @@
 #include "WidgetDesignerTools.h"
+#include <cctype>
 #include <set>
 #include <cmath>
 #include <stdexcept>
@@ -23,7 +24,23 @@ void Reparent(ui::Document& d,const std::string& id,const std::string& parent,ui
  for(std::string p=parent;!p.empty();p=Find(d,p).parent)if(p==id)throw std::runtime_error("Reparent would create a cycle");
  auto r=Rectangle(d,id,canvas),p=Rectangle(d,parent,canvas);auto next=d;auto& w=const_cast<ui::Widget&>(Find(next,id));w.parent=parent;SetRectangle(w,r,p);CheckDocument(next);d=std::move(next);
 }
+void Move(ui::Document& d,const std::string& id,const std::string& target,Drop drop,ui::Rect canvas){
+ if(id==d.root)throw std::runtime_error("Root cannot be moved");
+ if(id==target)throw std::runtime_error("Cannot drop a Widget onto itself");
+ auto parent=drop==Drop::Inside?target:Find(d,target).parent;
+ if(parent.empty())throw std::runtime_error("Root must remain the only root Panel");
+ auto next=d;
+ if(Find(next,id).parent!=parent)Reparent(next,id,parent,canvas);
+ // Move only the owned record. Children keep their IDs/parent references and their own order.
+ auto node=Find(next,id);std::erase_if(next.widgets,[&](auto& w){return w.id==id;});
+ auto at=next.widgets.end();
+ if(drop!=Drop::Inside){at=std::find_if(next.widgets.begin(),next.widgets.end(),[&](auto& w){return w.id==target;});if(drop==Drop::After)++at;}
+ else {for(auto it=next.widgets.begin();it!=next.widgets.end();++it)if(it->parent==parent)at=std::next(it);}
+ next.widgets.insert(at,std::move(node));CheckDocument(next);d=std::move(next);
+}
 void Rename(ui::Document& d,const std::string& id,const std::string& name){
+ if(name.empty()||std::all_of(name.begin(),name.end(),[](unsigned char c){return std::isspace(c);}))throw std::runtime_error("Widget ID cannot be empty or whitespace");
+ if(name.size()>128||!ui::ValidUTF8(name)||std::any_of(name.begin(),name.end(),[](unsigned char c){return c<32||c==127;}))throw std::runtime_error("Widget ID must be valid UTF-8, at most 128 bytes, without control characters");
  if(name==id)return;if(std::any_of(d.widgets.begin(),d.widgets.end(),[&](auto& w){return w.id==name;}))throw std::runtime_error("Widget ID already exists");
  auto next=d;const_cast<ui::Widget&>(Find(next,id)).id=name;for(auto& w:next.widgets)if(w.parent==id)w.parent=name;if(next.root==id)next.root=name;for(auto& clip:next.animations)if(clip.widget==id)clip.widget=name;for(auto& required:next.requiredWidgets)if(required==id)required=name;CheckDocument(next);d=std::move(next);
 }
@@ -50,7 +67,7 @@ ui::Rect Drag(ui::Rect r,float dx,float dy,int handle,float grid){
  if(handle==4||handle==5||handle==6)bottom=std::max(top,snap(bottom+dy));
  return {left,top,right-left,bottom-top};
 }
-std::string Pick(const ui::DrawList& draw,float x,float y){
- for(auto it=draw.widgets.rbegin();it!=draw.widgets.rend();++it)for(unsigned c=it->first;c<it->first+it->count;++c){auto& cmd=draw.commands[c];auto& a=draw.vertices[cmd.first];auto& b=draw.vertices[cmd.first+2];auto r=ui::Intersect({a.x,a.y,b.x-a.x,b.y-a.y},cmd.clip);if(x>=r.x&&y>=r.y&&x<r.x+r.w&&y<r.y+r.h)return it->id;}return {};
+std::string Pick(const ui::DrawList& draw,float x,float y,const std::set<std::string>& locked){
+ for(auto it=draw.widgets.rbegin();it!=draw.widgets.rend();++it)if(!locked.contains(it->id))for(unsigned c=it->first;c<it->first+it->count;++c){auto& cmd=draw.commands[c];auto& a=draw.vertices[cmd.first];auto& b=draw.vertices[cmd.first+2];auto r=ui::Intersect({a.x,a.y,b.x-a.x,b.y-a.y},cmd.clip);if(x>=r.x&&y>=r.y&&x<r.x+r.w&&y<r.y+r.h)return it->id;}return {};
 }
 }

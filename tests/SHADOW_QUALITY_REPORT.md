@@ -152,7 +152,7 @@ Default 2048 требует 32 MiB для двух raw depth maps против 8
 
 Изменены относительно snapshot: `CMakeLists.txt`, `WhispEngine.cpp`, `engine/core/Application.h/.cpp`, `RenderDiagnosticSample.h`, `engine/ecs/systems/RenderSystem.cpp`, `engine/editor/EditorLayer.cpp`, `engine/render/RenderInstanceData.h`, `MaterialState.h`, `Shadows.h`, `engine/render/backends/dx12/Dx12RenderAdapter.h/.cpp`, `Dx12Shadows.cpp`, `engine/shaders/dx12/textured.hlsl`, `tests/MaterialSystemRegression.cpp`, `tests/ShadowMappingRegression.cpp`.
 
-Новые: `engine/assets/models/shadow_inclined.obj`, `tests/ShadowQualityRegression.cpp`, `RunShadowQualityDiagnostics.ps1`, `SummarizeShadowQualityDiagnostics.py`, этот отчёт. Прежние отчёты не переписаны; их старые defaults/limitations относятся к соответствующим этапам.
+Новые: `test_projects/legacy_workspace/Assets/models/shadow_inclined.obj`, `tests/ShadowQualityRegression.cpp`, `RunShadowQualityDiagnostics.ps1`, `SummarizeShadowQualityDiagnostics.py`, этот отчёт. Прежние отчёты не переписаны; их старые defaults/limitations относятся к соответствующим этапам.
 
 ## 14. Воспроизведение
 

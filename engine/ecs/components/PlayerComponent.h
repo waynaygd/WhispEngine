@@ -4,7 +4,8 @@ namespace ecs {
 
     struct PlayerComponent
     {
-        // Measured from the feet, not from the Rigidbody center.
+        // Local player identity, independent of input/camera permissions or body type.
+        // eyeHeight remains the legacy controller's feet-relative eye setting.
         float eyeHeight = 1.7f;
     };
 

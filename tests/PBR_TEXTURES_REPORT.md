@@ -206,10 +206,10 @@ Live texture bytes вычисляются по GetResourceAllocationInfo, не �
 - `engine/render/IRenderAdapter.h`, `RenderInstanceData.h`, `backends/dx12/Dx12RenderAdapter.{h,cpp}`, `Dx12Shadows.cpp` — binding contract/lifetime/telemetry.
 - `engine/resources/MaterialResource.h`, `MaterialSerialization.h`, `MeshData.h`, `ResourceManager.h`, `loaders/MaterialLoader.cpp`, `loaders/MeshLoader.cpp` — v4/import/dependencies/cache.
 - `engine/shaders/dx12/textured.hlsl` — semantic sampling/TBN/MR/AO.
-- `engine/assets/models/material_slots.gltf` — explicit paint factors.
+- `test_projects/legacy_workspace/Assets/models/material_slots.gltf` — explicit paint factors.
 - `tests/GpuInstancingRegression.cpp`, `MaterialSystemRegression.cpp`, `PbrCoreRegression.cpp` — совместимый новый contract/defaults.
 
-Добавлены `engine/resources/TangentSpace.h`, `tests/PbrTexturesRegression.cpp`, `tests/RunPbrTexturesDiagnostics.ps1`, `tests/SummarizePbrTexturesDiagnostics.py`, этот отчёт, `engine/assets/materials/pbr_textures.material.json`, модели `pbr_textures{,_embedded,_uv1}.gltf`, textures `pbr_base.png`, `pbr_normal.png`, `pbr_orm.png`, `pbr_control.jpg`, `pbr_control.dds`, `pbr_control_bc3.dds`.
+Добавлены `engine/resources/TangentSpace.h`, `tests/PbrTexturesRegression.cpp`, `tests/RunPbrTexturesDiagnostics.ps1`, `tests/SummarizePbrTexturesDiagnostics.py`, этот отчёт, `test_projects/legacy_workspace/Assets/materials/pbr_textures.material.json`, модели `pbr_textures{,_embedded,_uv1}.gltf`, textures `pbr_base.png`, `pbr_normal.png`, `pbr_orm.png`, `pbr_control.jpg`, `pbr_control.dds`, `pbr_control_bc3.dds`.
 
 Hash manifest `out/diagnostics/pbr-textures/changed-files.json` отделяет изменения этого этапа от уже существовавших. Предыдущие reports, physics/job/timestep/interpolation implementation, Vulkan и unlit/depth shaders сохранены. Ни одного исходного файла не удалено. Commit/push/merge/PR не выполнялись.
 

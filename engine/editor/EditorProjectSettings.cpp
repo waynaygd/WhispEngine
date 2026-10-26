@@ -8,7 +8,8 @@
 namespace editor {
 void EditorLayer::ShowProjectSettings(Application& app){
     if(!m_ProjectSettingsBase||(!ProjectSettingsDirty()&&m_ProjectSettingsBase!=app.GetProject()))RevertProjectSettings(app);
-    m_ShowProjectSettings=m_FocusProjectSettings=true;
+    const auto id=RegisterDocument(app,DocumentType::ProjectSettings,"ProjectSettings").id;
+    RequestDocumentNavigation(app,id);m_ShowProjectSettings=m_FocusProjectSettings=true;
 }
 void EditorLayer::RevertProjectSettings(Application& app){
     m_ProjectSettingsBase=app.GetProject();m_ProjectSettingsDraft=m_ProjectSettingsBase?m_ProjectSettingsBase->Settings():ProjectSettings{};
@@ -35,22 +36,27 @@ void EditorLayer::DrawProjectSettings(Application& app){
     auto project=app.GetProject();
     if(!ProjectSettingsDirty()&&project!=m_ProjectSettingsBase)RevertProjectSettings(app);
     if(m_FocusProjectSettings){ImGui::SetNextWindowFocus();m_FocusProjectSettings=false;}
-    ImGui::SetNextWindowSize(ImVec2(740,480),ImGuiCond_FirstUseEver);ImGui::SetNextWindowSizeConstraints(ImVec2(480,330),ImVec2(FLT_MAX,FLT_MAX));
-    if(!ImGui::Begin("Project Settings",&m_ShowProjectSettings,ProjectSettingsDirty()?ImGuiWindowFlags_UnsavedDocument:0)){ImGui::End();return;}
-    if(!project){ImGui::TextWrapped("Open a .whispproject in Project Browser to edit project settings.");ImGui::End();return;}
+    ImGui::SetNextWindowSize(ImVec2(740,480),ImGuiCond_FirstUseEver);ImGui::SetNextWindowSizeConstraints(ImVec2(280,250),ImVec2(FLT_MAX,FLT_MAX));
+    bool open=true;
+    auto close=[&]{for(const auto& d:m_Documents)if(d.type==DocumentType::ProjectSettings){auto id=d.id;RequestDocumentNavigation(app,id,true);break;}};
+    if(!ImGui::Begin("Project Settings",&open,ProjectSettingsDirty()?ImGuiWindowFlags_UnsavedDocument:0)){ImGui::End();if(!open)close();return;}
+    if(!project){ImGui::TextWrapped("Open a .whispproject in Project Browser to edit project settings.");ImGui::End();if(!open)close();return;}
     ImGui::TextUnformatted(project->name.c_str());ImGui::SameLine();ImGui::TextDisabled(ProjectSettingsDirty()?"Unsaved changes":"Saved");
     if(app.IsEditorPlayMode())ImGui::TextDisabled("Stop Play to edit or save Project Settings.");
     const float footer=ImGui::GetFrameHeightWithSpacing()*3.5f;
-    ImGui::BeginChild("Categories",ImVec2(190,-footer),ImGuiChildFlags_Borders);
-    const char* categories[]={"General","Rendering","Physics","Startup / Runtime"};
-    for(int i=0;i<4;++i)if(ImGui::Selectable(categories[i],m_ProjectSettingsCategory==i))m_ProjectSettingsCategory=i;
+    ImGui::BeginChild("Categories",ImVec2(std::min(150.f,ImGui::GetContentRegionAvail().x*.3f),-footer),ImGuiChildFlags_Borders);
+    const char* categories[]={"Project / General","Rendering","Physics (read-only)","Startup / Runtime (read-only)","Project / Maps & Modes"};
+    for(int i=0;i<5;++i)if(ImGui::Selectable(categories[i],m_ProjectSettingsCategory==i))m_ProjectSettingsCategory=i;
     ImGui::EndChild();ImGui::SameLine();ImGui::BeginChild("Settings",ImVec2(0,-footer));
     ImGui::PushItemWidth(std::max(120.f,ImGui::GetContentRegionAvail().x*.62f));
     if(m_ProjectSettingsCategory==0){
         ImGui::SeparatorText("General");ImGui::BeginDisabled(app.IsEditorPlayMode());
-        ImGui::InputText("Project Name",&m_ProjectSettingsDraft.name);
+        ImGui::InputText("Search",&m_ProjectSettingsSearch);
+        const auto match=[&](const char* name){auto value=std::string(name),filter=m_ProjectSettingsSearch;for(auto& c:value)c=char(std::tolower(static_cast<unsigned char>(c)));for(auto& c:filter)c=char(std::tolower(static_cast<unsigned char>(c)));return value.find(filter)!=std::string::npos;};
+        if(match("Project Name"))ImGui::InputText("Project Name",&m_ProjectSettingsDraft.name);
         if(ImGui::IsItemHovered())ImGui::SetTooltip("Display name only. Project folder and descriptor filename stay the same.");
-        ImGui::InputText("Startup Scene",&m_ProjectSettingsDraft.startupScene);
+        if(match("Editor Startup Map")){
+        ImGui::InputText("Editor Startup Map",&m_ProjectSettingsDraft.startupScene);
         if(ImGui::IsItemHovered())ImGui::SetTooltip("Project-relative scene path, for example Scenes/Main.json. Applied the next time this project opens.");
         if(ImGui::Button("Choose Scene..."))ImGui::OpenPopup("StartupScenePicker");ImGui::SameLine();
         if(ImGui::Button("Refresh Scenes")){try{m_ProjectSettingsScenes.Refresh({});m_ProjectSettingsError.clear();}catch(const std::exception& e){m_ProjectSettingsError=e.what();}}
@@ -58,10 +64,13 @@ void EditorLayer::DrawProjectSettings(Application& app){
             for(const auto& scene:m_ProjectSettingsScenes.Entries())if(ImGui::Selectable(scene.key.c_str(),scene.key==m_ProjectSettingsDraft.startupScene))m_ProjectSettingsDraft.startupScene=scene.key;
             if(m_ProjectSettingsScenes.Entries().empty())ImGui::TextDisabled("No project scenes found.");ImGui::EndPopup();
         }
+        }
         ImGui::EndDisabled();ImGui::Spacing();
-        ImGui::TextDisabled("Project Root (read-only)");ImGui::TextWrapped("%s",AssetPaths::ToUtf8String(project->root).c_str());
-        ImGui::TextDisabled("Assets Root (read-only)");ImGui::TextWrapped("%s",AssetPaths::ToUtf8String(project->AssetRoot()).c_str());
-        ImGui::TextDisabled("Scenes Root (read-only)");ImGui::TextWrapped("%s",AssetPaths::ToUtf8String(project->SceneRoot()).c_str());
+        if(match("Project File")){ImGui::TextDisabled("Project File (read-only)");ImGui::TextWrapped("%s",AssetPaths::ToUtf8String(project->descriptorPath).c_str());}
+        if(match("Format Version"))ImGui::Text("Format Version: %d (read-only)",project->formatVersion);
+        if(match("Project Root")){ImGui::TextDisabled("Project Root (read-only)");ImGui::TextWrapped("%s",AssetPaths::ToUtf8String(project->root).c_str());}
+        if(match("Assets Root")){ImGui::TextDisabled("Assets Root (read-only)");ImGui::TextWrapped("%s",AssetPaths::ToUtf8String(project->AssetRoot()).c_str());}
+        if(match("Scenes Root")){ImGui::TextDisabled("Scenes Root (read-only)");ImGui::TextWrapped("%s",AssetPaths::ToUtf8String(project->SceneRoot()).c_str());}
         ImGui::TextWrapped("Root changes are not supported here because existing resource paths depend on them.");
     }else if(m_ProjectSettingsCategory==1){
         ImGui::SeparatorText("Rendering");ImGui::Text("Backend: %s (read-only)",app.GetRenderBackend()==RenderBackend::DX12?"DirectX 12":"Vulkan");
@@ -78,6 +87,20 @@ void EditorLayer::DrawProjectSettings(Application& app){
         ImGui::SeparatorText("Physics");ImGui::Text("Fixed timestep: %.6f seconds (%.0f Hz)",FixedStepClock::TickSeconds,1/FixedStepClock::TickSeconds);
         ImGui::TextWrapped("Read-only: the existing physics clock uses a fixed engine timestep. Project-level gravity and solver controls are not supported.");
         ImGui::TextWrapped("Physics settings in the engine startup configuration are separate from this project descriptor.");
+    }else if(m_ProjectSettingsCategory==4){
+        ImGui::SeparatorText("Maps & Modes");ImGui::BeginDisabled(app.IsEditorPlayMode());
+        auto scene=[&](const char* label,std::string& value,bool optional){ImGui::PushID(label);ImGui::TextUnformatted(label);if(ImGui::BeginCombo("##map",value.empty()?"Editor Startup fallback":value.c_str())){if(optional&&ImGui::Selectable("None (Editor Startup fallback)"))value.clear();for(const auto& entry:m_ProjectSettingsScenes.Entries())if(ImGui::Selectable(entry.key.c_str(),value==entry.key))value=entry.key;ImGui::EndCombo();}if(!value.empty()){if(optional&&ImGui::SmallButton("Clear"))value.clear();ImGui::SameLine();if(ImGui::SmallButton("Open map"))OpenDocument(app,value);}ImGui::PopID();};
+        scene("Editor Startup Map",m_ProjectSettingsDraft.startupScene,false);scene("Game Startup Map",m_ProjectSettingsDraft.maps.gameStartupMap,true);
+        ImGui::TextWrapped("Editor opens its startup map. Ordinary Play uses the current scene. Game Startup preview uses the separate game map; empty falls back to Editor Startup.");
+        auto& maps=m_ProjectSettingsDraft.maps;
+        if(ImGui::BeginCombo("Default GameMode",maps.defaultGameMode.empty()?"None (compatibility)":maps.defaultGameMode.c_str())){if(ImGui::Selectable("None"))maps.defaultGameMode.clear();for(const auto& [id,mode]:maps.modes)if(ImGui::Selectable(id.c_str(),id==maps.defaultGameMode))maps.defaultGameMode=id;ImGui::EndCombo();}
+        if(ImGui::Button("Create Default GameMode")){maps.modes.try_emplace("Default");maps.defaultGameMode="Default";}
+        ecs::PropertyDescriptor property;property.kind=ecs::PropertyKind::Asset;property.asset=ecs::AssetKind::Prefab;
+        ImGui::PushID("ProjectPlayer");ImGui::TextUnformatted("Project Default Player Prefab");DrawInspectorResource(property,maps.defaultPlayerPrefab);ImGui::PopID();
+        std::string effective=maps.defaultPlayerPrefab;
+        if(auto mode=maps.modes.find(maps.defaultGameMode);mode!=maps.modes.end()){ImGui::Checkbox("Auto Spawn Player",&mode->second.autoSpawnPlayer);ImGui::PushID("ModePlayer");ImGui::TextUnformatted("GameMode Player Prefab (empty inherits project)");DrawInspectorResource(property,mode->second.defaultPlayerPrefab);ImGui::PopID();if(!mode->second.defaultPlayerPrefab.empty())effective=mode->second.defaultPlayerPrefab;}
+        ImGui::TextWrapped("Effective default: %s",effective.empty()?"None":effective.c_str());ImGui::TextWrapped("Requires an enabled PlayerStart using GameMode Default. No implicit player is created without a marker.");
+        ImGui::EndDisabled();
     }else{
         ImGui::SeparatorText("Startup / Runtime");
         ImGui::TextWrapped("Startup Scene is selected once in General and loads when the project opens. Saving its path does not replace the scene you are editing.");
@@ -90,10 +113,10 @@ void EditorLayer::DrawProjectSettings(Application& app){
     const bool needsApply=project->gpuInstancing!=app.IsGpuInstancingEnabled();
     ImGui::BeginDisabled(app.IsEditorPlayMode()||(!ProjectSettingsDirty()&&!needsApply));if(ImGui::Button("Save & Apply"))SaveProjectSettingsDraft(app);ImGui::EndDisabled();
     ImGui::SameLine();if(ImGui::Button("Revert"))RevertProjectSettings(app);
-    ImGui::SameLine();if(ImGui::Button("Close"))m_ShowProjectSettings=false;
+    ImGui::SameLine();if(ImGui::Button("Close"))open=false;
     if(!m_ProjectSettingsError.empty())ImGui::TextWrapped("Error: %s",m_ProjectSettingsError.c_str());
     else if(!m_ProjectSettingsNotice.empty())ImGui::TextWrapped("%s",m_ProjectSettingsNotice.c_str());
     else ImGui::TextDisabled("Project descriptor: %s",AssetPaths::ToUtf8String(project->descriptorPath.filename()).c_str());
-    ImGui::End();
+    ImGui::End();if(!open)close();
 }
 }

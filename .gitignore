@@ -41,3 +41,14 @@ compile_commands.json
 
 # Authored procedural model sources (not compiler object files).
 !engine/assets/models/primitives/*.obj
+
+# Local architecture notes remain on disk, outside the Git index.
+/docs/
+
+# Regenerable loader caches and runtime log.
+*.wmesh
+*.wtex
+/engine.log
+
+# Project OBJ meshes are authored resources, not compiler objects.
+!test_projects/**/*.obj

@@ -19,6 +19,7 @@
 #endif
 #include <fstream>
 #include <iostream>
+#include <initializer_list>
 #include <thread>
 static void Check(bool condition,const char* message){if(!condition)throw std::runtime_error(message);}
 struct RegressionExtension {float gain=1;};
@@ -32,8 +33,14 @@ static void Extension(){
 }
 static void Cpu(){
     Extension();
-    const auto& registry=ecs::ComponentRegistry::Builtins();Check(registry.Components().size()==17,"builtin component coverage including Fog, LuaScript and player components");
-    for(const char* key:{"Fog","PlayerStart","Player","CharacterMovement"}){const auto* component=registry.Find(key);Check(component&&component->id==ecs::ComponentId(key),"player component stable descriptor");}
+    const auto& registry=ecs::ComponentRegistry::Builtins();
+    const std::initializer_list<const char*> builtinKeys={
+        "Tag","SceneIdentity","PrefabInstance","Transform","MeshRenderer","Material",
+        "UICanvas","PostProcessVolume","Rigidbody","Collider","Velocity","BoundsBounce",
+        "DirectionalLight","PointLight","SpotLight","Fog","LuaScript","PlayerStart",
+        "Player","CharacterMovement","Camera","CameraAttachment"};
+    Check(registry.Components().size()==builtinKeys.size(),"exact builtin component coverage");
+    for(const char* key:builtinKeys){const auto* component=registry.Find(key);Check(component&&component->id==ecs::ComponentId(key),"builtin component stable descriptor");}
     const auto* script=registry.Find("LuaScript");Check(script&&script->id==ecs::ComponentId("LuaScript")&&script->properties.size()==4,"LuaScript stable descriptor, asset/enabled and explicit input/camera permissions");
     ecs::World a,b;auto e=a.CreateEntity(),other=b.CreateEntity();Check(e.index==other.index&&e.generation==other.generation&&e!=other,"World identity in Entity equality");Check(!a.IsAlive(other)&&!b.IsAlive(e),"foreign handles cannot alias");
     std::string error;Check(registry.Add(a,e,ecs::ComponentId("Transform"),&error),"registry add");Check(!registry.Add(a,other,ecs::ComponentId("Transform"),&error),"registry foreign add");
@@ -64,8 +71,8 @@ static void Cpu(){
     Check(!editor.SetProperty(app,entity,ecs::ComponentId("SceneIdentity"),"value",std::string("forged")),"readonly scene identity");
     Check(editor.AddComponent(app,entity,ecs::ComponentId("PointLight")),"point component");Check(editor.AddComponent(app,entity,ecs::ComponentId("Rigidbody"))&&editor.AddComponent(app,entity,ecs::ComponentId("Collider")),"physics components");
     auto disposable=editor.CreateEntity(app,"Disposable");auto duplicate=editor.DuplicateEntity(app,entity);Check(world.IsAlive(duplicate)&&world.GetComponent<ecs::SceneIdentityComponent>(duplicate)->value!=world.GetComponent<ecs::SceneIdentityComponent>(entity)->value,"duplicate identity");
-    Check(editor.RenameEntity(app,duplicate,"Renamed"),"rename");editor.UndoEdit(app);Check(world.GetComponent<ecs::TagComponent>(duplicate)->name=="Original Copy","rename Undo");editor.RedoEdit(app);Check(world.GetComponent<ecs::TagComponent>(duplicate)->name=="Renamed","rename Redo");
-    Check(editor.DeleteEntity(app,duplicate),"generic delete");editor.UndoEdit(app);auto restored=editor.GetSelectedEntity();Check(restored!=duplicate&&world.IsAlive(restored),"delete Undo generation");editor.UndoEdit(app);Check(world.GetComponent<ecs::TagComponent>(restored)->name=="Original Copy","history remap after delete");editor.RedoEdit(app);editor.RedoEdit(app);Check(!world.IsAlive(restored),"redo remapped delete");
+    Check(editor.RenameEntity(app,duplicate,"Renamed"),"rename");editor.UndoEdit(app);Check(world.GetComponent<ecs::TagComponent>(duplicate)->name=="Original1","rename Undo");editor.RedoEdit(app);Check(world.GetComponent<ecs::TagComponent>(duplicate)->name=="Renamed","rename Redo");
+    Check(editor.DeleteEntity(app,duplicate),"generic delete");editor.UndoEdit(app);auto restored=editor.GetSelectedEntity();Check(restored!=duplicate&&world.IsAlive(restored),"delete Undo generation");editor.UndoEdit(app);Check(world.GetComponent<ecs::TagComponent>(restored)->name=="Original1","history remap after delete");editor.RedoEdit(app);editor.RedoEdit(app);Check(!world.IsAlive(restored),"redo remapped delete");
     editor.SelectEntity(entity);editor.MarkSaved();auto count=editor.UndoCount();editor.RecordEdit(app,"Drag position");for(int i=0;i<100;++i)world.GetComponent<ecs::TransformComponent>(entity)->position.x=i*.01f;editor.FinishTransaction(app);Check(editor.UndoCount()==count+1&&editor.IsSceneDirty(),"drag coalescing/dirty");editor.UndoEdit(app);Check(!editor.IsSceneDirty()&&world.GetComponent<ecs::TransformComponent>(entity)->position.x==0,"Undo savepoint");editor.RedoEdit(app);
     editor.RecordEdit(app,"Cancelled drag");world.GetComponent<ecs::TransformComponent>(entity)->position.x=18;editor.CancelTransaction(app);Check(std::abs(world.GetComponent<ecs::TransformComponent>(entity)->position.x-.99f)<1e-6,"cancel rollback");
     auto settings=app.GetSceneSettings();settings.lighting.ambientColor={.2f,.3f,.4f};settings.lighting.ambientIntensity=.17f;settings.environment.enabled=true;settings.environment.exposure=1.5f;settings.shadows.resolution=1024;settings.shadows.normalBias=.3f;

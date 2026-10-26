@@ -17,6 +17,7 @@
 #include "../ecs/components/VelocityComponent.h"
 #include "../ecs/components/PlayerStartComponent.h"
 #include "../ecs/PlayerSpawn.h"
+#include "RuntimeLevel.h"
 #include "../ecs/components/PlayerComponent.h"
 #include "../ecs/components/CharacterMovementComponent.h"
 #include "../ecs/systems/BoundsBounceSystem.h"
@@ -47,6 +48,7 @@
 #include <array>
 #include <sstream>
 #include <unordered_set>
+#include <utility>
 
 Application::Application() = default;
 Application::~Application() = default;
@@ -593,7 +595,7 @@ bool Application::ReloadSceneFromCurrentConfig(const char* reason){
 }
 
 bool Application::SaveCurrentScene(std::string* error){
-    if(IsPrefabEditing()){m_EditorLayer.RequestPrefabSave();return true;}
+    if(IsPrefabEditing())return m_EditorLayer.SavePrefabEditor(*this,true);
     return SaveSceneAs(m_SceneKey.empty()?DefaultSceneKey():m_SceneKey,!m_SceneKey.empty(),error);
 }
 bool Application::LoadCurrentScene(std::string* error){
@@ -849,7 +851,7 @@ void Application::UpdateCameraController(float dt)
         return;
 
     // A Lua camera lease excludes editor navigation, independent of Player presence.
-    if(m_EditorPlayMode&&m_LuaRuntime.HasCameraOwner()){
+    if(m_EditorPlayMode&&(m_LuaRuntime.HasCameraOwner()||m_GameplayCamera.Active(GetWorld()).IsValid())){
         if(m_Camera.controlsActive){
             if(!m_PlayerMouseCaptured){glfwSetInputMode(window,GLFW_CURSOR,GLFW_CURSOR_NORMAL);if(glfwRawMouseMotionSupported())glfwSetInputMode(window,GLFW_RAW_MOUSE_MOTION,GLFW_FALSE);}
             m_Camera.controlsActive=false;m_Camera.previousRightMouseDown=false;
@@ -997,12 +999,14 @@ void Application::UpdateRenderSystemCameraAspect(float aspectRatio)
     if (aspectRatio <= 0.0001f)
         aspectRatio = kFallbackAspectRatio;
 
-    m_RenderSystem->SetCameraTransform(m_Camera.position, m_Camera.yaw, m_Camera.pitch);
-    m_RenderSystem->SetCameraProjection(
-        m_Camera.verticalFovRadians,
-        aspectRatio,
-        m_Camera.nearPlane,
-        m_Camera.farPlane);
+    auto active=m_EditorPlayMode?m_GameplayCamera.Active(GetWorld()):ecs::Entity{};
+    if(active.IsValid())m_RenderCameraState=ecs::ResolveCameraState(GetWorld(),active,aspectRatio,&m_RenderInterpolation);
+    else{
+        ecs::CameraComponent c;c.fieldOfView=m_Camera.verticalFovRadians;c.nearClip=m_Camera.nearPlane;c.farClip=m_Camera.farPlane;
+        m_RenderCameraState=ecs::BuildCameraState({m_Camera.position,{1,1,1},ecs::RenderRotation({-m_Camera.pitch,m_Camera.yaw,0})},c,aspectRatio);
+    }
+    m_RenderSystem->SetCameraAttachmentsEnabled(m_EditorPlayMode);
+    m_RenderSystem->SetCameraState(m_RenderCameraState);
 }
 
 ecs::Entity Application::SpawnGameplayEntity()
@@ -1087,6 +1091,11 @@ bool Application::IsInputActionActive(const std::string& action) const
     return m_InputManager.IsActionActive(action);
 }
 
+bool Application::PlayFromGameStartupMap(){
+    if(!GetProject()){m_PlayError="Game Startup preview requires an open project";return false;}
+    if(IsEditorPlayMode()||IsPrefabEditing())return false;
+    m_PlayStartupMap=true;SetEditorPlayMode(true);m_PlayStartupMap=false;return IsEditorPlayMode();
+}
 void Application::SetEditorPlayMode(bool enabled)
 {
     if(enabled&&IsPrefabEditing())return;
@@ -1110,16 +1119,31 @@ void Application::SetEditorPlayMode(bool enabled)
         m_SavedEditorCamera.yaw = m_Camera.yaw;
         m_SavedEditorCamera.pitch = m_Camera.pitch;
         const auto start=std::chrono::steady_clock::now();
-        auto runtime=m_World.CloneData(&m_CloneMapping);
+        ecs::World::CloneMap mapping;
+        std::unique_ptr<ecs::World> runtime;
+        ecs::Entity playerEntity;ecs::TransformComponent spawnPoint;bool prefabSpawn=false;SceneSettings startupSettings;
+        m_PlayError.clear();
+        Logger::Get().BeginRuntimeSession();
+        try{
+            auto project=GetProject();std::string key;
+            if(m_PlayStartupMap)key=project->maps.gameStartupMap.empty()?project->startupScene:project->maps.gameStartupMap;
+            auto level=PrepareRuntimeLevel(m_World,project.get(),key);
+            runtime=std::move(level.world);mapping=std::move(level.mapping);startupSettings=level.settings;
+            playerEntity=level.player;spawnPoint=level.spawn;prefabSpawn=level.prefabSpawn;
+        }catch(const std::exception& failure){
+            m_PlayError=std::string("Cannot start Play: ")+(m_PlayStartupMap?"Game Startup Map: ":"")+failure.what();
+            Logger::Get().Error(m_PlayError);Logger::Get().EndRuntimeSession();return;
+        }
+        m_CloneMapping=std::move(mapping);
         m_EditDebugEntities=m_EcsDebugEntities;m_EditStressEntities=m_StressEntities;
         m_EditLighting=m_LightingSettings;m_EditEnvironment=m_EnvironmentSettings;m_EditShadows=m_ShadowSettings;m_EditBackground=m_Background;m_EditAntiAliasing=m_AntiAliasing;
         auto map=[&](std::vector<ecs::Entity>& entities){std::erase_if(entities,[&](auto e){return !m_CloneMapping.contains(e);});for(auto& e:entities)e=m_CloneMapping.at(e);};
         map(m_EcsDebugEntities);map(m_StressEntities);
         m_EditorLayer.EnterRuntime(m_CloneMapping);
         m_RuntimeWorld=std::move(runtime);
-        ecs::TransformComponent spawnPoint;
-        m_PlayerEntity=ecs::SpawnPlayer(*m_RuntimeWorld,&spawnPoint);
-        if(m_RuntimeWorld->IsAlive(m_PlayerEntity)){
+        if(m_PlayStartupMap)SetSceneSettings(startupSettings);
+        m_PlayerEntity=playerEntity;
+        if(!prefabSpawn&&m_RuntimeWorld->IsAlive(m_PlayerEntity)){
             const auto& t=*m_RuntimeWorld->GetComponent<ecs::TransformComponent>(m_PlayerEntity);
             const auto& player=*m_RuntimeWorld->GetComponent<ecs::PlayerComponent>(m_PlayerEntity);
             m_Camera.position=ecs::PlayerEyePosition(t.position,player.eyeHeight,m_RuntimeWorld->GetComponent<ecs::ColliderComponent>(m_PlayerEntity)->halfExtents.y);
@@ -1130,20 +1154,72 @@ void Application::SetEditorPlayMode(bool enabled)
         m_StateMachine.Clear(*this);RequestStateChange(std::make_unique<LoadingState>());m_StateMachine.ApplyPending(*this);
         m_LastCloneMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
     }else{
+        m_PlayerEntity={};m_PlayError.clear();
         ReleasePlayerMouse();
         if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
         m_StateMachine.Clear(*this);
-        m_LuaRuntime.Stop();m_InputManager.RestoreBindings(std::move(m_EditInputBindings));m_Mutations.Clear();m_RenderInterpolation.Clear();m_EditorLayer.LeaveRuntime();m_RuntimeWorld.reset();m_CloneMapping.clear();
+        m_LuaRuntime.Stop();Logger::Get().EndRuntimeSession();m_GameplayCamera={};m_RenderCameraState.entity={};m_InputManager.RestoreBindings(std::move(m_EditInputBindings));m_Mutations.Clear();m_RenderInterpolation.Clear();m_EditorLayer.LeaveRuntime();m_RuntimeWorld.reset();m_CloneMapping.clear();
         m_Camera.position = m_SavedEditorCamera.position;
         m_Camera.yaw = m_SavedEditorCamera.yaw;
         m_Camera.pitch = m_SavedEditorCamera.pitch;
         m_EcsDebugEntities=std::move(m_EditDebugEntities);m_StressEntities=std::move(m_EditStressEntities);
         m_LightingSettings=m_EditLighting;m_EnvironmentSettings=m_EditEnvironment;m_ShadowSettings=m_EditShadows;m_Background=m_EditBackground;m_AntiAliasing=m_EditAntiAliasing;
     }
+    m_PendingLevelTravel.clear();m_LevelTravelError.clear();
     m_EditorPlayMode=enabled;m_EditorPaused=false;ResetPhysicsClock();m_ActiveCollisionPairs.clear();
     if(m_PhysicsSystem){m_PhysicsSystem->ResetState();m_PhysicsSystem->SetEnabled(enabled);}
     m_EditorLayer.PruneSelection(*this);
     Logger::Get().Info(enabled?"Editor: Play isolated Runtime World":"Editor: Stop discarded Runtime World");
+}
+bool Application::RequestLevelTravel(const std::string& key){
+    if(!m_EditorPlayMode||!m_RuntimeWorld)throw std::runtime_error("Level Travel requires active Play");
+    auto project=GetProject();if(!project)throw std::runtime_error("Level Travel requires an open project");
+    if(key.empty()||key.size()>1024)throw std::runtime_error("Invalid Level Travel scene path");
+    (void)project->ResolveScene(key); // Existing containment, link and extension validation.
+    if(!m_PendingLevelTravel.empty())return false; // First accepted request wins.
+    m_PendingLevelTravel=key;return true;
+}
+void Application::ApplyLevelTravel(){
+    if(!m_EditorPlayMode||m_PendingLevelTravel.empty())return;
+    auto key=std::exchange(m_PendingLevelTravel,{});PreparedRuntimeLevel level;
+    try{level=PrepareRuntimeLevel(m_World,GetProject().get(),key);}
+    catch(const std::exception& failure){
+        m_LevelTravelError="Level Travel '"+key+"' failed: "+failure.what();
+        Logger::Get().Error(m_LevelTravelError);return;
+    }
+    // No callbacks are active here. Retire against the OLD World before publication.
+    m_LuaRuntime.Stop();ReleasePlayerMouse();m_StateMachine.Clear(*this);
+    m_InputManager.RestoreBindings(m_EditInputBindings);
+    m_PlayerAltWasDown=false;m_ProjectileInput={};
+    if(m_Camera.controlsActive){
+        if(auto* native=dynamic_cast<GlfwWindow*>(GetWindow()))if(auto* window=native->GetGlfwHandle()){
+            glfwSetInputMode(window,GLFW_CURSOR,GLFW_CURSOR_NORMAL);
+            if(glfwRawMouseMotionSupported())glfwSetInputMode(window,GLFW_RAW_MOUSE_MOTION,GLFW_FALSE);
+        }
+        m_Camera.controlsActive=false;m_Camera.previousRightMouseDown=true;
+    }
+    m_Mutations.Clear();m_RenderInterpolation.Clear();m_ActiveCollisionPairs.clear();
+    if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
+    // Restore then resuspend authored history, dropping all transient runtime handles.
+    m_EditorLayer.LeaveRuntime();m_EditorLayer.EnterRuntime({});
+    m_RuntimeWorld=std::move(level.world);m_CloneMapping.clear();m_PlayerEntity=level.player;
+    m_EcsDebugEntities.clear();m_StressEntities.clear();
+    SetSceneSettings(level.settings);ResetPhysicsClock();
+    m_Camera.position=m_SavedEditorCamera.position;m_Camera.yaw=m_SavedEditorCamera.yaw;m_Camera.pitch=m_SavedEditorCamera.pitch;
+    if(!level.prefabSpawn&&m_RuntimeWorld->IsAlive(m_PlayerEntity)){
+        const auto& t=*m_RuntimeWorld->GetComponent<ecs::TransformComponent>(m_PlayerEntity);
+        const auto& player=*m_RuntimeWorld->GetComponent<ecs::PlayerComponent>(m_PlayerEntity);
+        m_Camera.position=ecs::PlayerEyePosition(t.position,player.eyeHeight,m_RuntimeWorld->GetComponent<ecs::ColliderComponent>(m_PlayerEntity)->halfExtents.y);
+        m_Camera.yaw=t.rotation.y;m_Camera.pitch=std::clamp(level.spawn.rotation.x,-kMaxCameraPitch,kMaxCameraPitch);
+    }
+    m_GameplayCamera={};m_GameplayCamera.position=m_Camera.position;m_GameplayCamera.yaw=m_Camera.yaw;m_GameplayCamera.pitch=m_Camera.pitch;
+    m_RenderCameraState=ecs::BuildCameraState({},ecs::CameraComponent{},16.f/9.f);
+    if(m_RenderSystem)m_RenderSystem->SetCameraState(m_RenderCameraState);
+    m_LevelTravelError.clear();
+    m_LuaRuntime.Start(*m_RuntimeWorld,[this](const std::string& action){return GameplayActionAllowed(action)&&m_InputManager.FrameDown(action);},GameplayCapabilities());
+    RequestStateChange(std::make_unique<LoadingState>());m_StateMachine.ApplyPending(*this);
+    m_EditorLayer.PruneSelection(*this);
+    Logger::Get().Info("Level Travel loaded: "+key);
 }
 void Application::SetEditorPaused(bool paused){
     if(!m_EditorPlayMode||m_EditorPaused==paused)return;m_EditorPaused=paused;if(paused)m_LuaRuntime.SuspendInput();
@@ -1192,7 +1268,7 @@ void Application::UpdateEcs(float dt)
 
 bool Application::Initialize(StartupMode mode)
 {
-    Logger::Get().Initialize("engine.log");
+    Logger::Get().Initialize("engine.log");Logger::Get().ClearRuntimeSession();
     Logger::Get().Info("Application Initialize");
 
     if (!ValidateAssetDependencyAvailability())
@@ -1299,6 +1375,8 @@ bool Application::Initialize(StartupMode mode)
     });
     m_LegacyStartupScene=m_Config.ecsDemo.sceneFile;
     SetupEcsRuntimeDemo(!m_ProjectBrowserActive);
+    // Bootstrap establishes the baseline; stress cleanup is not a user edit.
+    m_EditorLayer.MarkSaved();
     if(!m_ProjectBrowserActive&&!m_Config.ecsDemo.sceneFile.empty()){std::string error;if(!OpenScene(m_Config.ecsDemo.sceneFile,&error))Logger::Get().Error(error);}
     m_EditorLayer.InitializePreferences(*this);
     if(m_ProjectBrowserActive)m_EditorLayer.ShowProjectBrowser();
@@ -1438,7 +1516,7 @@ int Application::Run()
 
         }
 
-        if((GetProject()||IsPrefabEditing())&&m_EditorLayer.HasProjectEdits()&&!m_EditorLayer.ProjectExitConfirmed()){
+        if((GetProject()||IsPrefabEditing()||m_EditorLayer.ScriptDraftsDirty())&&m_EditorLayer.HasProjectEdits()&&!m_EditorLayer.ProjectExitConfirmed()){
             if(auto* native=dynamic_cast<GlfwWindow*>(GetWindow()))if(native->ShouldClose()){
                 glfwSetWindowShouldClose(native->GetGlfwHandle(),GLFW_FALSE);m_EditorLayer.RequestProjectExit();
             }
@@ -1497,6 +1575,7 @@ int Application::Run()
         {
             ZoneScopedN("GameUpdate");
 
+            ApplyLevelTravel();
             if(m_EditorPlayMode)UpdateGameplayInput(dt);
             if(m_EditorPlayMode)m_LuaRuntime.DispatchUIEvents();
             const auto luaStart=std::chrono::steady_clock::now();
@@ -1639,34 +1718,57 @@ int Application::Run()
 
                 if(m_RenderSystem)m_RenderSystem->SetUIPreview(m_EditorPlayMode||m_EditorLayer.IsUIPreviewVisible());
                 wc.renderer->SetAntiAliasing(m_AntiAliasing);
+                // Resolve the current render pose before sky/background submission too.
+                const int cameraWidth=m_EditorLayer.GetViewportPixelWidth(),cameraHeight=m_EditorLayer.GetViewportPixelHeight();
+                if(cameraWidth>1&&cameraHeight>1)UpdateRenderSystemCameraAspect(float(cameraWidth)/cameraHeight);
+                else UpdateRenderSystemCamera(wc.window.get());
                 wc.renderer->SetEditorVisuals(m_EditorLayer.BuildVisualFrame(*this));
                 const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
                 const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();
+                const auto preview=m_EditorLayer.GetCameraPreviewRequest();
+                auto* previewCamera=GetWorld().GetComponent<ecs::CameraComponent>(preview.entity);
+                bool previewEligible=(&wc==&m_Windows.front())&&!m_EditorPlayMode&&wc.editorUiAvailable&&wc.renderer->SupportsCameraPreview()&&preview.width>1&&preview.height>1&&previewCamera&&previewCamera->enabled&&ecs::ValidCamera(*previewCamera)&&GetWorld().HasComponent<ecs::TransformComponent>(preview.entity);
+                ecs::CameraState previewState;
+                if(previewEligible)try{previewState=ecs::ResolveCameraState(GetWorld(),preview.entity,float(preview.width)/preview.height);}
+                catch(const std::exception& failure){previewEligible=false;Logger::Get().Warn(std::string("Camera Preview: ")+failure.what());}
+                const bool previewFrame=previewEligible&&(m_CameraPreviewFrame++%4==0);
+                if(!previewEligible){if(&wc==&m_Windows.front())m_CameraPreviewFrame=0;wc.renderer->ReleaseCameraPreview();}
                 const bool renderSceneToViewport =
                     !m_ProjectBrowserActive && wc.editorUiAvailable &&
-                    viewportWidth > 1 &&
-                    viewportHeight > 1 &&
-                    wc.renderer->BeginViewportRender(viewportWidth, viewportHeight, wc.clear);
+                    (previewFrame||(viewportWidth > 1 && viewportHeight > 1)) &&
+                    (previewFrame?wc.renderer->BeginCameraPreview(preview.width,preview.height,wc.clear):wc.renderer->BeginViewportRender(viewportWidth, viewportHeight, wc.clear));
 
                 if (renderSceneToViewport)
                 {
                     if (m_RenderSystem != nullptr)
                     {
                         m_RenderSystem->SetRenderAdapter(wc.renderer.get());
-                        UpdateRenderSystemCameraAspect(static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight));
+                        if(previewFrame){
+                            const auto& state=previewState;
+                            m_RenderSystem->SetCameraState(state);m_RenderSystem->SetDebugCollidersEnabled(false);
+                            m_RenderSystem->SetEditorIsolation({});m_RenderSystem->SetPlacementPreview({});
+                            auto visuals=m_EditorLayer.BuildVisualFrame(*this);visuals.game=true;visuals.showGrid=false;
+                            static_cast<SceneBackground&>(visuals.settings)=m_Background;
+                            visuals.camera={state.pose.position.x,state.pose.position.y,state.pose.position.z};
+                            visuals.right={state.right.x,state.right.y,state.right.z};visuals.up={state.up.x,state.up.y,state.up.z};visuals.forward={state.forward.x,state.forward.y,state.forward.z};
+                            visuals.aspect=state.aspect;visuals.tanHalfFov=state.settings.projection==ecs::CameraProjection::Orthographic?0.f:std::tan(state.settings.fieldOfView*.5f);
+                            visuals.nearPlane=state.settings.nearClip;visuals.farPlane=state.settings.farClip;wc.renderer->SetEditorVisuals(visuals);
+                        }else UpdateRenderSystemCameraAspect(static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight));
                     }
 
                     {
                         ZoneScopedN("WorldSystems");
                         m_RenderInterpolation.SetFrame(GetWorld(), IsSimulationRunning(),
                             m_FixedClock.Accumulator()/FixedStepClock::TickSeconds);
-                        editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);
+                        if(!previewFrame)editor::SynchronizeSun(GetWorld(),m_Background,m_Background.useIblEnvironment?m_EnvironmentSettings.rotationDegrees:m_Background.skyRotation);
                         const auto renderStart=std::chrono::steady_clock::now();
-                        m_World.UpdateFrameSystemsOn(GetWorld(),dt);
+                        if(previewFrame){if(m_RenderSystem)m_RenderSystem->Update(GetWorld(),dt);}
+                        else m_World.UpdateFrameSystemsOn(GetWorld(),dt);
                         if(m_FrameObserver)m_FrameCpuMs[4]+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-renderStart).count();
                     }
-                    m_StateMachine.Render(*this, *wc.renderer);
-                    wc.renderer->EndViewportRender();
+                    if(!previewFrame)m_StateMachine.Render(*this, *wc.renderer);
+                    if(previewFrame){wc.renderer->EndCameraPreview();if(m_RenderSystem)m_RenderSystem->SetCameraState(m_RenderCameraState);wc.renderer->SetEditorVisuals(m_EditorLayer.BuildVisualFrame(*this));}
+                    else wc.renderer->EndViewportRender();
                 }
 
                 wc.renderer->Clear(wc.clear[0], wc.clear[1], wc.clear[2], wc.clear[3]);
@@ -1790,6 +1892,7 @@ void Application::UpdateGameplayInput(float uiDelta)
 scripting::GameplayServices Application::GameplayCapabilities()
 {
     scripting::GameplayServices host;
+    host.loadScene=[this](const std::string& key){return RequestLevelTravel(key);};
     host.inputAllowed=[this]{return GameplayInputAllowed();};
     host.pressed=[this](const std::string& a){return GameplayActionAllowed(a)&&m_InputManager.FramePressed(a);};
     host.released=[this](const std::string& a){return GameplayActionAllowed(a)&&m_InputManager.FrameReleased(a);};

@@ -3,6 +3,7 @@
 #include "SyntheticEditorInput.h"
 #include "core/Application.h"
 #include "ecs/FogGather.h"
+#include "ecs/PlayerSpawn.h"
 #include "ecs/components/ColliderComponent.h"
 #include "scene/SceneSerializer.h"
 #include "editor/LightGizmoMath.h"
@@ -92,9 +93,35 @@ static void Gpu(){
     Check(renderer->GetValidationErrorCount()==0,"DX12 validation zero");
 }
 #endif
+// Optional local diagnostic. Only an explicitly copied fixture may be opened:
+// loaders may write model caches, so never point this at the user's project.
+#if defined(ENABLE_DX12)
+static void ProjectDiagnostic(const std::filesystem::path& descriptor){
+    Check(std::filesystem::exists(descriptor.parent_path()/"stability-fixture"),"Project diagnostic requires an owned copy marker");
+    Application app;Check(app.Initialize(Application::StartupMode::ProjectBrowser),"Project diagnostic init");SyntheticEditorInput input;auto* window=dynamic_cast<GlfwWindow*>(app.GetWindow())->GetGlfwHandle();glfwHideWindow(window);std::string error;Check(app.OpenProject(descriptor,Application::ProjectDecision::Discard,&error),error.c_str());
+    auto& editor=app.GetEditorLayer();editor.SetFixedDiagnosticLayout(true);editor.SetDiagnosticViewport(400,300);editor.SetGameView(true);editor.SetGridVisible(false);editor.SetBackgroundOverride(false);app.SetEditorCameraPose({0,3,-6},0,0);
+    auto* gpu=dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter());auto frame=[&](unsigned n=6){app.SetFrameLimit(n);Check(app.Run()==0,"Project diagnostic native frames");};frame(100);
+    Entity fogEntity;for(auto e:app.GetWorld().Entities())if(app.GetWorld().HasComponent<FogComponent>(e))fogEntity=e;Check(fogEntity.IsValid(),"copied Project has Fog");
+    const auto original=*app.GetWorld().GetComponent<FogComponent>(fogEntity);const auto settings=app.GetSceneSettings();std::ofstream csv("fog-captures/projectA-comparison.csv");csv<<"scenario,mean_hdr,cpu_ms,gpu_ms,width,height\n";
+    auto measure=[&](const char* name){frame(12);double cpu=0,gpuTime=0;for(int i=0;i<8;++i){frame(1);auto stats=gpu->GetFogDiagnostics();cpu+=stats.cpuMs;gpuTime+=stats.gpuMs;}auto pixels=gpu->ReadBackViewportPixels();Image(std::string("projectA-")+name,pixels,editor.GetViewportPixelWidth(),editor.GetViewportPixelHeight());auto hdr=gpu->ReadBackHdrPixels();double total=0;for(std::size_t i=0;i<hdr.size();++i)if(i%4!=3){if(!std::isfinite(hdr[i])||hdr[i]<0)throw std::runtime_error("Project Fog nonfinite/negative radiance");total+=hdr[i];}const double mean=total/(hdr.size()*3/4);csv<<name<<','<<mean<<','<<cpu/8<<','<<gpuTime/8<<','<<editor.GetViewportPixelWidth()<<','<<editor.GetViewportPixelHeight()<<'\n';return mean;};
+    auto& fog=*app.GetWorld().GetComponent<FogComponent>(fogEntity);fog.enabled=false;const double off=measure("off");fog.enabled=true;fog.mode=FogMode::Distance;measure("distance");fog.mode=FogMode::Height;measure("height");fog.mode=FogMode::Volumetric;measure("volume-authored");fog.extinction=.04f;measure("volume-control");
+    const auto beforePreview=gpu->ReadBackHdrPixels();const auto sceneDocument=editor.ActiveDocument();
+    Check(editor.OpenDocument(app,"materials/new.material.json"),"copied Project Material Preview opens");frame(12);Check(editor.ActivateDocument(app,sceneDocument),"return from Material Preview to Fog scene");frame(12);Check(gpu->ReadBackHdrPixels()==beforePreview,"Material Preview does not change Fog/lighting pixel output");
+    app.SetViewportUnlit(true);measure("unlit");app.SetViewportUnlit(false);
+    std::vector<std::pair<Entity,float>> suns,spots;app.GetWorld().ForEach<DirectionalLightComponent>([&](Entity e,auto& light){suns.emplace_back(e,light.intensity);light.intensity=0;});measure("no-directional");for(auto [e,intensity]:suns)app.GetWorld().GetComponent<DirectionalLightComponent>(e)->intensity=intensity;
+    app.GetWorld().ForEach<SpotLightComponent>([&](Entity e,auto& light){spots.emplace_back(e,light.intensity);light.intensity=0;});measure("no-spot");for(auto [e,intensity]:spots)app.GetWorld().GetComponent<SpotLightComponent>(e)->intensity=intensity;
+    auto noPost=settings;noPost.antiAliasing=AntiAliasingMode::Off;noPost.environment.toneMapping=false;Check(app.SetSceneSettings(noPost),"Project output controls");measure("no-post");Check(app.SetSceneSettings(settings),"restore Project output controls");
+    // Keep the diagnostic camera fixed instead of comparing the editor view to
+    // the user's different spawn point/controller camera. Only the copy changes.
+    app.GetWorld().ForEach<PlayerStartComponent,TransformComponent>([](Entity,auto& start,auto& t){t.position={0,3-PlayerEyeHeight(start),-6};t.rotation={};});
+    app.SetEditorPlayMode(true);app.GetLuaRuntime().Stop();measure("play");app.SetEditorPaused(true);measure("pause");app.SetEditorPlayMode(false);measure("edit-return");
+    editor.SetDiagnosticViewport(0,0);editor.SetGameView(false);ImGui::SetWindowFocus("Viewport");SyntheticEditorInput::Key(ImGuiKey_F11,true);frame(1);SyntheticEditorInput::Key(ImGuiKey_F11,false);frame();measure("f11");
+    Check(off>0,"Project baseline has visible radiance");Check(gpu->GetValidationErrorCount()==0,"Project comparison DX12 validation zero");app.Shutdown();
+}
+#endif
 int main(int argc,char** argv){ScopedEditorPreferenceRestore prefs;try{
 #if defined(ENABLE_DX12)
-    if(argc>1&&std::string(argv[1])=="--dx12")Gpu();else
+    if(argc>2&&std::string(argv[1])=="--project")ProjectDiagnostic(std::filesystem::u8path(argv[2]));else if(argc>1&&std::string(argv[1])=="--dx12")Gpu();else
 #endif
     Cpu();std::cout<<"Fog: "<<checks<<" checks passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

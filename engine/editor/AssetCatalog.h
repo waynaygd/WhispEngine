@@ -2,6 +2,7 @@
 #include "../ecs/ComponentRegistry.h"
 #include <filesystem>
 #include <set>
+#include <optional>
 namespace editor {
 struct AssetType {
     std::string name,icon,folder;
@@ -9,7 +10,7 @@ struct AssetType {
     std::vector<std::string> extensions;
     bool shaderRoot=false;
 };
-struct AssetEntry {std::string key;std::size_t type=0;};
+struct AssetEntry {std::string key;std::size_t type=0;std::optional<std::uintmax_t> bytes;};
 struct AssetDependencyAudit {std::vector<std::string> confirmed,dynamic,incomplete;};
 // Register additional types at startup, then Refresh. Script/Prefab can provide
 // their own activation/creation handlers later without changing browser layout.

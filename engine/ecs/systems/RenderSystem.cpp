@@ -2,6 +2,7 @@
 #include "RenderSystem.h"
 #include "../components/UICanvasComponent.h"
 #include "../LightGather.h"
+#include "../CameraAttachments.h"
 
 #include "../World.h"
 #include "../components/MaterialComponent.h"
@@ -26,56 +27,6 @@ namespace
 {
 constexpr float kWhiteTint[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 
-float Dot(const ecs::Vec3& lhs, const ecs::Vec3& rhs)
-{
-    return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
-}
-
-ecs::Vec3 Cross(const ecs::Vec3& lhs, const ecs::Vec3& rhs)
-{
-    return ecs::Vec3{
-        lhs.y * rhs.z - lhs.z * rhs.y,
-        lhs.z * rhs.x - lhs.x * rhs.z,
-        lhs.x * rhs.y - lhs.y * rhs.x
-    };
-}
-
-float Length(const ecs::Vec3& vector)
-{
-    return std::sqrt(Dot(vector, vector));
-}
-
-ecs::Vec3 Normalize(const ecs::Vec3& vector)
-{
-    const float length = Length(vector);
-    if (length <= 0.0001f)
-        return ecs::Vec3{};
-
-    const float invLength = 1.0f / length;
-    return ecs::Vec3{ vector.x * invLength, vector.y * invLength, vector.z * invLength };
-}
-
-ecs::Vec3 BuildCameraForward(float yaw, float pitch)
-{
-    const float cosPitch = std::cos(pitch);
-    return Normalize(ecs::Vec3{
-        std::sin(yaw) * cosPitch,
-        std::sin(pitch),
-        std::cos(yaw) * cosPitch
-    });
-}
-
-void SetIdentity(float* out16)
-{
-    for (int i = 0; i < 16; ++i)
-        out16[i] = 0.0f;
-
-    out16[0] = 1.0f;
-    out16[5] = 1.0f;
-    out16[10] = 1.0f;
-    out16[15] = 1.0f;
-}
-
 void MultiplyMatrix(const float* lhs, const float* rhs, float* out16)
 {
     float result[16]{};
@@ -93,78 +44,13 @@ void MultiplyMatrix(const float* lhs, const float* rhs, float* out16)
         out16[i] = result[i];
 }
 
-void BuildViewMatrix(
-    float* out16,
-    const ecs::Vec3& cameraPosition,
-    float yaw,
-    float pitch)
+void BuildMvp(float* out16,const ecs::RenderPose& pose,const ecs::CameraState& camera,float* outModel=nullptr)
 {
-    const ecs::Vec3 worldUp{ 0.0f, 1.0f, 0.0f };
-    const ecs::Vec3 forward = BuildCameraForward(yaw, pitch);
-    const ecs::Vec3 right = Normalize(Cross(worldUp, forward));
-    const ecs::Vec3 up = Cross(forward, right);
-
-    // View matrix is the inverse of the camera transform, so the camera basis
-    // must be transposed relative to the world-space camera axes.
-    SetIdentity(out16);
-    out16[0] = right.x;
-    out16[1] = up.x;
-    out16[2] = forward.x;
-    out16[4] = right.y;
-    out16[5] = up.y;
-    out16[6] = forward.y;
-    out16[8] = right.z;
-    out16[9] = up.z;
-    out16[10] = forward.z;
-    out16[12] = -Dot(right, cameraPosition);
-    out16[13] = -Dot(up, cameraPosition);
-    out16[14] = -Dot(forward, cameraPosition);
+    float model[16];ecs::BuildRenderModelMatrix(model,pose);
+    if(outModel)std::copy(model,model+16,outModel);
+    MultiplyMatrix(camera.viewProjection.data(),model,out16);
 }
 
-void BuildPerspectiveMatrix(
-    float* out16,
-    float verticalFovRadians,
-    float aspectRatio,
-    float nearPlane,
-    float farPlane)
-{
-    const float yScale = 1.0f / std::tan(verticalFovRadians * 0.5f);
-    const float xScale = yScale / aspectRatio;
-    const float depthRange = farPlane - nearPlane;
-
-    for (int i = 0; i < 16; ++i)
-        out16[i] = 0.0f;
-
-    out16[0] = xScale;
-    out16[5] = yScale;
-    out16[10] = farPlane / depthRange;
-    out16[11] = 1.0f;
-    out16[14] = -(nearPlane * farPlane) / depthRange;
-}
-
-void BuildMvp(
-    float* out16,
-    const ecs::RenderPose& pose,
-    const ecs::Vec3& cameraPosition,
-    float cameraYaw,
-    float cameraPitch,
-    float verticalFovRadians,
-    float aspectRatio,
-    float nearPlane,
-    float farPlane, float* outModel = nullptr)
-{
-    float modelMatrix[16];
-    float viewMatrix[16];
-    float projectionMatrix[16];
-    float viewModel[16];
-
-    ecs::BuildRenderModelMatrix(modelMatrix, pose);
-    if(outModel) std::copy(modelMatrix, modelMatrix+16, outModel);
-    BuildViewMatrix(viewMatrix, cameraPosition, cameraYaw, cameraPitch);
-    BuildPerspectiveMatrix(projectionMatrix, verticalFovRadians, aspectRatio, nearPlane, farPlane);
-    MultiplyMatrix(viewMatrix, modelMatrix, viewModel);
-    MultiplyMatrix(projectionMatrix, viewModel, out16);
-}
 }
 
 namespace ecs {
@@ -182,11 +68,24 @@ namespace ecs {
             m_ResourceOwnerRenderer = renderer;
     }
 
+    void RenderSystem::SetCameraState(const CameraState& state)
+    {
+        m_RenderCamera=state;m_CameraPosition=state.pose.position;
+        m_CameraYaw=std::atan2(state.forward.x,state.forward.z);m_CameraPitch=std::asin(std::clamp(state.forward.y,-1.f,1.f));
+        m_CameraVerticalFovRadians=state.settings.fieldOfView;m_CameraAspectRatio=state.aspect;
+        m_CameraNearPlane=state.settings.nearClip;m_CameraFarPlane=state.settings.farClip;
+    }
+    void RenderSystem::RebuildLegacyCamera()
+    {
+        CameraComponent c;c.fieldOfView=m_CameraVerticalFovRadians;c.nearClip=m_CameraNearPlane;c.farClip=m_CameraFarPlane;
+        SetCameraState(BuildCameraState({m_CameraPosition,{1,1,1},RenderRotation({-m_CameraPitch,m_CameraYaw,0})},c,m_CameraAspectRatio));
+    }
     void RenderSystem::SetCameraTransform(const Vec3& position, float yawRadians, float pitchRadians)
     {
         m_CameraPosition = position;
         m_CameraYaw = yawRadians;
         m_CameraPitch = pitchRadians;
+        RebuildLegacyCamera();
     }
 
     void RenderSystem::SetCameraProjection(
@@ -195,13 +94,15 @@ namespace ecs {
         float nearPlane,
         float farPlane)
     {
-        m_CameraVerticalFovRadians = verticalFovRadians > 0.001f ? verticalFovRadians : 1.04719755f;
+        m_CameraVerticalFovRadians = std::isfinite(verticalFovRadians)?std::clamp(verticalFovRadians,.017453293f,3.1241394f):1.04719755f;
         m_CameraAspectRatio = aspectRatio > 0.001f ? aspectRatio : 16.0f / 9.0f;
-        m_CameraNearPlane = nearPlane > 0.0001f ? nearPlane : 0.01f;
+        m_CameraNearPlane = std::isfinite(nearPlane)?std::clamp(nearPlane,.001f,999999.f):.01f;
         m_CameraFarPlane =
             farPlane > m_CameraNearPlane + 0.001f
             ? farPlane
             : m_CameraNearPlane + 0.001f;
+        m_CameraFarPlane=std::min(m_CameraFarPlane,1000000.f);
+        RebuildLegacyCamera();
     }
 
     void RenderSystem::ReleaseGpuResources()
@@ -209,6 +110,7 @@ namespace ecs {
         IRenderAdapter* renderer = m_ResourceOwnerRenderer != nullptr ? m_ResourceOwnerRenderer : m_Renderer;
         if (renderer != nullptr)
         {
+            m_UIFonts.Clear(renderer);
             if(m_UIFontTexture.IsValid())renderer->DestroyTexture(m_UIFontTexture);m_UIFontTexture={};m_RuntimeUI.Clear();m_UIDrawList={};
             for (auto& [key, resource] : m_ShaderResources)
             {
@@ -272,8 +174,7 @@ namespace ecs {
         (void)dt;
         m_Statistics = {};m_MaterialDiagnostics.clear();
         LightCamera lightCamera;
-        BuildViewMatrix(lightCamera.view.data(),m_CameraPosition,m_CameraYaw,m_CameraPitch);
-        BuildPerspectiveMatrix(lightCamera.projection.data(),m_CameraVerticalFovRadians,m_CameraAspectRatio,m_CameraNearPlane,m_CameraFarPlane);
+        lightCamera.view=m_RenderCamera.view;lightCamera.projection=m_RenderCamera.projection;
         lightCamera.nearPlane=m_CameraNearPlane;lightCamera.farPlane=m_CameraFarPlane;
         auto lights=GatherSceneLights(world,m_LightingSettings?*m_LightingSettings:m_DefaultLighting,lightCamera,m_Interpolation);
         if(m_ViewportUnlit)lights.lighting.enabled=false;
@@ -362,7 +263,8 @@ namespace ecs {
                         if(resource==m_MeshResources.end())return;
                         const auto& mesh=resource->second->GetData().meshData;
                         const auto count=std::max(std::size_t(1),mesh.submeshes.size());
-                        const auto pose=m_Interpolation?m_Interpolation->ResolveWorld(world,entity):RenderPose::From(world.WorldTransform(entity));
+                        const auto attachment=m_CameraAttachmentsEnabled?CameraAttachmentPose(world,entity,m_RenderCamera,m_Interpolation):std::optional<RenderPose>{};
+                        const auto pose=attachment?*attachment:m_Interpolation?m_Interpolation->ResolveWorld(world,entity):RenderPose::From(world.WorldTransform(entity));
                         bool visible=false,casts=false;
                         for(std::size_t slot=0;slot<count;++slot) {
                             RenderSnapshot snapshot{};
@@ -447,7 +349,20 @@ namespace ecs {
                 auto settings=SanitizeShadowSettings(m_ShadowSettings?*m_ShadowSettings:m_DefaultShadows);
                 settings.enabled=settings.enabled&&lights.primaryCastShadows&&!m_ViewportUnlit;
                 const auto light=BuildLightingConstants(lights.lighting);
-                auto frame=BuildCameraDirectionalShadowFrame(light,settings,
+                ShadowFrame frame;
+                if(m_RenderCamera.settings.projection==CameraProjection::Orthographic){
+                    float far=std::min(m_CameraFarPlane,std::max(m_CameraNearPlane,settings.focusDistance));
+                    float distance=(m_CameraNearPlane+far)*.5f;
+                    float half=m_RenderCamera.settings.orthographicSize*.5f;
+                    if(settings.cameraFitted){
+                        float radius=std::ceil(std::sqrt(half*half*(1+m_CameraAspectRatio*m_CameraAspectRatio)+(far-distance)*(far-distance)));
+                        settings.coverage=std::max(settings.coverage,2*radius);
+                        settings.coverage+=2*settings.coverage/settings.resolution;
+                        settings.depthRange=std::max(settings.depthRange,settings.coverage+20.f);
+                    }else distance=settings.focusDistance;
+                    auto p=m_RenderCamera.pose.position,f=m_RenderCamera.forward;
+                    frame=BuildDirectionalShadowFrame(light,settings,{p.x+f.x*distance,p.y+f.y*distance,p.z+f.z*distance});
+                }else frame=BuildCameraDirectionalShadowFrame(light,settings,
                     {m_CameraPosition.x,m_CameraPosition.y,m_CameraPosition.z},m_CameraYaw,m_CameraPitch,
                     m_CameraVerticalFovRadians,m_CameraAspectRatio,m_CameraNearPlane,m_CameraFarPlane);
                 ExtendDirectionalCasterDepth(frame,m_ShadowWorldBounds);
@@ -507,7 +422,7 @@ namespace ecs {
                 if(!m_UIFontTexture.IsValid())m_UIFontTexture=m_Renderer->CreateTexture2D(m_UIFont->texture);
                 auto area=m_Renderer->RenderAreaSize();
                 const auto layoutStart=std::chrono::steady_clock::now();
-                m_UIDrawList=m_RuntimeUI.Build(world,*m_ResourceManager,float(area[0]),float(area[1]),*m_UIFont,m_UIFontTexture,[&](const std::string& key){return key.empty()?RenderTextureHandle{}:GetOrCreateTexture(key,true);});
+                m_UIDrawList=m_RuntimeUI.Build(world,*m_ResourceManager,float(area[0]),float(area[1]),*m_UIFont,m_UIFontTexture,[&](const std::string& key){return key.empty()?RenderTextureHandle{}:GetOrCreateTexture(key,true);},[&](const std::string& key){return m_UIFonts.Get(key,*m_ResourceManager,m_Renderer);});
                 m_Statistics.runtimeUILayoutMs=elapsed(layoutStart);
                 const auto uiSubmitStart=std::chrono::steady_clock::now();
                 m_Renderer->DrawRuntimeUI(m_UIDrawList);
@@ -542,16 +457,7 @@ namespace ecs {
                             collider.halfExtents.z * 2.0f
                         };
                     }
-                    BuildMvp(
-                        mvp,
-                        debugTransform,
-                        m_CameraPosition,
-                        m_CameraYaw,
-                        m_CameraPitch,
-                        m_CameraVerticalFovRadians,
-                        m_CameraAspectRatio,
-                        m_CameraNearPlane,
-                        m_CameraFarPlane);
+                    BuildMvp(mvp,debugTransform,m_RenderCamera);
                     m_Renderer->SetTestTransform(mvp);
                     m_Renderer->SetTestColor(0.1f, 1.0f, 0.1f, 1.0f);
                     m_Renderer->DrawTestCube();
@@ -647,16 +553,7 @@ namespace ecs {
         const RenderSnapshot& snapshot,
         RenderPacket& outPacket) const
     {
-        BuildMvp(
-            outPacket.instance.mvp.data(),
-            snapshot.pose,
-            m_CameraPosition,
-            m_CameraYaw,
-            m_CameraPitch,
-            m_CameraVerticalFovRadians,
-            m_CameraAspectRatio,
-            m_CameraNearPlane,
-            m_CameraFarPlane, outPacket.instance.model.data());
+        BuildMvp(outPacket.instance.mvp.data(),snapshot.pose,m_RenderCamera,outPacket.instance.model.data());
 
         outPacket.range=snapshot.range;outPacket.materialState=snapshot.materialState;outPacket.castShadows=snapshot.castShadows;
         outPacket.mesh = snapshot.mesh;
@@ -1207,5 +1104,5 @@ ui::DrawList ecs::RenderSystem::BuildUIDesignerPreview(const ui::Document& docum
   if(key.empty())return RenderTextureHandle{};
   auto cached=m_TextureResources.find(key);if(cached!=m_TextureResources.end()&&cached->second!=m_ResourceManager->Get<TextureResource>(key)){auto& data=cached->second->GetData();if(data.gpuHandle.IsValid()){m_Renderer->DestroyTexture(data.gpuHandle);data.gpuHandle={};data.gpuHandleVersion=0;}m_TextureResources.erase(cached);m_FailedTextureGpuVersions.erase(key);}
   return GetOrCreateTexture(key,true);
- });
+ },[&](const std::string& key){return m_UIFonts.Get(key,*m_ResourceManager,m_Renderer);});
 }

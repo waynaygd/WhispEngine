@@ -10,7 +10,7 @@
 4. Fog глобальный: Transform Entity не влияет на эффект. Высота слоя определяется явным Base Height.
 5. Undo/Redo, Scene Save/Load, prefab snapshots и Runtime World используют существующий ComponentRegistry. Отдельного формата сериализации Fog нет. Сцены без компонента сохраняют обычный rendering path.
 
-Диагностическая сцена: `engine/assets/scenes/fog_diagnostic.json`, автоматически staged в `assets/scenes/fog_diagnostic.json`. В ней есть плоскость, три Cube на разных расстояниях/высотах, Directional/Point/Spot Lights и Fog в Volumetric Mode. Для кадров автотеста камера: `(0, 3, -8)`, yaw/pitch = 0. Камера редактора не сериализуется этой сценой; при открытии можно выбрать нужный ракурс самостоятельно и переключать Mode в Inspector.
+Диагностическая сцена: `test_projects/legacy_workspace/Scenes/fog_diagnostic.json`, автоматически staged в `assets/scenes/fog_diagnostic.json`. В ней есть плоскость, три Cube на разных расстояниях/высотах, Directional/Point/Spot Lights и Fog в Volumetric Mode. Для кадров автотеста камера: `(0, 3, -8)`, yaw/pitch = 0. Камера редактора не сериализуется этой сценой; при открытии можно выбрать нужный ракурс самостоятельно и переключать Mode в Inspector.
 
 ## Inspector и валидация
 
@@ -156,7 +156,7 @@ Runner `tests/RunLuaScriptingDiagnostics.ps1` получил необязате�
 - `engine/render/backends/dx12/Dx12Environment.cpp`, `Dx12Shadows.cpp`: HDR integration point, один pass до editor grid/output.
 - `engine/shaders/dx12/fog.hlsl`: три режима, реконструкция, analytic Height, lit volume integration.
 - `engine/editor/EditorLayer.h`, `EditorTransactions.cpp`, `EditorUi.cpp`, `EditorInspector.cpp`: Create Fog, Add Component/Inspector sections, diagnostics, существующий Undo.
-- `engine/assets/scenes/fog_diagnostic.json`: диагностическая сцена.
+- `test_projects/legacy_workspace/Scenes/fog_diagnostic.json`: диагностическая сцена.
 - `CMakeLists.txt`, `engine/CMakeLists.txt`: новый модуль, shader/scene staging, CPU/DX12 tests.
 - `tests/FogRegression.cpp`, `Editor2Regression.cpp`, `RunLuaScriptingDiagnostics.ps1`, `FOG_SYSTEM_PERFORMANCE.csv`, `diagnostics/fog/*.png`, `FOG_SYSTEM_REPORT.md`: проверки (включая расширенный registry), измерения и документация.
 

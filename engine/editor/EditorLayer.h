@@ -8,6 +8,7 @@
 #include "../scene/SceneSettings.h"
 #include "../render/RenderResourceHandles.h"
 #include "EditorPreferences.h"
+#include "EditorDocuments.h"
 #include "InputRouting.h"
 #include "SelectionSet.h"
 #include "GroupTransform.h"
@@ -41,9 +42,16 @@ struct ImGuiContext;
 
 namespace editor
 {
+class LuaCodeEditor;
 class EditorLayer
 {
 public:
+    bool OpenDocument(Application&,const std::string&);
+    LuaCodeEditor& ScriptSession(Application&,const std::string&);
+    bool ScriptDraftsDirty()const;
+    bool SaveLuaDocument(Application&,const std::string&);
+    bool SaveAllDocuments(Application&);
+    bool OpenScriptAtLine(Application&,const std::string&,int line);
     class CameraMouseFrame {
         ImGuiContext* context=nullptr;
         bool restoreMouse=false;
@@ -55,7 +63,7 @@ public:
     };
     CameraMouseFrame RouteCameraMouse(bool captured,bool buttonsDown,const ImVec2& pointer);
     bool IsViewportMaximized()const{return m_ViewportMaximized;}
-    struct Statistics {double uiMs=0,hierarchyMs=0,inspectorMs=0,assetBrowserMs=0,lightGizmoMs=0;};
+    struct Statistics {double uiMs=0,hierarchyMs=0,inspectorMs=0,assetBrowserMs=0,lightGizmoMs=0;std::uint64_t inspectorPathProbes=0;};
     const Statistics& GetStatistics()const{return m_Statistics;}
     EditorVisualSettings& GetVisualSettings(){return m_VisualSettings;}
     bool ProjectileTestEnabled()const{return m_ProjectileTestInput;}
@@ -68,11 +76,20 @@ public:
     bool IsRotationSnapping()const{return m_RotationSnapping;}
     void SetSkyDiagnosticEnabled(bool enabled){m_SkyDiagnosticEnabled=enabled;}
     void SetDiagnosticViewport(int w,int h){m_DiagnosticWidth=w;m_DiagnosticHeight=h;}
-    void SetAssetGrid(bool grid){m_AssetGrid=grid;}
+    enum class AssetView {Grid,List,Compact};
+    void SetAssetView(AssetView view){m_AssetView=int(view);m_AssetGrid=view==AssetView::Grid;}
+    AssetView GetAssetView()const{return AssetView(m_AssetView);}
+    void SetAssetGrid(bool grid){SetAssetView(grid?AssetView::Grid:AssetView::List);}
+    void SetAssetSearchScope(bool all){m_AssetNavigation.projectSearch=all;}
+    void SetAssetTree(bool visible,float width=180){m_AssetTree=visible;m_AssetTreeReveal=visible;m_AssetTreeWidth=std::clamp(width,90.f,480.f);}
+    float AssetTreeWidth()const{return m_AssetTreeWidth;}
+    const auto& SelectedAssets()const{return m_AssetSelection;}
+    struct BrowserStatistics {unsigned visible=0,matched=0,thumbnailCalls=0,thumbnailHits=0,requests=0,uploads=0;std::uint64_t pathProbes=0,catalogRevision=0;};
+    const BrowserStatistics& GetBrowserStatistics()const{return m_BrowserStatistics;}
     void SetAssetCardSize(float size){if(std::isfinite(size))m_AssetCardSize=std::clamp(size,120.f,320.f);}
     void SetAssetSearch(const std::string& search){m_AssetFilter=search;}
-    void SetAssetTypeFilter(ecs::AssetKind kind){m_AssetKindFilter=0;for(std::size_t i=0;i<m_AssetCatalog.Types().size();++i)if(m_AssetCatalog.Types()[i].kind==kind){m_AssetKindFilter=int(i)+1;break;}}
-    void NavigateAssetFolder(const std::string& folder){auto key=AssetCatalog::DirectoryKey(std::filesystem::u8path(folder));m_AssetNavigation.Go(key);m_AssetDirectory=key;}
+    void SetAssetTypeFilter(ecs::AssetKind kind){m_AssetKindFilter=0;m_AssetCategory=0;if(kind==ecs::AssetKind::None)return;for(std::size_t i=0;i<m_AssetCatalog.Types().size();++i)if(m_AssetCatalog.Types()[i].kind==kind){m_AssetKindFilter=int(i)+1;break;}}
+    void NavigateAssetFolder(const std::string& folder){auto key=AssetCatalog::DirectoryKey(std::filesystem::u8path(folder));m_AssetNavigation.Go(key);m_AssetDirectory=key;m_AssetTreeReveal=true;for(auto parent=AssetNavigation::Parent(key);!parent.empty();parent=AssetNavigation::Parent(parent))m_AssetExpanded.insert(parent);}
     const std::string& AssetFolder()const{return m_AssetDirectory;}
     const std::string& ImportTargetFolder()const{return m_ImportTargetFolder;}
     void BeginAssetImport(){m_ImportTargetFolder=m_AssetDirectory;m_ImportTarget.clear();m_ImportPackageName.clear();m_ImportPopup=true;m_ImportPreview.clear();}
@@ -92,7 +109,8 @@ public:
     void ResetProjectState(IRenderAdapter*);
     void ProjectOpened(Application&);
     bool UIDraftsDirty()const{if(!m_DirtyUIStyles.empty())return true;for(auto& [key,s]:m_UIDocuments)if(s.dirty)return true;return false;}
-    bool HasProjectEdits()const{return UIDraftsDirty()||m_PrefabHistory.has_value()||ProjectSettingsDirty()||m_MaterialDirty||(m_EditHistory?(m_EditHistory->external||m_EditHistory->revision!=m_EditHistory->saved):IsSceneDirty());}
+    bool AuthoringSceneDirty()const{const auto* history=m_PrefabHistory?&*m_PrefabHistory:m_EditHistory?&*m_EditHistory:nullptr;return history?(history->external||history->revision!=history->saved):IsSceneDirty();}
+    bool HasProjectEdits()const{return ScriptDraftsDirty()||UIDraftsDirty()||ProjectSettingsDirty()||m_MaterialDirty||AuthoringSceneDirty()||(m_PrefabHistory&&IsSceneDirty());}
     void ShowProjectSettings(Application&);
     void RevertProjectSettings(Application&);
     bool SaveProjectSettingsDraft(Application&);
@@ -120,7 +138,7 @@ public:
     void ShowGameplayEvents(){m_ShowGameplayEvents=true;}
     bool SelectGameplayEventEntity(Application&,const scripting::EventEntity&);
     EditorWorkspace GetWorkspace()const{return m_Workspace;}
-    void SwitchWorkspace(EditorWorkspace value){if(int(value)>=0&&int(value)<int(WorkspaceKeys.size())){m_RequestedWorkspace=value;m_WorkspacePending=true;m_WorkspaceFirstApply=false;}}
+    void SwitchWorkspace(EditorWorkspace value){if(int(value)>=0&&int(value)<int(WorkspaceKeys.size())){CaptureCurrentWorkspace();m_RequestedWorkspace=value;m_WorkspacePending=true;m_WorkspaceFirstApply=false;}}
     bool SaveCurrentWorkspace(Application&);
     bool ResetCurrentWorkspace(Application&);
     void ResetLayout(){m_ResetLayout=true;}
@@ -130,6 +148,9 @@ public:
     bool BlocksGameplayInput()const;
     bool OwnsViewportKeyboard()const{return m_ViewportFocused&&!BlocksCamera();}
     void SetLightGizmosVisible(bool v){m_ShowLightGizmos=v;}
+    struct CameraPreviewRequest {ecs::Entity entity{};int width=0,height=0;};
+    const CameraPreviewRequest& GetCameraPreviewRequest()const{return m_CameraPreviewRequest;}
+    void SetCameraToolsVisible(bool gizmos,bool frustum,bool preview){m_ShowCameraGizmos=gizmos;m_ShowCameraFrustum=frustum;m_ShowCameraPreview=preview;}
     void EnterRuntime(const ecs::World::CloneMap&);
     void LeaveRuntime();
     void ResetHistory(){m_LuaInspection={};m_LuaInspectionCaptured=false;m_SceneValidation={};m_SelectedValidation=-1;m_SurfaceMove.reset();m_EditPivot=false;m_VertexSource.reset();m_VertexTarget.reset();m_VertexSourcePicking=false;m_BoxSelection.reset();m_SelectionLocked=false;m_BulkSession.reset();m_BulkUiSelection.clear();m_BulkText.clear();ExitIsolation();CancelPlacement();m_UndoStack.clear();m_RedoStack.clear();m_Selection.Clear();m_GroupTransform.reset();m_Transaction.reset();m_PropertyDrafts.clear();m_Revision=m_SavedRevision=m_NextRevision=0;m_ExternalDirty=false;m_DuplicateDrag=m_GizmoUndoCaptured=m_LightPointerCaptured=m_LightHandleHovered=m_ToolActive=false;m_CancelGizmoUntilRelease=true;m_PlaneScaleCaptured=false;}
@@ -141,6 +162,7 @@ public:
     void MarkDirty(){m_ExternalDirty=true;}
     ecs::Entity CreateEntity(Application&,const std::string& name="Entity");
     ecs::Entity CreatePlayerStart(Application&);
+    ecs::Entity CreateCamera(Application&);
     ecs::Entity CreateFog(Application&);
     ecs::Entity CreatePostProcessVolume(Application&,bool global);
     bool DeleteEntity(Application&,ecs::Entity);
@@ -183,6 +205,21 @@ public:
     bool UpdateGroupTransform(Application&,const ImportMatrix&);
     void EndGroupTransform(Application&,bool cancel=false);
     enum class OpenDecision {Cancel,Discard,Save};
+    bool ActivateDocument(Application&,const std::string&,OpenDecision decision=OpenDecision::Cancel);
+    bool CloseDocument(Application&,const std::string&,OpenDecision decision=OpenDecision::Cancel);
+    bool RequestDocumentNavigation(Application&,const std::string&,bool close=false);
+    bool NeedsDocumentDecision(Application&,const std::string&,bool close=false)const;
+    void BackToSceneDocument(Application&);
+    bool SaveActiveDocument(Application&);
+    bool UndoActiveDocument(Application&,bool redo=false);
+    bool CanUndoActiveDocument(bool redo=false)const;
+    bool DocumentDirty(const EditorDocument&)const;
+    const std::vector<EditorDocument>& Documents()const{return m_Documents;}
+    const std::string& ActiveDocument()const{return m_ActiveDocument;}
+    bool ActiveDocumentIs(DocumentType type)const{for(const auto& d:m_Documents)if(d.id==m_ActiveDocument)return d.type==type;return false;}
+    bool IsWorkspaceFocused()const{return m_WorkspaceFocus;}
+    void SetWorkspaceFocused(bool value){if(value==m_WorkspaceFocus)return;if(value)CaptureCurrentWorkspace();else {m_RequestedWorkspace=m_Workspace;m_WorkspacePending=true;m_WorkspaceFirstApply=false;}m_WorkspaceFocus=value;}
+    void PrepareWorkspacePrimaryWindow();
     void ReleaseAssetPreview(IRenderAdapter*);
     struct AssetThumbnail {
         RenderTextureHandle texture;
@@ -256,6 +293,7 @@ public:
     bool WidgetCommand(Application&,const std::string& command,const std::string& argument="");
     void DrawUIDesigner(Application&);
     friend struct WidgetDesignerTestAccess;
+    friend struct EditorDocumentTestAccess;
     void DrawUIDocumentProperties(Application&,const std::string&,bool hierarchy);
     void DrawUI4Properties(Application&,const std::string&,ui::Document&,ui::Widget&,bool&);
     bool EditUIStyle(Application&,const std::string&,const ui::StyleSheet&,bool finish=true);
@@ -268,9 +306,14 @@ public:
     bool CreateMaterialAsset(Application&,const std::string&,std::string* error=nullptr);
     std::string CreateLuaScriptAsset(Application&,const std::string& directory);
     bool CreatePrefab(Application&,const std::string& key);
+    bool CreateChildPrefab(Application&,const std::string& parent,const std::string& key);
+    bool ResetPrefabProperty(Application&,ecs::Entity,const std::string& component,const std::string& path);
+    bool ReloadPrefabParent(Application&);
+    bool ResetPrefabOverride(Application&,const std::string& member,const std::string& component,const std::string& path);
+    bool OverridePrefabProperty(Application&,ecs::Entity,const std::string& component,const std::string& path);
     ecs::Entity InstantiatePrefab(Application&,const std::string& key,ecs::Vec3 position={},const ecs::TransformComponent* placement=nullptr,const nlohmann::json* prepared=nullptr);
     bool OpenPrefabEditor(Application&,const std::string& key);
-    bool SavePrefabEditor(Application&);
+    bool SavePrefabEditor(Application&,bool stayOpen=false);
     void RequestPrefabSave(){m_PrefabAction=1;m_PrefabConfirm=true;}
     bool ClosePrefabEditor(Application&,bool discard=false);
     bool ApplyPrefab(Application&,ecs::Entity);
@@ -286,7 +329,7 @@ public:
     bool MoveAssetFile(Application&,const std::string&,const std::string& destination,bool confirmed,std::string* error=nullptr,bool acceptDynamicRisk=false);
     std::vector<std::string> AssetFileBlockers(Application&,const std::string&)const;
     const std::string& SelectedAsset()const{return m_SelectedAsset;}
-    void SelectAsset(const std::string& key,const std::string& kind){m_SelectedAsset=key;m_SelectedAssetKind=kind;}
+    void SelectAsset(const std::string& key,const std::string& kind){m_SelectedAsset=key;m_SelectedAssetKind=kind;m_AssetSelection.clear();m_AssetAnchor=kind=="Folder"?AssetContentItem::FolderId(key):key;if(!key.empty())m_AssetSelection.insert(m_AssetAnchor);}
     struct BulkValue {
         bool common=false;ecs::PropertyValue value;
         std::array<bool,4> mixed{};
@@ -330,7 +373,7 @@ private:
     std::shared_ptr<const ProjectContext> m_ProjectSettingsBase;
     ProjectSettings m_ProjectSettingsDraft;
     SceneCatalog m_ProjectSettingsScenes;
-    std::string m_ProjectSettingsError,m_ProjectSettingsNotice;
+    std::string m_ProjectSettingsError,m_ProjectSettingsNotice,m_ProjectSettingsSearch;
     struct PrefabFileSnapshot {std::string key;std::optional<nlohmann::json> contents,expected;};
     struct EntitySnapshot {
         ecs::Entity entity{},previousSelection{};
@@ -343,6 +386,7 @@ private:
         std::vector<EntitySnapshot> related;
         std::optional<SelectionSet> selection;
         std::vector<PrefabFileSnapshot> files;
+        std::optional<nlohmann::json> prefabAuthored,prefabParentBase;
         bool prefabBatch=false,bulk=false;
         std::string componentOnly;
     };
@@ -393,6 +437,22 @@ private:
     std::string m_RequestedSky;
     std::uint64_t m_FailedSkyVersion=0;
     void ConfigureDocking();
+    EditorDocument& RegisterDocument(Application&,DocumentType,const std::string&);
+    void DrawDocumentTabs(Application&);
+    void DrawScriptDocument(Application&);
+    void SyncSceneDocument(Application&);
+    void CaptureSceneDocument(Application&);
+    void RenameAssetDocument(Application&,const std::string&,const std::string&);
+    void StoreDocumentSession();
+    void RestoreDocumentSession(Application&);
+    bool ResolveDocumentEdits(Application&,const EditorDocument&,OpenDecision);
+    std::vector<EditorDocument> m_Documents;
+    std::string m_ActiveDocument,m_ObservedScene="<initial>",m_DocumentProject,m_PendingDocument,m_OpenDocumentKey;
+    bool m_DocumentClose=false,m_DocumentPrompt=false,m_OpenDocumentPrompt=false,m_WorkspaceFocus=false,m_RestoreDocuments=true;
+    nlohmann::json m_DocumentSessions=nlohmann::json::object();
+    std::string m_ScriptText,m_ScriptKey;
+    std::map<std::string,std::shared_ptr<LuaCodeEditor>> m_ScriptSessions;
+    double m_ScriptExternalPoll=0;
     std::map<std::string,bool> CaptureWorkspaceVisibility();
     void ApplyWorkspaceVisibility(const std::map<std::string,bool>&);
     void WorkspaceDefaults();
@@ -400,6 +460,7 @@ private:
     bool CaptureCurrentWorkspace();
     void InitializeWorkspaces(const EditorPreferences&);
     void DrawWorkspaceMenu(Application&);
+    void DrawRuntimeErrors(Application&);
     void DrawConsole(Application&,IRenderAdapter*);
     void DrawGameplayEvents(Application&);
     void DrawSceneValidation(Application&);
@@ -409,6 +470,10 @@ private:
     void DrawViewportOverlays(Application&,const ImVec2&,const ImVec2&);
     void DrawSceneHierarchy(Application& app);
     void DrawInspector(Application& app);
+    bool DrawInspectorResource(const ecs::PropertyDescriptor&,std::string&);
+    std::string m_InspectorSearch;
+    std::string m_InspectorPrefabCacheKey,m_InspectorPrefabError;
+    nlohmann::json m_InspectorPrefabSource;
     void DrawBulkInspector(Application&);
     void RestoreBulkSnapshot(Application&,const EntitySnapshot&);
     struct BulkSession {
@@ -438,6 +503,11 @@ private:
     void DrawImportDialogs(Application& app);
     void DrawMaterialEditor(Application& app);
     void DrawLightGizmos(Application&,IRenderAdapter*,const ImVec2&,const ImVec2&);
+    void DrawCameraGizmos(Application&,const ImVec2&,const ImVec2&);
+    void DrawCameraPreview(Application&,ecs::Entity);
+    CameraPreviewRequest m_CameraPreviewRequest;
+    ecs::Entity m_CameraPreviewSource{};
+    bool m_ShowCameraGizmos=true,m_ShowCameraFrustum=true,m_ShowCameraPreview=true;
     bool DrawViewportCreateMenu(Application&);
     bool DrawPlacementMenu(Application&);
     void DrawPlacementTarget(Application&,const ImVec2&,const ImVec2&);
@@ -450,7 +520,7 @@ private:
     struct PrefabPlacementCache {
         std::string key,error;std::filesystem::path path;
         std::filesystem::file_time_type time{};std::uintmax_t size=0;
-        nlohmann::json source;
+        nlohmann::json source;std::uint64_t prefabRevision=0;
         ecs::TransformComponent root;
         std::vector<ecs::TransformComponent> nodes;
         std::vector<PrefabPlacementPart> parts;
@@ -515,7 +585,7 @@ private:
     int m_GizmoMode = 0;
     bool m_GameView=false,m_ProjectAssets=true,m_PlaneScaleCaptured=false;
     float m_AssetCardSize=180;
-    struct UIDocumentEdit {std::string resourceKey;ui::Document draft;nlohmann::json disk;std::vector<nlohmann::json> undo,redo;std::optional<nlohmann::json> pending;std::string selected;bool initialized=false,dirty=false;};
+    struct UIDocumentEdit {std::set<std::string> lockedWidgets;std::string resourceKey;ui::Document draft;nlohmann::json disk;std::vector<nlohmann::json> undo,redo;std::optional<nlohmann::json> pending;std::string selected;ui::Pair preview{1920,1080};float zoom=.35f,panX=0,panY=0;bool viewSaved=false,fit=true;bool initialized=false,dirty=false;};
     std::map<std::string,UIDocumentEdit> m_UIDocuments;
     struct UIStyleEdit {ui::StyleSheet draft;nlohmann::json disk;std::vector<nlohmann::json> undo,redo;std::optional<nlohmann::json> pending;};
     std::map<std::string,UIStyleEdit> m_UIStyles;std::set<std::string> m_DirtyUIStyles;
@@ -523,9 +593,9 @@ private:
     std::string m_UI4Selection,m_UIStyleKey,m_UIStyleId,m_UIClipId,m_UIClipNameDraft,m_UIClipNameSource;
 
     UIDocumentEdit& UIDocumentSession(Application&,const std::string&);
-    bool m_ShowRuntimeUI=true;
+    bool m_ShowRuntimeUI=false;
     bool m_ShowWidgetHierarchy=false,m_ShowCanvasDesigner=false,m_ShowWidgetInspector=false;
-    std::string m_DesignDocument,m_WidgetSearch,m_WidgetRename,m_WidgetRenameId;std::vector<std::string> m_UIDesignerKeys;
+    std::string m_DesignDocument,m_WidgetSearch,m_WidgetRename,m_WidgetRenameId,m_WidgetInlineId;bool m_WidgetRenameFocus=false;std::vector<std::string> m_UIDesignerKeys;
     ui::Pair m_UIPreviewSize{1920,1080};float m_UIZoom=.35f,m_UIGridSize=16;
     struct UIDesignerPoint {float x=0,y=0;};
     UIDesignerPoint m_UIPan{},m_UICanvasOrigin{};bool m_UIFit=true,m_UIGrid=true,m_UISnap=false;
@@ -539,6 +609,26 @@ private:
     bool m_ShowMaterialEditor = true;
     std::string m_EditingMaterial,m_MaterialError,m_NewMaterialKey="materials/new.material.json";
     bool m_MaterialDirty=false;
+    struct MaterialSession {
+        MaterialResource base,draft;
+        struct Change {MaterialResource before,after;};
+        std::vector<Change> undo,redo;std::optional<MaterialResource> transaction;
+        std::uint64_t version=0;bool initialized=false;
+        float yaw=.65f,pitch=.3f,distance=3.7f,panX=0,panY=0;int mesh=0,lighting=0;bool dark=false;
+    };
+    std::map<std::string,MaterialSession> m_MaterialSessions;
+    std::array<RenderMeshHandle,3> m_MaterialPreviewMeshes{};
+    RenderTextureHandle m_MaterialWhite;
+    std::map<std::string,std::function<void(IRenderAdapter*)>> m_MaterialGpuCleanup;
+    std::uint64_t m_MaterialPreviewImage=0;
+    double m_MaterialUpdateMs=0;std::uint64_t m_MaterialPathProbes=0;
+    MaterialSession* EnsureMaterialSession(Application&);
+    bool SaveMaterialDraft(Application&);
+    bool ReloadMaterialDraft(Application&);
+    void FinishMaterialEdit(Application&,bool cancel=false);
+    void UndoMaterialEdit(Application&,bool redo=false);
+    void ReleaseMaterialEditor(IRenderAdapter*);
+
     bool m_ShowDemoWindow = false;
     bool m_ShowLuaRuntimeInspector=false,m_LuaInspectorAuto=true,m_LuaInspectionCaptured=false;
     scripting::LuaInstanceSnapshot m_LuaInspection;
@@ -565,6 +655,13 @@ private:
     Statistics m_Statistics;
     AssetCatalog m_AssetCatalog;
     bool m_AssetGrid=true,m_AssetActionRequested=false;
+    int m_AssetView=0,m_AssetCategory=0;
+    bool m_AssetTree=true,m_AssetDetails=false,m_AssetScrollSelection=false,m_AssetTreeReveal=false;
+    float m_AssetTreeWidth=180;
+    std::set<std::string> m_AssetSelection,m_AssetExpanded;
+    std::string m_AssetAnchor,m_BrowserProject;
+    nlohmann::json m_BrowserSessions=nlohmann::json::object();
+    BrowserStatistics m_BrowserStatistics;
     int m_AssetAction=0,m_ModelImportMode=0;
     std::string m_AssetActionSource,m_AssetActionKey="materials/new.material.json";
     bool m_AssetActionFocus=false;
@@ -580,6 +677,10 @@ private:
     int m_AssetKindFilter=0,m_SceneDialogAction=0;
     ecs::Entity m_RenameTarget{};
     bool m_SceneDialogRequested=false,m_RenameRequested=false,m_ConsoleInfo=true,m_ConsoleWarning=true,m_ConsoleError=true;
+    Logger::RuntimeSummary m_LastRuntimeErrors;
+    std::uint64_t m_ConsoleTargetSequence=0;
+    bool m_ShowRuntimeErrors=false;
+    std::uint64_t m_RuntimeErrorSession=0;
     std::uint64_t m_ConsoleRevision=UINT64_MAX;
     std::vector<Logger::Entry> m_ConsoleMessages;
     std::vector<std::string> m_EnvironmentAssets;
@@ -605,8 +706,14 @@ private:
     struct HistoryContext {SelectionSet selection;std::vector<UndoRecord> undo,redo;std::uint64_t revision,saved,next;bool external;};
     std::optional<HistoryContext> m_EditHistory;
     std::optional<HistoryContext> m_PrefabHistory;
-    std::string m_EditingPrefab,m_PrefabActionKey,m_PrefabDoubleClick,m_PrefabNewKey="prefabs/cabinet.prefab.json";
-    nlohmann::json m_PrefabDiskBase;
+    std::string m_EditingPrefab,m_PrefabActionKey,m_AssetDoubleClick,m_PrefabNewKey="prefabs/cabinet.prefab.json";
+    nlohmann::json m_PrefabDiskBase,m_PrefabAuthored,m_PrefabObserved,m_PrefabParentBase;
+    std::uint64_t m_PrefabParentRevision=0;
+    std::string m_ChildPrefabParent,m_ChildPrefabKey;
+    bool m_ChildPrefabPopup=false,m_PrefabReloadRequested=false;
+    std::string PrefabMember(Application&,ecs::Entity)const;
+    void TrackPrefabChanges(Application&);
+    void DrawPrefabInheritance(Application&,ecs::Entity);
     SceneSettings m_PrefabSavedSceneSettings;
     ecs::Entity m_PrefabRoot{};
     std::vector<ecs::Entity> m_PrefabIsolation;
@@ -615,7 +722,7 @@ private:
     int m_PrefabAction=0;
     ecs::Entity m_PrefabActionEntity{};
     EntitySnapshot PrefabNodesSnapshot(Application&,const nlohmann::json&);
-    bool WritePrefabAndUpdate(Application&,const std::string&,const nlohmann::json&,const nlohmann::json&,bool update);
+    bool WritePrefabAndUpdate(Application&,const std::string&,const nlohmann::json&,const nlohmann::json&,bool update,const nlohmann::json* authored=nullptr);
     void RestorePrefabHistory();
     bool StartPrefabEditor(Application&,const std::string&,const nlohmann::json&,const nlohmann::json&);
     std::vector<UndoRecord> m_UndoStack;

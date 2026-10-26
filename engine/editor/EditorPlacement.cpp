@@ -76,10 +76,10 @@ const EditorLayer::PlacementPreview& EditorLayer::UpdatePrefabPlacementPreview(A
     if(!std::isfinite(u)||!std::isfinite(v)){preview.status="Invalid placement coordinates";return preview;}
     auto* resources=app.GetResourceManager();if(!resources){preview.status="Resource manager unavailable";return preview;}
     try{
-        const auto path=scripting::SafeAsset(key,".prefab.json");const auto time=std::filesystem::last_write_time(path);const auto size=std::filesystem::file_size(path);
-        if(!m_PrefabPlacement||m_PrefabPlacement->key!=key||m_PrefabPlacement->path!=path||m_PrefabPlacement->time!=time||m_PrefabPlacement->size!=size){
+        const auto path=scripting::SafeAsset(key,".prefab.json");const auto time=std::filesystem::last_write_time(path);const auto size=std::filesystem::file_size(path);if(!m_PrefabPlacement||m_PrefabPlacement->key!=key)scripting::InvalidatePrefabCache();const auto prefabRevision=scripting::PrefabRevision(key);
+        if(!m_PrefabPlacement||m_PrefabPlacement->key!=key||m_PrefabPlacement->path!=path||m_PrefabPlacement->time!=time||m_PrefabPlacement->size!=size||m_PrefabPlacement->prefabRevision!=prefabRevision){
             // Parse and resolve the local hierarchy only on source changes / a new drag.
-            m_PrefabPlacement.emplace();auto& cache=*m_PrefabPlacement;cache.key=key;cache.path=path;cache.time=time;cache.size=size;
+            m_PrefabPlacement.emplace();auto& cache=*m_PrefabPlacement;cache.key=key;cache.path=path;cache.time=time;cache.size=size;cache.prefabRevision=prefabRevision;
             try{
                 cache.source=scripting::ReadPrefab(key);
                 ecs::World source;SceneSettings settings;std::string error;
@@ -143,7 +143,8 @@ ecs::Entity EditorLayer::ConfirmPlacement(Application& app){
         try{
             if(!m_PrefabPlacement||m_PrefabPlacement->key!=preview.key)throw std::runtime_error("Prefab preview expired; drag it again");
             const auto& cache=*m_PrefabPlacement;
-            if(scripting::SafeAsset(preview.key,".prefab.json")!=cache.path||std::filesystem::last_write_time(cache.path)!=cache.time||std::filesystem::file_size(cache.path)!=cache.size)throw std::runtime_error("Prefab changed during placement; wait for its updated preview");
+            scripting::PollPrefabReload(true);
+            if(scripting::SafeAsset(preview.key,".prefab.json")!=cache.path||std::filesystem::last_write_time(cache.path)!=cache.time||std::filesystem::file_size(cache.path)!=cache.size||scripting::PrefabRevision(preview.key)!=cache.prefabRevision)throw std::runtime_error("Prefab or its Parent changed during placement; wait for its updated preview");
             auto* resources=app.GetResourceManager();
             for(const auto& part:cache.parts){auto mesh=resources?resources->Get<MeshResource>(part.mesh):nullptr;
                 if(!mesh||!mesh->IsLoaded()||mesh->GetData().placeholder||part.owner.lock()!=mesh||part.version!=mesh->GetVersion())throw std::runtime_error("Prefab Mesh changed or is unavailable; wait for its updated preview");}

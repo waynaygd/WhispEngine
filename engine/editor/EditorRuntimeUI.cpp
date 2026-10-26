@@ -1,3 +1,4 @@
+#include "EditorTheme.h"
 #include "EditorLayer.h"
 #include "EditorWidgets.h"
 #include "WidgetDesignerTools.h"
@@ -23,13 +24,24 @@ bool EditorLayer::EditUIDocument(Application& app,const std::string& key,const u
  }catch(const std::exception& e){m_EditorError=e.what();return false;}
 }
 bool EditorLayer::UndoUIDocument(Application& app,const std::string& key,bool redo){
- try{if(app.IsEditorPlayMode())return false;auto& session=UIDocumentSession(app,key);if(session.pending)EditUIDocument(app,key,session.draft,true);auto& source=redo?session.redo:session.undo;auto& destination=redo?session.undo:session.redo;if(source.empty())return false;destination.push_back(session.draft);session.draft=source.back().get<ui::Document>();source.pop_back();if(std::none_of(session.draft.widgets.begin(),session.draft.widgets.end(),[&](auto& w){return w.id==session.selected;}))session.selected=session.draft.root;session.dirty=nlohmann::json(session.draft)!=session.disk;auto* resources=app.GetResourceManager();auto resource=resources->Get<UIResource>(key);if(!resource)resource=resources->Load<UIResource>(key);resource->ReplaceData(UIResource{std::make_shared<ui::Document>(session.draft)},ResourceLoadState::Loaded,false);resources->SetUIDirty(key,session.dirty);return true;}catch(const std::exception& e){m_EditorError=e.what();return false;}
+ try{if(app.IsEditorPlayMode())return false;auto& session=UIDocumentSession(app,key);if(session.pending)EditUIDocument(app,key,session.draft,true);auto& source=redo?session.redo:session.undo;auto& destination=redo?session.undo:session.redo;if(source.empty())return false;destination.push_back(session.draft);session.draft=source.back().get<ui::Document>();source.pop_back();{
+  // Recognize a pure ID rename through the shared validated operation. Editor
+  // references follow it even if another widget was selected before Undo.
+  const auto& priorWidgets=destination.back().at("widgets");std::optional<std::size_t> renameIndex;bool multiple=false;
+  if(priorWidgets.size()==session.draft.widgets.size())for(std::size_t i=0;i<priorWidgets.size();++i)if(priorWidgets[i].at("id")!=session.draft.widgets[i].id){if(renameIndex){multiple=true;break;}renameIndex=i;}
+  if(renameIndex&&!multiple)try{
+   auto candidate=destination.back().get<ui::Document>();const auto previous=candidate.widgets[*renameIndex].id;const auto replacement=session.draft.widgets[*renameIndex].id;widgets::Rename(candidate,previous,replacement);
+   if(nlohmann::json(candidate)==nlohmann::json(session.draft)){if(session.lockedWidgets.erase(previous))session.lockedWidgets.insert(replacement);if(session.selected==previous)session.selected=replacement;}
+  }catch(const std::exception&){}
+  if(std::none_of(session.draft.widgets.begin(),session.draft.widgets.end(),[&](auto& w){return w.id==session.selected;}))session.selected=session.draft.root;
+ }session.dirty=nlohmann::json(session.draft)!=session.disk;auto* resources=app.GetResourceManager();auto resource=resources->Get<UIResource>(key);if(!resource)resource=resources->Load<UIResource>(key);resource->ReplaceData(UIResource{std::make_shared<ui::Document>(session.draft)},ResourceLoadState::Loaded,false);resources->SetUIDirty(key,session.dirty);return true;}catch(const std::exception& e){m_EditorError=e.what();return false;}
 }
 bool EditorLayer::SaveUIDocument(Application& app,const std::string& key){
  try{if(app.IsEditorPlayMode())return false;auto& session=UIDocumentSession(app,key);if(session.pending)EditUIDocument(app,key,session.draft,true);auto disk=UILoader::Load(key,{});if(!disk.success||nlohmann::json(*disk.data.document)!=session.disk)throw std::runtime_error("UI document changed on disk. Reload explicitly before overwriting external edits.");if(!UILoader::Save(key,session.draft,&m_EditorError))return false;session.disk=session.draft;session.dirty=false;app.GetResourceManager()->SetUIDirty(key,false);m_EditorError.clear();return true;}catch(const std::exception& e){m_EditorError=e.what();return false;}
 }
 bool EditorLayer::ReloadUIDocument(Application& app,const std::string& key){
  try{if(app.IsEditorPlayMode()||m_UIWidgetDrag)return false;auto loaded=UILoader::Load(key,{});if(!loaded.success||!loaded.data.document)throw std::runtime_error(loaded.errorMessage);auto& session=UIDocumentSession(app,key);UIDocumentEdit next;next.resourceKey=key;next.draft=*loaded.data.document;next.disk=next.draft;next.selected=next.draft.root;next.initialized=true;
+ next.lockedWidgets=session.lockedWidgets;std::erase_if(next.lockedWidgets,[&](const auto& id){return std::none_of(next.draft.widgets.begin(),next.draft.widgets.end(),[&](const auto& w){return w.id==id;});});
  auto* resources=app.GetResourceManager();auto asset=resources->Get<UIResource>(key);if(!asset)asset=resources->Load<UIResource>(key);asset->ReplaceData(loaded.data,ResourceLoadState::Loaded,false);resources->SetUIDirty(key,false);session=std::move(next);m_UIFit=true;m_EditorError.clear();return true;}catch(const std::exception& e){m_EditorError=e.what();return false;}
 }
 ecs::Entity EditorLayer::CreateUICanvas(Application& app,const std::string& existing){
@@ -51,29 +63,73 @@ void EditorLayer::DrawUIDocumentProperties(Application& app,const std::string& k
  auto pair=[&](const char* label,ui::Pair& value,float speed,float minimum,float maximum){ImGui::TextUnformatted(label);ImGui::SetNextItemWidth(-FLT_MIN);return ImGui::DragFloat2((std::string("##")+label).c_str(),value.data(),speed,minimum,maximum);};
  ImGui::BeginDisabled(app.IsEditorPlayMode());
  try{auto& session=UIDocumentSession(app,key);if(session.pending&&!m_UIWidgetDrag&&ImGui::IsKeyPressed(ImGuiKey_Escape,false)){CancelUIDocumentEdit(app,key);m_EscapeConsumed=true;}auto edited=session.draft;bool changed=false;
-  if(ImGui::Button("Save UI"))SaveUIDocument(app,key);ImGui::SameLine();if(ImGui::Button("Undo UI"))UndoUIDocument(app,key);ImGui::SameLine();if(ImGui::Button("Redo UI"))UndoUIDocument(app,key,true);
+  if(ImGui::Button("Save UI"))SaveUIDocument(app,key);Inline("Undo UI");if(Action("Undo UI","Undo the last UI edit. No edits available when disabled.",session.pending.has_value()||!session.undo.empty()))UndoUIDocument(app,key);Inline("Redo UI");if(Action("Redo UI","Redo the last undone UI edit. No redo available when disabled.",!session.redo.empty()))UndoUIDocument(app,key,true);
   if(ImGui::Button("Reload UI from disk")){ImGui::OpenPopup("Reload UI?");}if(ImGui::BeginPopup("Reload UI?")){ImGui::TextWrapped("Discard unsaved UI changes and history?");if(ImGui::Button("Reload")){ReloadUIDocument(app,key);ImGui::CloseCurrentPopup();}ImGui::EndPopup();}
   ImGui::TextUnformatted(session.dirty?"UI Document: unsaved changes":"UI Document: saved");
-  edited=session.draft;changed|=ImGui::InputText("Canvas Name",&edited.name);changed|=ImGui::Checkbox("Canvas Enabled",&edited.enabled);changed|=pair("Reference Resolution",edited.referenceResolution,1,1,16384);ImGui::TextWrapped("Scale: With Screen Size (uniform fit)");ImGui::TextUnformatted("Document Sort Order");ImGui::SetNextItemWidth(-FLT_MIN);changed|=ImGui::DragInt("##Document Sort Order",&edited.sortOrder,1,-1000000,1000000);
+  edited=session.draft;if(ImGui::CollapsingHeader("Document")){ImGui::TextUnformatted("Canvas Name");ImGui::SetNextItemWidth(-FLT_MIN);changed|=ImGui::InputText("##Canvas Name",&edited.name);changed|=ImGui::Checkbox("Canvas Enabled",&edited.enabled);changed|=pair("Reference Resolution",edited.referenceResolution,1,1,16384);ImGui::TextWrapped("Scale: With Screen Size (uniform fit)");ImGui::TextUnformatted("Document Sort Order");ImGui::SetNextItemWidth(-FLT_MIN);changed|=ImGui::DragInt("##Document Sort Order",&edited.sortOrder,1,-1000000,1000000);
+  }
   if(hierarchy&&ImGui::BeginCombo("Add Widget","Panel / Text / Image / Progress Bar / Button")){for(const char* type:{"Panel","Text","Image","ProgressBar","Button"})if(ImGui::Selectable(type)){
     ui::Widget w;w.type=type;w.id=std::string(type)+std::to_string(edited.widgets.size());while(std::any_of(edited.widgets.begin(),edited.widgets.end(),[&](auto& n){return n.id==w.id;}))w.id+="_";
     auto parent=std::find_if(edited.widgets.begin(),edited.widgets.end(),[&](auto& n){return n.id==session.selected;});w.parent=parent!=edited.widgets.end()&&(parent->type=="Panel"||parent->type=="Button")?parent->id:edited.root;w.position={16,16};if(w.type=="Text")w.text="Text / Текст";if(edited.widgets.empty()){auto root=ui::EmptyDocument().widgets[0];edited.root=root.id;edited.widgets.push_back(root);w.parent=root.id;}session.selected=w.id;edited.widgets.push_back(w);changed=true;
   }ImGui::EndCombo();}
   if(hierarchy){auto tree=[&](auto&& self,const std::string& parent,int depth)->void{if(depth>64)return;for(auto& w:edited.widgets)if(w.parent==parent){ImGui::Indent(depth?10.f:0.f);if(ImGui::Selectable((w.id+" ("+w.type+")").c_str(),session.selected==w.id))session.selected=w.id;ImGui::Unindent(depth?10.f:0.f);self(self,w.id,depth+1);}};tree(tree,"",0);}
   auto found=std::find_if(edited.widgets.begin(),edited.widgets.end(),[&](auto& w){return w.id==session.selected;});
-  if(found!=edited.widgets.end()){auto& w=*found;ImGui::SeparatorText("Widget Properties");ImGui::Text("ID: %s",w.id.c_str());ImGui::Text("Type: %s",w.type.c_str());
-   if(w.id!=edited.root&&ImGui::BeginCombo("Parent",w.parent.c_str())){for(auto& parent:edited.widgets)if((parent.type=="Panel"||parent.type=="Button")&&parent.id!=w.id)if(ImGui::Selectable(parent.id.c_str(),w.parent==parent.id)){try{auto next=edited;widgets::Reparent(next,w.id,parent.id,widgets::Canvas(edited,key==m_DesignDocument?m_UIPreviewSize:edited.referenceResolution));w=widgets::Find(next,w.id);changed=true;}catch(const std::exception& e){m_EditorError=e.what();}break;}ImGui::EndCombo();}
-   changed|=ImGui::Checkbox("Visible",&w.visible);changed|=ImGui::SliderFloat("Opacity",&w.opacity,0,1);changed|=ImGui::DragInt("Local Z-order",&w.zOrder,1,-1000000,1000000);
-   bool managed=ui::ManagedByLayout(edited,w);ImGui::BeginDisabled(managed);
-   changed|=pair("Anchor Min",w.anchorMin,.01f,0,1);changed|=pair("Anchor Max",w.anchorMax,.01f,0,1);changed|=pair("Pivot / Alignment",w.pivot,.01f,0,1);changed|=pair("Anchored Position",w.position,1,-100000,100000);changed|=pair("Size Delta",w.size,1,-100000,100000);ImGui::EndDisabled();changed|=ImGui::ColorEdit4(w.type=="Button"?"Normal Color":"Color",w.color.data());
+  if(found!=edited.widgets.end()){auto& w=*found;
+   // Stable section IDs belong to the Inspector window, not to the selected Widget.
+   if(ImGui::CollapsingHeader("Identity",ImGuiTreeNodeFlags_DefaultOpen)){
+    if(!hierarchy){
+     if(m_WidgetRenameId!=session.selected){m_WidgetRenameId=session.selected;m_WidgetRename=session.selected;}
+     ImGui::TextUnformatted("Widget ID");if(ImGui::InputText("##Widget ID",&m_WidgetRename,ImGuiInputTextFlags_EnterReturnsTrue)){
+      if(WidgetCommand(app,"Rename",m_WidgetRename))edited=session.draft;
+      // Rename can replace the draft; reacquire next frame rather than keeping a stale iterator.
+      ImGui::EndDisabled();ImGui::PopItemWidth();return;
+     }
+     if((ImGui::IsItemActive()||ImGui::IsItemDeactivated())&&ImGui::IsKeyPressed(ImGuiKey_Escape,false)){m_WidgetRename=session.selected;m_EscapeConsumed=true;}
+    }else ImGui::Text("ID: %s",w.id.c_str());
+    ImGui::Text("Type: %s",w.type.c_str());changed|=ImGui::Checkbox("Visible",&w.visible);
+    bool required=std::find(edited.requiredWidgets.begin(),edited.requiredWidgets.end(),w.id)!=edited.requiredWidgets.end();
+    if(ImGui::Checkbox("Required Widget ID",&required)){if(required)edited.requiredWidgets.push_back(w.id);else std::erase(edited.requiredWidgets,w.id);changed=true;}
+    if(w.id!=edited.root&&ImGui::BeginCombo("Parent",w.parent.c_str())){for(auto& parent:edited.widgets)if((parent.type=="Panel"||parent.type=="Button")&&parent.id!=w.id)if(ImGui::Selectable(parent.id.c_str(),w.parent==parent.id)){try{auto next=edited;widgets::Reparent(next,w.id,parent.id,widgets::Canvas(edited,key==m_DesignDocument?m_UIPreviewSize:edited.referenceResolution));w=widgets::Find(next,w.id);changed=true;}catch(const std::exception& e){m_EditorError=e.what();}break;}ImGui::EndCombo();}
+   }
+   if(ImGui::CollapsingHeader("Rect Transform",ImGuiTreeNodeFlags_DefaultOpen)){
+    bool managed=ui::ManagedByLayout(edited,w);
+    if(managed)ImGui::TextWrapped("Parent Layout controls anchors, pivot and position. Use Ignore Parent Layout for manual placement; Content Fixed Size remains editable in Layout.");
+    ImGui::BeginDisabled(managed);
+    if(!hierarchy){
+     const char* names[]{"Top Left","Top Center","Top Right","Middle Left","Center","Middle Right","Bottom Left","Bottom Center","Bottom Right","Stretch Horizontal","Stretch Vertical","Stretch Both"};
+     for(bool pivot:{false,true})if(ImGui::BeginCombo(pivot?"Pivot Preset":"Anchor Preset","Preserve rectangle")){for(int i=0;i<(pivot?9:12);++i)if(ImGui::Selectable(names[i])){auto next=edited;widgets::Preset(next,w.id,pivot?-1:i,pivot?i:-1,widgets::Canvas(edited,m_UIPreviewSize));w=widgets::Find(next,w.id);changed=true;break;}ImGui::EndCombo();}
+    }
+    changed|=pair("Anchor Min (X / Y)",w.anchorMin,.01f,0,1);changed|=pair("Anchor Max (X / Y)",w.anchorMax,.01f,0,1);
+    changed|=pair("Pivot (X / Y)",w.pivot,.01f,0,1);changed|=pair("Position (X / Y)",w.position,1,-100000,100000);changed|=pair("Size Delta (W / H)",w.size,1,-100000,100000);
+    if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Size Delta is added to the anchor span. Position uses the selected pivot; coordinates are UI units.");
+    ImGui::EndDisabled();changed|=ImGui::DragInt("Local Z-order",&w.zOrder,1,-1000000,1000000);
+   }
+ if(ImGui::CollapsingHeader("Layout",ImGuiTreeNodeFlags_DefaultOpen)){
+ changed|=ImGui::Checkbox("Ignore Parent Layout",&w.ignoreLayout);bool managed=ui::ManagedByLayout(edited,w);if(managed)ImGui::TextWrapped("Position / anchors / size are managed by Parent Layout. Enable Ignore Parent Layout to drag manually. Authored transforms are retained.");
+ if(w.type=="Panel"){
+  changed|=ImGui::Combo("Layout Mode",&w.layout,"Manual\0Vertical\0Horizontal\0Stack\0");
+  if(w.layout){changed|=ImGui::DragFloat("Spacing",&w.spacing,1,0,10000,"%.1f",ImGuiSliderFlags_AlwaysClamp);changed|=ImGui::DragFloat4("Padding L T R B",w.padding.data(),1,0,10000,"%.1f",ImGuiSliderFlags_AlwaysClamp);changed|=ImGui::SliderFloat2("Layout Alignment X Y",w.alignment.data(),0,1);changed|=ImGui::Checkbox("Reverse Order",&w.reverse);changed|=ImGui::Checkbox("Stretch Children",&w.stretchChildren);changed|=ImGui::Checkbox("Auto Width",&w.autoSize[0]);changed|=ImGui::Checkbox("Auto Height",&w.autoSize[1]);}
+ }
+ if(managed){changed|=ImGui::DragFloat2("Content Fixed Size",w.size.data(),1,0,100000,"%.1f",ImGuiSliderFlags_AlwaysClamp);changed|=ImGui::Checkbox("Stretch Width",&w.stretch[0]);changed|=ImGui::Checkbox("Stretch Height",&w.stretch[1]);}
+ if(w.type=="Panel"||w.type=="Button")changed|=ImGui::Checkbox("Clip Children",&w.clipChildren);
+ }
+   if(ImGui::CollapsingHeader("Appearance",ImGuiTreeNodeFlags_DefaultOpen)){
+    changed|=ImGui::ColorEdit4(w.type=="Button"?"Normal Color":"Color",w.color.data());changed|=ImGui::SliderFloat("Opacity",&w.opacity,0,1);
+    if(w.type=="ProgressBar")changed|=ImGui::ColorEdit4("Fill Color",w.fillColor.data());
+    if(w.type=="Image"){ImGui::TextUnformatted("Texture (drop an Asset Browser texture here)");ImGui::SetNextItemWidth(-FLT_MIN);changed|=ImGui::InputText("##Texture",&w.texture);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,w.texture);changed|=ImGui::DragFloat4("UV Rect",w.uv.data(),.01f,0,1);if(!w.texture.empty()){auto texture=app.GetResourceManager()->Get<TextureResource>(w.texture);if(texture&&texture->HasError())ImGui::TextWrapped("Image error: %s",texture->GetErrorMessage().c_str());}}
+   }
+   if((w.type=="Text"||w.type=="ProgressBar")&&ImGui::CollapsingHeader("Content",ImGuiTreeNodeFlags_DefaultOpen)){
+    if(w.type=="Text"){ImGui::TextUnformatted("Text");ImGui::SetNextItemWidth(-FLT_MIN);changed|=ImGui::InputTextMultiline("##Text",&w.text,{0,80});ImGui::SeparatorText("Typography");if(!w.styleAsset.empty()&&std::find(w.styleOverrides.begin(),w.styleOverrides.end(),"font")==w.styleOverrides.end())ImGui::TextWrapped("Shared Style controls Font; choosing a Font Asset or Default Font creates a local override.");ImGui::TextWrapped("Font: %s",w.font.empty()?"Default (Segoe UI)":w.font.c_str());
+    if(ImGui::BeginCombo("Font Asset",w.font.empty()?"Default Font":w.font.c_str())){if(ImGui::Selectable("Default Font",w.font.empty())){w.font.clear();if(!w.styleAsset.empty()&&std::find(w.styleOverrides.begin(),w.styleOverrides.end(),"font")==w.styleOverrides.end())w.styleOverrides.push_back("font");changed=true;}for(auto& asset:m_AssetCatalog.Entries())if(m_AssetCatalog.Types()[asset.type].kind==ecs::AssetKind::Font)if(ImGui::Selectable(asset.key.c_str(),w.font==asset.key)){w.font=asset.key;changed=true;}ImGui::EndCombo();}
+    changed|=AcceptAssetDrop(ecs::AssetKind::Font,w.font);if(!w.font.empty()){ImGui::SameLine();if(ImGui::SmallButton("Clear Font")){w.font.clear();changed=true;}auto font=app.GetResourceManager()->Get<FontResource>(w.font);if(font&&font->HasError())ErrorText(font->GetErrorMessage().c_str());}
+    changed|=ImGui::ColorEdit4("Text Color",w.color.data());
+    changed|=ImGui::DragFloat("Font Size",&w.fontSize,1,1,256);changed|=ImGui::Combo("Text Alignment",&w.textAlignment,"Left\0Center\0Right\0");}
+    else changed|=ImGui::SliderFloat("Progress Value",&w.value,0,1);
+   }
+   if(w.type=="Button"&&ImGui::CollapsingHeader("Interaction",ImGuiTreeNodeFlags_DefaultOpen)){
+    changed|=ImGui::Checkbox("Button Enabled",&w.enabled);changed|=ImGui::ColorEdit4("Hover Color",w.hoverColor.data());changed|=ImGui::ColorEdit4("Pressed Color",w.pressedColor.data());changed|=ImGui::ColorEdit4("Disabled Color",w.disabledColor.data());changed|=ImGui::DragFloat("State Transition Seconds",&w.transitionDuration,.01f,0,10,"%.2f",ImGuiSliderFlags_AlwaysClamp);
+   }
    DrawUI4Properties(app,key,edited,w,changed);
-   if(w.type=="Panel"||w.type=="Button")changed|=ImGui::Checkbox("Clip Children",&w.clipChildren);
-   bool required=std::find(edited.requiredWidgets.begin(),edited.requiredWidgets.end(),w.id)!=edited.requiredWidgets.end();
-   if(ImGui::Checkbox("Required Widget ID",&required)){if(required)edited.requiredWidgets.push_back(w.id);else std::erase(edited.requiredWidgets,w.id);changed=true;}
-   if(w.type=="Button"){changed|=ImGui::Checkbox("Enabled",&w.enabled);changed|=ImGui::ColorEdit4("Hover Color",w.hoverColor.data());changed|=ImGui::ColorEdit4("Pressed Color",w.pressedColor.data());changed|=ImGui::ColorEdit4("Disabled Color",w.disabledColor.data());}
-   if(w.type=="Text"){ImGui::TextUnformatted("Text");ImGui::SetNextItemWidth(-FLT_MIN);changed|=ImGui::InputTextMultiline("##Text",&w.text,{0,80});changed|=ImGui::DragFloat("Font Size",&w.fontSize,1,1,256);changed|=ImGui::Combo("Text Alignment",&w.textAlignment,"Left\0Center\0Right\0");ImGui::TextWrapped("Font: Segoe UI, independent runtime atlas. Latin and Cyrillic; explicit newlines.");}
-   if(w.type=="ProgressBar"){changed|=ImGui::SliderFloat("Value",&w.value,0,1);changed|=ImGui::ColorEdit4("Fill Color",w.fillColor.data());}
-   if(w.type=="Image"){ImGui::TextUnformatted("Texture (drop an Asset Browser texture here)");ImGui::SetNextItemWidth(-FLT_MIN);changed|=ImGui::InputText("##Texture",&w.texture);changed|=AcceptAssetDrop(ecs::AssetKind::Texture,w.texture);ImGui::TextUnformatted("UV Rect");ImGui::SetNextItemWidth(-FLT_MIN);changed|=ImGui::DragFloat4("##UV Rect",w.uv.data(),.01f,0,1);if(!w.texture.empty()){auto texture=app.GetResourceManager()->Get<TextureResource>(w.texture);if(texture&&texture->HasError())ImGui::TextWrapped("Image error: %s",texture->GetErrorMessage().c_str());}}
    if(ImGui::Button("Remove Widget Subtree")){std::set<std::string> removed{w.id};for(bool more=true;more;){more=false;for(auto& node:edited.widgets)if(removed.contains(node.parent)&&removed.insert(node.id).second)more=true;}std::erase_if(edited.widgets,[&](auto& node){return removed.contains(node.id);});std::erase_if(edited.animations,[&](auto& c){return removed.contains(c.widget);});std::erase_if(edited.requiredWidgets,[&](auto& id){return removed.contains(id);});if(removed.contains(edited.root))edited.root.clear();session.selected=edited.root;changed=true;}
   }
   if(changed)EditUIDocument(app,key,edited,!ImGui::IsAnyItemActive());else if(session.pending&&!m_UIWidgetDrag&&!ImGui::IsAnyItemActive())EditUIDocument(app,key,session.draft,true);

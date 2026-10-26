@@ -93,8 +93,8 @@ Camera.release()
 | `engine/ecs/PlayerSpawn.h` | Назначение выбранного LuaScriptComponent runtime-персонажу |
 | `engine/ecs/ComponentRegistry.cpp` | Inspector/serialization новых полей через существующий registry |
 | `engine/assets/scripts/FirstPersonController.lua` | Рабочий FPS controller |
-| `engine/assets/scripts/KeyboardTurnController.lua` | Альтернативное управление |
-| `engine/assets/scenes/lua_wave_demo.json` | Явное разрешение ввода старому wave controller |
+| `test_projects/legacy_workspace/Assets/scripts/KeyboardTurnController.lua` | Альтернативное управление |
+| `test_projects/legacy_workspace/Scenes/lua_wave_demo.json` | Явное разрешение ввода старому wave controller |
 | `tests/LuaGameplayControllerRegression.cpp` | Новый Input/Lua/Physics/DX12 regression |
 | `tests/LuaScriptingRegression.cpp` | Явное input permission тестовым акторам старого API |
 | `tests/Editor2Regression.cpp` | Проверка расширенного LuaScript descriptor |

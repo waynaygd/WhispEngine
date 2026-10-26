@@ -12,6 +12,7 @@ bool EditorLayer::DrawViewportCreateMenu(Application& app){
         if(play)ImGui::CloseCurrentPopup();
         if(ImGui::BeginMenu("3D Object")){for(const char* type:{"cube","sphere","cylinder","cone","plane"}){std::string label=type;label[0]=char(std::toupper(label[0]));if(ImGui::MenuItem(label.c_str()))CreatePrimitive(app,type);}ImGui::EndMenu();}
         if(ImGui::MenuItem("Empty Entity"))CreateEntity(app);
+        if(ImGui::MenuItem("Camera"))CreateCamera(app);
         if(ImGui::BeginMenu("Player")){if(ImGui::MenuItem("Player Start"))CreatePlayerStart(app);ImGui::EndMenu();}
         if(ImGui::BeginMenu("Light")){if(ImGui::MenuItem("Directional"))CreateLight(app,LightType::Directional);if(ImGui::MenuItem("Point"))CreateLight(app,LightType::Point);if(ImGui::MenuItem("Spot"))CreateLight(app,LightType::Spot);ImGui::EndMenu();}
         if(ImGui::BeginMenu("UI")){if(ImGui::MenuItem("Canvas"))CreateUICanvas(app);ImGui::EndMenu();}

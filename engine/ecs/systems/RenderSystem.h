@@ -1,6 +1,7 @@
 #pragma once
 #include <nlohmann/json.hpp>
 #include "../../ui/RuntimeUI.h"
+#include "../../ui/FontCache.h"
 #include "../../render/Environment.h"
 #include "../PostProcessEvaluation.h"
 #include "../../render/SceneLights.h"
@@ -11,6 +12,7 @@
 #include "../MathTypes.h"
 #include "../components/TransformComponent.h"
 #include "../RenderInterpolation.h"
+#include "../CameraState.h"
 #include "../PlacementPreview.h"
 #include "../../render/RenderResourceHandles.h"
 #include "../../render/RenderInstanceData.h"
@@ -56,6 +58,9 @@ public:
     const char* Name() const override { return "RenderSystem"; }
     void Update(World& world, float dt) override;
     void SetRenderAdapter(IRenderAdapter* renderer);
+    void SetCameraState(const CameraState& state);
+    void SetCameraAttachmentsEnabled(bool enabled){m_CameraAttachmentsEnabled=enabled;}
+    const CameraState& GetCameraState()const{return m_RenderCamera;}
     void SetCameraTransform(const Vec3& position, float yawRadians, float pitchRadians);
     void SetCameraProjection(float verticalFovRadians, float aspectRatio, float nearPlane, float farPlane);
     void SetResourceManager(ResourceManager* resourceManager) { m_ResourceManager = resourceManager; }
@@ -63,6 +68,7 @@ public:
     void SetInterpolation(RenderInterpolation* interpolation) { m_Interpolation = interpolation; }
     void SetPhysicsDebugPose(bool enabled) { m_PhysicsDebugPose = enabled; }
     void SetShadowSettings(const ShadowSettings* settings) { m_ShadowSettings=settings; }
+    const ui::FontCache& UIFonts()const{return m_UIFonts;}
     ui::DrawList BuildUIDesignerPreview(const ui::Document&,ui::Pair preview,IRenderAdapter* renderer);
     ui::RuntimeUI& RuntimeUI(){return m_RuntimeUI;}
     void SetUIPreview(bool value){m_UIPreview=value;}
@@ -97,6 +103,7 @@ private:
     std::vector<PlacementRenderItem> m_PlacementItems;
     const PostFxRuntimeOverrides* m_PostFxOverrides=nullptr;float m_PostFxTime=0;
     ui::RuntimeUI m_RuntimeUI;ui::DrawList m_UIDrawList;
+    ui::FontCache m_UIFonts;
     std::optional<ui::FontAtlas> m_UIFont;RenderTextureHandle m_UIFontTexture;bool m_UIPreview=true;
     bool m_TraceMaterials=false;
     std::uint64_t m_ResourceCacheEpoch=0;
@@ -152,6 +159,9 @@ private:
     IRenderAdapter* m_Renderer = nullptr;
     IRenderAdapter* m_ResourceOwnerRenderer = nullptr;
     ResourceManager* m_ResourceManager = nullptr;
+    CameraState m_RenderCamera=BuildCameraState({{0,0,-2.25f}},CameraComponent{},16.f/9.f);
+    bool m_CameraAttachmentsEnabled=false;
+    void RebuildLegacyCamera();
     Vec3 m_CameraPosition{ 0.0f, 0.0f, -2.25f };
     float m_CameraYaw = 0.0f;
     float m_CameraPitch = 0.0f;

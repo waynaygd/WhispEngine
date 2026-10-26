@@ -107,7 +107,7 @@ Commit/push/merge/rebase/reset/clean и смена ветки не выполн�
  M CMakeLists.txt
  M WhispEngine.cpp
  M engine/CMakeLists.txt
- M engine/assets/scripts/ConcertController.lua
+ M test_projects/legacy_workspace/Assets/scripts/ConcertController.lua
  M engine/assets/scripts/FirstPersonController.lua
  M engine/core/Application.cpp
  M engine/core/Application.h

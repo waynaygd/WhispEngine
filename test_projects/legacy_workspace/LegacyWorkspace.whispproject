@@ -1,0 +1,12 @@
+{
+  "formatVersion": 1,
+  "name": "Legacy Workspace",
+  "directories": {
+    "assets": "Assets",
+    "scenes": "Scenes"
+  },
+  "startupScene": "Scenes/pz3_demo_scene.json",
+  "mapsAndModes": {
+    "gameStartupMap": "Scenes/pz3_demo_scene.json"
+  }
+}

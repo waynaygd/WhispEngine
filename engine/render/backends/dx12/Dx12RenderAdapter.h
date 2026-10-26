@@ -33,6 +33,15 @@ public:
 	void EndFrame() override;
 	void Present() override;
 	void ShutdownEditorUi() override;
+    std::uint64_t RenderMaterialPreview(const MaterialPreviewFrame&) override;
+    bool SupportsCameraPreview()const override{return true;}
+    bool BeginCameraPreview(int,int,const float*)override;
+    void EndCameraPreview()override;
+    std::uint64_t GetCameraPreviewTextureId()const override{return m_CameraPreviewTarget.color?m_CameraPreviewTarget.srvGpu.ptr:0;}
+    void ReleaseCameraPreview()override;
+    std::vector<std::uint8_t> ReadBackCameraPreviewPixels(){return ReadBackColorPixels(m_CameraPreviewTarget.color.Get());}
+    void ReleaseMaterialPreview() override;
+    MaterialPreviewMetrics GetMaterialPreviewMetrics()const override{return m_MaterialPreviewMetrics;}
 	void Shutdown() override;
 
 	void SetTestTransform(const float* mvp16) override;
@@ -412,6 +421,14 @@ private:
 	std::unordered_map<std::uint64_t, UploadedShader> m_UploadedShaders;
 	std::uint64_t m_NextShaderHandle = 1;
 	ViewportTarget m_ViewportTarget;
+    ViewportTarget m_CameraPreviewTarget;
+    bool m_CameraPreviewRendering=false;
+    RenderTextureHandle m_MaterialPreviewColor;
+    ViewportTarget m_MaterialPreviewTarget;
+    MaterialPreviewMetrics m_MaterialPreviewMetrics;
+    Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_MaterialPreviewTime;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_MaterialPreviewReadback;
+    std::array<bool,FrameCount> m_MaterialPreviewTimed{};
 	RenderShaderHandle m_BoundShaderHandle{};
 	RenderTextureHandle m_BoundTextureHandle{};
 	bool m_EditorUiInitialized = false;

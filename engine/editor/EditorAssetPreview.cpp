@@ -7,7 +7,7 @@
 #include <set>
 #include <cstring>
 namespace editor {
-void EditorLayer::ReleaseAssetPreview(IRenderAdapter* renderer){ReleaseAssetThumbnails(renderer);if(renderer&&m_AssetPreviewTexture.IsValid())renderer->DestroyTexture(m_AssetPreviewTexture);m_AssetPreviewTexture={};m_AssetPreviewKey.clear();m_AssetPreviewVersion=0;}
+void EditorLayer::ReleaseAssetPreview(IRenderAdapter* renderer){ReleaseMaterialEditor(renderer);ReleaseAssetThumbnails(renderer);if(renderer&&m_AssetPreviewTexture.IsValid())renderer->DestroyTexture(m_AssetPreviewTexture);m_AssetPreviewTexture={};m_AssetPreviewKey.clear();m_AssetPreviewVersion=0;}
 void EditorLayer::ReleaseAssetThumbnails(IRenderAdapter* renderer){
     if(renderer){
         for(auto& [key,item]:m_AssetThumbnails)if(item.texture.IsValid())renderer->DestroyTexture(item.texture);
@@ -31,6 +31,8 @@ void EditorLayer::BeginAssetThumbnailFrame(Application& app){
     }
 }
 const EditorLayer::AssetThumbnail& EditorLayer::RequestAssetThumbnail(Application& app,ecs::AssetKind kind,const std::string& key){
+    ++m_BrowserStatistics.thumbnailCalls;
+    if(auto cached=m_AssetThumbnails.find(key);cached!=m_AssetThumbnails.end()&&cached->second.texture.IsValid())++m_BrowserStatistics.thumbnailHits;
     auto& item=m_AssetThumbnails[key];item.kind=kind;item.lastUsed=m_ThumbnailFrame;
     auto* resources=app.GetResourceManager();auto* renderer=app.GetRenderAdapter();
     if(!resources||!renderer)return item;
@@ -39,8 +41,8 @@ const EditorLayer::AssetThumbnail& EditorLayer::RequestAssetThumbnail(Applicatio
     auto pending=[&]{
         unsigned count=0;
         for(auto& [k,t]:m_AssetThumbnails){
-            if(t.kind==ecs::AssetKind::Mesh){auto r=resources->Get<MeshResource>(std::filesystem::u8path(k));count+=r&&r->IsLoading();}
-            if(t.kind==ecs::AssetKind::Texture){auto r=resources->Get<TextureResource>(std::filesystem::u8path(k));count+=r&&r->IsLoading();}
+            if(t.kind==ecs::AssetKind::Mesh){auto r=resources->PeekIndexed<MeshResource>(k);count+=r&&r->IsLoading();}
+            if(t.kind==ecs::AssetKind::Texture){auto r=resources->PeekIndexed<TextureResource>(k);count+=r&&r->IsLoading();}
         }return count;
     };
     auto process=[&](auto resource){
@@ -73,7 +75,7 @@ const EditorLayer::AssetThumbnail& EditorLayer::RequestAssetThumbnail(Applicatio
             }
             ++m_ThumbnailUploads;item.texture=renderer->CreateThumbnailTexture(small);item.width=small.width;item.height=small.height;
         }else{
-            auto shader=resources->Get<ShaderResource>("dx12/textured.hlsl");
+            auto shader=resources->PeekIndexed<ShaderResource>("dx12/textured.hlsl");
             if(!shader){(void)resources->LoadAsync<ShaderResource>("dx12/textured.hlsl");return;}
             if(shader->IsLoading())return;
             if(shader->IsFailed()){item.error=shader->GetErrorMessage();item.state="Failed";return;}
@@ -85,7 +87,7 @@ const EditorLayer::AssetThumbnail& EditorLayer::RequestAssetThumbnail(Applicatio
         if(item.texture.IsValid())item.state="Ready";
         else{item.state="Failed";item.error="Thumbnail GPU creation failed (unsupported renderer, invalid geometry, or exhausted GPU resources)";}
     };
-    if(kind==ecs::AssetKind::Texture)process(resources->Get<TextureResource>(path));else process(resources->Get<MeshResource>(path));
+    if(kind==ecs::AssetKind::Texture)process(resources->PeekIndexed<TextureResource>(key));else process(resources->PeekIndexed<MeshResource>(key));
     return item;
 }
 void EditorLayer::DrawAssetPreview(Application& app){
@@ -98,7 +100,7 @@ void EditorLayer::DrawAssetPreview(Application& app){
   }
   if(!preview.error.empty())ImGui::TextWrapped("%s",preview.error.c_str());
  }
- if(m_SelectedAssetKind=="Mesh")if(auto resource=resources->Get<MeshResource>(std::filesystem::u8path(m_SelectedAsset));resource&&resource->IsLoaded()){
+ if(m_SelectedAssetKind=="Mesh")if(auto resource=resources->PeekIndexed<MeshResource>(m_SelectedAsset);resource&&resource->IsLoaded()){
   if(m_AssetMetadataKey!=m_SelectedAsset||m_AssetMetadataVersion!=resource->GetVersion()){
    m_AssetMetadataKey=m_SelectedAsset;m_AssetMetadataVersion=resource->GetVersion();const auto& d=resource->GetData().meshData;std::ostringstream text;text<<"Format: "<<std::filesystem::u8path(m_SelectedAsset).extension().string()<<"\nMaterials: "<<d.materials.size()<<" / Submeshes: "<<d.submeshes.size();
    std::array<float,3> lo{FLT_MAX,FLT_MAX,FLT_MAX},hi{-FLT_MAX,-FLT_MAX,-FLT_MAX};for(const auto& v:d.vertices)for(int i=0;i<3;++i){lo[i]=std::min(lo[i],v.position[i]);hi[i]=std::max(hi[i],v.position[i]);}
@@ -107,7 +109,7 @@ void EditorLayer::DrawAssetPreview(Application& app){
    text<<"\nDependencies: "<<dependencies.size();for(const auto& key:dependencies)text<<"\n"<<key;m_AssetMetadata=text.str();
   }ImGui::TextWrapped("%s",m_AssetMetadata.c_str());
  }
- if(m_SelectedAssetKind=="Material")if(auto resource=resources->Get<MaterialResource>(std::filesystem::u8path(m_SelectedAsset));resource&&resource->IsLoaded()){
+ if(m_SelectedAssetKind=="Material")if(auto resource=resources->PeekIndexed<MaterialResource>(m_SelectedAsset);resource&&resource->IsLoaded()){
   const auto& m=resource->GetData();ImGui::ColorButton("Base Color",{LinearToSrgb(m.baseColor[0]),LinearToSrgb(m.baseColor[1]),LinearToSrgb(m.baseColor[2]),m.baseColor[3]});ImGui::TextWrapped("Base: %s\nNormal: %s\nMR: %s\nAO: %s",m.texturePath.c_str(),m.normalTexturePath.c_str(),m.metallicRoughnessTexturePath.c_str(),m.occlusionTexturePath.c_str());
  }
  if(m_SelectedAssetKind=="Environment"){
@@ -115,7 +117,7 @@ void EditorLayer::DrawAssetPreview(Application& app){
    if(ImGui::Button("Use as Scene Skybox")){BeginSceneTransaction(app,"Set skybox");auto s=app.GetSceneSettings();s.background.background=EditorBackground::Cubemap;s.background.cubemap=m_SelectedAsset;s.background.useIblEnvironment=false;s.background.sunMetadata=false;if(s.background.sunSync==SunSyncMode::SkyDrivesLight)s.background.sunSync=SunSyncMode::Independent;app.SetSceneSettings(s);FinishTransaction(app);}
    ImGui::SameLine();if(ImGui::Button("Use as IBL"))AssignAsset(app,{},ecs::AssetKind::Environment,m_SelectedAsset);
   }
-  if(auto resource=resources->Get<EnvironmentResource>(std::filesystem::u8path(m_SelectedAsset));resource&&resource->IsLoaded()&&!resource->GetData().placeholder){
+  if(auto resource=resources->PeekIndexed<EnvironmentResource>(m_SelectedAsset);resource&&resource->IsLoaded()&&!resource->GetData().placeholder){
    const auto& d=resource->GetData();
    if(renderer&&(m_AssetPreviewKey!=m_SelectedAsset||m_AssetPreviewVersion!=resource->GetVersion())&&d.width&&d.height&&d.radiance.size()==std::size_t(d.width)*d.height*4){
     TextureData thumbnail;thumbnail.width=256;thumbnail.height=128;thumbnail.pixels.resize(256*128*4);

@@ -25,11 +25,15 @@ target_include_directories(ImGuizmo PUBLIC
 target_link_libraries(ImGuizmo PUBLIC DearImGui)
 
 add_library(Engine
+  ui/UICustomFont.cpp
+  ui/FontCache.cpp
+  resources/FontResource.cpp
   ui/UILayout.cpp
   ui/UIEffects.cpp
   editor/EditorUI4.cpp
   scripting/LuaRuntime.cpp
   scripting/Prefab.cpp
+  scripting/PrefabInheritance.cpp
   core/Application.cpp
   core/ApplicationProject.cpp
   core/AssetDependencyValidation.cpp
@@ -64,6 +68,7 @@ add_library(Engine
   resources/loaders/ShaderLoader.cpp
   scene/SceneSerializer.cpp
   scene/SceneSettings.cpp
+  editor/EditorDocuments.cpp
   editor/EditorLayer.cpp
   editor/EditorProject.cpp
   editor/EditorProjectSettings.cpp
@@ -71,6 +76,7 @@ add_library(Engine
   editor/EditorTransactions.cpp
   editor/EditorSelection.cpp
   editor/EditorGroupTransform.cpp
+  editor/EditorMaterial.cpp
   editor/EditorInspector.cpp
   editor/SceneValidation.cpp
   editor/EditorSceneValidation.cpp
@@ -85,6 +91,7 @@ add_library(Engine
   editor/EditorVertexSnap.cpp
   editor/EditorPlacement.cpp
   editor/EditorFogGizmos.cpp
+  editor/EditorCameraTools.cpp
   editor/EditorPostProcess.cpp
   editor/EditorEntityIcons.cpp
   editor/EditorVisualSettings.cpp
@@ -92,6 +99,10 @@ add_library(Engine
   editor/EditorAssetPreview.cpp
   editor/EditorAssets.cpp
   editor/EditorPrefabs.cpp
+  editor/EditorPrefabInheritance.cpp
+  editor/LuaScriptBuffer.cpp
+  editor/LuaCodeEditor.cpp
+  editor/EditorScriptDocument.cpp
   editor/ScriptEditor.cpp
   editor/GltfSceneImport.cpp
   editor/EditorLevelWorkflow.cpp
@@ -169,4 +180,8 @@ if(MSVC)
   set_source_files_properties(ui/UIDocument.cpp editor/EditorRuntimeUI.cpp
   editor/WidgetDesignerTools.cpp
   editor/EditorWidgetDesigner.cpp PROPERTIES COMPILE_OPTIONS "/utf-8")
+endif()
+
+if(WIN32)
+ target_link_libraries(Engine PRIVATE dwrite)
 endif()

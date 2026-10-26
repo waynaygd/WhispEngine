@@ -209,7 +209,7 @@ Tracy: `pbr-500.tracy`, 1303 frames, span 8.26 s, 692302 zones, 2578.48 KB. Expo
 - `engine/shaders/dx12/textured.hlsl`.
 - `tests/LightingRegression.cpp`, `MaterialSystemRegression.cpp`, `ShadowMappingRegression.cpp`, `ShadowQualityRegression.cpp` — новый color oracle/новые PBR проверки.
 
-Добавлены `engine/render/ColorPipeline.h`, `engine/assets/models/pbr_sphere.obj`, `tests/PbrCoreRegression.cpp`, `RunPbrDiagnostics.ps1`, `SummarizePbrDiagnostics.py`, этот отчёт. 41 из 62 прежних dirty/new files сохранён byte-for-byte; остальные 21 изменены в перечисленном scope. Mesh/Texture loaders, ResourceManager, SceneSerializer, прежние reports/assets, GPU Instancing regression source и shadow projection/depth implementation сохранены.
+Добавлены `engine/render/ColorPipeline.h`, `test_projects/legacy_workspace/Assets/models/pbr_sphere.obj`, `tests/PbrCoreRegression.cpp`, `RunPbrDiagnostics.ps1`, `SummarizePbrDiagnostics.py`, этот отчёт. 41 из 62 прежних dirty/new files сохранён byte-for-byte; остальные 21 изменены в перечисленном scope. Mesh/Texture loaders, ResourceManager, SceneSerializer, прежние reports/assets, GPU Instancing regression source и shadow projection/depth implementation сохранены.
 
 ## 22. Команды воспроизведения
 

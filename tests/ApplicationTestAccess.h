@@ -18,6 +18,8 @@ struct ApplicationTestAccess {
     static void FixedGameplayCamera(Application& app,ecs::Vec3 position){app.m_GameplayCamera.position=position;app.m_GameplayCamera.following=false;app.m_GameplayCamera.yaw=app.m_GameplayCamera.pitch=0;}
     static void ObserveFrames(Application& app,std::function<void()> observer){app.m_FrameObserver=std::move(observer);}
     static auto FrameCpuMs(const Application& app){return app.m_FrameCpuMs;}
+    static const ui::FontCache& UIFonts(const Application& app){return app.m_RenderSystem->UIFonts();}
+    static void ReleaseUIResources(Application& app){app.m_RenderSystem->ReleaseGpuResources();}
     static std::size_t RuntimeUIInstances(const Application& app){return app.m_RenderSystem->UIInstanceCount();}
     static const ecs::EvaluatedPostProcess& PostProcess(const Application& app){return app.m_RenderSystem->GetEvaluatedPostProcess();}
     static void FrameDelta(Application& app,float seconds){

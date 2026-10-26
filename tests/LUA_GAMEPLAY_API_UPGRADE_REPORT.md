@@ -69,7 +69,7 @@ Prefab spawning не менялся: свежий prefab root получает �
 
 ## ConcertController.lua
 
-Файл: `engine/assets/scripts/ConcertController.lua`, штатно staged через LuaGameplayAssets в активный Asset Root (`assets/scripts/ConcertController.lua`).
+Файл: `test_projects/legacy_workspace/Assets/scripts/ConcertController.lua`, штатно staged через LuaGameplayAssets в активный Asset Root (`assets/scripts/ConcertController.lua`).
 
 1. Создайте Mesh, например Sphere, и назовите Globe. Создайте Spot Light, направьте его на освещаемую геометрию.
 2. Create → Empty Entity, Add Component → Lua Script.
@@ -113,7 +113,7 @@ Release-сборка всех targets: PASS (`out/lua-api-release-final.log`, `o
 - `engine/scripting/EntityReference.h`: общий формат/валидатор/resolver Scene Identity.
 - `engine/ecs/ComponentRegistry.cpp`: validation tagged reference/null в properties.
 - `engine/editor/EditorInspector.cpp`, `EditorLayer.h`: assignment command и Combo/drop/X.
-- `engine/assets/scripts/ConcertController.lua`: рабочий пример.
+- `test_projects/legacy_workspace/Assets/scripts/ConcertController.lua`: рабочий пример.
 - `tests/LuaGameplayApiRegression.cpp`, `CMakeLists.txt`: CPU/DX12 regressions и dependency на staged Lua assets.
 - `tests/LUA_GAMEPLAY_API_UPGRADE_REPORT.md`: этот отчёт.
 

@@ -1,7 +1,11 @@
 #include "GlfwWindow.h"
 #include "../core/Logger.h"
+#include "branding/GeneratedIcon.h"
 
 #include <GLFW/glfw3.h>
+#include <stb_image.h>
+#include <array>
+#include <memory>
 
 #ifdef _WIN32
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -12,6 +16,22 @@ static int g_GlfwRefCount = 0;
 
 namespace
 {
+void SetApplicationIcon(GLFWwindow* window)
+{
+    // GLFW copies the RGBA pixels; no CPU images survive this creation step.
+    struct FreePixels { void operator()(unsigned char* p)const { stbi_image_free(p); } };
+    std::array<std::unique_ptr<unsigned char, FreePixels>, 7> pixels{};
+    std::array<GLFWimage, 7> images{};
+    int count=0;
+    for(const auto& frame:whisp::branding::WindowIcons){
+        int width=0,height=0,channels=0;
+        auto* rgba=stbi_load_from_memory(frame.png,static_cast<int>(frame.bytes),&width,&height,&channels,STBI_rgb_alpha);
+        if(!rgba){Logger::Get().Warn("Application icon could not be decoded");continue;}
+        pixels[count].reset(rgba);images[count++]={width,height,rgba};
+    }
+    if(count)glfwSetWindowIcon(window,count,images.data());
+}
+
 void PointerCallback(GLFWwindow* window,double x,double y){if(auto* owner=static_cast<GlfwWindow*>(glfwGetWindowUserPointer(window)))owner->PointerMoved(x,y);}
 void PointerEnterCallback(GLFWwindow* window,int entered){if(!entered)if(auto* owner=static_cast<GlfwWindow*>(glfwGetWindowUserPointer(window)))owner->PointerLeft();}
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset)
@@ -66,6 +86,7 @@ bool GlfwWindow::Create(int width, int height, const std::string& title)
         return false;
     }
 
+    SetApplicationIcon(m_Window);
     glfwSetWindowUserPointer(m_Window, this);
     glfwSetScrollCallback(m_Window, ScrollCallback);
     glfwSetCursorPosCallback(m_Window,PointerCallback);glfwSetCursorEnterCallback(m_Window,PointerEnterCallback);

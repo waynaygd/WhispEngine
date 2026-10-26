@@ -1,5 +1,6 @@
 #define NOMINMAX
 #include "SceneSerializer.h"
+#include "../scripting/Prefab.h"
 #include "../ecs/ComponentRegistry.h"
 #include "../ecs/components/SceneIdentityComponent.h"
 #include <set>
@@ -290,6 +291,7 @@ bool SceneSerializer::WriteAtomic(const std::filesystem::path& path,const nlohma
 #else
         std::filesystem::rename(temporary,path);
 #endif
+        if(path.filename().native().ends_with(std::filesystem::path(".prefab.json").native()))scripting::InvalidatePrefabCache();
         return true;
     }catch(const std::exception& e){std::error_code ignored;if(!temporary.empty())std::filesystem::remove(temporary,ignored);SetError(error,e.what());return false;}
 }

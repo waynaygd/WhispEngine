@@ -6,6 +6,9 @@
 #include "../../../editor/EditorTheme.h"
 #ifdef _WIN32
 
+// Dynamic ImGui font atlas resizing can retain an old texture for in-flight frames.
+static constexpr unsigned ExtraImGuiDescriptors=8;
+
 #include "../../../core/Logger.h"
 #include "../../../core/AssetPaths.h"
 #include <d3d12sdklayers.h>
@@ -502,6 +505,63 @@ RenderTextureHandle Dx12RenderAdapter::RenderMeshThumbnail(const MeshData& data,
     if(dsvHeap)m_RetiredResources[m_FrameIndex].emplace_back(dsvHeap.Get());
     if(mesh.IsValid())DestroyMesh(mesh);
     return result;
+}
+
+void Dx12RenderAdapter::ReleaseMaterialPreview(){
+    if(m_MaterialPreviewColor.IsValid())DestroyTexture(m_MaterialPreviewColor);
+    m_MaterialPreviewColor={};
+    auto& t=m_MaterialPreviewTarget;
+    if(m_FrameRecording){if(t.depth)m_RetiredResources[m_FrameIndex].emplace_back(t.depth.Get());if(t.rtvHeap)m_RetiredResources[m_FrameIndex].emplace_back(t.rtvHeap.Get());if(t.dsvHeap)m_RetiredResources[m_FrameIndex].emplace_back(t.dsvHeap.Get());}
+    t={};m_MaterialPreviewMetrics.targetBytes=0;
+}
+std::uint64_t Dx12RenderAdapter::RenderMaterialPreview(const MaterialPreviewFrame& f){
+    using namespace DirectX;const auto start=std::chrono::steady_clock::now();
+    struct Timer{double& ms;std::chrono::steady_clock::time_point start;~Timer(){ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}} timer{m_MaterialPreviewMetrics.submissionMs,start};
+    if(!m_FrameRecording||m_ViewportTarget.rendering||m_HdrActive||!m_UploadedMeshes.count(f.mesh.value)||!m_UploadedShaders.count(f.shader.value))return 0;
+    auto& target=m_MaterialPreviewTarget;const UINT width=std::clamp(f.width,64u,1536u),height=std::clamp(f.height,64u,1536u);
+    if(target.width!=width||target.height!=height){
+        ReleaseMaterialPreview();TextureData pixels;pixels.width=width;pixels.height=height;pixels.pixels.resize(std::size_t(width)*height*4);
+        m_MaterialPreviewColor=CreateTexture(pixels,true);if(!m_MaterialPreviewColor.IsValid())return 0;
+        D3D12_DESCRIPTOR_HEAP_DESC heap{};heap.NumDescriptors=1;heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;ThrowIfFailed(m_Device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&target.rtvHeap)),"Material preview RTV");heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_DSV;ThrowIfFailed(m_Device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&target.dsvHeap)),"Material preview DSV");
+        auto desc=CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT,width,height,1,1,1,0,D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);D3D12_HEAP_PROPERTIES props{};props.Type=D3D12_HEAP_TYPE_DEFAULT;D3D12_CLEAR_VALUE clear{};clear.Format=DXGI_FORMAT_D32_FLOAT;clear.DepthStencil.Depth=1;
+        ThrowIfFailed(m_Device->CreateCommittedResource(&props,D3D12_HEAP_FLAG_NONE,&desc,D3D12_RESOURCE_STATE_DEPTH_WRITE,&clear,IID_PPV_ARGS(&target.depth)),"Material preview depth");
+        target.rtv=target.rtvHeap->GetCPUDescriptorHandleForHeapStart();target.dsv=target.dsvHeap->GetCPUDescriptorHandleForHeapStart();D3D12_RENDER_TARGET_VIEW_DESC view{};view.Format=DXGI_FORMAT_R8G8B8A8_UNORM;view.ViewDimension=D3D12_RTV_DIMENSION_TEXTURE2D;
+        m_Device->CreateRenderTargetView(m_UploadedTextures.at(m_MaterialPreviewColor.value).texture.Get(),&view,target.rtv);m_Device->CreateDepthStencilView(target.depth.Get(),nullptr,target.dsv);target.width=width;target.height=height;++m_MaterialPreviewMetrics.allocations;m_MaterialPreviewMetrics.targetBytes=std::uint64_t(width)*height*8;
+    }
+    if(!m_MaterialPreviewTime){
+        D3D12_QUERY_HEAP_DESC query{};query.Type=D3D12_QUERY_HEAP_TYPE_TIMESTAMP;query.Count=FrameCount*2;ThrowIfFailed(m_Device->CreateQueryHeap(&query,IID_PPV_ARGS(&m_MaterialPreviewTime)),"Material preview time");D3D12_HEAP_PROPERTIES props{};props.Type=D3D12_HEAP_TYPE_READBACK;auto desc=CD3DX12_RESOURCE_DESC::Buffer(FrameCount*16);ThrowIfFailed(m_Device->CreateCommittedResource(&props,D3D12_HEAP_FLAG_NONE,&desc,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&m_MaterialPreviewReadback)),"Material preview readback");
+    }
+    if(m_MaterialPreviewTimed[m_FrameIndex]){UINT64* ticks=nullptr;const SIZE_T offset=m_FrameIndex*16;D3D12_RANGE range{offset,offset+16};if(SUCCEEDED(m_MaterialPreviewReadback->Map(0,&range,reinterpret_cast<void**>(&ticks)))){UINT64 frequency=0;m_Queue->GetTimestampFrequency(&frequency);if(frequency&&ticks[m_FrameIndex*2+1]>=ticks[m_FrameIndex*2])m_MaterialPreviewMetrics.gpuMs=double(ticks[m_FrameIndex*2+1]-ticks[m_FrameIndex*2])*1000/frequency;D3D12_RANGE written{0,0};m_MaterialPreviewReadback->Unmap(0,&written);}}
+    m_CmdList->EndQuery(m_MaterialPreviewTime.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_FrameIndex*2);
+    auto* color=m_UploadedTextures.at(m_MaterialPreviewColor.value).texture.Get();auto barrier=CD3DX12_RESOURCE_BARRIER::Transition(color,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);m_CmdList->ResourceBarrier(1,&barrier);
+    D3D12_VIEWPORT viewport{0,0,float(width),float(height),0,1};D3D12_RECT rect{0,0,LONG(width),LONG(height)};m_CmdList->RSSetViewports(1,&viewport);m_CmdList->RSSetScissorRects(1,&rect);m_CmdList->OMSetRenderTargets(1,&target.rtv,FALSE,&target.dsv);const float value=f.dark?.025f:.12f;const float background[]={value,value,value,1};m_CmdList->ClearRenderTargetView(target.rtv,background,0,nullptr);m_CmdList->ClearDepthStencilView(target.dsv,D3D12_CLEAR_FLAG_DEPTH,1,0,0,nullptr);
+        const auto oldShader=m_BoundShaderHandle; const auto oldTexture=m_BoundTextureHandle;
+        const auto oldMaps=m_BoundMaps; const auto oldModel=m_Model; const auto oldNormal=m_Normal;
+        const auto oldBase=m_BaseColor; const auto oldSurface=m_Surface; const auto oldParams=m_TextureParameters;
+        const auto oldCamera=m_Camera; const auto oldLighting=m_Lighting; const auto oldRange=m_MeshRange;
+        const auto oldMaterial=m_MaterialState; const auto oldEnv=m_EnvironmentSettings;
+        const auto oldShadows=m_ShadowConstants; const auto oldLightPass=m_ActiveLightPass;
+        const auto oldMode=m_LightMode;const auto oldLights=m_PendingLights; const auto oldStats=m_SubmissionStatistics;
+        const auto oldDiagnostics=m_SceneLightDiagnostics;
+        const auto oldWidth=m_ViewportTarget.width,oldHeight=m_ViewportTarget.height;
+        const bool oldRendering=m_ViewportTarget.rendering;
+        float oldMvp[16],oldColor[4]; std::memcpy(oldMvp,m_PendingMVP,sizeof(oldMvp)); std::memcpy(oldColor,m_PendingColor,sizeof(oldColor));
+        struct Restore {std::function<void()> action;~Restore(){action();}} restore{[=,this]{
+            m_BoundShaderHandle=oldShader; m_BoundTextureHandle=oldTexture; m_BoundMaps=oldMaps; m_Model=oldModel; m_Normal=oldNormal;
+            m_BaseColor=oldBase; m_Surface=oldSurface; m_TextureParameters=oldParams; m_Camera=oldCamera; m_Lighting=oldLighting;
+            m_MeshRange=oldRange; m_MaterialState=oldMaterial; m_EnvironmentSettings=oldEnv; m_ShadowConstants=oldShadows;
+            m_ActiveLightPass=oldLightPass;m_LightMode=oldMode; m_PendingLights=oldLights; m_SubmissionStatistics=oldStats; m_FrameConstantsDirty=true; m_LastMaterialTable={};
+            m_ViewportTarget.width=oldWidth;m_ViewportTarget.height=oldHeight;m_ViewportTarget.rendering=oldRendering;m_SceneLightDiagnostics=oldDiagnostics;
+            SetTestTransform(oldMvp); SetTestColor(oldColor[0],oldColor[1],oldColor[2],oldColor[3]);
+        }};
+
+    m_ViewportTarget.width=width;m_ViewportTarget.height=height;m_ViewportTarget.rendering=true;
+    const auto focus=XMVectorSet(f.panX,f.panY,0,1);const auto eye=XMVectorAdd(focus,XMVectorSet(std::sin(f.yaw)*std::cos(f.pitch)*f.distance,std::sin(f.pitch)*f.distance,-std::cos(f.yaw)*std::cos(f.pitch)*f.distance,0));
+    const auto model=XMMatrixIdentity(),mvp=model*XMMatrixLookAtLH(eye,focus,XMVectorSet(0,1,0,0))*XMMatrixPerspectiveFovLH(XM_PIDIV4,float(width)/height,.05f,100.f);XMFLOAT4X4 matrix;XMStoreFloat4x4(&matrix,mvp);SetTestTransform(&matrix._11);XMStoreFloat4x4(&matrix,model);std::memcpy(m_Model.data(),&matrix,sizeof(matrix));m_Normal=BuildNormalMatrix(m_Model);
+    const auto& material=f.material;m_BaseColor={material.baseColor[0],material.baseColor[1],material.baseColor[2],material.baseColor[3]};m_Surface={material.metallic,material.roughness,float(material.shadingModel),0};unsigned mask=0;for(int i=1;i<4;++i)if(f.textures[i].IsValid()&&material.textureTexCoords[i]==0)mask|=1u<<(i-1);m_TextureParameters={material.normalScale,material.occlusionStrength,float(mask),1};if(f.colorPipeline)SetTestColor(1,1,1,1);else {SetTestColor(material.baseColor[0],material.baseColor[1],material.baseColor[2],material.baseColor[3]);m_BaseColor={1,1,1,1};}XMFLOAT3 camera;XMStoreFloat3(&camera,eye);m_Camera={camera.x,camera.y,camera.z,0};LightingSettings lights;if(f.lighting==1){lights.directional.color={1,1,1};lights.directional.direction={-.2f,-.5f,1};lights.ambientIntensity=.4f;}if(f.lighting==2)lights.enabled=false;m_Lighting=BuildLightingConstants(lights);
+    m_MeshRange={};m_MaterialState={material.doubleSided,false,false};m_EnvironmentSettings.enabled=false;m_ShadowConstants={};m_PendingLights.clear();m_LightMode=LightRenderingMode::Forward;if(lights.enabled){GpuSceneLight light;light.directionType={m_Lighting.directionEnabled[0],m_Lighting.directionEnabled[1],m_Lighting.directionEnabled[2],0};light.colorIntensity=m_Lighting.colorIntensity;m_PendingLights.push_back(light);m_Lighting.colorIntensity[3]=0;}m_ActiveLightPass=UINT_MAX;m_FrameConstantsDirty=true;BindShader(f.shader);for(unsigned i=0;i<4;++i)BindTexture(i,f.textures[i]);if(material.surfaceMode==MaterialSurfaceMode::Opaque){DrawMesh(f.mesh);++m_MaterialPreviewMetrics.draws;}
+    barrier=CD3DX12_RESOURCE_BARRIER::Transition(color,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);m_CmdList->ResourceBarrier(1,&barrier);m_CmdList->EndQuery(m_MaterialPreviewTime.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_FrameIndex*2+1);m_CmdList->ResolveQueryData(m_MaterialPreviewTime.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_FrameIndex*2,2,m_MaterialPreviewReadback.Get(),m_FrameIndex*16);m_MaterialPreviewTimed[m_FrameIndex]=true;
+    return GetTexturePreviewId(m_MaterialPreviewColor);
 }
 
 void Dx12RenderAdapter::DestroyTexture(RenderTextureHandle handle)
@@ -1186,22 +1246,22 @@ bool Dx12RenderAdapter::InitializeEditorUi(IWindow* window)
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
-    // Keep the bundled editor face; fill its missing Cyrillic glyphs from the
-    // Windows monospace font. No new redistributable font dependency.
-    // The Cyrillic merge below uses an explicit reference size. ImGui 1.92
-    // requires the destination to have one too (13px is its existing default).
-    ImFontConfig defaultFont;defaultFont.SizePixels=13.f;
-    io.Fonts->AddFontDefault(&defaultFont);
-    wchar_t windowsDirectory[MAX_PATH]{};
+    // One atlas, initialized once. Segoe is the common UI face; code/logs opt
+    // into a separate monospace face. Both carry Latin and Cyrillic glyphs.
+    static const ImWchar ranges[]={0x0020,0x00ff,0x0400,0x052f,0x25a0,0x25cf,0};
+    wchar_t windowsDirectory[MAX_PATH]{};ImFont* uiFont=nullptr;
     if(GetWindowsDirectoryW(windowsDirectory,MAX_PATH)){
-        const auto font=std::filesystem::path(windowsDirectory)/"Fonts"/"consola.ttf";
-        if(std::filesystem::is_regular_file(font)){
-            static const ImWchar cyrillic[]={0x0400,0x052f,0};
-            ImFontConfig config;config.MergeMode=true;
-            io.Fonts->AddFontFromFileTTF(AssetPaths::ToUtf8String(font).c_str(),16.f,&config,cyrillic);
+        auto fonts=std::filesystem::path(windowsDirectory)/"Fonts";
+        for(const auto* name:{L"segoeui.ttf",L"arial.ttf"})if(!uiFont&&std::filesystem::is_regular_file(fonts/name)){
+            ImFontConfig config;strcpy_s(config.Name,"Browser UI");uiFont=io.Fonts->AddFontFromFileTTF(AssetPaths::ToUtf8String(fonts/name).c_str(),16,&config,ranges);
         }
+        if(std::filesystem::is_regular_file(fonts/L"consola.ttf")){ImFontConfig config;strcpy_s(config.Name,"Editor Mono");io.Fonts->AddFontFromFileTTF(AssetPaths::ToUtf8String(fonts/L"consola.ttf").c_str(),16,&config,ranges);}
     }
-
+    if(!uiFont){ImFontConfig config;config.SizePixels=16;uiFont=io.Fonts->AddFontDefault(&config);}
+    io.FontDefault=uiFont;
+    // Reserve the supported DPI sizes before the backend creates its atlas SRV.
+    io.Fonts->TexMinWidth=1024;io.Fonts->TexMinHeight=1024;
+    for(auto* font:io.Fonts->Fonts)for(float size:{16.f,24.f,36.f}){auto* baked=font->GetFontBaked(size);for(ImWchar c=32;c<256;++c)baked->FindGlyph(c);for(ImWchar c=0x400;c<=0x52f;++c)baked->FindGlyph(c);if(font==uiFont)for(ImWchar c=0x25a0;c<=0x25cf;++c)baked->FindGlyph(c);}
 
     float dpiX=1,dpiY=1;glfwGetWindowContentScale(glfwWin->GetGlfwHandle(),&dpiX,&dpiY);
     m_EditorUiWindow=glfwWin->GetGlfwHandle();m_EditorUiScale=(std::max)(dpiX,dpiY);editor::ApplyEditorTheme(m_EditorUiScale);
@@ -1381,6 +1441,35 @@ bool Dx12RenderAdapter::EnsureViewportResources(UINT width, UINT height)
     Logger::Get().Info(
         "DX12 viewport target resized to " + std::to_string(width) + "x" + std::to_string(height));
     return true;
+}
+
+bool Dx12RenderAdapter::BeginCameraPreview(int width,int height,const float* clear){
+    if(!m_FrameRecording||m_ViewportTarget.rendering||m_HdrActive||m_CameraPreviewRendering)return false;
+    std::swap(m_ViewportTarget,m_CameraPreviewTarget);
+    try{
+        if(BeginViewportRender(width,height,clear)){m_CameraPreviewRendering=true;return true;}
+    }catch(...){std::swap(m_ViewportTarget,m_CameraPreviewTarget);throw;}
+    std::swap(m_ViewportTarget,m_CameraPreviewTarget);return false;
+}
+void Dx12RenderAdapter::EndCameraPreview(){
+    if(!m_CameraPreviewRendering)return;
+    EndViewportRender();std::swap(m_ViewportTarget,m_CameraPreviewTarget);m_CameraPreviewRendering=false;
+}
+void Dx12RenderAdapter::ReleaseCameraPreview(){
+    if(m_CameraPreviewRendering)EndCameraPreview();
+    auto& t=m_CameraPreviewTarget;
+    if(!t.color&&t.srvDescriptorIndex==UINT_MAX)return;
+    if(m_FrameRecording){
+        // ImGui may already have recorded this SRV earlier in the current UI
+        // frame. Retain descriptors AND resources through this frame's fence.
+        for(auto* resource:{static_cast<IUnknown*>(t.color.Get()),static_cast<IUnknown*>(t.depth.Get()),static_cast<IUnknown*>(t.rtvHeap.Get()),static_cast<IUnknown*>(t.dsvHeap.Get())})
+            if(resource)m_RetiredResources[m_FrameIndex].emplace_back(resource);
+        if(t.srvDescriptorIndex!=UINT_MAX)m_RetiredTextureDescriptors[m_FrameIndex].push_back(t.srvDescriptorIndex);
+        t={};
+    }else{
+        WaitForGpu();std::swap(m_ViewportTarget,m_CameraPreviewTarget);
+        ReleaseViewportResources();std::swap(m_ViewportTarget,m_CameraPreviewTarget);
+    }
 }
 
 bool Dx12RenderAdapter::BeginViewportRender(int width, int height, const float* clearColor)
@@ -1705,7 +1794,7 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
 
     D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
     srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    srvHeapDesc.NumDescriptors = MaxTextures+FrameCount*MaterialTablesPerFrame*4;
+    srvHeapDesc.NumDescriptors = MaxTextures+FrameCount*MaterialTablesPerFrame*4+ExtraImGuiDescriptors;
     srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     ThrowIfFailed(
         m_Device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&m_SrvHeap)),
@@ -1714,6 +1803,8 @@ bool Dx12RenderAdapter::CreatePipelineAndAssets()
     m_FreeTextureDescriptorIndices.clear();
     m_FreeTextureDescriptorIndices.reserve(MaxTextures);
     m_FreeImGuiDescriptorIndices.clear();
+    const UINT extraImGuiBase=MaxTextures+FrameCount*MaterialTablesPerFrame*4;
+    for(UINT i=ExtraImGuiDescriptors;i>0;--i)m_FreeImGuiDescriptorIndices.push_back(extraImGuiBase+i-1);
     m_FreeImGuiDescriptorIndices.push_back(0);
     for (UINT descriptorIndex = 1; descriptorIndex < MaxTextures; ++descriptorIndex)
         m_FreeTextureDescriptorIndices.push_back(MaxTextures - descriptorIndex);
@@ -2079,12 +2170,16 @@ void Dx12RenderAdapter::FreeImGuiDescriptor(
     D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle,
     D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle)
 {
-    (void)cpuHandle;
     (void)gpuHandle;
-
     auto* self = static_cast<Dx12RenderAdapter*>(info->UserData);
-    if (self != nullptr)
-        self->m_FreeImGuiDescriptorIndices.push_back(0);
+    if(self&&self->m_SrvHeap){
+        const auto start=self->m_SrvHeap->GetCPUDescriptorHandleForHeapStart().ptr;
+        if(cpuHandle.ptr<start)return;
+        const auto index=UINT((cpuHandle.ptr-start)/self->m_SrvDescriptorSize);
+        const UINT extraBase=MaxTextures+FrameCount*MaterialTablesPerFrame*4;
+        if(index==0||(index>=extraBase&&index<extraBase+ExtraImGuiDescriptors))
+            self->m_FreeImGuiDescriptorIndices.push_back(index);
+    }
 }
 
 void Dx12RenderAdapter::ReleaseViewportResources()
@@ -2172,10 +2267,12 @@ void Dx12RenderAdapter::Shutdown()
     }
     m_FrameConstantAddress=0;
     std::fill(std::begin(m_InstanceFrameFence),std::end(m_InstanceFrameFence),0);
+    ReleaseMaterialPreview();m_MaterialPreviewTime.Reset();m_MaterialPreviewReadback.Reset();m_MaterialPreviewTimed={};m_MaterialPreviewMetrics={};
     m_UploadedMeshes.clear();
     m_UploadedTextures.clear();
     m_BoundMaps={};m_TextureParameters={1,1,0,1};m_MaterialTables.clear();m_LastMaterialTable={};m_MaterialTableCount=0;m_EnvironmentTable={};m_FrameConstantsDirty=true;
     m_UploadedShaders.clear();
+    ReleaseCameraPreview();
     ReleaseViewportResources();
     m_FreeTextureDescriptorIndices.clear();
     m_FreeImGuiDescriptorIndices.clear();

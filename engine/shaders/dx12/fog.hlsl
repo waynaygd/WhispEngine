@@ -38,15 +38,16 @@ float Visibility(float3 position){
 }
 // Stratification is needed only for discontinuous primary shadow visibility.
 float Stratum(uint2 pixel,uint step){uint n=pixel.x*1973u+pixel.y*9277u+step*26699u+89173u;n=(n^(n>>13))*1274126177u;return float((n>>8)&0x00ffffffu)/16777216.0;}
-float Tau(float3 ray,float s){return volume.z*distanceFog.z*HeightIntegral(camera.y,camera.y+ray.y*s,s);}
+float Tau(float3 origin,float3 ray,float s){return volume.z*distanceFog.z*HeightIntegral(origin.y,origin.y+ray.y*s,s);}
 float Medium(float3 p){return volume.z*distanceFog.z*exp(-heightFog.y*max(p.y-heightFog.x,0));}
-float3 Ray(int2 pixel){uint w,h;depth.GetDimensions(w,h);float2 uv=(float2(pixel)+.5)/float2(w,h);return normalize(forward.xyz+right.xyz*((uv.x*2-1)/projection.x)+up.xyz*((1-uv.y*2)/projection.y));}
-float ViewDepth(float d){return d>=1?-1:projection.w/(d-projection.z);}
+float3 Origin(int2 pixel){uint w,h;depth.GetDimensions(w,h);float2 uv=(float2(pixel)+.5)/float2(w,h);return camera.xyz+forward.w*(right.xyz*((uv.x*2-1)/projection.x)+up.xyz*((1-uv.y*2)/projection.y));}
+float3 Ray(int2 pixel){uint w,h;depth.GetDimensions(w,h);float2 uv=(float2(pixel)+.5)/float2(w,h);return forward.w>.5?forward.xyz:normalize(forward.xyz+right.xyz*((uv.x*2-1)/projection.x)+up.xyz*((1-uv.y*2)/projection.y));}
+float ViewDepth(float d){return d>=1?-1:(forward.w>.5?(d-projection.w)/projection.z:projection.w/(d-projection.z));}
 float RayLength(float z,float3 ray){return z<0?heightFog.w:min(heightFog.w,z/max(dot(ray,forward.xyz),1e-5));}
-float3 LocalScattering(Light l,float3 ray,float length){
+float3 LocalScattering(Light l,float3 origin,float3 ray,float length){
     // Conservative sphere/ray interval: no per-step work for a light whose
     // influence volume cannot intersect this visible ray segment.
-    float3 offset=l.positionRange.xyz-camera.xyz;
+    float3 offset=l.positionRange.xyz-origin;
     float center=dot(offset,ray);float3 perpendicular=offset-ray*center;
     float impact2=dot(perpendicular,perpendicular),range2=l.positionRange.w*l.positionRange.w;
     if(impact2>=range2)return 0;
@@ -61,20 +62,20 @@ float3 LocalScattering(Light l,float3 ray,float length){
     float3 result=0;
     [loop]for(uint j=0;j<samples;++j){
         float s=clamp(center+h*tan(theta0+(j+.5)*dt),a,b);
-        float3 position=camera.xyz+ray*s,toward=l.positionRange.xyz-position;
+        float3 position=origin+ray*s,toward=l.positionRange.xyz-position;
         float r2=dot(toward,toward),invR=rsqrt(max(r2,1e-10));
         float normalized=r2/range2,window=saturate(1-normalized*normalized),cone=1;
         if(l.directionType.w>1.5){float cosine=dot(-toward*invR,l.directionType.xyz);cone=saturate((cosine-l.coneAttenuation.y)/max(l.coneAttenuation.x-l.coneAttenuation.y,1e-5));cone=cone*cone*(3-2*cone);}
         if(cone<=0)continue;
-        float transmission=exp(-Tau(ray,s));if(transmission<1e-4)break;
+        float transmission=exp(-Tau(origin,ray,s));if(transmission<1e-4)break;
         float ratio=(h*h+(s-center)*(s-center))/max(r2,near2);
         result+=Medium(position)*transmission*window*window*cone*Phase(dot(toward,ray)*invR)*ratio;
     }
     return result*(dt/h)*l.colorIntensity.rgb*l.colorIntensity.w;
 }
-float3 Scattering(float3 ray,float length,uint2 pixel){
+float3 Scattering(float3 origin,float3 ray,float length,uint2 pixel){
     if(volume.z*distanceFog.z<=0||length<=0)return 0;
-    float opacity=1-exp(-Tau(ray,length));
+    float opacity=1-exp(-Tau(origin,ray,length));
     if(volume.y<.5)return fogColor.rgb*scattering.rgb*opacity;
     float3 result=ambient.rgb*ambient.w*sunDirection.w*opacity;
     float3 primary=sunColor.rgb*sunColor.w*sunDirection.w*Phase(dot(-sunDirection.xyz,ray));
@@ -82,8 +83,8 @@ float3 Scattering(float3 ray,float length,uint2 pixel){
     else if(any(primary>0)){
         float ds=length/volume.x,transmission=1;
         [loop]for(uint step=0;step<(uint)volume.x;++step){
-            float tau=Tau(ray,(step+1)*ds),next=exp(-tau);
-            float3 p=camera.xyz+ray*((step+Stratum(pixel,step))*ds);
+            float tau=Tau(origin,ray,(step+1)*ds),next=exp(-tau);
+            float3 p=origin+ray*((step+Stratum(pixel,step))*ds);
             result+=primary*(transmission-next)*Visibility(p);
             transmission=next;if(transmission<1e-4)break;
         }
@@ -91,14 +92,14 @@ float3 Scattering(float3 ray,float length,uint2 pixel){
     [loop]for(uint j=0;j<(uint)volume.w;++j){
         Light l=lights[j];if(l.colorIntensity.w<=0)continue;
         if(l.directionType.w<.5)result+=l.colorIntensity.rgb*l.colorIntensity.w*Phase(dot(-l.directionType.xyz,ray))*opacity;
-        else result+=LocalScattering(l,ray,length);
+        else result+=LocalScattering(l,origin,ray,length);
     }
     return result*scattering.rgb;
 }
 float4 VolumePS(Out i):SV_Target{
     uint w,h;depth.GetDimensions(w,h);int2 pixel=min(int2(i.pos.xy)*2+1,int2(w,h)-1);
     float z=ViewDepth(depth.Load(int3(pixel,0)));float3 ray=Ray(pixel);
-    return float4(Scattering(ray,RayLength(z,ray),uint2(pixel)),z);
+    return float4(Scattering(Origin(pixel),ray,RayLength(z,ray),uint2(pixel)),z);
 }
 float NeighborDepth(int2 pixel,int2 last){return ViewDepth(depth.Load(int3(clamp(pixel,int2(0,0),last),0)));}
 float Slope(float center,float low,float high){
@@ -121,17 +122,19 @@ float4 CompositePS(Out i):SV_Target{
     }
     // Thin foreground objects may have no half-res representative. Integrating
     // their own ray avoids borrowing background fog across a silhouette.
-    float3 integrated;[branch]if(weights>1e-6)integrated=sum/weights;else integrated=Scattering(ray,length,uint2(pixel));
-    return float4(color.rgb*exp(-Tau(ray,length))+integrated,color.a);
+    float3 integrated;[branch]if(weights>1e-6)integrated=sum/weights;else integrated=Scattering(Origin(pixel),ray,length,uint2(pixel));
+    return float4(color.rgb*exp(-Tau(Origin(pixel),ray,length))+integrated,color.a);
 }
 float4 PS(Out i):SV_Target{
     int2 pixel=int2(i.pos.xy);float4 color=scene.Load(int3(pixel,0));float d=depth.Load(int3(pixel,0));
-    float3 ray=normalize(forward.xyz+right.xyz*((i.uv.x*2-1)/projection.x)+up.xyz*((1-i.uv.y*2)/projection.y));
-    float length=d>=1?heightFog.w:(projection.w/(d-projection.z))/max(dot(ray,forward.xyz),1e-5);
+    float3 ray=Ray(pixel),origin=Origin(pixel);
+    // Distance fog keeps the legacy unbounded surface distance; maxDistance
+    // bounds sky/height/volume integration, not the distance-fog ramp on geometry.
+    float length=d>=1?heightFog.w:ViewDepth(d)/max(dot(ray,forward.xyz),1e-5);
     float amount=distanceFog.z*saturate((length-distanceFog.x)/(distanceFog.y-distanceFog.x));
     if(distanceFog.w>.5){
         length=min(length,heightFog.w);
-        float opticalDepth=distanceFog.z*heightFog.z*HeightIntegral(camera.y,camera.y+ray.y*length,length);
+        float opticalDepth=distanceFog.z*heightFog.z*HeightIntegral(origin.y,origin.y+ray.y*length,length);
         amount=1-exp(-opticalDepth);
     }
     return float4(lerp(color.rgb,fogColor.rgb,amount),color.a);

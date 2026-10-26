@@ -1,4 +1,6 @@
+#include "EditorTheme.h"
 #include "EditorLayer.h"
+#include "LuaCodeEditor.h"
 #include "../core/Application.h"
 #include "../core/AssetPaths.h"
 #include "../resources/ResourceManager.h"
@@ -16,11 +18,13 @@
 
 namespace editor {
 bool EditorLayer::ResolveProjectEdits(Application& app,int decision,std::string* error){
-    if(app.IsPrefabEditing()){
-        if(error)*error="Save and Return or Discard changes in the Prefab menu before changing project or exiting";return false;
-    }
     if(decision==int(Application::ProjectDecision::Cancel))return false;
+    if(app.IsPrefabEditing()){
+        if(!(decision==int(Application::ProjectDecision::Save)?SavePrefabEditor(app):ClosePrefabEditor(app,true))){if(error)*error=m_EditorError;return false;}
+    }
     if(decision!=int(Application::ProjectDecision::Save))return true;
+    if(ScriptDraftsDirty()&&app.IsEditorPlayMode())app.SetEditorPlayMode(false);
+    for(auto& [origin,s]:m_ScriptSessions)if(s->Dirty()&&!SaveLuaDocument(app,s->key)){if(error)*error=m_EditorError;return false;}
     if(UIDraftsDirty()){
         if(app.IsEditorPlayMode()){if(error)*error="Stop Play before saving UI Documents and Styles";return false;}
         std::vector<std::string> documents,styles(m_DirtyUIStyles.begin(),m_DirtyUIStyles.end());
@@ -31,27 +35,29 @@ bool EditorLayer::ResolveProjectEdits(Application& app,int decision,std::string*
     const bool sceneDirty=m_EditHistory?(m_EditHistory->external||m_EditHistory->revision!=m_EditHistory->saved):IsSceneDirty();
     if(sceneDirty&&!app.SaveAuthoringSceneForTransition(error))return false;
     if(sceneDirty&&m_EditHistory){m_EditHistory->saved=m_EditHistory->revision;m_EditHistory->external=false;}
-    if(m_MaterialDirty){
-        auto* resources=app.GetResourceManager();
-        auto material=resources?resources->Get<MaterialResource>(std::filesystem::u8path(m_EditingMaterial)):nullptr;
-        if(!material){if(error)*error="Edited material is unavailable";return false;}
-        if(!MaterialLoader::Save(m_EditingMaterial,material->GetData(),error))return false;
-        resources->SetMaterialDirty(m_EditingMaterial,false);m_MaterialDirty=false;
-    }
+    if(m_MaterialDirty&&!SaveMaterialDraft(app)){if(error)*error=m_MaterialError;return false;}
+
     if(ProjectSettingsDirty()&&!SaveProjectSettingsDraft(app)){if(error)*error=m_ProjectSettingsError;return false;}
     return true;
 }
 void EditorLayer::ResetProjectState(IRenderAdapter* renderer){
+    if(renderer)renderer->ReleaseCameraPreview();m_CameraPreviewRequest={};m_CameraPreviewSource={};
+    ReleaseMaterialEditor(renderer);m_MaterialSessions.clear();
+    StoreDocumentSession();m_Documents.clear();m_ActiveDocument.clear();m_ObservedScene="<initial>";m_DocumentProject.clear();m_PendingDocument.clear();m_DocumentPrompt=false;m_WorkspaceFocus=false;m_RestoreDocuments=true;m_ScriptSessions.clear();m_ScriptKey.clear();m_ScriptText.clear();
+    m_AssetDoubleClick.clear();m_PrefabActionKey.clear();m_PrefabConfirm=false;m_PrefabCreatePopup=false;m_PrefabAction=0;m_PrefabActionEntity={};m_PrefabRoot={};m_EditingPrefab.clear();m_PrefabDiskBase={};m_PrefabHistory.reset();
+    m_PrefabAuthored=nlohmann::json();m_PrefabObserved=nlohmann::json();m_PrefabParentBase=nlohmann::json();m_PrefabParentRevision=0;m_PrefabReloadRequested=false;m_ChildPrefabParent.clear();m_ChildPrefabKey.clear();m_ChildPrefabPopup=false;
     m_UIDocuments.clear();m_UIStyles.clear();m_DirtyUIStyles.clear();m_DesignDocument.clear();m_UIDesignerKeys.clear();m_UIWidgetDrag.reset();m_UI4Selection.clear();m_UIStyleKey.clear();m_UIStyleId.clear();m_UIClipId.clear();
     m_EventFilter={};m_SelectedGameplayEvent=0;
-    m_ShowProjectSettings=m_FocusProjectSettings=false;m_ProjectSettingsBase.reset();m_ProjectSettingsDraft={};m_ProjectSettingsScenes={};m_ProjectSettingsError.clear();m_ProjectSettingsNotice.clear();
+    m_ShowProjectSettings=m_FocusProjectSettings=false;m_ProjectSettingsBase.reset();m_ProjectSettingsDraft={};m_ProjectSettingsScenes={};m_ProjectSettingsError.clear();m_ProjectSettingsNotice.clear();m_ProjectSettingsSearch.clear();
     CancelPlacement();m_PlacementCancelled=false;
     if(ImGui::GetCurrentContext()){ImGui::ClearActiveID();ImGui::ClearDragDrop();}
     if(renderer)renderer->ReleaseEditorSky();m_RequestedSky.clear();m_FailedSkyVersion=0;
     m_BackgroundAssetDraft.clear();m_BackgroundAssetEditing=false;m_BackgroundDraftWorld=0;
     ReleaseAssetPreview(renderer);ResetHistory();m_EditHistory.reset();m_Clipboard={};
     m_SelectedAsset.clear();m_SelectedAssetKind.clear();m_EditingMaterial.clear();m_MaterialDirty=false;m_MaterialError.clear();
-    m_AssetDirectory.clear();m_AssetNavigation={};m_AssetCatalog=AssetCatalog{};
+    if(!m_BrowserProject.empty())m_BrowserSessions[m_BrowserProject]={{"folder",m_AssetDirectory},{"expanded",m_AssetExpanded}};
+    const bool all=m_AssetNavigation.projectSearch;m_BrowserProject.clear();m_AssetExpanded.clear();m_AssetSelection.clear();m_AssetAnchor.clear();m_AssetCategory=0;m_AssetKindFilter=0;
+    m_AssetDirectory.clear();m_AssetNavigation={};m_AssetNavigation.projectSearch=all;m_AssetCatalog=AssetCatalog{};
     m_AssetMetadataKey.clear();m_AssetMetadata.clear();m_AssetMetadataVersion=0;
     m_MeshAssets.clear();m_TextureAssets.clear();m_MaterialAssets.clear();m_ShaderAssets.clear();m_EnvironmentAssets.clear();
     m_AssetListsDirty=true;m_RecentScenes.clear();m_SceneCatalog={};m_RenameTarget={};m_DragOriginal={};
@@ -104,12 +110,12 @@ void EditorLayer::DrawProjectBrowser(Application& app){
         if(ImGui::Begin("Project Browser",startup?nullptr:&m_ShowProjectBrowser,flags)){
             if(startup){
                 const auto space=ImGui::GetContentRegionAvail();
-                const ImVec2 size(std::min(760.f,space.x),std::min(620.f,space.y));
+                const ImVec2 size(std::min(920.f*ImGui::GetStyle().FontScaleDpi,space.x),std::min((m_RecentProjects.empty()?500.f:660.f)*ImGui::GetStyle().FontScaleDpi,space.y));
                 const auto cursor=ImGui::GetCursorPos();
                 ImGui::SetCursorPos(ImVec2(cursor.x+(space.x-size.x)*.5f,cursor.y+(space.y-size.y)*.5f));
                 ImGui::BeginChild("Workspace chooser",size,ImGuiChildFlags_Borders|ImGuiChildFlags_AlwaysUseWindowPadding);
-                ImGui::TextColored(ImVec4(.4f,.75f,1,1),"WhispEngine");
-                ImGui::TextUnformatted("Choose a workspace to begin");
+                ImGui::PushFont(ImGui::GetIO().FontDefault,24);ImGui::TextUnformatted("WhispEngine");ImGui::PopFont();
+                ImGui::TextUnformatted("Projects and workspaces");
                 ImGui::Spacing();ImGui::Separator();ImGui::Spacing();
             }
             if(auto p=app.GetProject()){
@@ -130,14 +136,14 @@ void EditorLayer::DrawProjectBrowser(Application& app){
                 if(ImGui::BeginTabItem("Recent",nullptr,m_ProjectTab==0?ImGuiTabItemFlags_SetSelected:0)){
                     if(!m_RecentProjects.empty()&&ImGui::Button("Continue last project"))RequestProjectOpen(app,m_RecentProjects.front().descriptor);
                     const auto recent=m_RecentProjects;
-                    ImGui::BeginChild("Recent projects",ImVec2(0,250));
-                    for(const auto& entry:recent){ImGui::PushID(entry.descriptor.c_str());std::error_code ec;
-                        const bool available=std::filesystem::is_regular_file(std::filesystem::u8path(entry.descriptor),ec);
-                        if(ImGui::Selectable((entry.name+(available?"":" (unavailable)")).c_str()))RequestProjectOpen(app,entry.descriptor);
-                        ImGui::TextWrapped("%s",entry.descriptor.c_str());
+                    ImGui::BeginChild("Recent projects",ImVec2(0,std::clamp(ImGui::GetContentRegionAvail().y-120*ImGui::GetStyle().FontScaleDpi,80.f,360*ImGui::GetStyle().FontScaleDpi)));
+                    for(const auto& entry:recent){ImGui::PushID(entry.descriptor.c_str());
+                        // Availability is validated by Open, not by presentation each frame.
+                        if(ImGui::Selectable(entry.name.c_str()))RequestProjectOpen(app,entry.descriptor);
+                        ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));ImGui::TextWrapped("%s",entry.descriptor.c_str());ImGui::PopStyleColor();
                         if(ImGui::SmallButton("Remove from recent")){std::erase(m_RecentProjects,entry);PersistPreferences(app);}ImGui::PopID();
                     }
-                    if(recent.empty())ImGui::TextDisabled("No recent projects yet.");
+                    if(recent.empty())ImGui::TextWrapped("No recent projects yet. Create a New Project or open an existing .whispproject file.");
                     ImGui::EndChild();
                     ImGui::EndTabItem();
                 }
@@ -166,7 +172,7 @@ void EditorLayer::DrawProjectBrowser(Application& app){
                     ImGui::EndTabItem();
                 }ImGui::EndTabBar();m_ProjectTab=-1;
             }
-            if(!m_ProjectError.empty())ImGui::TextWrapped("%s",m_ProjectError.c_str());
+            if(!m_ProjectError.empty()){ImGui::PushStyleColor(ImGuiCol_Text,Error);ImGui::TextWrapped("%s",m_ProjectError.c_str());ImGui::PopStyleColor();}
             if(startup){
                 ImGui::Spacing();ImGui::Separator();ImGui::Spacing();
                 if(ImGui::Button("Legacy Workspace",ImVec2(180,0)))app.OpenLegacyWorkspace(&m_ProjectError);
@@ -179,16 +185,16 @@ void EditorLayer::DrawProjectBrowser(Application& app){
     }
     if(m_ProjectConfirm){ImGui::OpenPopup("Unsaved project changes");m_ProjectConfirm=false;}
     if(ImGui::BeginPopupModal("Unsaved project changes",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
-        ImGui::TextWrapped("Save scene, material and Project Settings edits before continuing?");
+        ImGui::TextWrapped("Save modified documents and Project Settings before continuing?");
         if(app.GetSceneKey().empty()){ImGui::InputText("Save untitled as",&m_UnsavedSaveKey);ImGui::TextDisabled("Choose a fresh scene filename inside the current scene directory.");}
-        if(ImGui::Button("Save and continue")){
+        if(Decision("Save and continue")){
             if(app.GetSceneKey().empty()&&!app.IsEditorPlayMode()&&IsSceneDirty()){
                 if(app.SaveSceneAs(m_UnsavedSaveKey,false,&m_ProjectError)&&ExecuteProjectAction(app,int(Application::ProjectDecision::Save)))ImGui::CloseCurrentPopup();
             }else if(ExecuteProjectAction(app,int(Application::ProjectDecision::Save)))ImGui::CloseCurrentPopup();
         }
-        ImGui::SameLine();if(ImGui::Button("Discard")){if(ExecuteProjectAction(app,int(Application::ProjectDecision::Discard)))ImGui::CloseCurrentPopup();}
+        ImGui::SameLine();if(Decision("Discard",true)){if(ExecuteProjectAction(app,int(Application::ProjectDecision::Discard)))ImGui::CloseCurrentPopup();}
         ImGui::SameLine();if(ImGui::Button("Cancel")){m_PendingProject.clear();m_ProjectExit=false;ImGui::CloseCurrentPopup();}
-        if(!m_ProjectError.empty())ImGui::TextWrapped("%s",m_ProjectError.c_str());ImGui::EndPopup();
+        if(!m_ProjectError.empty()){ImGui::PushStyleColor(ImGuiCol_Text,Error);ImGui::TextWrapped("%s",m_ProjectError.c_str());ImGui::PopStyleColor();}ImGui::EndPopup();
     }
 }
 }

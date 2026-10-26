@@ -38,6 +38,9 @@ int main(int argc,char** argv){try{
  if(restore){
    ui.SwitchWorkspace(EditorWorkspace::LevelEditing);frame();
    auto* inspector=Window("Inspector");Check(!inspector->DockId&&std::abs(inspector->Pos.x-45)<3&&std::abs(inspector->SizeFull.x-300)<3,"new process restores floating Inspector geometry");
+   // Switching now captures the outgoing layout in memory. Establish the disk
+   // baseline after that capture before checking that Reset changes only Level.
+   Check(ui.PersistPreferences(app),ui.GetError());
    EditorPreferences saved;Check(LoadPreferences(PreferencesPath(),saved,&error),error);auto other=saved.workspaces.at("scripting");
    ui.SetTransformPrecision(2);ui.SetAssetCardSize(220);ui.GetVisualSettings().gridOpacity=.123f;
    menu("Reset Current Layout");frame();Check(Window("Inspector")->DockId!=0,"Reset restores builtin docking");Check(LoadPreferences(PreferencesPath(),saved,&error),error);Check(saved.workspaces.at("scripting")==other,"Reset does not erase another workspace");Check(saved.transformPrecision==2&&saved.assetCardSize==220&&saved.visuals.gridOpacity==.123f,"Reset preserves unrelated preferences");

@@ -32,10 +32,12 @@ static std::optional<ImRect> Card(std::uint64_t texture){
     }return {};
 }
 int main(){try{
-    ScopedEditorPreferenceRestore preferences;Application app;Check(app.Initialize(),"initialize editor");
+    ScopedEditorPreferenceRestore preferences;std::string preferenceError;
+    Check(editor::SavePreferences(editor::PreferencesPath(),editor::EditorPreferences{},&preferenceError),"isolated editor preferences: "+preferenceError);Application app;Check(app.Initialize(),"initialize editor");
     glfwHideWindow(dynamic_cast<GlfwWindow*>(app.GetWindow())->GetGlfwHandle());
     auto& ui=app.GetEditorLayer();auto* gpu=dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter());auto* resources=app.GetResourceManager();
     Check(gpu&&resources,"DX12 and ResourceManager");app.NewScene();app.SetEditorPlayMode(false);
+    ui.SwitchWorkspace(editor::EditorWorkspace::LevelEditing);app.SetFrameLimit(3);Check(app.Run()==0,"activate Level workspace fixture");Check(ui.ResetCurrentWorkspace(app),"reset cached Level layout for pixel/placement checks");
     ui.ResetLayout();ui.SetAssetGrid(true);ui.SetAssetCardSize(120);ui.NavigateAssetFolder("models/primitives");
     app.SetFrameLimit(4);Check(app.Run()==0,"editor warmup");
     // Small real assets only: PNG, JPEG, compressed DDS, OBJ and glTF.
@@ -92,7 +94,7 @@ int main(){try{
     auto floor=ui.CreatePrimitive(app,"plane");app.GetWorld().GetComponent<ecs::TransformComponent>(floor)->scale={20,1,20};ui.ClearSelection();
     Check(app.SetEditorCameraPose({0,6,-8},0,-.55f),"placement camera above floor");for(int i=0;i<12;++i)app.Run();
     const auto surfaceDraws=app.GetRenderStatistics().visibleSubmeshes;
-    const auto before=app.GetWorld().GetAliveCount();auto source=cube->GetCenter();
+    const auto before=app.GetWorld().GetAliveCount();Check(before==1,"placement fixture contains only its owned floor");auto source=cube->GetCenter();
     SyntheticEditorInput::Position(source.x,source.y);app.Run();SyntheticEditorInput::Button(0,true);app.Run();SyntheticEditorInput::Position(source.x+10,source.y);app.Run();
     auto* payload=ImGui::GetDragDropPayload();Check(payload&&payload->IsDataType("WHISP_ASSET"),"card starts existing asset drag payload");
     auto viewport=ui.GetViewportBounds();const float x=(viewport[0]+viewport[2])*.5f,y=(viewport[1]+viewport[3])*.5f;

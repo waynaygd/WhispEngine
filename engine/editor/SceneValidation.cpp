@@ -196,6 +196,11 @@ struct Validator {
                 component=descriptor.key;
                 try {
                     for(const auto& property:descriptor.properties){
+                        if(component=="PlayerStart"){
+                            const auto& start=*world.GetComponent<PlayerStartComponent>(e);const bool legacy=start.spawnMode==1||(start.spawnMode==0&&start.playerPrefab.empty());
+                            if(property.key=="controllerScript"&&!legacy)continue;
+                            if(property.key=="playerPrefab"&&(start.spawnMode==1||start.spawnMode==3))continue;
+                        }
                         if(property.kind!=PropertyKind::Asset&&property.kind!=PropertyKind::AssetList)continue;
                         auto value=property.get(world,e);
                         if(auto* key=std::get_if<std::string>(&value))Asset(property.asset,*key,property.key,
