@@ -1,5 +1,6 @@
 #include "EditorTheme.h"
 #include "EditorLayer.h"
+#include "LuaCodeEditor.h"
 #include "../core/Application.h"
 #include "../core/AssetPaths.h"
 #include "../resources/ResourceManager.h"
@@ -22,6 +23,8 @@ bool EditorLayer::ResolveProjectEdits(Application& app,int decision,std::string*
         if(!(decision==int(Application::ProjectDecision::Save)?SavePrefabEditor(app):ClosePrefabEditor(app,true))){if(error)*error=m_EditorError;return false;}
     }
     if(decision!=int(Application::ProjectDecision::Save))return true;
+    if(ScriptDraftsDirty()&&app.IsEditorPlayMode())app.SetEditorPlayMode(false);
+    for(auto& [origin,s]:m_ScriptSessions)if(s->Dirty()&&!SaveLuaDocument(app,s->key)){if(error)*error=m_EditorError;return false;}
     if(UIDraftsDirty()){
         if(app.IsEditorPlayMode()){if(error)*error="Stop Play before saving UI Documents and Styles";return false;}
         std::vector<std::string> documents,styles(m_DirtyUIStyles.begin(),m_DirtyUIStyles.end());
@@ -40,7 +43,7 @@ bool EditorLayer::ResolveProjectEdits(Application& app,int decision,std::string*
 void EditorLayer::ResetProjectState(IRenderAdapter* renderer){
     if(renderer)renderer->ReleaseCameraPreview();m_CameraPreviewRequest={};m_CameraPreviewSource={};
     ReleaseMaterialEditor(renderer);m_MaterialSessions.clear();
-    StoreDocumentSession();m_Documents.clear();m_ActiveDocument.clear();m_ObservedScene="<initial>";m_DocumentProject.clear();m_PendingDocument.clear();m_DocumentPrompt=false;m_WorkspaceFocus=false;m_RestoreDocuments=true;m_ScriptKey.clear();m_ScriptText.clear();
+    StoreDocumentSession();m_Documents.clear();m_ActiveDocument.clear();m_ObservedScene="<initial>";m_DocumentProject.clear();m_PendingDocument.clear();m_DocumentPrompt=false;m_WorkspaceFocus=false;m_RestoreDocuments=true;m_ScriptSessions.clear();m_ScriptKey.clear();m_ScriptText.clear();
     m_AssetDoubleClick.clear();m_PrefabActionKey.clear();m_PrefabConfirm=false;m_PrefabCreatePopup=false;m_PrefabAction=0;m_PrefabActionEntity={};m_PrefabRoot={};m_EditingPrefab.clear();m_PrefabDiskBase={};m_PrefabHistory.reset();
     m_UIDocuments.clear();m_UIStyles.clear();m_DirtyUIStyles.clear();m_DesignDocument.clear();m_UIDesignerKeys.clear();m_UIWidgetDrag.reset();m_UI4Selection.clear();m_UIStyleKey.clear();m_UIStyleId.clear();m_UIClipId.clear();
     m_EventFilter={};m_SelectedGameplayEvent=0;
@@ -181,7 +184,7 @@ void EditorLayer::DrawProjectBrowser(Application& app){
     }
     if(m_ProjectConfirm){ImGui::OpenPopup("Unsaved project changes");m_ProjectConfirm=false;}
     if(ImGui::BeginPopupModal("Unsaved project changes",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
-        ImGui::TextWrapped("Save scene, material and Project Settings edits before continuing?");
+        ImGui::TextWrapped("Save modified documents and Project Settings before continuing?");
         if(app.GetSceneKey().empty()){ImGui::InputText("Save untitled as",&m_UnsavedSaveKey);ImGui::TextDisabled("Choose a fresh scene filename inside the current scene directory.");}
         if(Decision("Save and continue")){
             if(app.GetSceneKey().empty()&&!app.IsEditorPlayMode()&&IsSceneDirty()){

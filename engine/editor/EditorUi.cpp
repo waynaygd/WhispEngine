@@ -1,6 +1,7 @@
 #include "EditorTheme.h"
 #include "PrecisionInputs.h"
 #include "EditorLayer.h"
+#include "ScriptEditor.h"
 #include "EditorWidgets.h"
 #include "../core/Application.h"
 #include "../core/AssetPaths.h"
@@ -65,7 +66,7 @@ void EditorLayer::DrawToolbar(Application& app){
     ImGui::Begin("Main Toolbar",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings);
     const bool play=app.IsEditorPlayMode(),prefab=app.IsPrefabEditing();const bool compact=viewport->WorkSize.x<1080*dpi;
     auto separator=[](){ImGui::SameLine();ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);ImGui::SameLine();};
-    if(Action("Save",play?"Stop Play before saving.":ActiveDocumentIs(DocumentType::Lua)?"Lua source is read-only here; edit and save it in the source editor.":"Save the active document (Ctrl+S).",!play&&!ActiveDocumentIs(DocumentType::Lua),false,58))if(!SaveActiveDocument(app))Logger::Get().Error(m_EditorError);
+    if(Action("Save",play?"Stop Play before saving.":"Save the active document (Ctrl+S).",!play,false,58))if(!SaveActiveDocument(app))Logger::Get().Error(m_EditorError);
     separator();
     if(Action("Play",prefab?"Return to the Scene document before starting Play.":!ActiveDocumentIs(DocumentType::Scene)?"Activate the Scene document to start Play.":"Start the scene in an isolated Runtime World.",!play&&!prefab&&ActiveDocumentIs(DocumentType::Scene),play,55))app.SetEditorPlayMode(true);
     ImGui::SameLine();if(Action(app.IsEditorPaused()?"Resume":"Pause","Pause/resume the running scene. Start Play first.",play,app.IsEditorPaused(),75))app.SetEditorPaused(!app.IsEditorPaused());
@@ -124,6 +125,7 @@ void EditorLayer::DrawMainMenu(Application& app){
         if(ImGui::BeginMenu("Recent Scenes",!m_RecentScenes.empty())){const auto recent=m_RecentScenes;for(const auto& key:recent)if(ImGui::MenuItem(key.c_str())){RequestRecentScene(app,key);}ImGui::EndMenu();}
         ImGui::EndDisabled();
         if(ImGui::MenuItem("Save","Ctrl+S",false,!app.IsEditorPlayMode())){if(!SaveActiveDocument(app))Logger::Get().Error(m_EditorError);}
+        if(ImGui::MenuItem("Save All",nullptr,false,!app.IsEditorPlayMode()))SaveAllDocuments(app);
         if(ImGui::MenuItem("Save As","Ctrl+Shift+S",false,!app.IsEditorPlayMode()&&!app.IsPrefabEditing()&&ActiveDocumentIs(DocumentType::Scene)))action(3);
         if(ImGui::MenuItem("Reopen Scene",nullptr,false,!app.GetSceneKey().empty()&&!app.IsPrefabEditing())){m_SceneDialogKey=app.GetSceneKey();action(2);}
         ImGui::EndMenu();
@@ -265,7 +267,7 @@ void EditorLayer::DrawSceneHierarchy(Application& app){
     if(!m_SelectionLocked&&ImGui::IsWindowHovered()&&ImGui::IsMouseClicked(0)&&!ImGui::IsAnyItemHovered()&&!m_LightPointerCaptured&&!ImGuizmo::IsUsing()&&!app.IsCameraControlActive()&&!ImGui::IsMouseDown(1)){FinishTransaction(app);ClearSelection();ImGui::ClearActiveID();}
     ImGui::TextDisabled("%zu entities",world.GetAliveCount());ImGui::End();m_Statistics.hierarchyMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
 }
-void EditorLayer::DrawRuntimeErrors(){
+void EditorLayer::DrawRuntimeErrors(Application& app){
  auto& log=Logger::Get();auto session=log.RuntimeSessionId();
  if(log.RuntimeSessionActive()||!session){m_RuntimeErrorSession=0;m_ShowRuntimeErrors=false;m_LastRuntimeErrors={};return;}
  if(session!=m_RuntimeErrorSession)m_LastRuntimeErrors=log.RuntimeErrors();
@@ -291,6 +293,8 @@ void EditorLayer::DrawRuntimeErrors(){
    ImGui::BeginDisabled(!available);if(ImGui::SmallButton("Show in Console")){m_WorkspaceFocus=false;m_ShowConsole=true;m_ConsoleInfo=m_ConsoleWarning=m_ConsoleError=true;m_ConsoleFilter.clear();m_ConsoleTargetSequence=e.firstSequence;ImGui::SetWindowFocus("Console / Diagnostics");}ImGui::EndDisabled();
    if(!available&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Original entry was cleared or overwritten in Console history.");ImGui::SameLine();
    if(ImGui::SmallButton("Copy Error"))ImGui::SetClipboardText(summary.Copy(i).c_str());
+   std::string sourceError;bool scriptAvailable=false;try{(void)ResolveEditableLuaScript(e.source);scriptAvailable=true;}catch(const std::exception& failure){sourceError=failure.what();}
+   ImGui::SameLine();ImGui::BeginDisabled(!scriptAvailable);if(ImGui::SmallButton("Open Script at Line"))OpenScriptAtLine(app,e.source,e.line);ImGui::EndDisabled();if(!scriptAvailable&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("%s",sourceError.c_str());
    if((!e.firstTrace.empty()||!e.lastTrace.empty())&&ImGui::TreeNode("Stack traceback")){ImGui::TextWrapped("%s",e.firstTrace.c_str());if(e.lastTrace!=e.firstTrace){ImGui::SeparatorText("Last occurrence");ImGui::TextWrapped("%s",e.lastTrace.c_str());}ImGui::TreePop();}
    ImGui::PopID();
   }ImGui::EndChild();

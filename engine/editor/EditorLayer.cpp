@@ -363,7 +363,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     m_ViewportHasBounds = false;
     m_ViewportFocused=false;m_HierarchyFocused=false;
     DrawMainMenu(app);DrawPrefabWorkflow(app);DrawSceneDialogs(app);DrawProjectBrowser(app);
-    DrawRuntimeErrors();
+    DrawRuntimeErrors(app);
     if(app.IsProjectBrowserActive())return;
     if(!m_ActiveDocument.empty())DrawUIDesigner(app);
     DrawScriptDocument(app);
@@ -453,6 +453,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
         DrawMaterialEditor(app);
     if (m_ShowDemoWindow&&!m_WorkspaceFocus)
         ImGui::ShowDemoWindow(&m_ShowDemoWindow);
+    if(!m_ScriptKey.empty()){auto key=std::move(m_ScriptKey);m_ScriptKey.clear();OpenDocument(app,key);}
 }
 
 EditorLayer::CameraMouseFrame::CameraMouseFrame(bool suppress){

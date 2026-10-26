@@ -95,6 +95,9 @@ add_library(Engine
   editor/EditorAssetPreview.cpp
   editor/EditorAssets.cpp
   editor/EditorPrefabs.cpp
+  editor/LuaScriptBuffer.cpp
+  editor/LuaCodeEditor.cpp
+  editor/EditorScriptDocument.cpp
   editor/ScriptEditor.cpp
   editor/GltfSceneImport.cpp
   editor/EditorLevelWorkflow.cpp

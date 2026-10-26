@@ -1,6 +1,7 @@
 #include "EditorTheme.h"
 #include "EditorLayer.h"
 #include "ScriptEditor.h"
+#include "LuaCodeEditor.h"
 #include "EditorWidgets.h"
 #include "PrecisionInputs.h"
 #include "AssetImport.h"
@@ -72,6 +73,7 @@ bool EditorLayer::AssetBrowserOwnsKeyboard()const{
 std::vector<std::string> EditorLayer::AssetFileBlockers(Application& app,const std::string& key)const{
     std::vector<std::string> reasons;
     if(app.IsEditorPlayMode())reasons.push_back("Stop Play before modifying asset files");
+    for(auto& [origin,s]:m_ScriptSessions)if(s->key==key&&s->Dirty())reasons.push_back("Save or Discard the open Lua draft first");
     if(m_MaterialDirty)reasons.push_back("Save or Revert unsaved material edits first");
     if(app.IsPrefabEditing())reasons.push_back("Return from Prefab Editor before changing asset files");
     if(std::any_of(m_Documents.begin(),m_Documents.end(),[&](auto& d){return d.key==key&&d.type==DocumentType::Prefab;}))reasons.push_back("Close the Prefab Document first; suspended Prefab session migration is not supported");
@@ -205,7 +207,7 @@ std::string EditorLayer::CreateLuaScriptAsset(Application& app,const std::string
             std::string key=directory+"/new_behaviour.lua";unsigned n=1;
             while(std::filesystem::exists(scripting::SafeAsset(key,".lua")))key=directory+"/new_behaviour_"+std::to_string(n++)+".lua";
             auto path=scripting::SafeAsset(key,".lua");std::filesystem::create_directories(path.parent_path());
-            std::ofstream file(path);file<<"return {\n  fields = { speed = {type=\"number\", default=1, min=0, max=20} },\n  on_start = function(self) end,\n  on_update = function(self, dt) end,\n  on_event = function(self, event) end,\n  on_destroy = function(self) end\n}\n";file.close();if(!file)throw std::runtime_error("Script write failed");m_SelectedAsset=key;m_SelectedAssetKind="Lua Script";m_AssetListsDirty=true;NavigateAssetFolder(directory);m_EditorError.clear();return key;
+            std::ofstream file(path,std::ios::binary);file<<NewLuaBehaviour();file.close();if(!file)throw std::runtime_error("Script write failed");m_SelectedAsset=key;m_SelectedAssetKind="Lua Script";m_AssetListsDirty=true;NavigateAssetFolder(directory);m_EditorError.clear();return key;
         }catch(const std::exception& error){m_EditorError=error.what();}
     return {};
 }

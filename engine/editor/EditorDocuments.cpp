@@ -4,6 +4,7 @@
 #endif
 #include "EditorLayer.h"
 #include "ScriptEditor.h"
+#include "LuaCodeEditor.h"
 #include "../core/Application.h"
 #include "../core/AssetPaths.h"
 #include "../ecs/components/SceneIdentityComponent.h"
@@ -56,6 +57,7 @@ void EditorLayer::RenameAssetDocument(Application& app,const std::string& old,co
     if(auto node=m_UIStyles.extract(old);!node.empty()){node.key()=replacement;m_UIStyles.insert(std::move(node));}
     if(m_UIStyleKey==old)m_UIStyleKey=replacement;
     if(auto node=m_MaterialSessions.extract(old);!node.empty()){node.key()=replacement;m_MaterialSessions.insert(std::move(node));}
+    auto previous=Canonical(AssetPaths::ResolveAssetPath(old));if(auto node=m_ScriptSessions.extract(previous);!node.empty()){auto destination=Canonical(AssetPaths::ResolveAssetPath(replacement));node.key()=destination;node.mapped()->key=replacement;node.mapped()->path=ResolveEditableLuaScript(replacement);m_ScriptSessions.insert(std::move(node));}
     m_ScriptKey.clear();m_UI4Selection.clear();StoreDocumentSession();
 }
 void EditorLayer::CaptureSceneDocument(Application& app){
@@ -79,6 +81,7 @@ bool EditorLayer::DocumentDirty(const EditorDocument& d)const{
     if(d.type==DocumentType::Scene)return d.key==m_ObservedScene&&AuthoringSceneDirty();
     if(d.type==DocumentType::Material)return d.key==m_EditingMaterial&&m_MaterialDirty;
     if(d.type==DocumentType::UI){for(const auto& [origin,s]:m_UIDocuments)if(s.resourceKey==d.key)return s.dirty||!m_DirtyUIStyles.empty();}
+    if(d.type==DocumentType::Lua){auto it=m_ScriptSessions.find(d.canonical);return it!=m_ScriptSessions.end()&&it->second->Dirty();}
     return false;
 }
 bool EditorLayer::ResolveDocumentEdits(Application& app,const EditorDocument& d,OpenDecision decision){
@@ -92,6 +95,7 @@ bool EditorLayer::ResolveDocumentEdits(Application& app,const EditorDocument& d,
         if(d.key.empty()){app.NewScene();return true;}
         return app.OpenScene(d.key,&m_EditorError);
     }
+    if(d.type==DocumentType::Lua)return decision==OpenDecision::Save?SaveLuaDocument(app,d.key):true;
     if(app.IsEditorPlayMode()){m_EditorError="Stop Play before saving or discarding asset drafts.";return false;}
     if(d.type==DocumentType::UI){
         if(m_UIWidgetDrag){CancelUIDocumentEdit(app,m_UIWidgetDrag->key);m_UIWidgetDrag.reset();}
@@ -182,6 +186,9 @@ bool EditorLayer::ActivateDocument(Application& app,const std::string& id,OpenDe
     if(target.type==DocumentType::ProjectSettings)m_ShowProjectSettings=m_FocusProjectSettings=true;
     return true;
 }
+LuaCodeEditor& EditorLayer::ScriptSession(Application&,const std::string& key){
+ auto path=scripting::SafeAsset(key,".lua");auto canonical=Canonical(path);auto found=m_ScriptSessions.find(canonical);if(found!=m_ScriptSessions.end())return *found->second;auto next=std::make_shared<LuaCodeEditor>();next->Open(key);auto& s=m_ScriptSessions[canonical];s=std::move(next);return *s;
+}
 bool EditorLayer::OpenDocument(Application& app,const std::string& input){
     try{
         SyncSceneDocument(app);
@@ -196,7 +203,7 @@ bool EditorLayer::OpenDocument(Application& app,const std::string& input){
         else throw std::runtime_error("Unsupported document type. Choose a scene, prefab, .ui.json, material or Lua script.");
         auto path=type==DocumentType::Scene&&app.GetProject()?app.GetProject()->ResolveScene(key):AssetPaths::ResolveAssetPath(key);
         if(path.empty()||!std::filesystem::is_regular_file(path))throw std::runtime_error("Document file is unavailable.");
-        if(type==DocumentType::Lua)(void)ResolveEditableLuaScript(key);
+        if(type==DocumentType::Lua)(void)ScriptSession(app,key);
         const auto id=RegisterDocument(app,type,key).id;
         return RequestDocumentNavigation(app,id);
     }catch(const std::exception& e){m_EditorError=e.what();return false;}
@@ -212,6 +219,7 @@ bool EditorLayer::CloseDocument(Application& app,const std::string& id,OpenDecis
         else if(!ClosePrefabEditor(app))return false;
     }
     if(!ResolveDocumentEdits(app,target,decision))return false;
+    if(target.type==DocumentType::Lua)m_ScriptSessions.erase(target.canonical);
     if(active)SetWorkspaceFocused(false);
     if(target.type==DocumentType::UI&&m_DesignDocument==target.key){auto& view=UIDocumentSession(app,target.key);view.preview=m_UIPreviewSize;view.zoom=m_UIZoom;view.panX=m_UIPan.x;view.panY=m_UIPan.y;view.fit=m_UIFit;view.viewSaved=true;}
     std::erase_if(m_Documents,[&](const auto& d){return d.id==closing;});
@@ -227,16 +235,18 @@ bool EditorLayer::CloseDocument(Application& app,const std::string& id,OpenDecis
 bool EditorLayer::SaveActiveDocument(Application& app){
     if(ActiveDocumentIs(DocumentType::ProjectSettings))return SaveProjectSettingsDraft(app);
     if(app.IsPrefabEditing())return SavePrefabEditor(app,true);
-    for(const auto& d:m_Documents)if(d.id==m_ActiveDocument){if(d.type==DocumentType::Lua)return true;if(d.type==DocumentType::Scene)return app.SaveCurrentScene(&m_EditorError);return ResolveDocumentEdits(app,d,OpenDecision::Save);}
+    for(const auto& d:m_Documents)if(d.id==m_ActiveDocument){if(d.type==DocumentType::Lua)return SaveLuaDocument(app,d.key);if(d.type==DocumentType::Scene)return app.SaveCurrentScene(&m_EditorError);return ResolveDocumentEdits(app,d,OpenDecision::Save);}
     return app.SaveCurrentScene(&m_EditorError);
 }
 bool EditorLayer::CanUndoActiveDocument(bool redo)const{
+    if(ActiveDocumentIs(DocumentType::Lua)){for(auto& d:m_Documents)if(d.id==m_ActiveDocument){auto s=m_ScriptSessions.find(d.canonical);return s!=m_ScriptSessions.end()&&s->second->CanUndo(redo);}return false;}
     if(ActiveDocumentIs(DocumentType::Material)){auto found=m_MaterialSessions.find(m_EditingMaterial);if(found==m_MaterialSessions.end())return false;const auto& s=found->second;return redo?!s.redo.empty():s.transaction.has_value()||!s.undo.empty();}
     if(m_PrefabHistory)return redo?CanRedo():CanUndo()||HasPendingTransaction();
     if(ActiveDocumentIs(DocumentType::UI)){for(const auto& [origin,s]:m_UIDocuments)if(s.resourceKey==m_DesignDocument)return redo?!s.redo.empty():s.pending.has_value()||!s.undo.empty();return false;}
     return ActiveDocumentIs(DocumentType::Scene)&&(redo?CanRedo():CanUndo()||HasPendingTransaction());
 }
 bool EditorLayer::UndoActiveDocument(Application& app,bool redo){
+    if(ActiveDocumentIs(DocumentType::Lua)){for(auto& d:m_Documents)if(d.id==m_ActiveDocument)return ScriptSession(app,d.key).Undo(redo);return false;}
     if(ActiveDocumentIs(DocumentType::Material)){if(!CanUndoActiveDocument(redo))return false;UndoMaterialEdit(app,redo);return true;}
     if(app.IsPrefabEditing()){if(redo)Redo(app);else Undo(app);return true;}
     if(ActiveDocumentIs(DocumentType::UI))return UndoUIDocument(app,m_DesignDocument,redo);
@@ -340,17 +350,6 @@ void EditorLayer::DrawDocumentTabs(Application& app){
         ImGui::SetNextWindowDockID(ImHashStr("WhispEngine.Editor.Dockspace"),ImGuiCond_FirstUseEver);
         if(ImGui::Begin("Start Workspace")){ImGui::TextWrapped("Open a Scene, Prefab, UI, Material or Lua document from File > Open Document or the Asset Browser.");if(ImGui::Button("Open Document..."))m_OpenDocumentPrompt=true;}ImGui::End();
     }
-}
-void EditorLayer::DrawScriptDocument(Application& app){
-    auto it=std::find_if(m_Documents.begin(),m_Documents.end(),[&](auto& d){return d.id==m_ActiveDocument&&d.type==DocumentType::Lua;});if(it==m_Documents.end())return;
-    PrepareWorkspacePrimaryWindow();
-    if(ImGui::Begin("Script Document",nullptr,m_WorkspaceFocus?ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings:0)){
-        ImGui::TextUnformatted(it->key.c_str());if(ImGui::Button("Open in Visual Studio"))OpenLuaScriptInVisualStudio(it->key,&m_EditorError);ImGui::SameLine();if(ImGui::Button("Reload file"))m_ScriptKey.clear();
-        if(m_ScriptKey!=it->canonical){try{auto path=ResolveEditableLuaScript(it->key);if(std::filesystem::file_size(path)>2*1024*1024)throw std::runtime_error("Script exceeds 2 MiB preview limit; open it externally.");std::ifstream file(path,std::ios::binary);if(!file)throw std::runtime_error("Script cannot be read");m_ScriptText.assign(std::istreambuf_iterator<char>(file),{});m_ScriptKey=it->canonical;}catch(const std::exception& e){m_ScriptText=e.what();}}
-        ImGui::TextDisabled("Read-only Behaviour / Module preview. Open externally to edit; saved dependencies reload during Play.");
-        const auto diagnostic=app.GetLuaRuntime().Error(it->key);if(!diagnostic.empty())ImGui::TextWrapped("Lua: %s",diagnostic.c_str());
-        if(ImGui::BeginChild("Source",{0,0},ImGuiChildFlags_Borders,ImGuiWindowFlags_HorizontalScrollbar)){ImGui::PushFont(MonoFont(),0);ImGui::TextUnformatted(m_ScriptText.c_str(),m_ScriptText.c_str()+m_ScriptText.size());ImGui::PopFont();}ImGui::EndChild();
-    }ImGui::End();
 }
 void EditorLayer::PrepareWorkspacePrimaryWindow(){
     if(!m_WorkspaceFocus)return;

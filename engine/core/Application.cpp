@@ -1516,7 +1516,7 @@ int Application::Run()
 
         }
 
-        if((GetProject()||IsPrefabEditing())&&m_EditorLayer.HasProjectEdits()&&!m_EditorLayer.ProjectExitConfirmed()){
+        if((GetProject()||IsPrefabEditing()||m_EditorLayer.ScriptDraftsDirty())&&m_EditorLayer.HasProjectEdits()&&!m_EditorLayer.ProjectExitConfirmed()){
             if(auto* native=dynamic_cast<GlfwWindow*>(GetWindow()))if(native->ShouldClose()){
                 glfwSetWindowShouldClose(native->GetGlfwHandle(),GLFW_FALSE);m_EditorLayer.RequestProjectExit();
             }

@@ -42,10 +42,16 @@ struct ImGuiContext;
 
 namespace editor
 {
+class LuaCodeEditor;
 class EditorLayer
 {
 public:
     bool OpenDocument(Application&,const std::string&);
+    LuaCodeEditor& ScriptSession(Application&,const std::string&);
+    bool ScriptDraftsDirty()const;
+    bool SaveLuaDocument(Application&,const std::string&);
+    bool SaveAllDocuments(Application&);
+    bool OpenScriptAtLine(Application&,const std::string&,int line);
     class CameraMouseFrame {
         ImGuiContext* context=nullptr;
         bool restoreMouse=false;
@@ -104,7 +110,7 @@ public:
     void ProjectOpened(Application&);
     bool UIDraftsDirty()const{if(!m_DirtyUIStyles.empty())return true;for(auto& [key,s]:m_UIDocuments)if(s.dirty)return true;return false;}
     bool AuthoringSceneDirty()const{const auto* history=m_PrefabHistory?&*m_PrefabHistory:m_EditHistory?&*m_EditHistory:nullptr;return history?(history->external||history->revision!=history->saved):IsSceneDirty();}
-    bool HasProjectEdits()const{return UIDraftsDirty()||ProjectSettingsDirty()||m_MaterialDirty||AuthoringSceneDirty()||(m_PrefabHistory&&IsSceneDirty());}
+    bool HasProjectEdits()const{return ScriptDraftsDirty()||UIDraftsDirty()||ProjectSettingsDirty()||m_MaterialDirty||AuthoringSceneDirty()||(m_PrefabHistory&&IsSceneDirty());}
     void ShowProjectSettings(Application&);
     void RevertProjectSettings(Application&);
     bool SaveProjectSettingsDraft(Application&);
@@ -439,6 +445,8 @@ private:
     bool m_DocumentClose=false,m_DocumentPrompt=false,m_OpenDocumentPrompt=false,m_WorkspaceFocus=false,m_RestoreDocuments=true;
     nlohmann::json m_DocumentSessions=nlohmann::json::object();
     std::string m_ScriptText,m_ScriptKey;
+    std::map<std::string,std::shared_ptr<LuaCodeEditor>> m_ScriptSessions;
+    double m_ScriptExternalPoll=0;
     std::map<std::string,bool> CaptureWorkspaceVisibility();
     void ApplyWorkspaceVisibility(const std::map<std::string,bool>&);
     void WorkspaceDefaults();
@@ -446,7 +454,7 @@ private:
     bool CaptureCurrentWorkspace();
     void InitializeWorkspaces(const EditorPreferences&);
     void DrawWorkspaceMenu(Application&);
-    void DrawRuntimeErrors();
+    void DrawRuntimeErrors(Application&);
     void DrawConsole(Application&,IRenderAdapter*);
     void DrawGameplayEvents(Application&);
     void DrawSceneValidation(Application&);

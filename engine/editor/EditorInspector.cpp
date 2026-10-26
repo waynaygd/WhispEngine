@@ -358,9 +358,9 @@ void EditorLayer::DrawInspector(Application& app){
             auto& runtime=app.GetLuaRuntime();
             if(ImGui::Button("Reload Script"))runtime.ReloadScript(script->scriptPath);
             ImGui::SameLine();ImGui::BeginDisabled(script->scriptPath.empty());
-            if(ImGui::Button("Open Script"))OpenLuaScriptInVisualStudio(script->scriptPath,&m_EditorError);
+            if(ImGui::Button("Open Script"))m_ScriptKey=script->scriptPath; // Deferred until Inspector releases World/component references.
             ImGui::EndDisabled();
-            if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Open script in Visual Studio 2022: %s",script->scriptPath.empty()?"Assign a script first":script->scriptPath.c_str());
+            if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Open project script in Script Document: %s",script->scriptPath.empty()?"Assign a script first":script->scriptPath.c_str());
             auto schema=runtime.Fields(script->scriptPath);
             auto error=runtime.Error(script->scriptPath);
             if(error.empty())ImGui::TextDisabled("Loaded: %zu fields",schema.size());else ImGui::TextWrapped("%s",error.c_str());
