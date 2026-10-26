@@ -40,6 +40,7 @@ namespace ecs
 {
 struct MaterialComponent;
 struct MeshRendererComponent;
+enum class MeshRenderMode;
 struct TransformComponent;
 
 class RenderSystem final : public ISystem
@@ -87,7 +88,7 @@ public:
     void SetMaterialDiagnostics(bool enabled){m_TraceMaterials=enabled;}
     const auto& GetMaterialDiagnostics()const{return m_MaterialDiagnostics;}
     struct Statistics {
-        std::size_t visibleObjects=0;
+        std::size_t visibleObjects=0,worldSubmeshes=0,viewmodelSubmeshes=0;
         std::size_t materialCacheHits=0,materialCacheMisses=0,visibleSubmeshes=0;
         double materialResolveMs=0,materialPathMs=0,materialTextureMs=0,materialShaderMs=0,runtimeUILayoutMs=0,runtimeUISubmitMs=0,gpuFinalizationMs=0;
         std::size_t materialResolves=0,materialPathChecks=0;
@@ -116,6 +117,7 @@ private:
         RenderMeshRange range;
         MaterialRenderState materialState;
         bool castShadows=true;
+        MeshRenderMode renderMode{};
         RenderMeshHandle mesh = RenderMeshHandle::Invalid();
         std::array<RenderTextureHandle,3> maps{};
         RenderTextureHandle texture = RenderTextureHandle::Invalid();
@@ -132,6 +134,7 @@ private:
         RenderMeshRange range;
         MaterialRenderState materialState;
         bool castShadows=true;
+        MeshRenderMode renderMode{};
         RenderMeshHandle mesh = RenderMeshHandle::Invalid();
         std::array<RenderTextureHandle,3> maps{};
         RenderTextureHandle texture = RenderTextureHandle::Invalid();

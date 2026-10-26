@@ -2284,6 +2284,7 @@ void Dx12RenderAdapter::Shutdown()
     m_CubeVB.Reset();
     for (UINT i = 0; i < FrameCount; ++i) m_Rt[i].Reset();
     m_Depth.Reset();
+    for(auto& depth:m_ViewmodelDepth)depth={};
     m_DsvHeap.Reset();
     m_SrvHeap.Reset();
     m_RtvHeap.Reset();

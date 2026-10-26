@@ -103,6 +103,8 @@ public:
     EditorVisualDiagnostics GetEditorVisualDiagnostics()const override{return m_EditorVisualDiagnostics;}
     void BeginMainPass() override;
     void EndMainPass() override;
+    bool BeginViewmodelPass() override;
+    void EndViewmodelPass() override;
     std::uint64_t GetShadowPreviewTextureId() const override;
     std::array<unsigned,2> ProbeMsaaSupport(unsigned samples)const {std::array<unsigned,2> result{};int index=0;for(auto format:{DXGI_FORMAT_R32G32B32A32_FLOAT,DXGI_FORMAT_D32_FLOAT}){D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS data{format,samples,D3D12_MULTISAMPLE_QUALITY_LEVELS_FLAG_NONE,0};if(m_Device&&SUCCEEDED(m_Device->CheckFeatureSupport(D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS,&data,sizeof(data))))result[index]=data.NumQualityLevels;++index;}return result;}
     RenderGpuTimings GetGpuTimings() const override { return m_GpuTimings; }
@@ -213,7 +215,9 @@ private:
     ShadowConstants m_ShadowConstants{};
     UINT m_NullShadowDescriptor=UINT_MAX;
     D3D12_GPU_DESCRIPTOR_HANDLE m_NullShadowSrv{};
-    bool m_ShadowActive=false,m_PreparedScene=false;
+    bool m_ShadowActive=false,m_PreparedScene=false,m_WorldEffectsDone=false;
+    struct ViewmodelDepth {Microsoft::WRL::ComPtr<ID3D12Resource> depth;Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> heap;UINT width=0,height=0;};
+    ViewmodelDepth m_ViewmodelDepth[FrameCount];
     UINT m_LastShadowSlot=0;
     std::array<float,16> m_Model{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
     struct CachedInstances { const RenderInstanceData* data; std::size_t count; D3D12_VERTEX_BUFFER_VIEW view; };

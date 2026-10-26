@@ -269,7 +269,7 @@ namespace ecs {
                         for(std::size_t slot=0;slot<count;++slot) {
                             RenderSnapshot snapshot{};
                             if(TryBuildRenderSnapshot(meshRenderer,world.GetComponent<MaterialComponent>(entity),snapshot,mesh,meshHandle,slot)) {
-                                casts|=snapshot.castShadows;snapshot.pose=pose;if(m_TraceMaterials&&!m_MaterialDiagnostics.empty()){m_MaterialDiagnostics.back()["entity"]=entity.index;m_MaterialDiagnostics.back()["generation"]=entity.generation;}m_RenderSnapshots.push_back(std::move(snapshot));visible=true;
+                                snapshot.renderMode=meshRenderer.renderMode;if(snapshot.renderMode==MeshRenderMode::FirstPerson){snapshot.castShadows=false;snapshot.materialState.receiveShadows=false;}casts|=snapshot.castShadows;snapshot.pose=pose;if(m_TraceMaterials&&!m_MaterialDiagnostics.empty()){m_MaterialDiagnostics.back()["entity"]=entity.index;m_MaterialDiagnostics.back()["generation"]=entity.generation;}m_RenderSnapshots.push_back(std::move(snapshot));visible=true;
                             }
                         }
                         if(visible)++m_Statistics.visibleObjects;
@@ -291,6 +291,7 @@ namespace ecs {
                 }
                 m_Statistics.gatherMs = elapsed(start);
                 m_Statistics.visibleSubmeshes = m_RenderSnapshots.size();
+                m_Statistics.viewmodelSubmeshes=std::count_if(m_RenderSnapshots.begin(),m_RenderSnapshots.end(),[](const auto& s){return s.renderMode==MeshRenderMode::FirstPerson;});m_Statistics.worldSubmeshes=m_RenderSnapshots.size()-m_Statistics.viewmodelSubmeshes;
             }
 
             {
@@ -315,13 +316,13 @@ namespace ecs {
                 m_Batches.reserve(m_RenderPackets.size());
                 m_InstanceData.resize(m_RenderPackets.size());
                 // All supported surfaces are opaque: order by compatible state/range.
-                const auto batchKey=[](const RenderPacket& p) {return std::tuple(p.mesh.value,p.shader.value,p.texture.value,p.maps[0].value,p.maps[1].value,p.maps[2].value,
+                const auto batchKey=[](const RenderPacket& p) {return std::tuple(int(p.renderMode),p.mesh.value,p.shader.value,p.texture.value,p.maps[0].value,p.maps[1].value,p.maps[2].value,
                     p.range.firstIndex,p.range.indexCount,p.materialState.doubleSided,p.materialState.receiveShadows,p.materialState.reverseWinding);};
                 std::stable_sort(m_RenderPackets.begin(),m_RenderPackets.end(),[&](const auto& a,const auto& b){return batchKey(a)<batchKey(b);});
                 for (std::size_t i=0;i<m_RenderPackets.size();++i) {
                     m_InstanceData[i]=m_RenderPackets[i].instance;
                     const auto& packet=m_RenderPackets[i];
-                    if(i>0 && packet.mesh==m_RenderPackets[i-1].mesh &&
+                    if(i>0 && packet.renderMode==m_RenderPackets[i-1].renderMode && packet.mesh==m_RenderPackets[i-1].mesh &&
                         packet.maps==m_RenderPackets[i-1].maps && packet.texture==m_RenderPackets[i-1].texture && packet.shader==m_RenderPackets[i-1].shader &&
                         packet.range==m_RenderPackets[i-1].range && packet.materialState==m_RenderPackets[i-1].materialState)
                         ++m_Batches.back().count;
@@ -383,17 +384,22 @@ namespace ecs {
             {
                 ZoneScopedN("RenderSubmit");
                 const auto start = std::chrono::steady_clock::now();
-                for(const auto& batch:m_Batches) {
+                auto submitBatch=[&](const auto& batch) {
                     const auto& packet=m_RenderPackets[batch.begin];
                     m_Renderer->SetMeshRange(packet.range);m_Renderer->SetMaterialState(packet.materialState);
                     if(m_InstancingEnabled && batch.count>1 && m_Renderer->SupportsInstancing(packet.shader)) {
                         m_Renderer->BindShader(packet.shader);
                         m_Renderer->BindTexture(0,packet.texture);
                         for(unsigned i=0;i<3;++i)m_Renderer->BindTexture(i+1,packet.maps[i]);
-                        if(m_Renderer->DrawMeshInstanced(packet.mesh,std::span<const RenderInstanceData>(m_InstanceData.data()+batch.begin,batch.count)))continue;
+                        if(m_Renderer->DrawMeshInstanced(packet.mesh,std::span<const RenderInstanceData>(m_InstanceData.data()+batch.begin,batch.count)))return;
                     }
                     ZoneScopedN("RenderFallbackDraw");
                     for(std::size_t i=batch.begin;i<batch.begin+batch.count;++i)SubmitRenderPacket(m_RenderPackets[i]);
+                };
+                for(const auto& batch:m_Batches)if(m_RenderPackets[batch.begin].renderMode==MeshRenderMode::World)submitBatch(batch);
+                if(m_Statistics.viewmodelSubmeshes&&m_Renderer->BeginViewmodelPass()){
+                    for(const auto& batch:m_Batches)if(m_RenderPackets[batch.begin].renderMode==MeshRenderMode::FirstPerson)submitBatch(batch);
+                    m_Renderer->EndViewmodelPass();
                 }
                 m_Statistics.submitMs=elapsed(start);
             }
@@ -555,7 +561,7 @@ namespace ecs {
     {
         BuildMvp(outPacket.instance.mvp.data(),snapshot.pose,m_RenderCamera,outPacket.instance.model.data());
 
-        outPacket.range=snapshot.range;outPacket.materialState=snapshot.materialState;outPacket.castShadows=snapshot.castShadows;
+        outPacket.renderMode=snapshot.renderMode;outPacket.range=snapshot.range;outPacket.materialState=snapshot.materialState;outPacket.castShadows=snapshot.castShadows;
         outPacket.mesh = snapshot.mesh;
         outPacket.texture = snapshot.texture;outPacket.maps=snapshot.maps;
         outPacket.instance.textureParameters=snapshot.textureParameters;
