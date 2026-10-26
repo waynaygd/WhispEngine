@@ -45,6 +45,7 @@ void EditorLayer::ResetProjectState(IRenderAdapter* renderer){
     ReleaseMaterialEditor(renderer);m_MaterialSessions.clear();
     StoreDocumentSession();m_Documents.clear();m_ActiveDocument.clear();m_ObservedScene="<initial>";m_DocumentProject.clear();m_PendingDocument.clear();m_DocumentPrompt=false;m_WorkspaceFocus=false;m_RestoreDocuments=true;m_ScriptSessions.clear();m_ScriptKey.clear();m_ScriptText.clear();
     m_AssetDoubleClick.clear();m_PrefabActionKey.clear();m_PrefabConfirm=false;m_PrefabCreatePopup=false;m_PrefabAction=0;m_PrefabActionEntity={};m_PrefabRoot={};m_EditingPrefab.clear();m_PrefabDiskBase={};m_PrefabHistory.reset();
+    m_PrefabAuthored=nlohmann::json();m_PrefabObserved=nlohmann::json();m_PrefabParentBase=nlohmann::json();m_PrefabParentRevision=0;m_PrefabReloadRequested=false;m_ChildPrefabParent.clear();m_ChildPrefabKey.clear();m_ChildPrefabPopup=false;
     m_UIDocuments.clear();m_UIStyles.clear();m_DirtyUIStyles.clear();m_DesignDocument.clear();m_UIDesignerKeys.clear();m_UIWidgetDrag.reset();m_UI4Selection.clear();m_UIStyleKey.clear();m_UIStyleId.clear();m_UIClipId.clear();
     m_EventFilter={};m_SelectedGameplayEvent=0;
     m_ShowProjectSettings=m_FocusProjectSettings=false;m_ProjectSettingsBase.reset();m_ProjectSettingsDraft={};m_ProjectSettingsScenes={};m_ProjectSettingsError.clear();m_ProjectSettingsNotice.clear();m_ProjectSettingsSearch.clear();

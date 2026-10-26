@@ -247,7 +247,7 @@ void EditorLayer::DrawInspector(Application& app){
     const nlohmann::json* prefabProperties=nullptr;bool prefabPlacement=false;
     if(auto root=scripting::PrefabRoot(world,e);root.IsValid()){
         const auto* sourceLink=world.GetComponent<ecs::PrefabInstanceComponent>(root);
-        const auto cacheKey=(app.GetProject()?AssetPaths::ToUtf8String(app.GetProject()->descriptorPath):"legacy")+"|"+sourceLink->asset+"|"+std::to_string(m_AssetCatalog.Revision());
+        const auto cacheKey=(app.GetProject()?AssetPaths::ToUtf8String(app.GetProject()->descriptorPath):"legacy")+"|"+sourceLink->asset+"|"+std::to_string(m_AssetCatalog.Revision())+"|"+std::to_string(scripting::PrefabRevision(sourceLink->asset));
         if(cacheKey!=m_InspectorPrefabCacheKey){m_InspectorPrefabCacheKey=cacheKey;m_InspectorPrefabSource=nullptr;m_InspectorPrefabError.clear();try{m_InspectorPrefabSource=scripting::ReadPrefab(sourceLink->asset);}catch(const std::exception& failure){m_InspectorPrefabError=failure.what();}}
         if(!m_InspectorPrefabError.empty())ImGui::TextWrapped("Missing / invalid Prefab source: %s",m_InspectorPrefabError.c_str());
         else if(auto* identity=world.GetComponent<ecs::SceneIdentityComponent>(e)){
@@ -263,6 +263,7 @@ void EditorLayer::DrawInspector(Application& app){
             ImGui::SameLine();if(ImGui::Button("Revert...")){m_PrefabAction=4;m_PrefabActionEntity=root;m_PrefabConfirm=true;}
         }
     }
+    DrawPrefabInheritance(app,e);
     if(app.IsEditorPlayMode())ImGui::TextWrapped("Runtime edits are discarded on Stop.");
     if(auto parent=world.Parent(e);parent.IsValid()){auto* name=world.GetComponent<ecs::TagComponent>(parent);ImGui::Text("Parent: %s",name?name->name.c_str():"Entity");}
     if(ImGui::Checkbox("World coordinates",&m_InspectorWorldTransform)){FinishTransaction(app);m_PropertyDrafts.clear();}
@@ -276,7 +277,8 @@ void EditorLayer::DrawInspector(Application& app){
         const bool componentMatch=inspector::Matches(d.label,m_InspectorSearch)||inspector::Matches(d.key,m_InspectorSearch);
         if(!componentMatch&&!std::any_of(d.properties.begin(),d.properties.end(),[&](const auto& p){return !p.internal&&(inspector::Matches(p.label,m_InspectorSearch)||inspector::Matches(p.key,m_InspectorSearch));})&&d.key!="LuaScript")continue;
         if(!m_InspectorSearch.empty())ImGui::SetNextItemOpen(true,ImGuiCond_Always);ImGui::PushID(d.key.c_str());
-        bool open=ImGui::CollapsingHeader(d.label.c_str(),d.key=="Tag"||d.key=="Velocity"||d.key=="BoundsBounce"?ImGuiTreeNodeFlags_None:ImGuiTreeNodeFlags_DefaultOpen);
+        std::string inheritanceLabel=d.label;if(!m_PrefabAuthored.is_null()&&d.key!="PrefabInstance"){auto member=PrefabMember(app,e);bool inherited=false;for(auto& node:m_PrefabParentBase.at("entities"))if(node.at("id")==member)inherited=node.at("components").contains(d.key);bool changed=m_PrefabAuthored["overrides"].contains(member)&&m_PrefabAuthored["overrides"][member]["components"].contains(d.key);inheritanceLabel+=!inherited?" [Added]":changed?" [Overridden]":" [Inherited]";inheritanceLabel+="###"+d.label;}
+        bool open=ImGui::CollapsingHeader(inheritanceLabel.c_str(),d.key=="Tag"||d.key=="Velocity"||d.key=="BoundsBounce"?ImGuiTreeNodeFlags_None:ImGuiTreeNodeFlags_DefaultOpen);
         if(ImGui::BeginPopupContextItem("ComponentActions")){if(ImGui::MenuItem("Reset",nullptr,false,d.removable))ResetComponent(app,e,d.id);if(ImGui::MenuItem("Remove",nullptr,false,d.removable)){RemoveComponent(app,e,d.id);ImGui::EndPopup();ImGui::PopID();continue;}ImGui::EndPopup();}
         if(open){auto drawProperty=[&](const ecs::PropertyDescriptor& p){
             if(p.internal||(!componentMatch&&!inspector::Matches(p.label,m_InspectorSearch)&&!inspector::Matches(p.key,m_InspectorSearch)))return;
@@ -287,7 +289,10 @@ void EditorLayer::DrawInspector(Application& app){
                 if(d.key=="Transform"&&prefabPlacement){propertyTip+="\nInstance placement is retained by Prefab Revert.";}
                 else if(source.contains(p.key)){auto current=PropertyJson(p.get(world,e));if(p.kind==ecs::PropertyKind::Color&&source.at(p.key).is_array()&&source.at(p.key).size()==3&&current.is_array()&&current.size()==4)current.erase(current.begin()+3);const bool overridden=source.at(p.key)!=current;propertyLabel+=overridden?" *":"";propertyTip+=overridden?"\nLocal override differs from Prefab source. Revert uses the existing instance operation.":"\nInherited: matches Prefab source.";}
             }
+            bool inheritedProperty=false,propertyOverride=false;
+            if(!m_PrefabAuthored.is_null()){auto member=PrefabMember(app,e);for(auto& node:m_PrefabParentBase.at("entities"))if(node.at("id")==member)inheritedProperty=node.at("components").contains(d.key);if(m_PrefabAuthored["overrides"].contains(member)){auto& o=m_PrefabAuthored["overrides"][member]["components"];propertyOverride=o.contains(d.key)&&o[d.key].contains("properties")&&o[d.key]["properties"].contains("/"+p.key);}propertyLabel+=!inheritedProperty?" [Local]":propertyOverride?" [Override]":" [Inherited]";}
             inspector::PropertyRow(propertyLabel.c_str(),propertyTip.c_str());
+            if(!m_PrefabAuthored.is_null()&&ImGui::BeginPopupContextItem(("Inheritance"+p.key).c_str())){ImGui::BeginDisabled(!inheritedProperty||p.readOnly);if(ImGui::MenuItem("Override Property"))OverridePrefabProperty(app,e,d.key,"/"+p.key);ImGui::EndDisabled();if(!inheritedProperty&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("This component is local to Child and has no Parent property.");ImGui::BeginDisabled(!propertyOverride);if(ImGui::MenuItem("Reset to Parent"))ResetPrefabProperty(app,e,d.key,"/"+p.key);ImGui::EndDisabled();ImGui::EndPopup();}
 
             ImGui::PushID(p.key.c_str());const auto id=ImGui::GetID("PropertyDraft");auto draft=m_PropertyDrafts.find(id);
             auto value=draft!=m_PropertyDrafts.end()?draft->second:p.get(world,e);

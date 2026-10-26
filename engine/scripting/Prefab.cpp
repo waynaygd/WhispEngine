@@ -53,9 +53,7 @@ void ValidatePrefab(const nlohmann::json& data){
     auto e=check.Entities().front();while(check.Parent(e).IsValid())e=check.Parent(e);
     if(check.Subtree(e).size()!=nodes.size())throw std::runtime_error("Disconnected prefab hierarchy");
 }
-nlohmann::json ReadPrefab(const std::string& key){
-    auto path=SafeAsset(key,".prefab.json");if(std::filesystem::file_size(path)>1024*1024)throw std::runtime_error("Prefab exceeds 1 MiB");
-    std::ifstream stream(path);Json data;stream>>data;
+nlohmann::json DecodePrefabAsset(nlohmann::json data){
     if(data.at("version")!=1&&data.contains("_legacySceneReferences"))throw std::runtime_error("Reserved prefab compatibility field");
     if(data.at("version")==1){auto c=data.at("components");c.erase("SceneIdentity");if(!c.contains("Transform"))c["Transform"]={{"position",{0,0,0}},{"rotation",{0,0,0}},{"scale",{1,1,1}}};data={{"version",2},{"_legacySceneReferences",true},{"root","root"},{"entities",Json::array({{{"id","root"},{"components",c}}})}};}
     ValidatePrefab(data);return data;
@@ -65,7 +63,8 @@ ecs::Entity PrefabRoot(const ecs::World& world,ecs::Entity member){
 }
 nlohmann::json CapturePrefab(ecs::World& world,ecs::Entity root){
     if(!world.IsAlive(root))throw std::runtime_error("Select a prefab root");
-    Map ids;const auto subtree=world.Subtree(root);auto* link=world.GetComponent<ecs::PrefabInstanceComponent>(root);
+    Map ids;const auto subtree=world.Subtree(root);for(auto e:subtree)if(!world.HasComponent<ecs::SceneIdentityComponent>(e)){auto old=SceneSerializer::EntitySceneId(world,e);auto id=ecs::NewSceneIdentity();world.AddComponent<ecs::SceneIdentityComponent>(e).value=id;ids.emplace(old,id);}
+    auto* link=world.GetComponent<ecs::PrefabInstanceComponent>(root);
     if(link)for(auto it=link->members.begin();it!=link->members.end();++it)ids.emplace(it.value().at("$entity").get<std::string>(),it.key());
     for(auto e:subtree){auto id=SceneSerializer::EntitySceneId(world,e);if(!ids.contains(id))ids.emplace(id,id);}
     Json nodes=Json::array();for(auto e:subtree){

@@ -50,6 +50,7 @@ EditorLayer::EntitySnapshot EditorLayer::CaptureSelection(Application& app,bool 
 bool EditorLayer::DeleteSelection(Application& app){
     if(app.IsEditorPlayMode())return false;
     PruneSelection(app);EndGroupTransform(app);FinishTransaction(app);if(m_Selection.items.empty())return false;
+    if(!m_PrefabAuthored.is_null()&&IsSelected(m_PrefabRoot)){m_EditorError="The inherited single root cannot be deleted";return false;}
     EntitySnapshot before;before.world=app.GetWorld().GetIdentity();before.selection=m_Selection;const auto entities=app.GetWorld().HierarchyRoots(m_Selection.items);
     for(auto e:entities)before.related.push_back(CaptureSubtree(app,e));
     for(auto e:entities)app.DestroySceneEntity(e);ClearSelection();CommitUndo(app,"Delete selection",std::move(before));return true;

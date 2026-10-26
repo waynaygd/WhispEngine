@@ -306,6 +306,11 @@ public:
     bool CreateMaterialAsset(Application&,const std::string&,std::string* error=nullptr);
     std::string CreateLuaScriptAsset(Application&,const std::string& directory);
     bool CreatePrefab(Application&,const std::string& key);
+    bool CreateChildPrefab(Application&,const std::string& parent,const std::string& key);
+    bool ResetPrefabProperty(Application&,ecs::Entity,const std::string& component,const std::string& path);
+    bool ReloadPrefabParent(Application&);
+    bool ResetPrefabOverride(Application&,const std::string& member,const std::string& component,const std::string& path);
+    bool OverridePrefabProperty(Application&,ecs::Entity,const std::string& component,const std::string& path);
     ecs::Entity InstantiatePrefab(Application&,const std::string& key,ecs::Vec3 position={},const ecs::TransformComponent* placement=nullptr,const nlohmann::json* prepared=nullptr);
     bool OpenPrefabEditor(Application&,const std::string& key);
     bool SavePrefabEditor(Application&,bool stayOpen=false);
@@ -381,6 +386,7 @@ private:
         std::vector<EntitySnapshot> related;
         std::optional<SelectionSet> selection;
         std::vector<PrefabFileSnapshot> files;
+        std::optional<nlohmann::json> prefabAuthored,prefabParentBase;
         bool prefabBatch=false,bulk=false;
         std::string componentOnly;
     };
@@ -514,7 +520,7 @@ private:
     struct PrefabPlacementCache {
         std::string key,error;std::filesystem::path path;
         std::filesystem::file_time_type time{};std::uintmax_t size=0;
-        nlohmann::json source;
+        nlohmann::json source;std::uint64_t prefabRevision=0;
         ecs::TransformComponent root;
         std::vector<ecs::TransformComponent> nodes;
         std::vector<PrefabPlacementPart> parts;
@@ -701,7 +707,13 @@ private:
     std::optional<HistoryContext> m_EditHistory;
     std::optional<HistoryContext> m_PrefabHistory;
     std::string m_EditingPrefab,m_PrefabActionKey,m_AssetDoubleClick,m_PrefabNewKey="prefabs/cabinet.prefab.json";
-    nlohmann::json m_PrefabDiskBase;
+    nlohmann::json m_PrefabDiskBase,m_PrefabAuthored,m_PrefabObserved,m_PrefabParentBase;
+    std::uint64_t m_PrefabParentRevision=0;
+    std::string m_ChildPrefabParent,m_ChildPrefabKey;
+    bool m_ChildPrefabPopup=false,m_PrefabReloadRequested=false;
+    std::string PrefabMember(Application&,ecs::Entity)const;
+    void TrackPrefabChanges(Application&);
+    void DrawPrefabInheritance(Application&,ecs::Entity);
     SceneSettings m_PrefabSavedSceneSettings;
     ecs::Entity m_PrefabRoot{};
     std::vector<ecs::Entity> m_PrefabIsolation;
@@ -710,7 +722,7 @@ private:
     int m_PrefabAction=0;
     ecs::Entity m_PrefabActionEntity{};
     EntitySnapshot PrefabNodesSnapshot(Application&,const nlohmann::json&);
-    bool WritePrefabAndUpdate(Application&,const std::string&,const nlohmann::json&,const nlohmann::json&,bool update);
+    bool WritePrefabAndUpdate(Application&,const std::string&,const nlohmann::json&,const nlohmann::json&,bool update,const nlohmann::json* authored=nullptr);
     void RestorePrefabHistory();
     bool StartPrefabEditor(Application&,const std::string&,const nlohmann::json&,const nlohmann::json&);
     std::vector<UndoRecord> m_UndoStack;

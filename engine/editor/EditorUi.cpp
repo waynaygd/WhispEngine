@@ -230,7 +230,8 @@ void EditorLayer::DrawSceneHierarchy(Application& app){
     ImGuiListClipper clipper;clipper.Begin(int(rows.size()));while(clipper.Step())for(int index=clipper.DisplayStart;index<clipper.DisplayEnd;++index){
         const auto& row=rows[index];const auto e=row.entity;const auto* tag=world.GetComponent<ecs::TagComponent>(e);
         ImGui::PushID(int(e.index));ImGui::PushID(int(e.generation));if(row.depth)ImGui::Indent(row.depth*ImGui::GetStyle().IndentSpacing);
-        const std::string label=std::string(EntityKind(world,e))+" "+(tag&&!tag->name.empty()?tag->name:"Entity "+std::to_string(e.index));
+        std::string provenance;if(!m_PrefabAuthored.is_null()){auto member=PrefabMember(app,e);bool local=false;for(auto& n:m_PrefabAuthored.at("addedEntities"))if(n.at("id")==member)local=true;provenance=local?"[Added] ":"[Inherited] ";}
+        const std::string label=provenance+std::string(EntityKind(world,e))+" "+(tag&&!tag->name.empty()?tag->name:"Entity "+std::to_string(e.index));
         const std::string rowLabel=(m_RenameTarget==e?std::string{}:label+(e==m_Selection.active?" [Active]":""))+"###EntityRow";
         if(!m_HierarchyFilter.empty())ImGui::SetNextItemOpen(true);
         ImGui::TreeNodeEx(rowLabel.c_str(),ImGuiTreeNodeFlags_NoTreePushOnOpen|ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_SpanAvailWidth|ImGuiTreeNodeFlags_DefaultOpen|(row.branch?0:ImGuiTreeNodeFlags_Leaf)|(IsSelected(e)?ImGuiTreeNodeFlags_Selected:0));

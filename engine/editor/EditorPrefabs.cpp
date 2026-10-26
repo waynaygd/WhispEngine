@@ -71,15 +71,19 @@ EditorLayer::EntitySnapshot EditorLayer::PrefabNodesSnapshot(Application& app,co
         result.related.push_back(std::move(s));
     }return result;
 }
-bool EditorLayer::WritePrefabAndUpdate(Application& app,const std::string& key,const Json& data,const Json& expected,bool update){
+bool EditorLayer::WritePrefabAndUpdate(Application& app,const std::string& key,const Json& data,const Json& expected,bool update,const Json* authored){
     EntitySnapshot desired;
     try{
         AuthoringOnly(app);scripting::ValidatePrefab(data);FinishTransaction(app);
         if(DiskPrefab(key)!=expected)throw std::runtime_error("Prefab changed on disk; reload before applying changes");
+        auto stored=authored?*authored:data;
+        if(!authored&&expected.value("version",0)==3)stored=scripting::EditPrefabDelta(expected,scripting::ReadPrefab(key),data);
+        auto canonical=[](Json value){auto& nodes=value["entities"];std::sort(nodes.begin(),nodes.end(),[](const auto& a,const auto& b){return a.at("id").template get<std::string>()<b.at("id").template get<std::string>();});return value;};
+        if(stored.value("version",0)==3&&canonical(scripting::ResolvePrefabDelta(stored,scripting::ReadPrefab(stored.at("parentPrefab").get<std::string>())))!=canonical(data))throw std::runtime_error("Parent changed during prefab transaction; reload before saving");
         auto nodes=update?UpdatedNodes(app.GetWorld(),key,data):Json::array();ValidateNodes(app.GetWorld(),app.GetSceneSettings(),nodes);
         desired=PrefabNodesSnapshot(app,nodes);auto before=CaptureLike(app,desired);
         for(auto& item:before.related)if(item.components.empty()){item.alive=false;item.parent.reset();}
-        if(data!=expected&&!data.value("_legacySceneReferences",false)){desired.files.push_back({key,data,expected});before.files.push_back({key,expected,data});}
+        if(stored!=expected&&!data.value("_legacySceneReferences",false)){desired.files.push_back({key,stored,expected});before.files.push_back({key,expected,stored});}
         RestoreSnapshot(app,desired);CommitUndo(app,update?"Save Prefab and Update Instances":"Save Prefab",std::move(before));m_AssetListsDirty=true;m_EditorError.clear();return true;
     }catch(const std::exception& e){for(const auto& item:desired.related)if(app.GetWorld().IsAlive(item.entity)&&!app.GetWorld().HasComponent<ecs::SceneIdentityComponent>(item.entity))app.GetWorld().DestroyEntity(item.entity);m_EditorError=e.what();return false;}
 }
@@ -113,13 +117,15 @@ bool EditorLayer::UpdatePrefabInstances(Application& app,const std::string& key)
 }
 bool EditorLayer::StartPrefabEditor(Application& app,const std::string& key,const Json& data,const Json& base){
     try{
-        AuthoringOnly(app);FinishTransaction(app);ecs::Vec3 origin{};
+        AuthoringOnly(app);FinishTransaction(app);ecs::Vec3 origin{};Json parentBase;std::uint64_t parentRevision=0;if(base.value("version",0)==3){auto parent=base.at("parentPrefab").get<std::string>();parentBase=scripting::ReadPrefab(parent);parentRevision=scripting::PrefabRevision(parent);}
         for(const auto& node:data.at("entities"))if(node.at("id")==data.at("root")){auto p=node.at("components").at("Transform").value("position",Json::array({0,0,0}));origin={p.at(0).get<float>(),p.at(1).get<float>(),p.at(2).get<float>()};}
         auto world=std::make_unique<ecs::World>();auto root=scripting::InstantiatePrefab(*world,key,data,origin);
         m_PrefabSavedSceneSettings=app.GetSceneSettings();
         if(!app.BeginPrefabContext(std::move(world)))throw std::runtime_error("Cannot enter Prefab Editor");
         m_PrefabIsolation=m_Isolation;m_PrefabGameView=m_GameView;m_GameView=false;
         m_PrefabHistory=HistoryContext{m_Selection,std::move(m_UndoStack),std::move(m_RedoStack),m_Revision,m_SavedRevision,m_NextRevision,m_ExternalDirty};ResetHistory();
+        m_PrefabAuthored=base.value("version",0)==3?base:Json();m_PrefabObserved=data;m_PrefabParentBase=Json();
+        if(!m_PrefabAuthored.is_null()){m_PrefabParentBase=parentBase;m_PrefabParentRevision=parentRevision;}
         m_EditingPrefab=key;m_PrefabDiskBase=base;m_PrefabRoot=root;SelectEntity(root);app.FocusEntity(root);m_EditorError.clear();return true;
     }catch(const std::exception& e){m_EditorError=e.what();return false;}
 }
@@ -129,7 +135,7 @@ bool EditorLayer::OpenPrefabEditor(Application& app,const std::string& key){
 void EditorLayer::RestorePrefabHistory(){
     ResetHistory();if(m_PrefabHistory){auto saved=std::move(*m_PrefabHistory);m_PrefabHistory.reset();m_Selection=std::move(saved.selection);m_UndoStack=std::move(saved.undo);m_RedoStack=std::move(saved.redo);m_Revision=saved.revision;m_SavedRevision=saved.saved;m_NextRevision=saved.next;m_ExternalDirty=saved.external;}
     m_Isolation=std::move(m_PrefabIsolation);m_GameView=m_PrefabGameView;
-    m_EditingPrefab.clear();m_PrefabRoot={};m_PropertyDrafts.clear();
+    m_PrefabReloadRequested=false;m_PrefabAuthored=Json();m_PrefabObserved=Json();m_PrefabParentBase=Json();m_EditingPrefab.clear();m_PrefabRoot={};m_PropertyDrafts.clear();
 }
 bool EditorLayer::ClosePrefabEditor(Application& app,bool discard){
     if(!app.IsPrefabEditing())return true;FinishTransaction(app);
@@ -142,6 +148,8 @@ bool EditorLayer::SavePrefabEditor(Application& app,bool stayOpen){
     if(!app.IsPrefabEditing())return false;
     try{
         FinishTransaction(app);if(app.GetWorld().Subtree(m_PrefabRoot).size()!=app.GetWorld().GetAliveCount())throw std::runtime_error("A prefab must contain exactly one root; parent all entities beneath its root");auto data=scripting::CapturePrefab(app.GetWorld(),m_PrefabRoot);auto key=m_EditingPrefab;auto base=m_PrefabDiskBase;
+        auto authored=m_PrefabAuthored,parentBase=m_PrefabParentBase;auto parentRevision=m_PrefabParentRevision;
+        if(!authored.is_null()&&scripting::ReadPrefab(authored.at("parentPrefab").get<std::string>())!=parentBase)throw std::runtime_error("Parent changed while Child has edits; save is blocked. Resolve or discard the draft and reload Parent.");
         if(DiskPrefab(key)!=base)throw std::runtime_error("Prefab changed on disk; return without saving and reopen it");
         auto nodes=UpdatedNodes(app.GetEditorWorld(),key,data);ValidateNodes(app.GetEditorWorld(),m_PrefabSavedSceneSettings,nodes);
         // Hold the existing prefab World and its history while the scene's existing
@@ -150,17 +158,22 @@ bool EditorLayer::SavePrefabEditor(Application& app,bool stayOpen){
         auto isolation=m_Isolation;const auto gameView=m_GameView;
         HistoryContext history{m_Selection,std::move(m_UndoStack),std::move(m_RedoStack),m_Revision,m_SavedRevision,m_NextRevision,m_ExternalDirty};
         auto world=app.SuspendPrefabContext();RestorePrefabHistory();
-        const bool ok=WritePrefabAndUpdate(app,key,data,base,true);const auto error=m_EditorError;
+        const bool ok=WritePrefabAndUpdate(app,key,data,base,true,authored.is_null()?nullptr:&authored);const auto error=m_EditorError;
         if(ok&&!stayOpen){m_ActiveDocument=RegisterDocument(app,DocumentType::Scene,app.GetSceneKey()).id;m_FocusViewportWindow=true;return true;}
         app.BeginPrefabContext(std::move(world));
         m_PrefabIsolation=std::move(m_Isolation);m_PrefabGameView=m_GameView;
         m_PrefabHistory=HistoryContext{m_Selection,std::move(m_UndoStack),std::move(m_RedoStack),m_Revision,m_SavedRevision,m_NextRevision,m_ExternalDirty};ResetHistory();
         m_Selection=std::move(history.selection);m_UndoStack=std::move(history.undo);m_RedoStack=std::move(history.redo);m_Revision=history.revision;m_SavedRevision=history.saved;m_NextRevision=history.next;m_ExternalDirty=history.external;
-        m_Isolation=std::move(isolation);m_GameView=gameView;m_EditingPrefab=key;m_PrefabRoot=root;m_PrefabDiskBase=ok&&!data.value("_legacySceneReferences",false)?data:base;m_ActiveDocument=active;
+        m_Isolation=std::move(isolation);m_GameView=gameView;m_EditingPrefab=key;m_PrefabRoot=root;m_PrefabAuthored=authored;m_PrefabObserved=data;m_PrefabParentBase=parentBase;m_PrefabParentRevision=parentRevision;m_PrefabDiskBase=ok&&!data.value("_legacySceneReferences",false)?(authored.is_null()?data:authored):base;m_ActiveDocument=active;
         app.SetSceneSettings(settings);app.SetEditorCameraPose(position,yaw,pitch);if(ok)MarkSaved();m_EditorError=error;return ok;
     }catch(const std::exception& e){m_EditorError=e.what();return false;}
 }
 void EditorLayer::DrawPrefabWorkflow(Application& app){
+    if(m_PrefabReloadRequested){m_PrefabReloadRequested=false;ReloadPrefabParent(app);}
+    if(app.IsPrefabEditing()&&!m_PrefabAuthored.is_null()){
+        auto parent=m_PrefabAuthored.at("parentPrefab").get<std::string>();auto revision=scripting::PrefabRevision(parent);
+        if(revision!=m_PrefabParentRevision){try{auto current=scripting::ReadPrefab(parent);if(current==m_PrefabParentBase){m_PrefabParentRevision=revision;if(m_EditorError.starts_with("Parent reload: "))m_EditorError.clear();}else if(!IsSceneDirty()){if(!ReloadPrefabParent(app)){m_PrefabParentRevision=revision;m_EditorError="Parent reload: "+m_EditorError;}}}catch(const std::exception& error){m_EditorError=std::string("Parent reload: ")+error.what();m_PrefabParentRevision=revision;}}
+    }
     if(!ImGui::BeginMainMenuBar())return;
     if(ImGui::BeginMenu("Prefab")){
         if(app.IsPrefabEditing()){
@@ -180,6 +193,12 @@ void EditorLayer::DrawPrefabWorkflow(Application& app){
         }ImGui::EndMenu();
     }ImGui::EndMainMenuBar();
     if(!m_PrefabActionKey.empty()&&!m_PrefabConfirm&&!ImGui::IsPopupOpen("Prefab changes")){auto key=std::exchange(m_PrefabActionKey,{});OpenDocument(app,key);}
+    if(m_ChildPrefabPopup){ImGui::OpenPopup("Create Child Prefab");m_ChildPrefabPopup=false;}
+    if(ImGui::BeginPopupModal("Create Child Prefab",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
+        ImGui::TextWrapped("Parent: %s",m_ChildPrefabParent.c_str());ImGui::InputText("Child Asset key",&m_ChildPrefabKey);
+        if(ImGui::Button("Create Child")){if(CreateChildPrefab(app,m_ChildPrefabParent,m_ChildPrefabKey))ImGui::CloseCurrentPopup();}ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();
+        if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::EndPopup();
+    }
     if(m_PrefabCreatePopup){ImGui::OpenPopup("Create Prefab");m_PrefabCreatePopup=false;}
     if(ImGui::BeginPopupModal("Create Prefab",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
         ImGui::TextUnformatted("One selected root and its complete subtree. Path inside Assets:");ImGui::InputText("Asset key",&m_PrefabNewKey);

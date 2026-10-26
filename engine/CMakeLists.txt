@@ -33,6 +33,7 @@ add_library(Engine
   editor/EditorUI4.cpp
   scripting/LuaRuntime.cpp
   scripting/Prefab.cpp
+  scripting/PrefabInheritance.cpp
   core/Application.cpp
   core/ApplicationProject.cpp
   core/AssetDependencyValidation.cpp
@@ -98,6 +99,7 @@ add_library(Engine
   editor/EditorAssetPreview.cpp
   editor/EditorAssets.cpp
   editor/EditorPrefabs.cpp
+  editor/EditorPrefabInheritance.cpp
   editor/LuaScriptBuffer.cpp
   editor/LuaCodeEditor.cpp
   editor/EditorScriptDocument.cpp

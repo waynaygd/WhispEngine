@@ -463,6 +463,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
             if(!item.folder&&ImGui::BeginPopupContextItem("AssetActions")){
                 if(!m_AssetSelection.contains(key))SelectAsset(key,type.name);
                 if(ImGui::MenuItem("Open"))openAsset(entry);
+                if(type.kind==ecs::AssetKind::Prefab&&ImGui::MenuItem("Create Child Prefab",nullptr,false,!app.IsEditorPlayMode())){m_ChildPrefabParent=key;m_ChildPrefabKey=key.substr(0,key.size()-12)+"-Child.prefab.json";m_ChildPrefabPopup=true;}
                 if(ImGui::MenuItem("Copy Resource Key"))ImGui::SetClipboardText(key.c_str());
                 auto resolved=[&]{return type.name=="Scene Document"&&app.GetProject()?app.GetProject()->ResolveScene(key):type.shaderRoot?AssetPaths::ResolveShaderPath(std::filesystem::u8path(key)):AssetPaths::ResolveAssetPath(std::filesystem::u8path(key));};
                 if(ImGui::MenuItem("Copy Path")){try{ImGui::SetClipboardText(AssetPaths::ToUtf8String(resolved()).c_str());}catch(const std::exception& e){m_EditorError=e.what();}}

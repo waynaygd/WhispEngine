@@ -18,7 +18,7 @@ namespace {
 bool Same(const nlohmann::json& a,const nlohmann::json& b){return a==b;}
 }
 EditorLayer::EntitySnapshot EditorLayer::CaptureSelectedEntity(Application& app,ecs::Entity entity)const{
-    EntitySnapshot s;s.entity=entity.IsValid()?entity:m_Selection.active;s.world=app.GetWorld().GetIdentity();s.alive=app.GetWorld().IsAlive(s.entity);
+    EntitySnapshot s;if(!m_PrefabAuthored.is_null()){s.prefabAuthored=m_PrefabAuthored;s.prefabParentBase=m_PrefabParentBase;}s.entity=entity.IsValid()?entity:m_Selection.active;s.world=app.GetWorld().GetIdentity();s.alive=app.GetWorld().IsAlive(s.entity);
     if(s.alive)s.parent=app.GetWorld().Parent(s.entity);
     if(s.alive)s.components=ecs::ComponentRegistry::Builtins().Capture(app.GetWorld(),s.entity);s.selection=m_Selection;return s;
 }
@@ -33,6 +33,7 @@ EditorLayer::EntitySnapshot EditorLayer::CaptureLike(Application& app,const Enti
     if(sample.transform){result.entity=sample.entity;result.alive=app.GetWorld().IsAlive(sample.entity);if(auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(sample.entity))result.transform=*t;}
     if(sample.parent&&result.alive)result.parent=app.GetWorld().Parent(result.entity);
     result.selection=sample.selection?std::optional<SelectionSet>(m_Selection):std::nullopt;
+    if(sample.prefabAuthored){result.prefabAuthored=m_PrefabAuthored;result.prefabParentBase=m_PrefabParentBase;}
     result.prefabBatch=sample.prefabBatch;
     for(const auto& file:sample.files){
         auto path=scripting::SafeAsset(file.key,".prefab.json");std::optional<nlohmann::json> contents;
@@ -52,7 +53,7 @@ ecs::Entity EditorLayer::RestoreSnapshot(Application& app,const EntitySnapshot& 
     auto& world=app.GetWorld();auto entity=snapshot.entity;
     const auto owner=snapshot.world?snapshot.world:entity.world;
     if(owner!=world.GetIdentity())throw std::runtime_error("Undo transaction belongs to a different World");
-    if(root&&snapshot.bulk){RestoreBulkSnapshot(app,snapshot);return {};}
+    if(root&&snapshot.bulk){RestoreBulkSnapshot(app,snapshot);if(snapshot.prefabAuthored){m_PrefabAuthored=*snapshot.prefabAuthored;if(snapshot.prefabParentBase)m_PrefabParentBase=*snapshot.prefabParentBase;m_PrefabParentRevision=0;m_PrefabObserved=scripting::CapturePrefab(world,m_PrefabRoot);}return {};}
     if(root){
         auto validate=[&](auto&& self,const EntitySnapshot& s)->void{
             if(s.transform&&(!world.IsAlive(s.entity)||!world.HasComponent<ecs::TransformComponent>(s.entity)))throw std::runtime_error("Transform history target no longer exists");
@@ -92,7 +93,7 @@ ecs::Entity EditorLayer::RestoreSnapshot(Application& app,const EntitySnapshot& 
             auto path=scripting::SafeAsset(file.key,".prefab.json");std::string error;
             if(file.contents){if(!SceneSerializer::WriteAtomic(path,*file.contents,&error,true))throw std::runtime_error(error);}
             else if(!std::filesystem::remove(path))throw std::runtime_error("Cannot remove prefab file: "+file.key);
-            m_AssetListsDirty=true;
+            scripting::InvalidatePrefabCache();m_AssetListsDirty=true;
         }
         if(snapshot.prefabBatch){
             std::vector<std::pair<ecs::Entity,ecs::Entity>> detached;
@@ -125,6 +126,8 @@ ecs::Entity EditorLayer::RestoreSnapshot(Application& app,const EntitySnapshot& 
         if(snapshot.selection){m_Selection=*snapshot.selection;for(auto [old,replacement]:*remapped)m_Selection.Remap(old,replacement);m_Selection.Prune(world);}
         else SelectEntity(m_Selection.active);
         if(inverse&&inverse->selection)for(auto [old,replacement]:*remapped)inverse->selection->Remap(old,replacement);
+        if(snapshot.prefabAuthored){m_PrefabAuthored=*snapshot.prefabAuthored;if(snapshot.prefabParentBase){m_PrefabParentBase=*snapshot.prefabParentBase;m_PrefabParentRevision=0;}}
+        if(!m_PrefabAuthored.is_null()&&world.IsAlive(m_PrefabRoot))m_PrefabObserved=scripting::CapturePrefab(world,m_PrefabRoot);
         m_PropertyDrafts.clear();
     }
     return entity;
@@ -142,8 +145,10 @@ void EditorLayer::BeginSceneTransaction(Application& app,const std::string& labe
 }
 void EditorLayer::CommitUndo(Application& app,const std::string& label,EntitySnapshot before){
     FinishTransaction(app);if(!before.world)before.world=before.entity.world;
+    if(!m_PrefabAuthored.is_null()){if(!before.prefabAuthored){before.prefabAuthored=m_PrefabAuthored;before.prefabParentBase=m_PrefabParentBase;}TrackPrefabChanges(app);}
     auto after=CaptureLike(app,before);
     auto equal=[&](auto&& self,const EntitySnapshot& a,const EntitySnapshot& b)->bool{
+        if(a.prefabAuthored!=b.prefabAuthored||a.prefabParentBase!=b.prefabParentBase)return false;
         if(a.files.size()!=b.files.size())return false;for(std::size_t i=0;i<a.files.size();++i)if(a.files[i].contents!=b.files[i].contents)return false;
         if(a.alive!=b.alive||a.parent!=b.parent||!Same(a.components,b.components)||a.related.size()!=b.related.size()||a.settings.has_value()!=b.settings.has_value())return false;
         if(a.transform.has_value()!=b.transform.has_value()||(a.transform&&(TransformMatrix(*a.transform)!=TransformMatrix(*b.transform)||a.transform->pivot.x!=b.transform->pivot.x||a.transform->pivot.y!=b.transform->pivot.y||a.transform->pivot.z!=b.transform->pivot.z)))return false;
