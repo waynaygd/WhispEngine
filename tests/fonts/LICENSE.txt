@@ -1,0 +1,7 @@
+Whisp font regression fixtures and generator
+CC0 1.0 Universal (CC0-1.0)
+
+Original geometric outlines authored for WhispEngine regression tests. No glyphs or tables copied from system/commercial fonts. To the extent possible under law, the authors waive all copyright and related rights in these fixtures.
+See https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+Generation only: fontTools (MIT), not linked or required by WhispEngine. Run generate.py using fontTools 4.60.1; generated TTF and CFF/OTF are committed fixtures. Both use Basic Latin, Latin Extended A and Cyrillic test glyphs; shapes are deliberately geometric, not production typography.

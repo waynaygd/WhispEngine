@@ -26,7 +26,7 @@ void Walk(const Document& document,float width,float height,const std::function<
 }
 bool Contains(Rect r,float x,float y){return r.w>0&&r.h>0&&x>=r.x&&y>=r.y&&x<r.x+r.w&&y<r.y+r.h;}
 }
-DrawList LayoutDocument(const Document& document,float width,float height,const FontAtlas& atlas,RenderTextureHandle font,const TextureResolver& resolve){
+DrawList LayoutDocument(const Document& document,float width,float height,const FontAtlas& atlas,RenderTextureHandle font,const TextureResolver& resolve,const FontResolver& fonts){
  DrawList out;out.width=width;out.height=height;auto error=Validate(document);if(!error.empty()){out.errors.push_back(error);return out;}if(!document.enabled||width<1||height<1||document.widgets.empty())return out;
  const float scale=std::min(width/document.referenceResolution[0],height/document.referenceResolution[1]);
  const Rect screen{0,0,width,height};const std::array<float,4> solid{.5f/atlas.texture.width,.5f/atlas.texture.height,.5f/atlas.texture.width,.5f/atlas.texture.height};
@@ -39,10 +39,14 @@ DrawList LayoutDocument(const Document& document,float width,float height,const 
   else if(w.type=="ProgressBar"){quad(r,solid,color,clip,font);auto fill=w.fillColor;fill[3]*=opacity;Rect bar=r;bar.w*=w.visualValue.value_or(w.value);quad(bar,solid,fill,clip,font);}
   else if(w.type=="Image"){auto texture=resolve(w.texture);if(texture.IsValid())quad(r,w.uv,color,clip,texture);else {auto fallback=Color{1,0,1,opacity};quad(r,solid,fallback,clip,font);out.errors.push_back("Missing or loading Image texture: "+w.texture);}}
   else if(w.type=="Text"){
-   auto codepoints=DecodeUTF8(w.text);float unit=w.fontSize/atlas.height*scale;float lineY=r.y;
-   for(size_t start=0;start<codepoints.size();){size_t end=start;float advance=0;for(;end<codepoints.size()&&codepoints[end]!='\n';++end){if(codepoints[end]=='\r')continue;auto glyph=atlas.glyphs.find(codepoints[end]);if(glyph==atlas.glyphs.end())glyph=atlas.glyphs.find('?');if(glyph!=atlas.glyphs.end())advance+=glyph->second.advance*unit;}
-    float x=r.x+(w.textAlignment==1?(r.w-advance)*.5f:w.textAlignment==2?r.w-advance:0);for(size_t i=start;i<end;++i){if(codepoints[i]=='\r')continue;auto glyph=atlas.glyphs.find(codepoints[i]);if(glyph==atlas.glyphs.end())glyph=atlas.glyphs.find('?');if(glyph==atlas.glyphs.end())continue;auto& g=glyph->second;quad({x+g.pixels.x*unit,lineY+(atlas.ascent+g.pixels.y)*unit,g.pixels.w*unit,g.pixels.h*unit},g.uv,color,Intersect(clip,r),font);x+=g.advance*unit;}
-    lineY+=atlas.lineHeight*unit;start=end+1;
+   const FontAtlas* selected=&atlas;auto selectedTexture=font;
+   if(!w.font.empty()){auto view=fonts?fonts(w.font):FontView{};if(view.atlas){selected=view.atlas;selectedTexture=view.texture;}else out.errors.push_back("Font: "+w.font+": "+(view.error.empty()?"unavailable; using Default Font":view.error));}
+   auto codepoints=DecodeUTF8(w.text);float unit=w.fontSize/selected->height*scale;float lineY=r.y;
+   struct ResolvedGlyph {const Glyph* glyph;float unit;RenderTextureHandle texture;};
+   auto glyphFor=[&](unsigned c)->ResolvedGlyph{auto g=selected->glyphs.find(c);if(g!=selected->glyphs.end())return {&g->second,unit,selectedTexture};auto fallback=atlas.glyphs.find(c);if(fallback==atlas.glyphs.end())fallback=atlas.glyphs.find('?');return {fallback==atlas.glyphs.end()?nullptr:&fallback->second,w.fontSize/atlas.height*scale,font};};
+   for(size_t start=0;start<codepoints.size();){size_t end=start;float advance=0;for(;end<codepoints.size()&&codepoints[end]!='\n';++end){if(codepoints[end]=='\r')continue;auto g=glyphFor(codepoints[end]);if(g.glyph)advance+=g.glyph->advance*g.unit;}
+    float x=r.x+(w.textAlignment==1?(r.w-advance)*.5f:w.textAlignment==2?r.w-advance:0);for(size_t i=start;i<end;++i){if(codepoints[i]=='\r')continue;auto item=glyphFor(codepoints[i]);if(!item.glyph)continue;auto& g=*item.glyph;quad({x+g.pixels.x*item.unit,lineY+selected->ascent*unit+g.pixels.y*item.unit,g.pixels.w*item.unit,g.pixels.h*item.unit},g.uv,color,Intersect(clip,r),item.texture);x+=g.advance*item.unit;}
+    lineY+=selected->lineHeight*unit;start=end+1;
    }
   }
   out.widgets.push_back({w.id,firstCommand,unsigned(out.commands.size())-firstCommand});
@@ -141,16 +145,16 @@ bool RuntimeUI::Pointer(float x,float y,float width,float height,bool down,bool 
  for(auto& [e,i]:instances)for(auto& w:i.state.widgets)w.interaction=same(pressed,pressWidget,Get(e),w.id)?2:same(hovered,hoverWidget,Get(e),w.id)?1:0;
  pointerDown=down;const bool consumed=Valid(target)||gestureOwned;if(!down)gestureOwned=false;return consumed;
 }
-DrawList RuntimeUI::Build(const ecs::World& source,ResourceManager& resources,float width,float height,const FontAtlas& atlas,RenderTextureHandle font,const TextureResolver& textures){
+DrawList RuntimeUI::Build(const ecs::World& source,ResourceManager& resources,float width,float height,const FontAtlas& atlas,RenderTextureHandle font,const TextureResolver& textures,const FontResolver& fonts){
  Sync(source,resources);DrawList out;out.width=width;out.height=height;
- for(auto e:order){out.errors.insert(out.errors.end(),instances.at(e).styles.errors.begin(),instances.at(e).styles.errors.end());auto draw=LayoutDocument(instances.at(e).state,width,height,atlas,font,textures);unsigned offset=unsigned(out.vertices.size());if(offset+draw.vertices.size()>131072){out.errors.push_back("UI vertex budget exceeded");break;}out.vertices.insert(out.vertices.end(),draw.vertices.begin(),draw.vertices.end());for(auto command:draw.commands){command.first+=offset;out.commands.push_back(command);}out.errors.insert(out.errors.end(),draw.errors.begin(),draw.errors.end());}if(!out.errors.empty()&&Logger::Get().RuntimeSessionActive()){
+ for(auto e:order){out.errors.insert(out.errors.end(),instances.at(e).styles.errors.begin(),instances.at(e).styles.errors.end());auto draw=LayoutDocument(instances.at(e).state,width,height,atlas,font,textures,fonts);unsigned offset=unsigned(out.vertices.size());if(offset+draw.vertices.size()>131072){out.errors.push_back("UI vertex budget exceeded");break;}out.vertices.insert(out.vertices.end(),draw.vertices.begin(),draw.vertices.end());for(auto command:draw.commands){command.first+=offset;out.commands.push_back(command);}out.errors.insert(out.errors.end(),draw.errors.begin(),draw.errors.end());}if(!out.errors.empty()&&Logger::Get().RuntimeSessionActive()){
   // Loading is a normal resource state, not a completed-session error.
   std::set<std::string> pending;
   for(auto e:order)for(auto& w:instances.at(e).state.widgets){
    if(w.type=="Image"&&!w.texture.empty()){auto asset=resources.Get<TextureResource>(w.texture);if(!asset||asset->IsLoading())pending.insert("Missing or loading Image texture: "+w.texture);}
    if(!w.styleAsset.empty()){auto asset=resources.Get<UIResource>(w.styleAsset);if(!asset||asset->IsLoading())pending.insert("Missing/invalid UI Style: "+w.styleAsset);}
   }
-  for(auto& error:out.errors)if(!pending.contains(error))Logger::Get().Diagnostic("WARN","Runtime UI","Build",error);
+  for(auto& error:out.errors)if(!pending.contains(error)&&!error.starts_with("Font: "))Logger::Get().Diagnostic("WARN","Runtime UI","Build",error);
  }return out;
 }
 }

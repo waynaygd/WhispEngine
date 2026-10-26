@@ -25,6 +25,9 @@ target_include_directories(ImGuizmo PUBLIC
 target_link_libraries(ImGuizmo PUBLIC DearImGui)
 
 add_library(Engine
+  ui/UICustomFont.cpp
+  ui/FontCache.cpp
+  resources/FontResource.cpp
   ui/UILayout.cpp
   ui/UIEffects.cpp
   editor/EditorUI4.cpp
@@ -175,4 +178,8 @@ if(MSVC)
   set_source_files_properties(ui/UIDocument.cpp editor/EditorRuntimeUI.cpp
   editor/WidgetDesignerTools.cpp
   editor/EditorWidgetDesigner.cpp PROPERTIES COMPILE_OPTIONS "/utf-8")
+endif()
+
+if(WIN32)
+ target_link_libraries(Engine PRIVATE dwrite)
 endif()

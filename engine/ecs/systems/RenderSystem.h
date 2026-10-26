@@ -1,6 +1,7 @@
 #pragma once
 #include <nlohmann/json.hpp>
 #include "../../ui/RuntimeUI.h"
+#include "../../ui/FontCache.h"
 #include "../../render/Environment.h"
 #include "../PostProcessEvaluation.h"
 #include "../../render/SceneLights.h"
@@ -67,6 +68,7 @@ public:
     void SetInterpolation(RenderInterpolation* interpolation) { m_Interpolation = interpolation; }
     void SetPhysicsDebugPose(bool enabled) { m_PhysicsDebugPose = enabled; }
     void SetShadowSettings(const ShadowSettings* settings) { m_ShadowSettings=settings; }
+    const ui::FontCache& UIFonts()const{return m_UIFonts;}
     ui::DrawList BuildUIDesignerPreview(const ui::Document&,ui::Pair preview,IRenderAdapter* renderer);
     ui::RuntimeUI& RuntimeUI(){return m_RuntimeUI;}
     void SetUIPreview(bool value){m_UIPreview=value;}
@@ -101,6 +103,7 @@ private:
     std::vector<PlacementRenderItem> m_PlacementItems;
     const PostFxRuntimeOverrides* m_PostFxOverrides=nullptr;float m_PostFxTime=0;
     ui::RuntimeUI m_RuntimeUI;ui::DrawList m_UIDrawList;
+    ui::FontCache m_UIFonts;
     std::optional<ui::FontAtlas> m_UIFont;RenderTextureHandle m_UIFontTexture;bool m_UIPreview=true;
     bool m_TraceMaterials=false;
     std::uint64_t m_ResourceCacheEpoch=0;

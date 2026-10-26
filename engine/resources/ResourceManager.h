@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FontResource.h"
 #include "MaterialResource.h"
 #include "PostFxResource.h"
 #include "../ui/UIDocument.h"
@@ -19,6 +20,7 @@
 #include <tracy/Tracy.hpp>
 
 #include <deque>
+#include <chrono>
 #include <functional>
 
 #include <filesystem>
@@ -263,7 +265,7 @@ public:
         if (resolvedPath.empty())return;
         const bool exists=std::filesystem::exists(resolvedPath);
         // UI documents and style sheets can be repaired/created after a scene opens.
-        if (!exists&&!std::is_same_v<T,UIResource>)return;
+        if (!exists&&!std::is_same_v<T,UIResource>&&!std::is_same_v<T,FontResource>)return;
 
         HotReloadWatch watch;
         watch.key = key;
@@ -282,6 +284,7 @@ public:
     std::string FindPostFx(const std::string& id);
     bool PostFxDuplicate(const std::string& id);
     void ReloadPostFx(const std::string& key);
+    std::uint64_t FontWatchChecks()const {std::lock_guard<std::recursive_mutex> lock(m_Mutex);return m_FontWatchChecks;}
     void PollHotReload();
     void PollAsyncLoads();
 
@@ -299,7 +302,7 @@ public:
         CollectResourceStats(m_TextureCache, stats);
         CollectResourceStats(m_ShaderCache, stats);
         CollectResourceStats(m_MaterialCache, stats);
-        CollectResourceStats(m_EnvironmentCache, stats);CollectResourceStats(m_PostFxCache,stats);CollectResourceStats(m_UICache,stats);
+        CollectResourceStats(m_EnvironmentCache, stats);CollectResourceStats(m_PostFxCache,stats);CollectResourceStats(m_UICache,stats);CollectResourceStats(m_FontCache,stats);
         return stats;
     }
 
@@ -321,7 +324,7 @@ private:
         Texture,
         Shader,
         Material,
-        Environment,PostFx,UI
+        Environment,PostFx,UI,Font
     };
 
     struct HotReloadWatch
@@ -342,7 +345,8 @@ private:
     template <typename T>
     CacheMap<T>& GetCache()
     {
-        if constexpr (std::is_same_v<T, UIResource>)return m_UICache;
+        if constexpr (std::is_same_v<T, FontResource>)return m_FontCache;
+        else if constexpr (std::is_same_v<T, UIResource>)return m_UICache;
         else if constexpr (std::is_same_v<T, PostFxResource>)return m_PostFxCache;
         else if constexpr (std::is_same_v<T, MeshResource>)
             return m_MeshCache;
@@ -361,7 +365,8 @@ private:
     template <typename T>
     ResourceHandle<T> GetDefaultStorage() const
     {
-        if constexpr (std::is_same_v<T, UIResource>)return ResourceHandle<UIResource>{};
+        if constexpr (std::is_same_v<T, FontResource>)return ResourceHandle<FontResource>{};
+        else if constexpr (std::is_same_v<T, UIResource>)return ResourceHandle<UIResource>{};
         else if constexpr (std::is_same_v<T, PostFxResource>)return ResourceHandle<PostFxResource>{};
         else if constexpr (std::is_same_v<T, MeshResource>)
             return m_DefaultMesh;
@@ -380,7 +385,8 @@ private:
     template <typename T>
     std::string NormalizeKey(const std::filesystem::path& path) const
     {
-        if constexpr (std::is_same_v<T, UIResource>){try{auto key=AssetPaths::ToUtf8String(path);ui::SafeDocumentPath(key);return key;}catch(...){return {};}}
+        if constexpr (std::is_same_v<T, FontResource>){try{auto key=AssetPaths::ToUtf8String(path);return FontLoader::ValidKey(key)?key:std::string{};}catch(...){return {};}}
+        else if constexpr (std::is_same_v<T, UIResource>){try{auto key=AssetPaths::ToUtf8String(path);ui::SafeDocumentPath(key);return key;}catch(...){return {};}}
         else if constexpr (std::is_same_v<T, PostFxResource>){try{auto key=AssetPaths::ToUtf8String(path);PostFxLoader::SafePath(key);return key;}catch(...){return {};}}
         else if constexpr (std::is_same_v<T, EnvironmentResource>) {
             if(path.empty()||path.is_absolute()||path.has_root_name())return {};
@@ -399,7 +405,8 @@ private:
     template <typename T>
     std::filesystem::path ResolvePathFromKey(const std::string& key) const
     {
-        if constexpr (std::is_same_v<T, UIResource>)return ui::SafeDocumentPath(key);
+        if constexpr (std::is_same_v<T, FontResource>)return FontLoader::SafePath(key);
+        else if constexpr (std::is_same_v<T, UIResource>)return ui::SafeDocumentPath(key);
         else if constexpr (std::is_same_v<T, PostFxResource>)return PostFxLoader::SafePath(key);
         else if constexpr (std::is_same_v<T, ShaderResource>)
             return AssetPaths::ResolveShaderPath(std::filesystem::u8path(key));
@@ -416,7 +423,8 @@ private:
     {
         const std::filesystem::path resolvedPath = ResolvePathFromKey<T>(key);
 
-        if constexpr (std::is_same_v<T, UIResource>)return UILoader::Load(key,resolvedPath);
+        if constexpr (std::is_same_v<T, FontResource>)return FontLoader::Load(key,resolvedPath);
+        else if constexpr (std::is_same_v<T, UIResource>)return UILoader::Load(key,resolvedPath);
         else if constexpr (std::is_same_v<T, PostFxResource>)return PostFxLoader::Load(key,resolvedPath);
         else if constexpr (std::is_same_v<T, MeshResource>)
             return MeshLoader::Load(key, resolvedPath);
@@ -500,7 +508,8 @@ private:
     template <typename T>
     std::string ResourceTypeName() const
     {
-        if constexpr (std::is_same_v<T, UIResource>)return "UI Document";
+        if constexpr (std::is_same_v<T, FontResource>)return "Font";
+        else if constexpr (std::is_same_v<T, UIResource>)return "UI Document";
         else if constexpr (std::is_same_v<T, PostFxResource>)return "Custom PostFX";
         else if constexpr (std::is_same_v<T, MeshResource>)
             return "Mesh";
@@ -519,7 +528,8 @@ private:
     template <typename T>
     ResourceKind ResourceKindFor() const
     {
-        if constexpr (std::is_same_v<T, UIResource>)return ResourceKind::UI;
+        if constexpr (std::is_same_v<T, FontResource>)return ResourceKind::Font;
+        else if constexpr (std::is_same_v<T, UIResource>)return ResourceKind::UI;
         else if constexpr (std::is_same_v<T, PostFxResource>)return ResourceKind::PostFx;
         else if constexpr (std::is_same_v<T, MeshResource>)
             return ResourceKind::Mesh;
@@ -576,6 +586,7 @@ private:
         return static_cast<std::uint64_t>(resource.vertexSource.size() + resource.fragmentSource.size());
     }
 
+    std::uint64_t EstimateResourceBytes(const FontResource& r)const{return r.cpuBytes;}
     std::uint64_t EstimateResourceBytes(const UIResource& r)const{return r.document?nlohmann::json(*r.document).dump().size():r.styles?nlohmann::json(*r.styles).dump().size():0;}
     std::uint64_t EstimateResourceBytes(const PostFxResource& r)const{return r.definition?r.definition->source.size()+sizeof(PostFxDefinition):0;}
     std::uint64_t EstimateResourceBytes(const MaterialResource& resource) const
@@ -738,6 +749,9 @@ private:
     }
 
     mutable std::recursive_mutex m_Mutex;
+    std::chrono::steady_clock::time_point m_NextFontWatch{};
+    std::uint64_t m_FontWatchChecks=0;
+    CacheMap<FontResource> m_FontCache;
     CacheMap<UIResource> m_UICache;
     CacheMap<PostFxResource> m_PostFxCache;
     std::vector<std::string> m_PostFxKeys;bool m_PostFxScanned=false;

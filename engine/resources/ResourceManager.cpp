@@ -26,7 +26,7 @@ void ResourceManager::ClearAll()
     const std::size_t shaderCount = m_ShaderCache.size();
     const std::size_t materialCount = m_MaterialCache.size();
 
-    m_UICache.clear();m_DirtyUI.clear();
+    m_FontCache.clear();m_UICache.clear();m_DirtyUI.clear();
     m_PostFxCache.clear();m_PostFxKeys.clear();m_PostFxScanned=false;
     m_MeshCache.clear();
     m_TextureCache.clear();
@@ -84,11 +84,14 @@ void ResourceManager::PollHotReload()
 {
     std::lock_guard<std::recursive_mutex> lock(m_Mutex);
     std::vector<std::string> changedPostFx;
+    const auto now=std::chrono::steady_clock::now();const bool checkFonts=now>=m_NextFontWatch;if(checkFonts)m_NextFontWatch=now+std::chrono::milliseconds(250);
 
     for (auto& [watchKey, watch] : m_HotReloadWatches)
     {
         (void)watchKey;
+        if(watch.kind==ResourceKind::Font){if(!checkFonts)continue;++m_FontWatchChecks;}
         if (watch.path.empty() || !std::filesystem::exists(watch.path)){
+            if(watch.kind==ResourceKind::Font&&watch.fileSize>0){watch.fileSize=0;(void)Reload<FontResource>(watch.key);}
             if(watch.kind==ResourceKind::UI&&watch.fileSize>0){watch.fileSize=0;(void)Reload<UIResource>(watch.key);}
             if(watch.kind==ResourceKind::PostFx&&watch.fileSize>0){watch.fileSize=0;(void)Reload<PostFxResource>(watch.key);}
             continue;
@@ -106,6 +109,7 @@ void ResourceManager::PollHotReload()
         watch.fileSize = currentFileSize;
         switch (watch.kind)
         {
+        case ResourceKind::Font:(void)Reload<FontResource>(watch.key);break;
         case ResourceKind::UI:(void)Reload<UIResource>(watch.key);break;
         case ResourceKind::PostFx:(void)Reload<PostFxResource>(watch.key);changedPostFx.push_back(watch.key);break;
         case ResourceKind::Mesh:

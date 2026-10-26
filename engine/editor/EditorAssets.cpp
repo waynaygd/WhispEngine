@@ -185,19 +185,19 @@ void BrowserIcon(ImDrawList* d,ImVec2 p,float size,const AssetType& type){
 }
 int BrowserCategory(const AssetType& type){
     if(type.name=="Scene Document")return 1;
-    switch(type.kind){case ecs::AssetKind::Prefab:return 2;case ecs::AssetKind::Mesh:return 3;case ecs::AssetKind::Material:return 4;case ecs::AssetKind::Texture:return 5;case ecs::AssetKind::LuaScript:return 6;case ecs::AssetKind::UIDocument:return 7;default:return type.name=="UI Style"?7:8;}
+    switch(type.kind){case ecs::AssetKind::Font:return 10;case ecs::AssetKind::Prefab:return 2;case ecs::AssetKind::Mesh:return 3;case ecs::AssetKind::Material:return 4;case ecs::AssetKind::Texture:return 5;case ecs::AssetKind::LuaScript:return 6;case ecs::AssetKind::UIDocument:return 7;default:return type.name=="UI Style"?7:8;}
 }
 template<class T>const char* LoadState(ResourceManager* resources,const std::string& key){
     auto asset=resources?resources->PeekIndexed<T>(key):nullptr;if(!asset)return "Not requested";if(asset->IsLoading())return "Loading";if(asset->IsFailed())return "Failed";return "Ready";
 }
 const char* AssetLoadState(ResourceManager* resources,ecs::AssetKind kind,const std::string& key){
-    switch(kind){case ecs::AssetKind::UIDocument:return LoadState<UIResource>(resources,key);case ecs::AssetKind::PostFx:return LoadState<PostFxResource>(resources,key);case ecs::AssetKind::Mesh:return LoadState<MeshResource>(resources,key);case ecs::AssetKind::Texture:return LoadState<TextureResource>(resources,key);case ecs::AssetKind::Material:return LoadState<MaterialResource>(resources,key);case ecs::AssetKind::Shader:return LoadState<ShaderResource>(resources,key);case ecs::AssetKind::Environment:return LoadState<EnvironmentResource>(resources,key);default:return "Indexed";}
+    switch(kind){case ecs::AssetKind::Font:return LoadState<FontResource>(resources,key);case ecs::AssetKind::UIDocument:return LoadState<UIResource>(resources,key);case ecs::AssetKind::PostFx:return LoadState<PostFxResource>(resources,key);case ecs::AssetKind::Mesh:return LoadState<MeshResource>(resources,key);case ecs::AssetKind::Texture:return LoadState<TextureResource>(resources,key);case ecs::AssetKind::Material:return LoadState<MaterialResource>(resources,key);case ecs::AssetKind::Shader:return LoadState<ShaderResource>(resources,key);case ecs::AssetKind::Environment:return LoadState<EnvironmentResource>(resources,key);default:return "Indexed";}
 }
 template<class T>std::string LoadError(ResourceManager* resources,const std::string& key){
     auto asset=resources?resources->PeekIndexed<T>(key):nullptr;return asset&&asset->IsFailed()?asset->GetErrorMessage():"";
 }
 std::string AssetLoadError(ResourceManager* resources,ecs::AssetKind kind,const std::string& key){
-    switch(kind){case ecs::AssetKind::UIDocument:return LoadError<UIResource>(resources,key);case ecs::AssetKind::PostFx:return LoadError<PostFxResource>(resources,key);case ecs::AssetKind::Mesh:return LoadError<MeshResource>(resources,key);case ecs::AssetKind::Texture:return LoadError<TextureResource>(resources,key);case ecs::AssetKind::Material:return LoadError<MaterialResource>(resources,key);case ecs::AssetKind::Shader:return LoadError<ShaderResource>(resources,key);case ecs::AssetKind::Environment:return LoadError<EnvironmentResource>(resources,key);default:return {};}
+    switch(kind){case ecs::AssetKind::Font:return LoadError<FontResource>(resources,key);case ecs::AssetKind::UIDocument:return LoadError<UIResource>(resources,key);case ecs::AssetKind::PostFx:return LoadError<PostFxResource>(resources,key);case ecs::AssetKind::Mesh:return LoadError<MeshResource>(resources,key);case ecs::AssetKind::Texture:return LoadError<TextureResource>(resources,key);case ecs::AssetKind::Material:return LoadError<MaterialResource>(resources,key);case ecs::AssetKind::Shader:return LoadError<ShaderResource>(resources,key);case ecs::AssetKind::Environment:return LoadError<EnvironmentResource>(resources,key);default:return {};}
 }
 }
 std::string EditorLayer::CreateLuaScriptAsset(Application& app,const std::string& directory){
@@ -334,7 +334,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
     ImGui::SetNextItemWidth(std::max(30.f,available-scopeWidth-typeWidth-clearWidth-ImGui::GetStyle().ItemSpacing.x*3));
     ImGui::InputTextWithHint("##search","Search name or key",&m_AssetFilter);ImGui::SameLine();
     if(ImGui::Button("x##clear",ImVec2(clearWidth,0)))m_AssetFilter.clear();ImGui::SameLine();
-    const char* categories[]={"All types","Scene","Prefab","Model","Material","Texture","Script","UI","Other"};
+    const char* categories[]={"All types","Scene","Prefab","Model","Material","Texture","Script","UI","Other","Font"};
     ImGui::SetNextItemWidth(typeWidth);if(ImGui::Combo("##type",&m_AssetCategory,categories,9))m_AssetKindFilter=0;ImGui::SameLine();
     int scope=m_AssetNavigation.projectSearch?1:0;const char* scopes[]={"Folder","All assets"};ImGui::SetNextItemWidth(scopeWidth);
     if(ImGui::Combo("##Scope",&scope,scopes,2))m_AssetNavigation.projectSearch=scope==1;

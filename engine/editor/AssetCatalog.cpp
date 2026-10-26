@@ -21,6 +21,7 @@ namespace {
 template<class F>bool Guard(F fn,std::string* error){try{fn();if(error)error->clear();return true;}catch(const std::exception& e){if(error)*error=e.what();return false;}}
 }
 AssetCatalog::AssetCatalog(){
+    Register({"Font","[Font]","",ecs::AssetKind::Font,{".ttf",".otf"}});
     Register({"UI Document","[UI]","",ecs::AssetKind::UIDocument,{".json"}});
     Register({"Custom PostFX","[FX]","",ecs::AssetKind::PostFx,{".json"}});
     Register({"Lua Script","[Lua]","scripts",ecs::AssetKind::LuaScript,{".lua"}});

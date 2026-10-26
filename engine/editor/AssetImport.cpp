@@ -63,11 +63,12 @@ bool AssetImport::NewFolder(const fs::path& root,const std::string& parent,const
  }catch(const std::exception& e){if(error)*error=e.what();return false;}}
 bool AssetImport::Scan(const fs::path& source,const std::string& package,ImportPlan& output,std::string* error,const fs::path& dependencyRoot,bool standaloneImage){try{
  Key(package);CheckLinks(source);if(!fs::is_regular_file(source))throw std::runtime_error("Source must be a regular file");auto ext=Ext(source);
- const std::set<std::string> supported={".obj",".gltf",".glb",".png",".jpg",".jpeg",".dds",".hdr"};if(!supported.contains(ext))throw std::runtime_error("Unsupported import format: "+ext);
+ const std::set<std::string> supported={".obj",".gltf",".glb",".png",".jpg",".jpeg",".dds",".hdr",".ttf",".otf"};if(!supported.contains(ext))throw std::runtime_error("Unsupported import format: "+ext);
  if((ext==".obj"||ext==".gltf"||ext==".glb")&&!package.starts_with("models/"))throw std::runtime_error("Models must be imported into models/");
  if(ext==".hdr"&&!package.starts_with("environments/"))throw std::runtime_error("HDR must be imported into environments/");
  if((ext==".png"||ext==".jpg"||ext==".jpeg"||ext==".dds")&&!package.starts_with("textures/"))throw std::runtime_error("Textures must be imported into textures/");
- if(standaloneImage&&ext!=".png"&&ext!=".jpg"&&ext!=".jpeg"&&ext!=".dds")throw std::runtime_error("Standalone import requires a texture; models and HDR retain package ownership");
+ if((ext==".ttf"||ext==".otf")&&!package.starts_with("fonts/"))throw std::runtime_error("Font Assets must be imported into fonts/");
+ if(standaloneImage&&ext!=".ttf"&&ext!=".otf"&&ext!=".png"&&ext!=".jpg"&&ext!=".jpeg"&&ext!=".dds")throw std::runtime_error("Standalone import requires a texture or Font; models and HDR retain package ownership");
  if(standaloneImage&&Ext(fs::u8path(package))!=ext)throw std::runtime_error("Texture destination must preserve its file extension");
  ImportPlan plan;plan.standaloneImage=standaloneImage;plan.sourceRoot=fs::absolute(standaloneImage||dependencyRoot.empty()?source.parent_path():dependencyRoot).lexically_normal();CheckLinks(plan.sourceRoot);if(!fs::is_directory(plan.sourceRoot))throw std::runtime_error("Dependency root must be an existing directory");plan.package=package;plan.entry=Utf8(fs::absolute(source).lexically_normal().lexically_relative(plan.sourceRoot));Key(plan.entry);
  const auto modelFolder=fs::u8path(plan.entry).parent_path();
@@ -89,7 +90,7 @@ bool AssetImport::Scan(const fs::path& source,const std::string& package,ImportP
   }}}
  }
  // Reject executable/unknown dependencies; no file supplied by an asset is executed.
- const std::set<std::string> dependencies={".obj",".gltf",".glb",".bin",".mtl",".png",".jpg",".jpeg",".dds",".hdr"};
+ const std::set<std::string> dependencies={".obj",".gltf",".glb",".bin",".mtl",".png",".jpg",".jpeg",".dds",".hdr",".ttf",".otf"};
  for(const auto& f:plan.files)if(!dependencies.contains(Ext(f.source)))throw std::runtime_error("Unsupported dependency: "+f.relative);
  output=std::move(plan);return true;
  }catch(const std::exception& e){if(error)*error=e.what();return false;}}

@@ -110,6 +110,7 @@ namespace ecs {
         IRenderAdapter* renderer = m_ResourceOwnerRenderer != nullptr ? m_ResourceOwnerRenderer : m_Renderer;
         if (renderer != nullptr)
         {
+            m_UIFonts.Clear(renderer);
             if(m_UIFontTexture.IsValid())renderer->DestroyTexture(m_UIFontTexture);m_UIFontTexture={};m_RuntimeUI.Clear();m_UIDrawList={};
             for (auto& [key, resource] : m_ShaderResources)
             {
@@ -421,7 +422,7 @@ namespace ecs {
                 if(!m_UIFontTexture.IsValid())m_UIFontTexture=m_Renderer->CreateTexture2D(m_UIFont->texture);
                 auto area=m_Renderer->RenderAreaSize();
                 const auto layoutStart=std::chrono::steady_clock::now();
-                m_UIDrawList=m_RuntimeUI.Build(world,*m_ResourceManager,float(area[0]),float(area[1]),*m_UIFont,m_UIFontTexture,[&](const std::string& key){return key.empty()?RenderTextureHandle{}:GetOrCreateTexture(key,true);});
+                m_UIDrawList=m_RuntimeUI.Build(world,*m_ResourceManager,float(area[0]),float(area[1]),*m_UIFont,m_UIFontTexture,[&](const std::string& key){return key.empty()?RenderTextureHandle{}:GetOrCreateTexture(key,true);},[&](const std::string& key){return m_UIFonts.Get(key,*m_ResourceManager,m_Renderer);});
                 m_Statistics.runtimeUILayoutMs=elapsed(layoutStart);
                 const auto uiSubmitStart=std::chrono::steady_clock::now();
                 m_Renderer->DrawRuntimeUI(m_UIDrawList);
@@ -1103,5 +1104,5 @@ ui::DrawList ecs::RenderSystem::BuildUIDesignerPreview(const ui::Document& docum
   if(key.empty())return RenderTextureHandle{};
   auto cached=m_TextureResources.find(key);if(cached!=m_TextureResources.end()&&cached->second!=m_ResourceManager->Get<TextureResource>(key)){auto& data=cached->second->GetData();if(data.gpuHandle.IsValid()){m_Renderer->DestroyTexture(data.gpuHandle);data.gpuHandle={};data.gpuHandleVersion=0;}m_TextureResources.erase(cached);m_FailedTextureGpuVersions.erase(key);}
   return GetOrCreateTexture(key,true);
- });
+ },[&](const std::string& key){return m_UIFonts.Get(key,*m_ResourceManager,m_Renderer);});
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include "UIDocument.h"
+#include "UIFont.h"
 #include "../ecs/World.h"
 #include "../render/RenderResourceHandles.h"
 #include "../resources/TextureData.h"
@@ -8,19 +9,15 @@
 #include <map>
 class ResourceManager;
 namespace ui {
-struct Rect {float x=0,y=0,w=0,h=0;};
 std::map<std::string,Rect> ComputeLayout(const Document&,Rect canvas);
 bool ManagedByLayout(const Document&,const Widget&);
 Rect LayoutRect(const Widget&,Rect parent);Rect Intersect(Rect,Rect);
-struct Glyph {Rect pixels;std::array<float,4> uv{};float advance=0;};
-struct FontAtlas {TextureData texture;std::map<unsigned,Glyph> glyphs;float ascent=0,lineHeight=0,height=32;};
-FontAtlas RasterizeFont();std::vector<unsigned> DecodeUTF8(const std::string&);
 struct Vertex {float x,y,u,v;Color color;};
 struct DrawCommand {unsigned first=0,count=0;Rect clip;RenderTextureHandle texture;};
 struct WidgetDraw {std::string id;unsigned first=0,count=0;};
 struct DrawList {std::vector<WidgetDraw> widgets;float width=0,height=0;std::vector<Vertex> vertices;std::vector<DrawCommand> commands;std::vector<std::string> errors;};
 using TextureResolver=std::function<RenderTextureHandle(const std::string&)>;
-DrawList LayoutDocument(const Document&,float width,float height,const FontAtlas&,RenderTextureHandle font,const TextureResolver&);
+DrawList LayoutDocument(const Document&,float width,float height,const FontAtlas&,RenderTextureHandle font,const TextureResolver&,const FontResolver& fonts={});
 struct CanvasHandle {ecs::Entity entity{};std::uint64_t session=0,serial=0,revision=0;std::string document;};
 struct PointerEvent {CanvasHandle canvas;std::string widget,type,animation;};
 struct Playback {AnimationClip clip;float time=0;bool playing=true;};
@@ -70,6 +67,6 @@ public:
  // Coordinates are render-target pixels. Disabled routing cancels the gesture.
  bool Pointer(float x,float y,float width,float height,bool down,bool available);
  std::vector<PointerEvent> TakeEvents(){auto out=std::move(events);events.clear();return out;}
- DrawList Build(const ecs::World&,ResourceManager&,float width,float height,const FontAtlas&,RenderTextureHandle,const TextureResolver&);
+ DrawList Build(const ecs::World&,ResourceManager&,float width,float height,const FontAtlas&,RenderTextureHandle,const TextureResolver&,const FontResolver& fonts={});
 };
 }

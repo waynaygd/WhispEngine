@@ -17,7 +17,7 @@ struct AnimationClip {
 };
 void to_json(nlohmann::json&,const AnimationClip&);void from_json(const nlohmann::json&,AnimationClip&);
 struct Widget {
- std::string id,parent,type="Panel",text,texture;
+ std::string id,parent,type="Panel",text,texture,font;
  Pair anchorMin{0,0},anchorMax{0,0},pivot{0,0},position{0,0},size{200,60};
  Color color{1,1,1,1},fillColor{.1f,.8f,.2f,1};
  Color hoverColor{.3f,.5f,.8f,1},pressedColor{.1f,.25f,.5f,1},disabledColor{.3f,.3f,.3f,.5f};

@@ -7,7 +7,7 @@ namespace ui {
 using Json=nlohmann::json;
 void to_json(Json& j,const AnimationClip& c){j={{"id",c.id},{"widget",c.widget},{"property",c.property},{"from",c.from},{"to",c.to},{"duration",c.duration},{"delay",c.delay},{"speed",c.speed},{"loop",c.loop},{"pingPong",c.pingPong},{"easing",c.easing}};}
 void from_json(const Json& j,AnimationClip& c){c.id=j.at("id");c.widget=j.at("widget");c.property=j.at("property");c.from=j.at("from");c.to=j.at("to");c.duration=j.value("duration",.25f);c.delay=j.value("delay",0.f);c.speed=j.value("speed",1.f);c.loop=j.value("loop",false);c.pingPong=j.value("pingPong",false);c.easing=j.value("easing",std::string("linear"));}
-const std::vector<std::string>& StyleProperties(){static const std::vector<std::string> p{"color","opacity","padding","spacing","size","fontSize","textAlignment","hoverColor","pressedColor","disabledColor","transitionDuration"};return p;}
+const std::vector<std::string>& StyleProperties(){static const std::vector<std::string> p{"font","color","opacity","padding","spacing","size","fontSize","textAlignment","hoverColor","pressedColor","disabledColor","transitionDuration"};return p;}
 void to_json(Json& j,const StyleSheet& sheet){j={{"version",1},{"styles",Json::object()}};for(auto& [id,s]:sheet.styles)j["styles"][id]={{"type",s.type},{"properties",s.properties}};}
 void from_json(const Json& j,StyleSheet& sheet){if(j.at("version")!=1||!j.at("styles").is_object()||j.at("styles").size()>256)throw std::runtime_error("Invalid UI style sheet");for(auto& [id,value]:j.at("styles").items())sheet.styles[id]={value.at("type").get<std::string>(),value.at("properties")};auto error=ValidateStyle(sheet);if(!error.empty())throw std::runtime_error(error);}
 std::string ValidateStyle(const StyleSheet& sheet){
@@ -16,7 +16,7 @@ std::string ValidateStyle(const StyleSheet& sheet){
   auto d=EmptyDocument();Widget w;w.id="Styled";w.parent=d.root;w.type=s.type;auto j=Json(w);
   for(auto& [key,value]:s.properties.items()){
    if(std::find(StyleProperties().begin(),StyleProperties().end(),key)==StyleProperties().end())return "Unsupported Style property: "+key;
-   if((key=="fontSize"||key=="textAlignment")&&s.type!="Text")return "Text Style property on incompatible type";
+   if((key=="font"||key=="fontSize"||key=="textAlignment")&&s.type!="Text")return "Text Style property on incompatible type";
    if((key=="hoverColor"||key=="pressedColor"||key=="disabledColor"||key=="transitionDuration")&&s.type!="Button")return "Button Style property on incompatible type";
    if((key=="padding"||key=="spacing")&&s.type!="Panel")return "Layout Style property on incompatible type";
    j[key]=value;
@@ -29,7 +29,7 @@ void ApplyStyle(Widget& output,const Widget& authored,const Style* style,unsigne
  auto values=Json(authored);if(style&&style->type==authored.type)for(auto& [key,value]:style->properties.items())if(std::find(authored.styleOverrides.begin(),authored.styleOverrides.end(),key)==authored.styleOverrides.end())values[key]=value;
  auto resolved=values.get<Widget>();
  if(!(mask&32))output.color=resolved.color;if(!(mask&4))output.opacity=resolved.opacity;
- output.padding=resolved.padding;output.spacing=resolved.spacing;output.size=resolved.size;output.fontSize=resolved.fontSize;output.textAlignment=resolved.textAlignment;output.hoverColor=resolved.hoverColor;output.pressedColor=resolved.pressedColor;output.disabledColor=resolved.disabledColor;output.transitionDuration=resolved.transitionDuration;
+ output.padding=resolved.padding;output.spacing=resolved.spacing;output.size=resolved.size;output.font=resolved.font;output.fontSize=resolved.fontSize;output.textAlignment=resolved.textAlignment;output.hoverColor=resolved.hoverColor;output.pressedColor=resolved.pressedColor;output.disabledColor=resolved.disabledColor;output.transitionDuration=resolved.transitionDuration;
 }
 bool StyleCache::Changed(const Document& d,ResourceManager& rm,bool sourceChanged){
  bool changed=sourceChanged;if(epoch!=rm.GetCacheEpoch()){Clear();epoch=rm.GetCacheEpoch();changed=true;}
