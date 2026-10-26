@@ -56,6 +56,7 @@ void ValidatePrefab(const nlohmann::json& data){
 nlohmann::json DecodePrefabAsset(nlohmann::json data){
     if(data.at("version")!=1&&data.contains("_legacySceneReferences"))throw std::runtime_error("Reserved prefab compatibility field");
     if(data.at("version")==1){auto c=data.at("components");c.erase("SceneIdentity");if(!c.contains("Transform"))c["Transform"]={{"position",{0,0,0}},{"rotation",{0,0,0}},{"scale",{1,1,1}}};data={{"version",2},{"_legacySceneReferences",true},{"root","root"},{"entities",Json::array({{{"id","root"},{"components",c}}})}};}
+    for(auto& n:data.at("entities"))if(n.at("components").contains("MeshRenderer")&&!n["components"]["MeshRenderer"].contains("renderMode"))n["components"]["MeshRenderer"]["renderMode"]=0;
     ValidatePrefab(data);return data;
 }
 ecs::Entity PrefabRoot(const ecs::World& world,ecs::Entity member){

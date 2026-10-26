@@ -70,7 +70,7 @@ Json ResolvePrefabDelta(const Json& delta,const Json& parent){
   }
  }
  Json list=Json::array();std::set<std::string> visited;auto walk=[&](auto&& self,const std::string& id)->void{if(!visited.insert(id).second)throw std::runtime_error("Prefab hierarchy cycle");list.push_back(nodes.at(id));for(auto& [child,n]:nodes)if(n.contains("parent")&&n.at("parent")==id)self(self,child);};walk(walk,root);
- if(visited.size()!=nodes.size())throw std::runtime_error("Inherited hierarchy has orphaned/local members; resolve parent deletion explicitly");Json result={{"version",2},{"root",root},{"entities",list}};ValidatePrefab(result);return result;
+ if(visited.size()!=nodes.size())throw std::runtime_error("Inherited hierarchy has orphaned/local members; resolve parent deletion explicitly");Json result={{"version",2},{"root",root},{"entities",list}};return DecodePrefabAsset(result);
 }
 Json EditPrefabDelta(const Json& original,const Json& before,const Json& after){
  CheckDelta(original);ValidatePrefab(before);ValidatePrefab(after);if(before.at("root")!=after.at("root"))throw std::runtime_error("Cannot replace inherited root identity");auto delta=original;auto old=Index(before),now=Index(after);std::set<std::string> local;for(auto& n:delta["addedEntities"])local.insert(n.at("id").get<std::string>());

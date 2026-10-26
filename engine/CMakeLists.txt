@@ -49,6 +49,7 @@ add_library(Engine
   ecs/systems/MotionSystem.cpp
   ecs/systems/PhysicsSystem.cpp
   ecs/systems/RenderSystem.cpp
+  ecs/systems/ParticleSystem.cpp
   ecs/systems/SystemPipeline.cpp
   game/StateMachine.cpp
   jobs/JobSystem.cpp
@@ -155,6 +156,8 @@ if (WIN32 AND ENABLE_DX12)
     render/backends/dx12/Dx12Environment.cpp
     render/backends/dx12/Dx12PostFx.cpp
     render/backends/dx12/Dx12RuntimeUI.cpp
+    render/backends/dx12/Dx12Viewmodel.cpp
+    render/backends/dx12/Dx12Particles.cpp
     render/backends/dx12/Dx12SceneLights.cpp
   )
   target_link_libraries(Engine PRIVATE d3d12 dxgi dxguid gdi32 d3dcompiler)
@@ -167,6 +170,8 @@ if (ENABLE_VULKAN)
   target_compile_definitions(Engine PRIVATE ENABLE_VULKAN=1)
   target_sources(Engine PRIVATE
     render/backends/vulkan/VkRenderAdapter.cpp
+    render/backends/vulkan/VkSceneSubmission.cpp
+    render/backends/vulkan/VkParticles.cpp
   )
   target_link_libraries(Engine PRIVATE Vulkan::Vulkan)
 endif()
@@ -184,4 +189,20 @@ endif()
 
 if(WIN32)
  target_link_libraries(Engine PRIVATE dwrite)
+endif()
+
+if(ENABLE_VULKAN)
+  find_program(VIEWMODEL_GLSLANG NAMES glslangValidator HINTS "$ENV{VULKAN_SDK}/Bin")
+  if(VIEWMODEL_GLSLANG)
+    set(VIEWMODEL_SPV)
+    foreach(shader viewmodel.vert viewmodel.frag runtimeui.vert particles.vert particles.frag)
+      set(binary "${CMAKE_BINARY_DIR}/shaders/vulkan/${shader}.spv")
+      add_custom_command(OUTPUT "${binary}" COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/shaders/vulkan" COMMAND "${VIEWMODEL_GLSLANG}" -V "${CMAKE_CURRENT_SOURCE_DIR}/shaders/vulkan/${shader}" -o "${binary}" DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/vulkan/${shader}" VERBATIM)
+      list(APPEND VIEWMODEL_SPV "${binary}")
+    endforeach()
+    add_custom_target(ViewmodelVulkanShaders DEPENDS ${VIEWMODEL_SPV})
+    add_dependencies(Engine ViewmodelVulkanShaders)
+  else()
+    message(WARNING "Vulkan scene submission needs glslangValidator to build SPIR-V")
+  endif()
 endif()

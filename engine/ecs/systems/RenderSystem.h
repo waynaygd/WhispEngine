@@ -9,6 +9,7 @@
 #include "../../resources/Resource.h"
 
 #include "ISystem.h"
+#include "ParticleSystem.h"
 #include "../MathTypes.h"
 #include "../components/TransformComponent.h"
 #include "../RenderInterpolation.h"
@@ -40,6 +41,7 @@ namespace ecs
 {
 struct MaterialComponent;
 struct MeshRendererComponent;
+enum class MeshRenderMode;
 struct TransformComponent;
 
 class RenderSystem final : public ISystem
@@ -71,6 +73,7 @@ public:
     const ui::FontCache& UIFonts()const{return m_UIFonts;}
     ui::DrawList BuildUIDesignerPreview(const ui::Document&,ui::Pair preview,IRenderAdapter* renderer);
     ui::RuntimeUI& RuntimeUI(){return m_RuntimeUI;}
+    void SetParticles(ParticleSystem* particles){m_Particles=particles;}
     void SetUIPreview(bool value){m_UIPreview=value;}
     const ui::DrawList& GetUIDrawList()const{return m_UIDrawList;}
     std::size_t UIInstanceCount()const{return m_RuntimeUI.Instances().size();}
@@ -87,7 +90,7 @@ public:
     void SetMaterialDiagnostics(bool enabled){m_TraceMaterials=enabled;}
     const auto& GetMaterialDiagnostics()const{return m_MaterialDiagnostics;}
     struct Statistics {
-        std::size_t visibleObjects=0;
+        std::size_t visibleObjects=0,worldSubmeshes=0,viewmodelSubmeshes=0;
         std::size_t materialCacheHits=0,materialCacheMisses=0,visibleSubmeshes=0;
         double materialResolveMs=0,materialPathMs=0,materialTextureMs=0,materialShaderMs=0,runtimeUILayoutMs=0,runtimeUISubmitMs=0,gpuFinalizationMs=0;
         std::size_t materialResolves=0,materialPathChecks=0;
@@ -98,6 +101,8 @@ public:
     void ReleaseGpuResources();
 
 private:
+    ParticleSystem* m_Particles=nullptr;
+    ParticleDrawList m_WorldParticles,m_FirstPersonParticles;
     std::vector<Entity> m_EditorIsolation;
     std::unordered_set<Entity,EntityHash> m_EditorIsolated;
     std::vector<PlacementRenderItem> m_PlacementItems;
@@ -116,6 +121,7 @@ private:
         RenderMeshRange range;
         MaterialRenderState materialState;
         bool castShadows=true;
+        MeshRenderMode renderMode{};
         RenderMeshHandle mesh = RenderMeshHandle::Invalid();
         std::array<RenderTextureHandle,3> maps{};
         RenderTextureHandle texture = RenderTextureHandle::Invalid();
@@ -132,6 +138,7 @@ private:
         RenderMeshRange range;
         MaterialRenderState materialState;
         bool castShadows=true;
+        MeshRenderMode renderMode{};
         RenderMeshHandle mesh = RenderMeshHandle::Invalid();
         std::array<RenderTextureHandle,3> maps{};
         RenderTextureHandle texture = RenderTextureHandle::Invalid();

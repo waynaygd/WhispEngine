@@ -239,6 +239,7 @@ struct LuaRuntime::Impl {
   double gameTime = 0;
   ecs::MutationQueue mutations;
   std::set<ecs::Entity, EntityLess> destroying;
+  ecs::ParticleSystem particles;
   ecs::World* world = nullptr;
   std::function<bool(const std::string&)> input;
   GameplayServices services;
@@ -774,6 +775,14 @@ struct LuaRuntime::Impl {
       return services.loadScene(key);
     });
     env["World"] = api;
+    auto vfx=lua.create_table();
+    auto particleEntity=[this](ecs::Entity e){if(stopping||!Alive(e))throw std::runtime_error("Particles: dead/foreign Entity or stopping session");};
+    vfx.set_function("play",[this,particleEntity](ecs::Entity e){particleEntity(e);particles.Play(*world,e);});
+    vfx.set_function("stop",[this,particleEntity](ecs::Entity e){particleEntity(e);particles.Stop(*world,e);});
+    vfx.set_function("reset",[this,particleEntity](ecs::Entity e){particleEntity(e);particles.Reset(*world,e);});
+    vfx.set_function("emit",[this,particleEntity](ecs::Entity e,sol::object count){particleEntity(e);if(count.get_type()!=sol::type::number)throw std::runtime_error("Particles.emit count must be an integer in [0,10000]");double n=count.as<double>();if(!std::isfinite(n)||n<0||n>10000||std::floor(n)!=n)throw std::runtime_error("Particles.emit count must be an integer in [0,10000]");particles.Emit(*world,e,int(n));});
+    vfx.set_function("is_playing",[this,particleEntity](ecs::Entity e){particleEntity(e);return particles.IsPlaying(*world,e);});
+    env["Particles"]=vfx;
     auto physics = lua.create_table();
     physics.set_function(
         "raycast",
@@ -1274,6 +1283,7 @@ void LuaRuntime::Start(ecs::World& world,
   impl->errors.clear();
   impl->loadFailures.clear();
   impl->world = &world;
+  impl->particles.Bind(world);
   impl->input = std::move(input);
   impl->services = std::move(services);
   impl->history.BeginSession();
@@ -1300,6 +1310,7 @@ void LuaRuntime::Stop() {
   impl->gameTime = 0;
   impl->mutations.Clear();
   impl->destroying.clear();
+  impl->particles.Clear();
   impl->world = nullptr;
   if (impl->services.runtimeUI) impl->services.runtimeUI->Clear();
   if (impl->services.resetUIInput) impl->services.resetUIInput();
@@ -1318,6 +1329,7 @@ void LuaRuntime::Stop() {
   impl->stopping = false;
   lua_gc(impl->lua.lua_state(), LUA_GCCOLLECT, 0);
 }
+ecs::ParticleSystem& LuaRuntime::Particles(){return impl->particles;}
 void LuaRuntime::Update(float dt) {
 #if defined(TRACY_ENABLE)
   ZoneScopedN("LuaGameplayUpdate");

@@ -197,8 +197,8 @@ void Dx12RenderAdapter::EndShadowPass() {
     m_CmdList->RSSetViewports(1,&vp);m_CmdList->RSSetScissorRects(1,&rect);m_CmdList->OMSetRenderTargets(1,&rtv,FALSE,&dsv);
     ShadowTimestamp(1);
 }
-void Dx12RenderAdapter::BeginMainPass() {BeginHdrScene();PrepareSceneLights();ShadowTimestamp(2);DrawEditorVisual(false);}
-void Dx12RenderAdapter::EndMainPass() {ApplyFog();DrawEditorVisual(true);ShadowTimestamp(3);ShadowTimestamp(4);EndHdrScene();ShadowTimestamp(5);m_PreparedScene=false;m_CachedInstances.clear();}
+void Dx12RenderAdapter::BeginMainPass() {m_WorldEffectsDone=false;BeginHdrScene();PrepareSceneLights();ShadowTimestamp(2);DrawEditorVisual(false);}
+void Dx12RenderAdapter::EndMainPass() {if(!m_WorldEffectsDone){ApplyFog();DrawEditorVisual(true);}ShadowTimestamp(3);ShadowTimestamp(4);EndHdrScene();ShadowTimestamp(5);m_PreparedScene=false;m_CachedInstances.clear();}
 std::uint64_t Dx12RenderAdapter::GetShadowPreviewTextureId() const {return m_ShadowTargets[m_LastShadowSlot].srv.ptr;}
 void Dx12RenderAdapter::ReleaseShadowResources() {
     if(m_ShadowActive&&m_FrameRecording)EndShadowPass();

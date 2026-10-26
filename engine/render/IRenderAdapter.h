@@ -2,6 +2,7 @@
 #include <string>
 
 #include "RenderResourceHandles.h"
+#include "Particles.h"
 #include "RenderInstanceData.h"
 #include "Shadows.h"
 #include "MaterialState.h"
@@ -126,6 +127,11 @@ public:
     virtual EditorVisualDiagnostics GetEditorVisualDiagnostics()const{return {};}
     virtual void BeginMainPass() {}
     virtual void EndMainPass() {}
+    // Same color target/material path, independent shared depth for all viewmodels.
+    virtual void DrawParticles(const ParticleDrawList&) {}
+    virtual ParticleGpuStatistics GetParticleStatistics()const{return {};}
+    virtual bool BeginViewmodelPass() {return false;}
+    virtual void EndViewmodelPass() {}
     virtual std::uint64_t GetShadowPreviewTextureId() const { return 0; }
     virtual bool SaveFrameImage(const std::string&) { return false; }
     virtual RenderGpuTimings GetGpuTimings() const { return {}; }

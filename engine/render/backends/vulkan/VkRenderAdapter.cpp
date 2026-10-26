@@ -416,6 +416,7 @@ bool VkRenderAdapter::CreatePipelineFromModules(VkShaderModule vs, VkShaderModul
     gp.pViewportState = &vpState;
     gp.pRasterizationState = &rs;
     gp.pMultisampleState = &ms;
+    VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};ds.depthTestEnable=ds.depthWriteEnable=VK_TRUE;ds.depthCompareOp=VK_COMPARE_OP_LESS_OR_EQUAL;gp.pDepthStencilState=&ds;
     gp.pColorBlendState = &cb;
     gp.layout = m_PipelineLayout;
     gp.renderPass = m_RenderPass;
@@ -488,12 +489,16 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         const char** glfwExt = glfwGetRequiredInstanceExtensions(&extCount);
         std::vector<const char*> exts(glfwExt, glfwExt + extCount);
 
+        uint32_t layerCount=0;vkEnumerateInstanceLayerProperties(&layerCount,nullptr);std::vector<VkLayerProperties> layers(layerCount);vkEnumerateInstanceLayerProperties(&layerCount,layers.data());const char* validation="VK_LAYER_KHRONOS_validation";bool validate=std::any_of(layers.begin(),layers.end(),[&](auto& layer){return std::strcmp(layer.layerName,validation)==0;});
+        VkDebugUtilsMessengerCreateInfoEXT debug{VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};debug.messageSeverity=VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;debug.messageType=VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT|VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT|VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;debug.pUserData=&m_ValidationErrors;debug.pfnUserCallback=[](VkDebugUtilsMessageSeverityFlagBitsEXT,VkDebugUtilsMessageTypeFlagsEXT,const VkDebugUtilsMessengerCallbackDataEXT* data,void* user)->VkBool32{++*static_cast<std::atomic<std::uint64_t>*>(user);Logger::Get().Error(std::string("Vulkan validation: ")+data->pMessage);return VK_FALSE;};if(validate)exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         VkInstanceCreateInfo ici{ VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
         ici.pApplicationInfo = &app;
+        if(validate){ici.enabledLayerCount=1;ici.ppEnabledLayerNames=&validation;ici.pNext=&debug;}
         ici.enabledExtensionCount = (uint32_t)exts.size();
         ici.ppEnabledExtensionNames = exts.data();
 
         VK_ThrowIfFailed(vkCreateInstance(&ici, nullptr, &m_Instance), "vkCreateInstance failed");
+        if(validate){auto create=reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(m_Instance,"vkCreateDebugUtilsMessengerEXT"));if(create)VK_ThrowIfFailed(create(m_Instance,&debug,nullptr,&m_DebugMessenger),"Vulkan debug messenger");}
 
         VK_ThrowIfFailed((VkResult)glfwCreateWindowSurface(m_Instance, w, nullptr, &m_Surface),
             "glfwCreateWindowSurface failed");
@@ -568,6 +573,7 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         int fbW = 0, fbH = 0;
         glfwGetFramebufferSize(w, &fbW, &fbH);
 
+        m_Window=window;
         auto sc = QuerySwapchainSupport(m_Physical, m_Surface);
         auto fmt = ChooseSurfaceFormat(sc.formats);
         auto pm = ChoosePresentMode(sc.presentModes);
@@ -584,7 +590,7 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         sci.imageColorSpace = fmt.colorSpace;
         sci.imageExtent = extent;
         sci.imageArrayLayers = 1;
-        sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;if(sc.caps.supportedUsageFlags&VK_IMAGE_USAGE_TRANSFER_SRC_BIT)sci.imageUsage|=VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
         uint32_t qidx[] = { m_GraphicsFamily, m_PresentFamily };
         if (m_GraphicsFamily != m_PresentFamily)
@@ -660,9 +666,13 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         dep.srcAccessMask = 0;
         dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
+        VkAttachmentDescription depth{};depth.format=VK_FORMAT_D32_SFLOAT;depth.samples=VK_SAMPLE_COUNT_1_BIT;depth.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;depth.storeOp=VK_ATTACHMENT_STORE_OP_STORE;depth.stencilLoadOp=VK_ATTACHMENT_LOAD_OP_DONT_CARE;depth.stencilStoreOp=VK_ATTACHMENT_STORE_OP_DONT_CARE;depth.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;depth.finalLayout=VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        VkAttachmentReference depthRef{1,VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};sub.pDepthStencilAttachment=&depthRef;
+        dep.srcStageMask=dep.dstStageMask=VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT|VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT|VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;dep.srcAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT|VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;dep.dstAccessMask=VK_ACCESS_COLOR_ATTACHMENT_READ_BIT|VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT|VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT|VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        VkAttachmentDescription attachments[]={color,depth};
         VkRenderPassCreateInfo rp{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
-        rp.attachmentCount = 1;
-        rp.pAttachments = &color;
+        rp.attachmentCount = 2;
+        rp.pAttachments = attachments;
         rp.subpassCount = 1;
         rp.pSubpasses = &sub;
         rp.dependencyCount = 1;
@@ -670,6 +680,10 @@ bool VkRenderAdapter::Initialize(IWindow* window)
 
         VK_ThrowIfFailed(vkCreateRenderPass(m_Device, &rp, nullptr, &m_RenderPass),
             "vkCreateRenderPass failed");
+        attachments[0].loadOp=VK_ATTACHMENT_LOAD_OP_LOAD;attachments[0].initialLayout=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        VK_ThrowIfFailed(vkCreateRenderPass(m_Device,&rp,nullptr,&m_ViewmodelPass),"Viewmodel render pass");
+        attachments[1].loadOp=VK_ATTACHMENT_LOAD_OP_LOAD;attachments[1].initialLayout=VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        VK_ThrowIfFailed(vkCreateRenderPass(m_Device,&rp,nullptr,&m_ResumePass),"Resume World render pass");
 
         VkPushConstantRange pcr{};
         pcr.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -761,7 +775,8 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         gp.pViewportState = &vpState;
         gp.pRasterizationState = &rs;
         gp.pMultisampleState = &ms;
-        gp.pColorBlendState = &cb;
+        VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};ds.depthTestEnable=ds.depthWriteEnable=VK_TRUE;ds.depthCompareOp=VK_COMPARE_OP_LESS_OR_EQUAL;gp.pDepthStencilState=&ds;
+    gp.pColorBlendState = &cb;
         gp.layout = m_PipelineLayout;
         gp.renderPass = m_RenderPass;
         gp.subpass = 0;
@@ -776,13 +791,14 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         vkDestroyShaderModule(m_Device, vs, nullptr);
         vkDestroyShaderModule(m_Device, fs, nullptr);
 
-        m_Framebuffers.resize(m_SwapViews.size());
+        m_Framebuffers.resize(m_SwapViews.size());m_ViewmodelFrames.resize(m_SwapViews.size());m_WorldDepth.resize(m_SwapViews.size());m_ViewmodelDepth.resize(m_SwapViews.size());
         for (size_t i = 0; i < m_SwapViews.size(); ++i)
         {
-            VkImageView att[] = { m_SwapViews[i] };
+            m_WorldDepth[i]=MakeDepth();m_ViewmodelDepth[i]=MakeDepth();
+            VkImageView att[] = { m_SwapViews[i],m_WorldDepth[i].view };
             VkFramebufferCreateInfo fbi{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
             fbi.renderPass = m_RenderPass;
-            fbi.attachmentCount = 1;
+            fbi.attachmentCount = 2;
             fbi.pAttachments = att;
             fbi.width = m_SwapExtent.width;
             fbi.height = m_SwapExtent.height;
@@ -790,6 +806,7 @@ bool VkRenderAdapter::Initialize(IWindow* window)
 
             VK_ThrowIfFailed(vkCreateFramebuffer(m_Device, &fbi, nullptr, &m_Framebuffers[i]),
                 "vkCreateFramebuffer failed");
+            att[1]=m_ViewmodelDepth[i].view;fbi.renderPass=m_ViewmodelPass;VK_ThrowIfFailed(vkCreateFramebuffer(m_Device,&fbi,nullptr,&m_ViewmodelFrames[i]),"Viewmodel framebuffer");
         }
 
         VkCommandPoolCreateInfo pci{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
@@ -919,17 +936,17 @@ bool VkRenderAdapter::Initialize(IWindow* window)
         VkFenceCreateInfo fci{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
         fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
+        m_RenderFinished.resize(m_SwapImages.size());for(auto& semaphore:m_RenderFinished)VK_ThrowIfFailed(vkCreateSemaphore(m_Device,&sci2,nullptr,&semaphore),"Vulkan presentation semaphore");
         for (int i = 0; i < MaxFramesInFlight; ++i)
         {
             VK_ThrowIfFailed(vkCreateSemaphore(m_Device, &sci2, nullptr, &m_ImageAvailable[i]),
                 "vkCreateSemaphore failed");
-            VK_ThrowIfFailed(vkCreateSemaphore(m_Device, &sci2, nullptr, &m_RenderFinished[i]),
-                "vkCreateSemaphore failed");
+
             VK_ThrowIfFailed(vkCreateFence(m_Device, &fci, nullptr, &m_InFlight[i]),
                 "vkCreateFence failed");
         }
 
-        m_Frame = 0;
+        m_Frame = 0;InitializeSubmission();
         Logger::Get().Info("Vulkan adapter initialized");
         return true;
     }
@@ -942,38 +959,43 @@ bool VkRenderAdapter::Initialize(IWindow* window)
 
 void VkRenderAdapter::BeginFrame()
 {
-    vkWaitForFences(m_Device, 1, &m_InFlight[m_Frame], VK_TRUE, UINT64_MAX);
-    vkResetFences(m_Device, 1, &m_InFlight[m_Frame]);
-
+    int width=0,height=0;glfwGetFramebufferSize(static_cast<GlfwWindow*>(m_Window)->GetGlfwHandle(),&width,&height);m_Skip=width<=0||height<=0;if(m_Skip)return;
+    if(unsigned(width)!=m_SwapExtent.width||unsigned(height)!=m_SwapExtent.height)RecreateWindow();
+    vkWaitForFences(m_Device, 1, &m_InFlight[m_Frame], VK_TRUE, UINT64_MAX);RetireSubmission();ParticleFrame();m_UIUsed=0;m_Statistics={};
     VkResult r = vkAcquireNextImageKHR(m_Device, m_Swapchain, UINT64_MAX,
         m_ImageAvailable[m_Frame], VK_NULL_HANDLE, &m_ImageIndex);
 
+    // Keep the fence signalled when acquisition produces no submission.
+    if(r==VK_ERROR_OUT_OF_DATE_KHR){RecreateWindow();m_Skip=true;return;}
     if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR)
         VK_ThrowIfFailed(r, "vkAcquireNextImageKHR failed");
+    vkResetFences(m_Device, 1, &m_InFlight[m_Frame]);
 
     vkResetCommandBuffer(m_CmdBuffers[m_ImageIndex], 0);
 
     VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     VK_ThrowIfFailed(vkBeginCommandBuffer(m_CmdBuffers[m_ImageIndex], &bi), "vkBeginCommandBuffer failed");
+    if(m_ParticleQueries)vkCmdResetQueryPool(m_CmdBuffers[m_ImageIndex],m_ParticleQueries,m_Frame*16,16);
 }
 
 void VkRenderAdapter::Clear(float r, float g, float b, float a)
 {
+    if(m_Skip)return;m_Recording=true;
     m_Clear[0] = r; m_Clear[1] = g; m_Clear[2] = b; m_Clear[3] = a;
 
-    VkClearValue cv{};
-    cv.color.float32[0] = m_Clear[0];
-    cv.color.float32[1] = m_Clear[1];
-    cv.color.float32[2] = m_Clear[2];
-    cv.color.float32[3] = m_Clear[3];
+    VkClearValue cv[2]{};cv[1].depthStencil.depth=1;
+    cv[0].color.float32[0] = m_Clear[0];
+    cv[0].color.float32[1] = m_Clear[1];
+    cv[0].color.float32[2] = m_Clear[2];
+    cv[0].color.float32[3] = m_Clear[3];
 
     VkRenderPassBeginInfo rp{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
     rp.renderPass = m_RenderPass;
     rp.framebuffer = m_Framebuffers[m_ImageIndex];
     rp.renderArea.offset = { 0,0 };
     rp.renderArea.extent = m_SwapExtent;
-    rp.clearValueCount = 1;
-    rp.pClearValues = &cv;
+    rp.clearValueCount = 2;
+    rp.pClearValues = cv;
 
     vkCmdBeginRenderPass(m_CmdBuffers[m_ImageIndex], &rp, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -981,6 +1003,7 @@ void VkRenderAdapter::Clear(float r, float g, float b, float a)
 
 void VkRenderAdapter::DrawTestTriangle()
 {
+    if(m_Skip||!m_Recording)return;
     PushConstants pc{};
     std::memcpy(pc.mvp, m_PendingMVP, sizeof(pc.mvp));
     std::memcpy(pc.color, m_PendingColor, sizeof(pc.color));
@@ -1002,6 +1025,7 @@ void VkRenderAdapter::DrawTestTriangle()
 
 void VkRenderAdapter::DrawTestLine()
 {
+    if(m_Skip||!m_Recording)return;
     PushConstants pc{};
     std::memcpy(pc.mvp, m_PendingMVP, sizeof(pc.mvp));
     std::memcpy(pc.color, m_PendingColor, sizeof(pc.color));
@@ -1023,6 +1047,7 @@ void VkRenderAdapter::DrawTestLine()
 
 void VkRenderAdapter::DrawTestQuad()
 {
+    if(m_Skip||!m_Recording)return;
     PushConstants pc{};
     std::memcpy(pc.mvp, m_PendingMVP, sizeof(pc.mvp));
     std::memcpy(pc.color, m_PendingColor, sizeof(pc.color));
@@ -1044,6 +1069,7 @@ void VkRenderAdapter::DrawTestQuad()
 
 void VkRenderAdapter::DrawTestCube()
 {
+    if(m_Skip||!m_Recording)return;
     PushConstants pc{};
     std::memcpy(pc.mvp, m_PendingMVP, sizeof(pc.mvp));
     std::memcpy(pc.color, m_PendingColor, sizeof(pc.color));
@@ -1065,12 +1091,14 @@ void VkRenderAdapter::DrawTestCube()
 
 void VkRenderAdapter::EndFrame()
 {
-    vkCmdEndRenderPass(m_CmdBuffers[m_ImageIndex]);
+    if(m_Skip)return;m_Recording=false;
+    vkCmdEndRenderPass(m_CmdBuffers[m_ImageIndex]);CopyReadback();
+    m_LastSubmittedFrame=m_Frame;
     VK_ThrowIfFailed(vkEndCommandBuffer(m_CmdBuffers[m_ImageIndex]), "vkEndCommandBuffer failed");
 
     VkSemaphore waitS[] = { m_ImageAvailable[m_Frame] };
     VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-    VkSemaphore signalS[] = { m_RenderFinished[m_Frame] };
+    VkSemaphore signalS[] = { m_RenderFinished[m_ImageIndex] };
 
     VkSubmitInfo si{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
     si.waitSemaphoreCount = 1;
@@ -1086,7 +1114,8 @@ void VkRenderAdapter::EndFrame()
 
 void VkRenderAdapter::Present()
 {
-    VkSemaphore signalS[] = { m_RenderFinished[m_Frame] };
+    if(m_Skip)return;
+    VkSemaphore signalS[] = { m_RenderFinished[m_ImageIndex] };
 
     VkPresentInfoKHR pi{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
     pi.waitSemaphoreCount = 1;
@@ -1096,6 +1125,7 @@ void VkRenderAdapter::Present()
     pi.pImageIndices = &m_ImageIndex;
 
     VkResult r = vkQueuePresentKHR(m_PresentQueue, &pi);
+    if(r==VK_ERROR_OUT_OF_DATE_KHR){RecreateWindow();return;}
     if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR)
         VK_ThrowIfFailed(r, "vkQueuePresentKHR failed");
 
@@ -1106,18 +1136,19 @@ void VkRenderAdapter::Shutdown()
 {
     if (!m_Device) return;
 
-    vkDeviceWaitIdle(m_Device);
+    vkDeviceWaitIdle(m_Device);ReleaseSubmission();m_Recording=false;
 
     for (int i = 0; i < MaxFramesInFlight; ++i)
     {
         if (m_ImageAvailable[i]) vkDestroySemaphore(m_Device, m_ImageAvailable[i], nullptr);
-        if (m_RenderFinished[i]) vkDestroySemaphore(m_Device, m_RenderFinished[i], nullptr);
+
         if (m_InFlight[i]) vkDestroyFence(m_Device, m_InFlight[i], nullptr);
         m_ImageAvailable[i] = VK_NULL_HANDLE;
-        m_RenderFinished[i] = VK_NULL_HANDLE;
+
         m_InFlight[i] = VK_NULL_HANDLE;
     }
 
+    for(auto semaphore:m_RenderFinished)if(semaphore)vkDestroySemaphore(m_Device,semaphore,nullptr);m_RenderFinished.clear();
     if (m_VB) vkDestroyBuffer(m_Device, m_VB, nullptr);
     if (m_VBMem) vkFreeMemory(m_Device, m_VBMem, nullptr);
     m_VB = VK_NULL_HANDLE;
@@ -1142,7 +1173,9 @@ void VkRenderAdapter::Shutdown()
     m_CmdPool = VK_NULL_HANDLE;
 
     for (auto fb : m_Framebuffers) vkDestroyFramebuffer(m_Device, fb, nullptr);
-    m_Framebuffers.clear();
+    m_Framebuffers.clear();for(auto fb:m_ViewmodelFrames)vkDestroyFramebuffer(m_Device,fb,nullptr);m_ViewmodelFrames.clear();
+    for(auto& image:m_WorldDepth)FreeImage(image);for(auto& image:m_ViewmodelDepth)FreeImage(image);m_WorldDepth.clear();m_ViewmodelDepth.clear();
+    if(m_ViewmodelPass)vkDestroyRenderPass(m_Device,m_ViewmodelPass,nullptr);if(m_ResumePass)vkDestroyRenderPass(m_Device,m_ResumePass,nullptr);m_ViewmodelPass=m_ResumePass=VK_NULL_HANDLE;
 
     if (m_Pipeline) vkDestroyPipeline(m_Device, m_Pipeline, nullptr);
     if (m_LinePipeline) vkDestroyPipeline(m_Device, m_LinePipeline, nullptr);
@@ -1156,12 +1189,14 @@ void VkRenderAdapter::Shutdown()
 
     if (m_Surface) vkDestroySurfaceKHR(m_Instance, m_Surface, nullptr);
     if (m_Device) vkDestroyDevice(m_Device, nullptr);
+    if(m_DebugMessenger){auto destroy=reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(m_Instance,"vkDestroyDebugUtilsMessengerEXT"));if(destroy)destroy(m_Instance,m_DebugMessenger,nullptr);m_DebugMessenger=VK_NULL_HANDLE;}
     if (m_Instance) vkDestroyInstance(m_Instance, nullptr);
 
     m_Swapchain = VK_NULL_HANDLE;
     m_Surface = VK_NULL_HANDLE;
     m_Device = VK_NULL_HANDLE;
     m_Instance = VK_NULL_HANDLE;
+    m_Pipeline=m_LinePipeline=VK_NULL_HANDLE;m_PipelineLayout=VK_NULL_HANDLE;m_RenderPass=VK_NULL_HANDLE;m_CmdBuffers.clear();
 
     Logger::Get().Info("Vulkan adapter shutdown");
 }
