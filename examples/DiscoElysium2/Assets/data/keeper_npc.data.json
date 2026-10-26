@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "kind": "DataAsset",
+  "type": "NPCDefinition",
+  "schema": {
+    "type": "Object",
+    "fields": {
+      "id": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      },
+      "tag": {
+        "type": "String"
+      },
+      "dialogue": {
+        "type": "Resource",
+        "suffix": ".data.json"
+      },
+      "portrait": {
+        "type": "Resource",
+        "suffix": ".png"
+      },
+      "range": {
+        "type": "Number"
+      }
+    }
+  },
+  "value": {
+    "id": "keeper",
+    "name": "Марта Рейн",
+    "tag": "Keeper",
+    "dialogue": "data/keeper.data.json",
+    "portrait": "textures/keeper.png",
+    "range": 1.8
+  }
+}

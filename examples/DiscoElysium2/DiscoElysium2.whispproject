@@ -1,0 +1,9 @@
+{
+  "formatVersion": 1,
+  "name": "DiscoElysium2 — Дело о пропавшем свете",
+  "startupScene": "Scenes/Harbor.json",
+  "directories": {
+    "assets": "Assets",
+    "scenes": "Scenes"
+  }
+}

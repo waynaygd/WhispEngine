@@ -1,5 +1,6 @@
 #include "EditorTheme.h"
 #include "EditorLayer.h"
+#include "../resources/DataResource.h"
 #include "ScriptEditor.h"
 #include "LuaCodeEditor.h"
 #include "EditorWidgets.h"
@@ -269,6 +270,13 @@ void EditorLayer::DrawAssetBrowser(Application& app){
                 if(!allowed&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("%s. Use %s or a subfolder.",!edit?"Stop Play first":!extra?"Select an entity first":"Choose a compatible folder",root);
                 return clicked;
             };
+            for(bool table:{false,true})if(item(table?"DataTable":"DataAsset","data")){
+                auto key=directory+"/New-"+ecs::NewSceneIdentity()+(table?".table.json":".data.json");
+                nlohmann::json schema={{"type","Object"},{"fields",{{table?"id":"name",{{"type","String"}}}}}};
+                nlohmann::json d={{"version",1},{"kind",table?"DataTable":"DataAsset"},{"type",table?"NewTable":"NewAsset"},{"schema",schema}};
+                if(table)d["rows"]=nlohmann::json::array();else d["value"]=DataLoader::Default(schema);
+                if(DataLoader::Save(key,d,&m_EditorError)){m_AssetListsDirty=true;SelectAsset(key,table?"DataTable":"DataAsset");}
+            }
             if(item("Lua Script","scripts"))CreateLuaScriptAsset(app,directory);
             if(item("Prefab","prefabs",app.GetWorld().IsAlive(m_Selection.active))){m_PrefabNewKey=(directory.empty()?"prefabs":directory)+"/new.prefab.json";m_PrefabCreatePopup=true;}
             if(item("UI Document","ui")){auto key=directory+"/Canvas-"+ecs::NewSceneIdentity()+".ui.json";if(UILoader::Save(key,ui::EmptyDocument(),&m_EditorError)){m_AssetListsDirty=true;OpenUIDesigner(app,key);}}

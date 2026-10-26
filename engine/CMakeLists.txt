@@ -25,6 +25,8 @@ target_include_directories(ImGuizmo PUBLIC
 target_link_libraries(ImGuizmo PUBLIC DearImGui)
 
 add_library(Engine
+  resources/DataResource.cpp
+  editor/EditorData.cpp
   ui/UICustomFont.cpp
   ui/FontCache.cpp
   resources/FontResource.cpp

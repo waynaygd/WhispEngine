@@ -1,0 +1,11 @@
+{
+  "name": "Harbor painted surfaces",
+  "shaderPath": "dx12/textured.hlsl",
+  "baseColor": [
+    1,
+    1,
+    1,
+    1
+  ],
+  "roughness": 0.9
+}

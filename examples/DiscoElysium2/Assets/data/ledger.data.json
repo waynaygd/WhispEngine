@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "kind": "DataAsset",
+  "type": "DialogueGraph",
+  "schema": {
+    "type": "Object",
+    "fields": {
+      "start": {
+        "type": "String"
+      },
+      "nodes": {
+        "type": "Array",
+        "items": {
+          "type": "Object",
+          "fields": {
+            "id": {
+              "type": "String"
+            },
+            "speaker": {
+              "type": "String"
+            },
+            "portrait": {
+              "type": "Resource",
+              "suffix": ".png"
+            },
+            "text": {
+              "type": "String"
+            },
+            "choices": {
+              "type": "Array",
+              "items": {
+                "type": "Object",
+                "fields": {
+                  "text": {
+                    "type": "String"
+                  },
+                  "next": {
+                    "type": "String"
+                  },
+                  "requires": {
+                    "type": "String"
+                  },
+                  "excludes": {
+                    "type": "String"
+                  },
+                  "flag": {
+                    "type": "String"
+                  },
+                  "check": {
+                    "type": "String"
+                  },
+                  "difficulty": {
+                    "type": "Number"
+                  },
+                  "success": {
+                    "type": "String"
+                  },
+                  "failure": {
+                    "type": "String"
+                  },
+                  "quest": {
+                    "type": "String"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "value": {
+    "start": "start",
+    "nodes": [
+      {
+        "id": "start",
+        "speaker": "Сменный журнал",
+        "text": "В журнале записано: «03:10 — буй № 9 не отвечает. 03:18 — лодка прошла канал». Вы отмечаете время: оно пригодится при проверке версии.",
+        "choices": [
+          {
+            "text": "Запомнить время.",
+            "next": "",
+            "requires": "",
+            "excludes": "",
+            "flag": "ledger",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": "Журнал даёт +2 к Логике. Сопоставьте его с квитанцией."
+          }
+        ],
+        "portrait": "textures/receipt.png"
+      }
+    ]
+  }
+}

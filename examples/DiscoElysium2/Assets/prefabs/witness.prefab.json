@@ -1,0 +1,63 @@
+{
+  "version": 2,
+  "root": "Witness",
+  "entities": [
+    {
+      "id": "Witness",
+      "components": {
+        "Tag": {
+          "name": "Keeper"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.7,
+            1.7,
+            0.65
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.49,
+            0.29,
+            0.2,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.35,
+            1.1,
+            0.325
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0,
+          "offset": [
+            0,
+            0.25,
+            0
+          ]
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    }
+  ]
+}

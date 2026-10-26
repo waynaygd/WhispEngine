@@ -1899,6 +1899,13 @@ scripting::GameplayServices Application::GameplayCapabilities()
     host.pressed=[this](const std::string& a){return GameplayActionAllowed(a)&&m_InputManager.FramePressed(a);};
     host.released=[this](const std::string& a){return GameplayActionAllowed(a)&&m_InputManager.FrameReleased(a);};
     host.mouseDelta=[this]{return GameplayInputAllowed()&&!m_UIPointerConsumed&&m_PlayerMouseCaptured?m_InputManager.MouseDelta():ecs::Vec3{};};
+    host.mousePosition=[this]{
+        if(!GameplayInputAllowed()||m_UIPointerConsumed||m_Windows.empty())return ecs::Vec3{-1,-1,1};
+        auto* native=dynamic_cast<GlfwWindow*>(GetWindow());if(!native)return ecs::Vec3{-1,-1,1};auto p=native->PointerPosition();auto b=m_EditorLayer.GetViewportBounds();
+        float w=float(m_EditorLayer.GetViewportPixelWidth()),h=float(m_EditorLayer.GetViewportPixelHeight());
+        if(b[2]<=b[0]||b[3]<=b[1]||h<=0)return ecs::Vec3{-1,-1,1};
+        return ecs::Vec3{float((p[0]-b[0])/(b[2]-b[0])),float((p[1]-b[1])/(b[3]-b[1])),w/h};
+    };
     host.cursorCaptured=[this]{return m_PlayerMouseCaptured;};
     host.captureCursor=[this](bool capture){return CaptureGameplayCursor(capture);};
     host.bindAction=[this](const std::string& action,const std::string& key){return m_InputManager.BindNamedAction(action,key);};

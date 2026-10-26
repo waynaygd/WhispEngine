@@ -28,7 +28,7 @@ void ResourceManager::ClearAll()
     const std::size_t materialCount = m_MaterialCache.size();
 
     scripting::ClearPrefabCache();
-    m_FontCache.clear();m_UICache.clear();m_DirtyUI.clear();
+    m_DataCache.clear();m_FontCache.clear();m_UICache.clear();m_DirtyUI.clear();
     m_PostFxCache.clear();m_PostFxKeys.clear();m_PostFxScanned=false;
     m_MeshCache.clear();
     m_TextureCache.clear();
@@ -94,6 +94,7 @@ void ResourceManager::PollHotReload()
         (void)watchKey;
         if(watch.kind==ResourceKind::Font){if(!checkFonts)continue;++m_FontWatchChecks;}
         if (watch.path.empty() || !std::filesystem::exists(watch.path)){
+            if(watch.kind==ResourceKind::Data&&watch.fileSize>0){watch.fileSize=0;(void)Reload<DataResource>(watch.key);}
             if(watch.kind==ResourceKind::Font&&watch.fileSize>0){watch.fileSize=0;(void)Reload<FontResource>(watch.key);}
             if(watch.kind==ResourceKind::UI&&watch.fileSize>0){watch.fileSize=0;(void)Reload<UIResource>(watch.key);}
             if(watch.kind==ResourceKind::PostFx&&watch.fileSize>0){watch.fileSize=0;(void)Reload<PostFxResource>(watch.key);}
@@ -112,6 +113,7 @@ void ResourceManager::PollHotReload()
         watch.fileSize = currentFileSize;
         switch (watch.kind)
         {
+        case ResourceKind::Data:(void)Reload<DataResource>(watch.key);break;
         case ResourceKind::Font:(void)Reload<FontResource>(watch.key);break;
         case ResourceKind::UI:(void)Reload<UIResource>(watch.key);break;
         case ResourceKind::PostFx:(void)Reload<PostFxResource>(watch.key);changedPostFx.push_back(watch.key);break;

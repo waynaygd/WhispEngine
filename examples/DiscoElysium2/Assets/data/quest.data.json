@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "kind": "DataAsset",
+  "type": "QuestDefinition",
+  "schema": {
+    "type": "Object",
+    "fields": {
+      "id": {
+        "type": "String"
+      },
+      "title": {
+        "type": "String"
+      },
+      "description": {
+        "type": "String"
+      }
+    }
+  },
+  "value": {
+    "id": "lost_light",
+    "title": "Дело о пропавшем свете",
+    "description": "Найдите фонарь, выслушайте свидетелей и решите судьбу рапорта."
+  }
+}

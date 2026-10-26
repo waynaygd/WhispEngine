@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "kind": "DataAsset",
+  "type": "NPCDefinition",
+  "schema": {
+    "type": "Object",
+    "fields": {
+      "id": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      },
+      "tag": {
+        "type": "String"
+      },
+      "dialogue": {
+        "type": "Resource",
+        "suffix": ".data.json"
+      },
+      "portrait": {
+        "type": "Resource",
+        "suffix": ".png"
+      },
+      "range": {
+        "type": "Number"
+      }
+    }
+  },
+  "value": {
+    "id": "radio",
+    "name": "Илья Ветров",
+    "tag": "Radio",
+    "dialogue": "data/radio.data.json",
+    "portrait": "textures/radio.png",
+    "range": 1.8
+  }
+}

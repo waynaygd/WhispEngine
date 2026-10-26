@@ -1,0 +1,671 @@
+{
+  "version": 1,
+  "name": "Harbor Investigation",
+  "root": "Root",
+  "referenceResolution": [
+    1280,
+    800
+  ],
+  "scaleMode": 0,
+  "widgets": [
+    {
+      "id": "Root",
+      "type": "Panel",
+      "parent": "",
+      "position": [
+        0,
+        0
+      ],
+      "size": [
+        1280,
+        800
+      ],
+      "text": "",
+      "color": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "fontSize": 19
+    },
+    {
+      "id": "Top",
+      "type": "Panel",
+      "parent": "Root",
+      "position": [
+        18,
+        16
+      ],
+      "size": [
+        1244,
+        74
+      ],
+      "text": "",
+      "color": [
+        0.08,
+        0.12,
+        0.14,
+        0.96
+      ],
+      "fontSize": 19
+    },
+    {
+      "id": "Title",
+      "type": "Text",
+      "parent": "Top",
+      "position": [
+        18,
+        8
+      ],
+      "size": [
+        700,
+        27
+      ],
+      "text": "ДЕЛО О ПРОПАВШЕМ СВЕТЕ",
+      "color": [
+        0.87,
+        0.75,
+        0.5,
+        1
+      ],
+      "fontSize": 23
+    },
+    {
+      "id": "Hint",
+      "type": "Text",
+      "parent": "Top",
+      "position": [
+        18,
+        40
+      ],
+      "size": [
+        900,
+        24
+      ],
+      "text": "ЛКМ — идти / говорить   •   J — журнал   •   C — навыки   •   Z / X — масштаб",
+      "color": [
+        0.73,
+        0.8,
+        0.78,
+        1
+      ],
+      "fontSize": 16
+    },
+    {
+      "id": "JournalToggle",
+      "type": "Button",
+      "parent": "Top",
+      "position": [
+        1000,
+        18
+      ],
+      "size": [
+        105,
+        36
+      ],
+      "text": "",
+      "color": [
+        0.22,
+        0.3,
+        0.31,
+        1
+      ],
+      "fontSize": 19
+    },
+    {
+      "id": "JournalToggleText",
+      "type": "Text",
+      "parent": "JournalToggle",
+      "position": [
+        9,
+        7
+      ],
+      "size": [
+        100,
+        25
+      ],
+      "text": "Журнал",
+      "color": [
+        0.94,
+        0.87,
+        0.7,
+        1
+      ],
+      "fontSize": 17
+    },
+    {
+      "id": "SkillsToggle",
+      "type": "Button",
+      "parent": "Top",
+      "position": [
+        1120,
+        18
+      ],
+      "size": [
+        105,
+        36
+      ],
+      "text": "",
+      "color": [
+        0.22,
+        0.3,
+        0.31,
+        1
+      ],
+      "fontSize": 19
+    },
+    {
+      "id": "SkillsToggleText",
+      "type": "Text",
+      "parent": "SkillsToggle",
+      "position": [
+        9,
+        7
+      ],
+      "size": [
+        100,
+        25
+      ],
+      "text": "Навыки",
+      "color": [
+        0.94,
+        0.87,
+        0.7,
+        1
+      ],
+      "fontSize": 17
+    },
+    {
+      "id": "Status",
+      "type": "Text",
+      "parent": "Root",
+      "position": [
+        26,
+        100
+      ],
+      "size": [
+        950,
+        28
+      ],
+      "text": "Причал Девять. Найдите смотрительницу Марту у конторы.",
+      "color": [
+        0.88,
+        0.85,
+        0.72,
+        1
+      ],
+      "fontSize": 18
+    },
+    {
+      "id": "Dialogue",
+      "type": "Panel",
+      "parent": "Root",
+      "position": [
+        270,
+        335
+      ],
+      "size": [
+        990,
+        445
+      ],
+      "text": "",
+      "color": [
+        0.065,
+        0.09,
+        0.105,
+        0.98
+      ],
+      "fontSize": 19,
+      "visible": false
+    },
+    {
+      "id": "Portrait",
+      "type": "Image",
+      "parent": "Dialogue",
+      "position": [
+        18,
+        20
+      ],
+      "size": [
+        136,
+        170
+      ],
+      "text": "",
+      "color": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "fontSize": 19,
+      "texture": "textures/keeper.png"
+    },
+    {
+      "id": "Speaker",
+      "type": "Text",
+      "parent": "Dialogue",
+      "position": [
+        177,
+        18
+      ],
+      "size": [
+        760,
+        32
+      ],
+      "text": "",
+      "color": [
+        0.89,
+        0.74,
+        0.46,
+        1
+      ],
+      "fontSize": 23
+    },
+    {
+      "id": "Line",
+      "type": "Text",
+      "parent": "Dialogue",
+      "position": [
+        177,
+        62
+      ],
+      "size": [
+        780,
+        132
+      ],
+      "text": "",
+      "color": [
+        0.88,
+        0.89,
+        0.82,
+        1
+      ],
+      "fontSize": 21
+    },
+    {
+      "id": "Feedback",
+      "type": "Text",
+      "parent": "Dialogue",
+      "position": [
+        177,
+        192
+      ],
+      "size": [
+        780,
+        30
+      ],
+      "text": "",
+      "color": [
+        0.65,
+        0.8,
+        0.72,
+        1
+      ],
+      "fontSize": 17
+    },
+    {
+      "id": "Choice1",
+      "type": "Button",
+      "parent": "Dialogue",
+      "position": [
+        177,
+        224
+      ],
+      "size": [
+        780,
+        40
+      ],
+      "text": "",
+      "color": [
+        0.15,
+        0.21,
+        0.23,
+        1
+      ],
+      "fontSize": 19,
+      "visible": false
+    },
+    {
+      "id": "ChoiceText1",
+      "type": "Text",
+      "parent": "Choice1",
+      "position": [
+        12,
+        8
+      ],
+      "size": [
+        752,
+        27
+      ],
+      "text": "",
+      "color": [
+        0.89,
+        0.84,
+        0.69,
+        1
+      ],
+      "fontSize": 18
+    },
+    {
+      "id": "Choice2",
+      "type": "Button",
+      "parent": "Dialogue",
+      "position": [
+        177,
+        270
+      ],
+      "size": [
+        780,
+        40
+      ],
+      "text": "",
+      "color": [
+        0.15,
+        0.21,
+        0.23,
+        1
+      ],
+      "fontSize": 19,
+      "visible": false
+    },
+    {
+      "id": "ChoiceText2",
+      "type": "Text",
+      "parent": "Choice2",
+      "position": [
+        12,
+        8
+      ],
+      "size": [
+        752,
+        27
+      ],
+      "text": "",
+      "color": [
+        0.89,
+        0.84,
+        0.69,
+        1
+      ],
+      "fontSize": 18
+    },
+    {
+      "id": "Choice3",
+      "type": "Button",
+      "parent": "Dialogue",
+      "position": [
+        177,
+        316
+      ],
+      "size": [
+        780,
+        40
+      ],
+      "text": "",
+      "color": [
+        0.15,
+        0.21,
+        0.23,
+        1
+      ],
+      "fontSize": 19,
+      "visible": false
+    },
+    {
+      "id": "ChoiceText3",
+      "type": "Text",
+      "parent": "Choice3",
+      "position": [
+        12,
+        8
+      ],
+      "size": [
+        752,
+        27
+      ],
+      "text": "",
+      "color": [
+        0.89,
+        0.84,
+        0.69,
+        1
+      ],
+      "fontSize": 18
+    },
+    {
+      "id": "Choice4",
+      "type": "Button",
+      "parent": "Dialogue",
+      "position": [
+        177,
+        362
+      ],
+      "size": [
+        780,
+        40
+      ],
+      "text": "",
+      "color": [
+        0.15,
+        0.21,
+        0.23,
+        1
+      ],
+      "fontSize": 19,
+      "visible": false
+    },
+    {
+      "id": "ChoiceText4",
+      "type": "Text",
+      "parent": "Choice4",
+      "position": [
+        12,
+        8
+      ],
+      "size": [
+        752,
+        27
+      ],
+      "text": "",
+      "color": [
+        0.89,
+        0.84,
+        0.69,
+        1
+      ],
+      "fontSize": 18
+    },
+    {
+      "id": "CloseDialogue",
+      "type": "Button",
+      "parent": "Dialogue",
+      "position": [
+        18,
+        210
+      ],
+      "size": [
+        136,
+        37
+      ],
+      "text": "",
+      "color": [
+        0.29,
+        0.22,
+        0.2,
+        1
+      ],
+      "fontSize": 19
+    },
+    {
+      "id": "CloseLabel",
+      "type": "Text",
+      "parent": "CloseDialogue",
+      "position": [
+        10,
+        9
+      ],
+      "size": [
+        130,
+        25
+      ],
+      "text": "Уйти",
+      "color": [
+        0.94,
+        0.84,
+        0.68,
+        1
+      ],
+      "fontSize": 17
+    },
+    {
+      "id": "Journal",
+      "type": "Panel",
+      "parent": "Root",
+      "position": [
+        20,
+        145
+      ],
+      "size": [
+        360,
+        370
+      ],
+      "text": "",
+      "color": [
+        0.08,
+        0.12,
+        0.14,
+        0.96
+      ],
+      "fontSize": 19,
+      "visible": false
+    },
+    {
+      "id": "JournalTitle",
+      "type": "Text",
+      "parent": "Journal",
+      "position": [
+        16,
+        14
+      ],
+      "size": [
+        330,
+        30
+      ],
+      "text": "ЖУРНАЛ",
+      "color": [
+        0.87,
+        0.74,
+        0.5,
+        1
+      ],
+      "fontSize": 23
+    },
+    {
+      "id": "Quest",
+      "type": "Text",
+      "parent": "Journal",
+      "position": [
+        16,
+        60
+      ],
+      "size": [
+        330,
+        140
+      ],
+      "text": "",
+      "color": [
+        0.85,
+        0.88,
+        0.83,
+        1
+      ],
+      "fontSize": 19
+    },
+    {
+      "id": "History",
+      "type": "Text",
+      "parent": "Journal",
+      "position": [
+        16,
+        218
+      ],
+      "size": [
+        330,
+        140
+      ],
+      "text": "",
+      "color": [
+        0.63,
+        0.74,
+        0.74,
+        1
+      ],
+      "fontSize": 16
+    },
+    {
+      "id": "Skills",
+      "type": "Panel",
+      "parent": "Root",
+      "position": [
+        900,
+        130
+      ],
+      "size": [
+        360,
+        186
+      ],
+      "text": "",
+      "color": [
+        0.08,
+        0.12,
+        0.14,
+        0.96
+      ],
+      "fontSize": 19,
+      "visible": false
+    },
+    {
+      "id": "SkillsTitle",
+      "type": "Text",
+      "parent": "Skills",
+      "position": [
+        16,
+        14
+      ],
+      "size": [
+        330,
+        30
+      ],
+      "text": "НАВЫКИ",
+      "color": [
+        0.87,
+        0.74,
+        0.5,
+        1
+      ],
+      "fontSize": 23
+    },
+    {
+      "id": "SkillsText",
+      "type": "Text",
+      "parent": "Skills",
+      "position": [
+        16,
+        60
+      ],
+      "size": [
+        330,
+        115
+      ],
+      "text": "",
+      "color": [
+        0.85,
+        0.88,
+        0.83,
+        1
+      ],
+      "fontSize": 19
+    }
+  ]
+}

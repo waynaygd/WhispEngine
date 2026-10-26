@@ -1,0 +1,213 @@
+{
+  "version": 1,
+  "kind": "DataAsset",
+  "type": "DialogueGraph",
+  "schema": {
+    "type": "Object",
+    "fields": {
+      "start": {
+        "type": "String"
+      },
+      "nodes": {
+        "type": "Array",
+        "items": {
+          "type": "Object",
+          "fields": {
+            "id": {
+              "type": "String"
+            },
+            "speaker": {
+              "type": "String"
+            },
+            "portrait": {
+              "type": "Resource",
+              "suffix": ".png"
+            },
+            "text": {
+              "type": "String"
+            },
+            "choices": {
+              "type": "Array",
+              "items": {
+                "type": "Object",
+                "fields": {
+                  "text": {
+                    "type": "String"
+                  },
+                  "next": {
+                    "type": "String"
+                  },
+                  "requires": {
+                    "type": "String"
+                  },
+                  "excludes": {
+                    "type": "String"
+                  },
+                  "flag": {
+                    "type": "String"
+                  },
+                  "check": {
+                    "type": "String"
+                  },
+                  "difficulty": {
+                    "type": "Number"
+                  },
+                  "success": {
+                    "type": "String"
+                  },
+                  "failure": {
+                    "type": "String"
+                  },
+                  "quest": {
+                    "type": "String"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "value": {
+    "start": "start",
+    "nodes": [
+      {
+        "id": "start",
+        "speaker": "Марта Рейн • смотрительница",
+        "text": "Сигнальный фонарь исчез перед утренним рейсом. Без него паром не выйдет. Кто-то оставил на причале мокрую квитанцию. Найдите фонарь, пока туман не закрыл бухту.",
+        "choices": [
+          {
+            "text": "Я разберусь. Кто был здесь ночью?",
+            "next": "witnesses",
+            "requires": "",
+            "excludes": "",
+            "flag": "case_started",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": "Осмотрите квитанцию у ящиков. Поговорите с Ильёй и Ниной."
+          },
+          {
+            "text": "Мы нашли объяснение. Поговорим о результате.",
+            "next": "report",
+            "requires": "confession",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          },
+          {
+            "text": "Пока всё.",
+            "next": "",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          }
+        ],
+        "portrait": "textures/keeper.png"
+      },
+      {
+        "id": "witnesses",
+        "speaker": "Марта Рейн",
+        "text": "Илья чинил радиостанцию. Нина сторожила кассу. Я бы не торопилась с обвинениями: здесь каждый когда-нибудь спасался чужим светом.",
+        "choices": [
+          {
+            "text": "Вернусь с доказательствами.",
+            "next": "",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          }
+        ],
+        "portrait": "textures/keeper.png"
+      },
+      {
+        "id": "report",
+        "speaker": "Марта Рейн",
+        "text": "Фонарь у Ильи? Значит, вы можете написать рапорт или дать ему шанс исправить ошибку.",
+        "choices": [
+          {
+            "text": "Дать шанс: вернуть свет и починить аварийный буй.",
+            "next": "mercy",
+            "requires": "",
+            "excludes": "",
+            "flag": "ending_mercy",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": "Завершено: свет возвращён. Илья восстановит аварийный буй."
+          },
+          {
+            "text": "Записать всё в рапорт. Ответственность должна быть общей.",
+            "next": "report_end",
+            "requires": "",
+            "excludes": "",
+            "flag": "ending_report",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": "Завершено: официальный рапорт. Фонарь вернётся с первым патрулём."
+          }
+        ],
+        "portrait": "textures/keeper.png"
+      },
+      {
+        "id": "mercy",
+        "speaker": "Марта Рейн",
+        "text": "К полудню на воде снова появится свет. Иногда расследование заканчивается не именем виновного, а работой, которую он согласился сделать.",
+        "choices": [
+          {
+            "text": "Закрыть дело.",
+            "next": "",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          }
+        ],
+        "portrait": "textures/keeper.png"
+      },
+      {
+        "id": "report_end",
+        "speaker": "Марта Рейн",
+        "text": "Я подпишу. Пусть город впервые оплатит ремонт, вместо того чтобы искать удобного виноватого. Это тоже способ вернуть свет.",
+        "choices": [
+          {
+            "text": "Закрыть дело.",
+            "next": "",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          }
+        ],
+        "portrait": "textures/keeper.png"
+      }
+    ]
+  }
+}

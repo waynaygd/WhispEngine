@@ -134,7 +134,7 @@ std::shared_ptr<const ProjectContext> ProjectManager::Create(const fs::path& par
     if(!fs::create_directory(root))throw std::runtime_error("Project folder already exists; choose a new name/location");
     // Only this newly created directory belongs to the transaction.
     try {
-        for(auto folder:{"Assets/models","Assets/textures","Assets/materials","Assets/scripts","Assets/audio","Assets/prefabs","Assets/environments","Scenes","Settings"})fs::create_directories(root/folder);
+        for(auto folder:{"Assets/models","Assets/textures","Assets/materials","Assets/scripts","Assets/audio","Assets/data","Assets/prefabs","Assets/environments","Scenes","Settings"})fs::create_directories(root/folder);
         Write(root/"Scenes/Main.json",{{"version",4},{"entities",nlohmann::json::array()}},false);
         auto path=root/fs::u8path(name+".whispproject");
         Write(path,{{"formatVersion",1},{"name",name},{"startupScene","Scenes/Main.json"},{"directories",{{"assets","Assets"},{"scenes","Scenes"}}}},false);

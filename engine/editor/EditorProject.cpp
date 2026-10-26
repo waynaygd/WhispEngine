@@ -23,6 +23,7 @@ bool EditorLayer::ResolveProjectEdits(Application& app,int decision,std::string*
         if(!(decision==int(Application::ProjectDecision::Save)?SavePrefabEditor(app):ClosePrefabEditor(app,true))){if(error)*error=m_EditorError;return false;}
     }
     if(decision!=int(Application::ProjectDecision::Save))return true;
+    if(m_DataDirty&&!SaveDataDraft(app)){if(error)*error=m_DataMessage;return false;}
     if(ScriptDraftsDirty()&&app.IsEditorPlayMode())app.SetEditorPlayMode(false);
     for(auto& [origin,s]:m_ScriptSessions)if(s->Dirty()&&!SaveLuaDocument(app,s->key)){if(error)*error=m_EditorError;return false;}
     if(UIDraftsDirty()){
@@ -41,6 +42,7 @@ bool EditorLayer::ResolveProjectEdits(Application& app,int decision,std::string*
     return true;
 }
 void EditorLayer::ResetProjectState(IRenderAdapter* renderer){
+    m_DataKey.clear();m_DataSchemaText.clear();m_DataMessage.clear();m_DataDraft=nullptr;m_DataDirty=false;
     if(renderer)renderer->ReleaseCameraPreview();m_CameraPreviewRequest={};m_CameraPreviewSource={};
     ReleaseMaterialEditor(renderer);m_MaterialSessions.clear();
     StoreDocumentSession();m_Documents.clear();m_ActiveDocument.clear();m_ObservedScene="<initial>";m_DocumentProject.clear();m_PendingDocument.clear();m_DocumentPrompt=false;m_WorkspaceFocus=false;m_RestoreDocuments=true;m_ScriptSessions.clear();m_ScriptKey.clear();m_ScriptText.clear();

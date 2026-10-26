@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "kind": "DataTable",
+  "type": "SkillChecks",
+  "schema": {
+    "type": "Object",
+    "fields": {
+      "id": {
+        "type": "String"
+      },
+      "skill": {
+        "type": "String"
+      },
+      "difficulty": {
+        "type": "Number"
+      },
+      "bonusFlag": {
+        "type": "String"
+      },
+      "bonus": {
+        "type": "Number"
+      }
+    }
+  },
+  "rows": [
+    {
+      "id": "radio_logic",
+      "skill": "logic",
+      "difficulty": 9,
+      "bonusFlag": "ledger",
+      "bonus": 2
+    }
+  ]
+}

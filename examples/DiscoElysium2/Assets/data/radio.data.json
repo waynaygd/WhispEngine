@@ -1,0 +1,161 @@
+{
+  "version": 1,
+  "kind": "DataAsset",
+  "type": "DialogueGraph",
+  "schema": {
+    "type": "Object",
+    "fields": {
+      "start": {
+        "type": "String"
+      },
+      "nodes": {
+        "type": "Array",
+        "items": {
+          "type": "Object",
+          "fields": {
+            "id": {
+              "type": "String"
+            },
+            "speaker": {
+              "type": "String"
+            },
+            "portrait": {
+              "type": "Resource",
+              "suffix": ".png"
+            },
+            "text": {
+              "type": "String"
+            },
+            "choices": {
+              "type": "Array",
+              "items": {
+                "type": "Object",
+                "fields": {
+                  "text": {
+                    "type": "String"
+                  },
+                  "next": {
+                    "type": "String"
+                  },
+                  "requires": {
+                    "type": "String"
+                  },
+                  "excludes": {
+                    "type": "String"
+                  },
+                  "flag": {
+                    "type": "String"
+                  },
+                  "check": {
+                    "type": "String"
+                  },
+                  "difficulty": {
+                    "type": "Number"
+                  },
+                  "success": {
+                    "type": "String"
+                  },
+                  "failure": {
+                    "type": "String"
+                  },
+                  "quest": {
+                    "type": "String"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "value": {
+    "start": "start",
+    "nodes": [
+      {
+        "id": "start",
+        "speaker": "Илья Ветров • радист",
+        "text": "Я не спал всю ночь. Радио ловило только треск. Фонарь? Не видел. И не понимаю, зачем вам эта промокшая бумага.",
+        "choices": [
+          {
+            "text": "Сопоставить номер на квитанции с записью в журнале. [Логика 9]",
+            "next": "",
+            "requires": "receipt",
+            "excludes": "checked",
+            "flag": "checked",
+            "check": "radio_logic",
+            "difficulty": 0,
+            "success": "admit",
+            "failure": "deny",
+            "quest": ""
+          },
+          {
+            "text": "Нина видела свет у аварийного буя. Я пришёл выслушать.",
+            "next": "admit",
+            "requires": "testimony",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          },
+          {
+            "text": "Ещё вернусь.",
+            "next": "",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          }
+        ],
+        "portrait": "textures/radio.png"
+      },
+      {
+        "id": "admit",
+        "speaker": "Илья Ветров",
+        "text": "Ладно. Буй погас, а в тумане шла лодка. Я взял фонарь и отнёс туда. Потом испугался, что меня уволят. Он в моей сумке. Помогите объяснить Марте.",
+        "choices": [
+          {
+            "text": "Я передам ей правду.",
+            "next": "",
+            "requires": "",
+            "excludes": "",
+            "flag": "confession",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": "Вернитесь к Марте. Решите, как завершить дело."
+          }
+        ],
+        "portrait": "textures/radio.png"
+      },
+      {
+        "id": "deny",
+        "speaker": "Илья Ветров",
+        "text": "Номер расплылся. Это мог быть любой рейс. Вы не уверены в своей версии. Спросите у Нины: она видела больше меня.",
+        "choices": [
+          {
+            "text": "Поговорю с Ниной.",
+            "next": "",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": "Проверка не удалась. Показания Нины дадут другой путь к правде."
+          }
+        ],
+        "portrait": "textures/radio.png"
+      }
+    ]
+  }
+}
