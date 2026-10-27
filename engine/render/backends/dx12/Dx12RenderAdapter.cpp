@@ -699,7 +699,7 @@ return float4(float3(v.x<=.04045?v.x/12.92:pow((v.x+.055)/1.055,2.4),v.y<=.04045
         CD3DX12_DESCRIPTOR_RANGE descriptorRange;
         descriptorRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
 
-        D3D12_ROOT_PARAMETER rootParameters[14]{};
+        D3D12_ROOT_PARAMETER rootParameters[16]{};
         rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
         rootParameters[0].Descriptor.ShaderRegister = 0;
         rootParameters[0].Descriptor.RegisterSpace = 0;
@@ -736,6 +736,11 @@ return float4(float3(v.x<=.04045?v.x/12.92:pow((v.x+.055)/1.055,2.4),v.y<=.04045
             rootParameters[10+i].Descriptor={9+i,0};rootParameters[10+i].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;}
         rootParameters[13].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
         rootParameters[13].Constants={7,0,8};rootParameters[13].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+        rootParameters[14].ParameterType=D3D12_ROOT_PARAMETER_TYPE_SRV;
+        rootParameters[14].Descriptor={12,0};rootParameters[14].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+        CD3DX12_DESCRIPTOR_RANGE spotRange;spotRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV,4,13);
+        rootParameters[15].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParameters[15].DescriptorTable={1,&spotRange};rootParameters[15].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
         CD3DX12_STATIC_SAMPLER_DESC staticSampler(0, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
         staticSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         staticSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -2249,6 +2254,7 @@ void Dx12RenderAdapter::Shutdown()
 
     m_FrameRecording=false;
     ReleaseSceneLights();
+    for(auto& p:m_SpotPso)p.Reset();m_SpotDepthBias=-1;m_SpotSlopeBias=-1;
     ReleaseParticles();
     m_RuntimeUIPso.Reset();m_RuntimeUIRoot.Reset();for(auto& buffer:m_RuntimeUIVertices)buffer.Reset();std::fill(std::begin(m_RuntimeUICapacity),std::end(m_RuntimeUICapacity),0);
     ReleaseCustomPostFx();ReleaseFog();ReleaseEditorVisuals();ReleaseEnvironment();m_CachedBrdfGpu.Reset();ReleaseHdrTargets();m_OutputPso.Reset();m_OutputRoot.Reset();

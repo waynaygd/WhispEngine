@@ -80,6 +80,10 @@ public:
     void SetBaseColor(const std::array<float,4>& p) override { m_BaseColor=p; }
     void SetCameraPosition(const std::array<float,4>& p) override { if(std::memcmp(m_Camera.data(),p.data(),sizeof(p))!=0){m_Camera=p;m_FrameConstantsDirty=true;} }
     void SetLighting(const LightingConstants& c) override { if(std::memcmp(&m_Lighting,&c,sizeof(c))!=0){m_Lighting=c;m_FrameConstantsDirty=true;} }
+    void SetSpotShadowFrames(std::span<const SpotShadowFrame>,unsigned) override;
+    bool BeginSpotShadowPass(unsigned) override;
+    SpotShadowDiagnostics GetSpotShadowDiagnostics() const override {return m_SpotDiagnostics;}
+    std::vector<float> ReadBackSpotShadowDepth(unsigned);
     void SetNormalMatrix(const std::array<float,12>& n) override { m_Normal=n; }
     bool SupportsInstancing(RenderShaderHandle handle) const override;
     bool DrawMeshInstanced(RenderMeshHandle handle, std::span<const RenderInstanceData> instances) override;
@@ -141,6 +145,9 @@ private:
     void ReleaseEditorVisuals();
     struct LightFrameResources {
         Microsoft::WRL::ComPtr<ID3D12Resource> lights,counts,indices,stats,readback;
+        Microsoft::WRL::ComPtr<ID3D12Resource> spotConstants;
+        D3D12_GPU_DESCRIPTOR_HANDLE spotTable{};
+        UINT spotCount=0;
         std::uint64_t lightCapacity=0,tileCapacity=0;
         bool pending=false,optimized=false;
         UINT count=0,tilesX=1,tilesY=1,width=1,height=1;
@@ -206,6 +213,20 @@ private:
         D3D12_GPU_DESCRIPTOR_HANDLE srv{};
         UINT descriptor=UINT_MAX,resolution=0;
     };
+    bool EnsureShadowTarget(UINT,ShadowTarget&);
+    void PrepareSpotBindings(LightFrameResources&);
+    void SwapSpotPipeline();
+    void ReleaseSpotResources();
+    ShadowTarget m_SpotTargets[FrameCount][MaxSpotShadows];
+    std::vector<SpotShadowFrame> m_SpotFrames;
+    std::array<SpotShadowGpu,MaxSpotShadows> m_SpotGpu{};
+    std::array<Microsoft::WRL::ComPtr<ID3D12PipelineState>,6> m_SpotPso;
+    int m_SpotDepthBias=-1;
+    float m_SpotSlopeBias=-1;
+    UINT m_ActiveSpot=UINT_MAX,m_LastSpotFrame=0;
+    ShadowConstants m_SpotSavedDirectional{};
+    SpotShadowDiagnostics m_SpotDiagnostics;
+    unsigned m_LastSpotOverflow=0;
     ShadowTarget m_ShadowTargets[FrameCount];
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_ShadowRoot;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_ShadowPso,m_ShadowInstancePso,m_ShadowDoublePso,m_ShadowDoubleInstancePso;

@@ -116,7 +116,15 @@ template<class C>ComponentDescriptor Light(const char* key,const char* label){
         Field<C>(d,"attenuation","Near radius",&C::attenuation,PropertyKind::Number,.01f,1000).tooltip="Inverse-square attenuation with smooth range cutoff; near radius softens the source";
     }
     if constexpr(std::is_same_v<C,SpotLightComponent>){Field<C>(d,"innerAngle","Inner half angle",&C::innerAngle,PropertyKind::Number,0,89);Field<C>(d,"outerAngle","Outer half angle",&C::outerAngle,PropertyKind::Number,.1f,89);}
-    Field<C>(d,"castShadows","Cast shadows",&C::castShadows,PropertyKind::Boolean).tooltip="Only primary Directional shadows are currently supported";
+    Field<C>(d,"castShadows","Cast shadows",&C::castShadows,PropertyKind::Boolean).tooltip="DX12: primary Directional and up to four visible Spot shadows; Point shadows unsupported";
+    if constexpr(std::is_same_v<C,SpotLightComponent>){
+        auto& resolution=Field<C>(d,"shadowResolution","Shadow resolution",&C::shadowResolution,PropertyKind::Integer,512,2048);
+        resolution.tooltip="512, 1024 or 2048";auto setResolution=resolution.set;
+        resolution.set=[setResolution](World& w,Entity e,const PropertyValue& value){int r=std::get<int>(value);if(r!=512&&r!=1024&&r!=2048)Fail("Spot shadow resolution must be 512, 1024 or 2048");setResolution(w,e,value);};
+        Field<C>(d,"shadowBias","Shadow bias (world units)",&C::shadowBias,PropertyKind::Number,0,.1f).speed=.0001f;
+        Field<C>(d,"shadowStrength","Shadow strength",&C::shadowStrength,PropertyKind::Number,0,1);
+        Field<C>(d,"shadowPcf","Shadow PCF",&C::shadowPcf,PropertyKind::Boolean);
+    }
     if constexpr(std::is_same_v<C,DirectionalLightComponent>)Field<C>(d,"primary","Prefer primary",&C::primary,PropertyKind::Boolean);
     Complete(d);
     d.serialize=[](const World& w,Entity e){auto* c=w.GetComponent<C>(e);SceneLightDescription light;

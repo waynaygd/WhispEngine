@@ -973,6 +973,16 @@ if(ENABLE_DX12)
 endif()
 
 if(WIN32 AND ENABLE_DX12 AND WHISP_BUILD_PHYSICS_TESTS)
+  add_executable(SpotShadowRegression tests/SpotShadowRegression.cpp)
+  target_link_libraries(SpotShadowRegression PRIVATE Engine)
+  if(ENABLE_TRACY)
+    target_link_libraries(SpotShadowRegression PRIVATE Tracy::TracyClient)
+  endif()
+  add_dependencies(SpotShadowRegression MaterialShaderSources Dx12Shaders)
+  add_test(NAME SpotShadowDx12Regression COMMAND SpotShadowRegression)
+  set_tests_properties(SpotShadowDx12Regression PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+    ENVIRONMENT "WHISP_DX12_DEBUG=1" RUN_SERIAL TRUE TIMEOUT 240)
   add_executable(ShadowDepthRangeRegression tests/ShadowDepthRangeRegression.cpp)
   target_link_libraries(ShadowDepthRangeRegression PRIVATE Engine)
   if(ENABLE_TRACY)

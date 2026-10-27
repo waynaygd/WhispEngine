@@ -91,6 +91,7 @@ void Dx12RenderAdapter::PrepareSceneLights()
     if(f.pending){auto b=CD3DX12_RESOURCE_BARRIER::Transition(f.stats.Get(),D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_COPY_DEST);m_CmdList->ResourceBarrier(1,&b);}
     m_CmdList->CopyBufferRegion(f.stats.Get(),0,f.lights.Get(),zeros,16);
     f.count=UINT(m_PendingLights.size());f.tilesX=tx;f.tilesY=ty;f.width=w;f.height=h;f.optimized=tiled;
+    PrepareSpotBindings(f);
     if(tiled){
         D3D12_RESOURCE_BARRIER barriers[]={
             CD3DX12_RESOURCE_BARRIER::Transition(f.counts.Get(),D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
@@ -126,8 +127,10 @@ void Dx12RenderAdapter::BindSceneLights()
     m_CmdList->SetGraphicsRootShaderResourceView(10,f.lights->GetGPUVirtualAddress());
     m_CmdList->SetGraphicsRootShaderResourceView(11,f.counts->GetGPUVirtualAddress());
     m_CmdList->SetGraphicsRootShaderResourceView(12,f.indices->GetGPUVirtualAddress());
-    UINT c[8]={f.count,f.tilesX,f.tilesY,f.optimized?1u:0u,f.width,f.height,LightTileCapacity,0};
+    UINT c[8]={f.count,f.tilesX,f.tilesY,f.optimized?1u:0u,f.width,f.height,LightTileCapacity,f.spotCount};
     m_CmdList->SetGraphicsRoot32BitConstants(13,8,c,0);
+    m_CmdList->SetGraphicsRootShaderResourceView(14,f.spotConstants->GetGPUVirtualAddress());
+    m_CmdList->SetGraphicsRootDescriptorTable(15,f.spotTable);
 }
 void Dx12RenderAdapter::CollectSceneLights(UINT slot)
 {

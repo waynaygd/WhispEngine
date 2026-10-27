@@ -13,6 +13,9 @@ struct LightParameters {
   float intensity = 2, range = 5, attenuation = .1f;
   float innerAngle = 20, outerAngle = 30;  // half angles in degrees
   bool enabled = true, castShadows = false;
+  int shadowResolution = 1024;
+  float shadowBias = .002f, shadowStrength = 1;
+  bool shadowPcf = true;
   bool operator==(const LightParameters&) const = default;
 };
 struct SceneLightDescription {
@@ -31,6 +34,9 @@ inline LightParameters SanitizeLight(LightParameters p) {
       safe(p.attenuation, .1f, .01f, 1000);  // near-source softening radius
   p.outerAngle = safe(p.outerAngle, 30, .1f, 89);
   p.innerAngle = safe(p.innerAngle, 20, 0, p.outerAngle);
+  if(p.shadowResolution!=512&&p.shadowResolution!=1024&&p.shadowResolution!=2048)p.shadowResolution=1024;
+  p.shadowBias=safe(p.shadowBias,.002f,0,.1f);
+  p.shadowStrength=safe(p.shadowStrength,1,0,1);
   return p;
 }
 inline float LocalLightAttenuation(float distance, const LightParameters& raw) {

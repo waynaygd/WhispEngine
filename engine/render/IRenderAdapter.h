@@ -11,6 +11,7 @@
 #include "AntiAliasing.h"
 #include "EditorVisuals.h"
 #include "SceneLights.h"
+#include "SpotShadows.h"
 #include "Fog.h"
 #include "ScreenEffects.h"
 #include "../resources/PostFxResource.h"
@@ -137,6 +138,9 @@ public:
     virtual std::uint64_t GetShadowPreviewTextureId() const { return 0; }
     virtual bool SaveFrameImage(const std::string&) { return false; }
     virtual RenderGpuTimings GetGpuTimings() const { return {}; }
+    virtual void SetSpotShadowFrames(std::span<const SpotShadowFrame>,unsigned) {}
+    virtual bool BeginSpotShadowPass(unsigned) {return false;}
+    virtual SpotShadowDiagnostics GetSpotShadowDiagnostics() const {return {};}
     virtual void SetMeshRange(const RenderMeshRange&) {}
     virtual void SetMaterialState(const MaterialRenderState&) {}
     virtual void SetModelMatrix(const std::array<float,16>&) {}

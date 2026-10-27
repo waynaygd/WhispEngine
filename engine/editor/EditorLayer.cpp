@@ -866,6 +866,10 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
         ImGui::Checkbox("Show Light Gizmos",&m_ShowLightGizmos);ImGui::SameLine();ImGui::Combo("Occlusion",&m_LightXrayMode,"Visible Only\0Selected X-Ray\0Always X-Ray\0");
         ImGui::Text("Tiles %u / indices %u",sceneLights.tiles,sceneLights.indices);
         ImGui::Text("Avg %.1f / max %u / overflow %u",sceneLights.averagePerTile,sceneLights.maxPerTile,sceneLights.overflow);
+        const auto spotShadows=renderer?renderer->GetSpotShadowDiagnostics():SpotShadowDiagnostics{};
+        ImGui::Text("Spot shadows: %u / 4, requested %u, over budget %u",spotShadows.active,spotShadows.requested,spotShadows.overBudget);
+        ImGui::Text("Spot depth maps: %.1f MiB, draws %u",spotShadows.mapBytes/1048576.,spotShadows.drawCalls);
+        if(!spotShadows.error.empty())ImGui::TextWrapped("%s",spotShadows.error.c_str());
         ImGui::Text("Gather %.3f / cull CPU %.3f / GPU %.3f ms",sceneLights.gatherMs,sceneLights.cullingCpuMs,sceneLights.cullingGpuMs);
         if(renderer){const auto t=renderer->GetGpuTimings();if(t.valid)ImGui::Text("Main GPU %.3f / frame GPU %.3f ms",t.mainMs,t.frameMs);}
         ImGui::Text("CPU frame %.3f ms / light upload %llu B",dt*1000.f,static_cast<unsigned long long>(sceneLights.uploadBytes));

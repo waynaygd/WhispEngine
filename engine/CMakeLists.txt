@@ -154,6 +154,7 @@ if (WIN32 AND ENABLE_DX12)
   target_sources(Engine PRIVATE
     render/backends/dx12/Dx12RenderAdapter.cpp
     render/backends/dx12/Dx12Shadows.cpp
+    render/backends/dx12/Dx12SpotShadows.cpp
     render/backends/dx12/Dx12EditorVisuals.cpp
     render/backends/dx12/Dx12Fog.cpp
     render/backends/dx12/Dx12Environment.cpp

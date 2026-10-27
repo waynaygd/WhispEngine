@@ -378,6 +378,25 @@ namespace ecs {
                     }
                     m_Renderer->EndShadowPass();
                 }
+                // Spot maps share caster submissions; their light-pose basis is independent of the camera.
+                const bool spotEnabled=(m_ShadowSettings?m_ShadowSettings->enabled:m_DefaultShadows.enabled)&&!m_ViewportUnlit;
+                m_Renderer->SetSpotShadowFrames(spotEnabled?std::span<const SpotShadowFrame>(lights.spotShadows):std::span<const SpotShadowFrame>{},spotEnabled?lights.spotShadowRequests:0);
+                if(spotEnabled)for(size_t slot=0;slot<lights.spotShadows.size();++slot)if(m_Renderer->BeginSpotShadowPass(unsigned(slot))){
+                    const auto& spot=lights.spotShadows[slot];
+                    auto intersects=[&](size_t i){const auto& packet=m_RenderPackets[i];auto it=m_ShadowLocalBounds.find(packet.mesh.value);if(it==m_ShadowLocalBounds.end())return true;
+                        ShadowCasterBounds bounds{{INFINITY,INFINITY,INFINITY},{-INFINITY,-INFINITY,-INFINITY}};const auto& model=m_InstanceData[i].model;
+                        for(int c=0;c<8;++c)for(int row=0;row<3;++row){float value=model[12+row];for(int k=0;k<3;++k)value+=model[k*4+row]*(c&(1<<k)?it->second.maximum[k]:it->second.minimum[k]);bounds.minimum[row]=std::min(bounds.minimum[row],value);bounds.maximum[row]=std::max(bounds.maximum[row],value);}
+                        return SpotCasterIntersects(spot,bounds);
+                    };
+                    for(const auto& batch:m_ShadowBatches){const auto& packet=m_RenderPackets[batch.begin];m_Renderer->SetMeshRange(packet.range);m_Renderer->SetMaterialState(packet.materialState);
+                        size_t cursor=batch.begin,end=batch.begin+batch.count;
+                        while(cursor<end){while(cursor<end&&!intersects(cursor))++cursor;const size_t begin=cursor;while(cursor<end&&intersects(cursor))++cursor;const size_t count=cursor-begin;if(!count)continue;
+                            if(m_InstancingEnabled&&count>1&&m_Renderer->DrawShadowMeshInstanced(packet.mesh,std::span<const RenderInstanceData>(m_InstanceData.data()+begin,count)))continue;
+                            for(size_t i=begin;i<cursor;++i)m_Renderer->DrawShadowMesh(packet.mesh,m_InstanceData[i]);
+                        }
+                    }
+                    m_Renderer->EndShadowPass();
+                }
                 m_Statistics.shadowMs=elapsed(start);
             }
             if(m_Particles)m_Particles->Build(world,m_RenderCamera,m_Interpolation,[this](const std::string& key){return GetOrCreateTexture(key);},m_WorldParticles,m_FirstPersonParticles);
