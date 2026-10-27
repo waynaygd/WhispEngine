@@ -59,7 +59,11 @@ float Visibility(float3 position,float3 normal) {
         gradient=float2(dy.y*dx.z-dx.y*dy.z,dx.x*dy.z-dy.x*dx.z)/determinant;
     if(clip.w<=0)return 1;
     if(any(uv<0)||any(uv>1)||ndc.z<0||ndc.z>1)return 1;
-    float depth=ndc.z-max(gShadowSampling.y,0.000005); // normalized D32 raster subpixel/transform roundoff floor
+    // Preserve the original projection's world-space bias after caster extension.
+    // A few local D32 ULPs still cover raster/transform roundoff when extension
+    // compresses that offset below depth precision; avoid a fixed 5e-6 floor.
+    float precisionBias=asfloat(asuint(ndc.z)+4u)-ndc.z;
+    float depth=ndc.z-max(gShadowSampling.y,precisionBias);
     float visibility=0;
     if(gShadowParameters.z>.5 && gShadowCoverage.w>4 && gShadowSampling.w>0) {
         // Continuous tent weights anchored to texel centers, no randomized taps.

@@ -86,7 +86,9 @@ inline ShadowFrame BuildDirectionalShadowFrame(const LightingConstants& light,Sh
     frame.projection={2/s.coverage,0,0,0,0,2/s.coverage,0,0,0,0,1/s.depthRange,0,0,0,0,1};
     frame.constants.lightVP=ShadowMultiply(frame.projection,frame.view);
     frame.constants.parameters={s.enabled&&light.directionEnabled[3]>.5f&&light.colorIntensity[3]>0&&s.strength>0?1.f:0.f,s.strength,s.pcf?1.f:0.f,float(s.debugMode)};
-    frame.constants.sampling={1.f/s.resolution,s.receiverBias,s.normalBias*texel,s.filterRadius};
+    // Establish the existing roundoff floor in the original projection. Caster
+    // depth extension rescales this offset to preserve its world-space size.
+    frame.constants.sampling={1.f/s.resolution,std::max(s.receiverBias,.000005f),s.normalBias*texel,s.filterRadius};
     frame.constants.coverage={s.edgeFade,s.edgeFade,s.receiverPlaneBias?1.f:0.f,float(s.filterTaps)};return frame;
 }
 // Fit a rotation-invariant sphere enclosing the near camera frustum. Quantize its

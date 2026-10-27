@@ -129,6 +129,10 @@ static std::size_t Pixel(float x,float z) {return std::size_t(int((.5f-z/12)*Hei
 static void Gpu() {
     GlfwWindow window;Check(window.Create(Width,Height,"DX12 Shadow Regression"),"window");
     Dx12RenderAdapter adapter;Check(adapter.Initialize(&window),"DX12 initialize");ResourceManager resources(nullptr);resources.Load<MaterialResource>("materials/stress.material.json");
+    // These analytic Lambert/texture oracles test identity SDR output. HDR
+    // Output 2.0 applies the default tone mapping even when IBL is disabled.
+    EnvironmentSettings output;output.toneMapping=false;output.exposure=0;
+    adapter.SetEnvironmentSettings(output);
     const auto sr=resources.Load<ShaderResource>("dx12/textured.hlsl");auto shader=adapter.CreateShaderProgram(sr->GetData());
     Check(shader.IsValid()&&adapter.SupportsInstancing(shader),"shadow-aware material PSOs");
     const auto cubeResource=resources.Load<MeshResource>("models/validation_cube.obj");auto cube=adapter.UploadMesh(cubeResource->GetData().meshData);

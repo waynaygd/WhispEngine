@@ -973,6 +973,16 @@ if(ENABLE_DX12)
 endif()
 
 if(WIN32 AND ENABLE_DX12 AND WHISP_BUILD_PHYSICS_TESTS)
+  add_executable(ShadowDepthRangeRegression tests/ShadowDepthRangeRegression.cpp)
+  target_link_libraries(ShadowDepthRangeRegression PRIVATE Engine)
+  if(ENABLE_TRACY)
+    target_link_libraries(ShadowDepthRangeRegression PRIVATE Tracy::TracyClient)
+  endif()
+  add_dependencies(ShadowDepthRangeRegression MaterialShaderSources Dx12Shaders)
+  add_test(NAME ShadowDepthRangeDx12Regression COMMAND ShadowDepthRangeRegression)
+  set_tests_properties(ShadowDepthRangeDx12Regression PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+    ENVIRONMENT "WHISP_DX12_DEBUG=1" RUN_SERIAL TRUE TIMEOUT 180)
   add_executable(FogTransparencyRegression tests/FogTransparencyRegression.cpp)
   target_link_libraries(FogTransparencyRegression PRIVATE Engine)
   if(ENABLE_TRACY)
