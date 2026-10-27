@@ -288,6 +288,8 @@ float3 SceneDirect(float2 pixel,float3 position,float3 base,float m,float rough,
         if(index<gLightCount)sum+=LocalContribution(index,gSceneLights[index],position,base,m,rough,N,V,pbr);}
     return sum;
 }
+Texture2D<float> gScreenAo:register(t17);
+cbuffer AmbientOcclusionCB:register(b8){uint4 gAoConfig;};
 float4 Shade(VSOut input,bool hdr) {
     float3 base=SampleBaseLinear(input.uv)*DecodeSRGB(saturate(input.tint.rgb))*input.baseColor.rgb;
     float3 result=base;
@@ -306,6 +308,8 @@ float4 Shade(VSOut input,bool hdr) {
     }
     float2 mr=(mapMask&2)!=0?gMetallicRoughnessTexture.Sample(gSampler,input.uv).bg:float2(1,1);
     float ao=(mapMask&4)!=0?lerp(1,gOcclusionTexture.Sample(gSampler,input.uv).r,input.textureParameters.y):1;
+    float screenAo=gAoConfig.x!=0?gScreenAo.Load(int3(int2(input.pos.xy),0)):1;
+    ao*=screenAo; // Only the existing ambient/IBL terms consume this factor.
     if(gDirectionEnabled.w>.5 && dot(N,N)>.5) {
         float visibility=Visibility(input.worldPosition,geometryN);
         if(gShadowParameters.w>.5) {

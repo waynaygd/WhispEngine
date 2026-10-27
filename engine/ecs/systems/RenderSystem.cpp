@@ -202,7 +202,7 @@ namespace ecs {
         if (m_Renderer == nullptr)
             return;
         if(m_EnvironmentSettings){
-            auto environment=m_EvaluatedPostProcess.environment;if(m_ViewportUnlit)environment.diffuse=environment.specular=false;
+            auto environment=m_EvaluatedPostProcess.environment;if(m_ViewportUnlit){environment.diffuse=environment.specular=false;environment.ambientOcclusion.enabled=false;}
             m_Renderer->SetEnvironmentSettings(environment);
             if(m_ResourceManager&&m_EnvironmentSettings->enabled){
                 const auto& key=m_EnvironmentSettings->assetPath;
@@ -401,6 +401,17 @@ namespace ecs {
             }
             if(m_Particles)m_Particles->Build(world,m_RenderCamera,m_Interpolation,[this](const std::string& key){return GetOrCreateTexture(key);},m_WorldParticles,m_FirstPersonParticles);
             else {m_WorldParticles.vertices.clear();m_WorldParticles.commands.clear();m_FirstPersonParticles.vertices.clear();m_FirstPersonParticles.commands.clear();}
+            // Reuse opaque depth submission (including non-shadow-casting meshes).
+            // First-person geometry/particles are excluded from world occlusion.
+            if(!m_ViewportUnlit&&m_Renderer->BeginAmbientOcclusion(m_RenderCamera.viewProjection,m_RenderCamera.projection)){
+                for(const auto& batch:m_Batches){const auto& packet=m_RenderPackets[batch.begin];
+                    if(packet.renderMode!=MeshRenderMode::World)continue;
+                    m_Renderer->SetMeshRange(packet.range);m_Renderer->SetMaterialState(packet.materialState);
+                    if(m_InstancingEnabled&&batch.count>1&&m_Renderer->DrawShadowMeshInstanced(packet.mesh,std::span<const RenderInstanceData>(m_InstanceData.data()+batch.begin,batch.count)))continue;
+                    for(size_t i=batch.begin;i<batch.begin+batch.count;++i)m_Renderer->DrawShadowMesh(packet.mesh,m_InstanceData[i]);
+                }
+                m_Renderer->EndAmbientOcclusion();
+            }
             m_Renderer->BeginMainPass();
             {
                 ZoneScopedN("RenderSubmit");

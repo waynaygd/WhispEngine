@@ -131,6 +131,7 @@ void Dx12RenderAdapter::BindSceneLights()
     m_CmdList->SetGraphicsRoot32BitConstants(13,8,c,0);
     m_CmdList->SetGraphicsRootShaderResourceView(14,f.spotConstants->GetGPUVirtualAddress());
     m_CmdList->SetGraphicsRootDescriptorTable(15,f.spotTable);
+    BindAmbientOcclusion();
 }
 void Dx12RenderAdapter::CollectSceneLights(UINT slot)
 {

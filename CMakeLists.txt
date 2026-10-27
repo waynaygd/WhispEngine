@@ -879,6 +879,7 @@ add_custom_target(MaterialShaderSources ALL
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/shaders/dx12/fog_common.hlsli ${CMAKE_BINARY_DIR}/shaders/dx12/fog_common.hlsli
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/shaders/dx12/particles.hlsl ${CMAKE_BINARY_DIR}/shaders/dx12/particles.hlsl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/shaders/dx12/fog.hlsl ${CMAKE_BINARY_DIR}/shaders/dx12/fog.hlsl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/shaders/dx12/ambient_occlusion.hlsl ${CMAKE_BINARY_DIR}/shaders/dx12/ambient_occlusion.hlsl
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/shaders/dx12
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/engine/shaders/dx12/editor_visuals.hlsl ${CMAKE_BINARY_DIR}/shaders/dx12/editor_visuals.hlsl
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/shaders/dx12
@@ -974,6 +975,14 @@ endif()
 
 if(WIN32 AND ENABLE_DX12 AND WHISP_BUILD_PHYSICS_TESTS)
   add_executable(SpotShadowRegression tests/SpotShadowRegression.cpp)
+  add_executable(AmbientOcclusionRegression tests/AmbientOcclusionRegression.cpp)
+  target_link_libraries(AmbientOcclusionRegression PRIVATE Engine)
+  if(ENABLE_TRACY)
+    target_link_libraries(AmbientOcclusionRegression PRIVATE Tracy::TracyClient)
+  endif()
+  add_dependencies(AmbientOcclusionRegression MaterialShaderSources Dx12Shaders)
+  add_test(NAME AmbientOcclusionDx12Regression COMMAND AmbientOcclusionRegression)
+  set_tests_properties(AmbientOcclusionDx12Regression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" ENVIRONMENT "WHISP_DX12_DEBUG=1" RUN_SERIAL TRUE TIMEOUT 240)
   target_link_libraries(SpotShadowRegression PRIVATE Engine)
   if(ENABLE_TRACY)
     target_link_libraries(SpotShadowRegression PRIVATE Tracy::TracyClient)

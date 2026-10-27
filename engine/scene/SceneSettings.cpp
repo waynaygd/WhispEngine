@@ -18,6 +18,8 @@ Json SceneSettingsToJson(const SceneSettings& s){
             {"shadows",{{"enabled",h.enabled},{"pcf",h.pcf},{"filterTaps",h.filterTaps},{"resolution",h.resolution},{"coverage",h.coverage},{"focusDistance",h.focusDistance},{"depthRange",h.depthRange},{"depthBias",h.depthBias},{"slopeBias",h.slopeBias},{"receiverBias",h.receiverBias},{"normalBias",h.normalBias},{"strength",h.strength},{"cameraFitted",h.cameraFitted},{"receiverPlaneBias",h.receiverPlaneBias},{"filterRadius",h.filterRadius},{"edgeFade",h.edgeFade}}},
             {"background",{{"visibleSunDisc",s.background.visibleSunDisc},{"driveLightProperties",s.background.driveLightProperties},{"nightColor",s.background.nightColor},{"horizonGlow",s.background.horizonGlow},{"sunsetWarmth",s.background.sunsetWarmth},{"nightIntensity",s.background.nightIntensity},{"dayLightIntensity",s.background.dayLightIntensity},{"sunSync",int(s.background.sunSync)},{"sunMetadata",s.background.sunMetadata},{"sunDirection",s.background.sunDirection},{"sunGlowRadius",s.background.sunGlowRadius},{"sunGlowIntensity",s.background.sunGlowIntensity},{"sunRadius",s.background.sunRadius},{"sunIntensity",s.background.sunIntensity},{"version",1},{"mode",int(s.background.background)},{"solid",s.background.solid},{"top",s.background.top},{"horizon",s.background.horizon},{"bottom",s.background.bottom},{"intensity",s.background.skyIntensity},{"blend",s.background.gradientBlend},{"rotation",s.background.skyRotation},{"asset",s.background.cubemap},{"useIbl",s.background.useIblEnvironment}}},
             {"primaryDirectional",s.primaryDirectional}};
+    const auto& ao=e.ambientOcclusion;
+    j["ambientOcclusion"]={{"enabled",ao.enabled},{"quality",ao.quality},{"radius",ao.radius},{"intensity",ao.intensity},{"bias",ao.bias},{"debug",ao.debug}};
     (void)SceneSettingsFromJson(j);return j;
 }
 SceneSettings SceneSettingsFromJson(const Json& j){
@@ -41,5 +43,10 @@ SceneSettings SceneSettingsFromJson(const Json& j){
     const bool authoredToneMapping=j.contains("environment")&&j.at("environment").contains("toneMapping");
     if(!authoredToneMapping&&!s.environment.enabled&&s.background.background!=EditorBackground::Cubemap)
         s.environment.toneMapping=false;
+    if(j.contains("ambientOcclusion")){const auto& a=j.at("ambientOcclusion");auto& ao=s.environment.ambientOcclusion;
+        ao.enabled=a.value("enabled",false);ao.quality=a.value("quality",1);ao.debug=a.value("debug",0);
+        if(ao.quality<0||ao.quality>2||ao.debug<0||ao.debug>2)throw std::runtime_error("Invalid AO quality/debug");
+        ao.radius=Number(a,"radius",.75f,.01f,10);ao.intensity=Number(a,"intensity",1,0,4);ao.bias=Number(a,"bias",.025f,0,.5f);
+    }
     s.primaryDirectional=j.value("primaryDirectional",std::string());if(s.primaryDirectional.size()>128)throw std::runtime_error("Invalid primary directional reference");return s;
 }

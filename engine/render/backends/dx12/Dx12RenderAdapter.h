@@ -67,6 +67,10 @@ public:
     void SetAntiAliasing(AntiAliasingMode mode) override {m_AntiAliasing=AntiAliasingMode(std::clamp(int(mode),0,2));}
     AntiAliasingDiagnostics GetAntiAliasingDiagnostics()const override {AntiAliasingDiagnostics d;d.mode=m_AntiAliasing;for(const auto& t:m_HdrTargets)if(t.color)d.intermediateBytes+=t.allocationBytes;return d;}
     void SetEnvironmentSettings(const EnvironmentSettings& s) override {m_EnvironmentSettings=SanitizeEnvironment(s);}
+    bool BeginAmbientOcclusion(const std::array<float,16>&,const std::array<float,16>&) override;
+    void EndAmbientOcclusion() override;
+    AmbientOcclusionDiagnostics GetAmbientOcclusionDiagnostics() const override{return m_AoDiagnostics;}
+    std::vector<float> ReadBackAmbientOcclusion(unsigned input=0); // depth/raw(AO,N)/filtered
     void SetSceneLights(std::span<const GpuSceneLight>,LightRenderingMode,const SceneLightDiagnostics& = {}) override;
     SceneLightDiagnostics GetSceneLightDiagnostics() const override {return m_SceneLightDiagnostics;}
     std::vector<std::uint32_t> ReadBackLightTiles();
@@ -384,6 +388,32 @@ private:
         UINT64 allocationBytes=0;
     };
     HdrTarget m_HdrTargets[FrameCount];
+    struct AoPass {
+        Microsoft::WRL::ComPtr<ID3D12Resource> depth,constants,readback;
+        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> dsvHeap;
+        HdrTarget raw,filtered;
+        D3D12_GPU_DESCRIPTOR_HANDLE table{};
+        UINT width=0,height=0;
+        UINT64 depthBytes=0;
+        bool ready=false,pending=false;
+    };
+    std::vector<AoPass> m_AoPasses[FrameCount];
+    UINT m_AoCursor=0,m_ActiveAo=UINT_MAX,m_LastAoFrame=0,m_LastAoPass=0;
+    AmbientOcclusionDiagnostics m_AoDiagnostics{true};
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_AoRoot;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_AoRawPso,m_AoFilterPso,m_AoDebugRawPso,m_AoDebugFilteredPso;
+    Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_AoTime;
+    std::array<Microsoft::WRL::ComPtr<ID3D12PipelineState>,6> m_AoDepthPso;
+    int m_AoDepthBias=-1;float m_AoSlopeBias=-1;
+    ShadowConstants m_AoSavedShadow;
+    RenderSubmissionStatistics m_AoSavedStatistics;
+    bool EnsureAoPipeline();
+    void SwapAoPipeline();
+    void BindAmbientOcclusion();
+    void DrawAmbientOcclusionDebug();
+    void CollectAoTiming(UINT);
+    void ReleaseAmbientOcclusion();
+    void EnsureAoTarget(HdrTarget&,UINT,UINT,DXGI_FORMAT);
     struct PostFxCompile {std::vector<unsigned char> vs,ps;std::string error;std::shared_ptr<const PostFxDefinition> definition;};
     struct PostFxGpu {std::shared_ptr<const PostFxDefinition> requested,active;std::future<PostFxCompile> pending;Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;std::string error;};
     std::map<std::string,PostFxGpu> m_PostFxGpu;

@@ -923,6 +923,22 @@ void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,fl
             if(!status.error.empty())ImGui::TextWrapped("%s",status.error.c_str());
             env=SanitizeEnvironment(env);
         }
+        if(ImGui::CollapsingHeader("Ambient Occlusion (DX12)",ImGuiTreeNodeFlags_DefaultOpen)){
+            auto& ao=app.GetEnvironmentSettings().ambientOcclusion;
+            ImGui::Checkbox("AO Enabled",&ao.enabled);
+            ImGui::Combo("AO Quality",&ao.quality,"Low (12)\0Medium (24)\0High (48)\0");
+            PrecisionSliderFloat("AO Radius (world)",&ao.radius,.01f,10.f);
+            PrecisionSliderFloat("AO Intensity",&ao.intensity,0,4.f);
+            PrecisionSliderFloat("AO Bias (world)",&ao.bias,0,.5f,"%.4f");
+            ImGui::Combo("AO View",&ao.debug,"Final Lighting\0Raw AO Only\0Filtered AO Only\0");
+            ao=SanitizeAo(ao);
+            auto d=renderer->GetAmbientOcclusionDiagnostics();
+            ImGui::TextWrapped("Full-resolution geometric SSAO; affects ambient/IBL only. No temporal history.");
+            if(!d.supported)ImGui::TextWrapped("Ambient Occlusion is unsupported by this backend.");
+            ImGui::Text("Depth %.3f / AO %.3f / Filter %.3f ms",d.depthMs,d.rawMs,d.filterMs);
+            ImGui::Text("AO resources %.2f MiB / %u depth draws",d.gpuBytes/1048576.,d.depthDraws);
+            if(!d.error.empty())ImGui::TextWrapped("%s",d.error.c_str());
+        }
         ImGui::SeparatorText("Ambient Lighting");
         LinearColorEdit("Ambient Color",lighting.ambientColor.data(),3);
         PrecisionSliderFloat("Ambient Intensity",&lighting.ambientIntensity,0.f,1.f);

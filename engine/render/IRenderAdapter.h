@@ -29,6 +29,10 @@ struct ShaderResource;
 class IRenderAdapter
 {
 public:
+    // Camera depth prepass is optional; unsupported backends keep legacy output.
+    virtual bool BeginAmbientOcclusion(const std::array<float,16>&,const std::array<float,16>&){return false;}
+    virtual void EndAmbientOcclusion(){}
+    virtual AmbientOcclusionDiagnostics GetAmbientOcclusionDiagnostics() const{return {};}
     virtual ~IRenderAdapter() = default;
 
     virtual bool Initialize(IWindow* window) = 0;

@@ -692,6 +692,7 @@ return float4(float3(v.x<=.04045?v.x/12.92:pow((v.x+.055)/1.055,2.4),v.y<=.04045
             for(UINT i=0;i<d.BoundResources;++i){D3D12_SHADER_INPUT_BIND_DESC b{};reflection->GetResourceBindingDesc(i,&b);
                 if(b.Type==D3D_SIT_CBUFFER&&b.BindPoint==6){D3D12_SHADER_BUFFER_DESC cb{};reflection->GetConstantBufferByName(b.Name)->GetDesc(&cb);if(b.Space||std::string(b.Name)!="EnvironmentCB"||cb.Size!=32)throw std::runtime_error("Incompatible EnvironmentCB");}
                 if(b.Type==D3D_SIT_CBUFFER&&b.BindPoint==7){D3D12_SHADER_BUFFER_DESC cb{};reflection->GetConstantBufferByName(b.Name)->GetDesc(&cb);if(b.Space||std::string(b.Name)!="SceneLightsCB"||cb.Size!=32)throw std::runtime_error("Incompatible SceneLightsCB");}
+                if(b.Type==D3D_SIT_CBUFFER&&b.BindPoint==8){D3D12_SHADER_BUFFER_DESC cb{};reflection->GetConstantBufferByName(b.Name)->GetDesc(&cb);if(b.Space||std::string(b.Name)!="AmbientOcclusionCB"||cb.Size!=16)throw std::runtime_error("Incompatible AmbientOcclusionCB");}
                 if(b.BindPoint>=9&&b.BindPoint<=11&&b.Type!=D3D_SIT_CBUFFER){if(b.Space||b.BindCount!=1||b.Type!=D3D_SIT_STRUCTURED||b.Dimension!=D3D_SRV_DIMENSION_BUFFER)throw std::runtime_error("Incompatible scene light SRV");}
                 if(b.Type==D3D_SIT_TEXTURE&&b.BindPoint>=5&&b.BindPoint<=8){if(b.Space||b.BindCount!=1||b.Dimension!=(b.BindPoint==8?D3D_SRV_DIMENSION_TEXTURE2D:D3D_SRV_DIMENSION_TEXTURECUBE))throw std::runtime_error("Incompatible IBL SRV");}
             }};
@@ -699,7 +700,7 @@ return float4(float3(v.x<=.04045?v.x/12.92:pow((v.x+.055)/1.055,2.4),v.y<=.04045
         CD3DX12_DESCRIPTOR_RANGE descriptorRange;
         descriptorRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
 
-        D3D12_ROOT_PARAMETER rootParameters[16]{};
+        D3D12_ROOT_PARAMETER rootParameters[18]{};
         rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
         rootParameters[0].Descriptor.ShaderRegister = 0;
         rootParameters[0].Descriptor.RegisterSpace = 0;
@@ -741,6 +742,11 @@ return float4(float3(v.x<=.04045?v.x/12.92:pow((v.x+.055)/1.055,2.4),v.y<=.04045
         CD3DX12_DESCRIPTOR_RANGE spotRange;spotRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV,4,13);
         rootParameters[15].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         rootParameters[15].DescriptorTable={1,&spotRange};rootParameters[15].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+        CD3DX12_DESCRIPTOR_RANGE aoRange;aoRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV,1,17);
+        rootParameters[16].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParameters[16].DescriptorTable={1,&aoRange};rootParameters[16].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+        rootParameters[17].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        rootParameters[17].Constants={8,0,4};rootParameters[17].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
         CD3DX12_STATIC_SAMPLER_DESC staticSampler(0, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
         staticSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         staticSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -827,10 +833,11 @@ return float4(float3(v.x<=.04045?v.x/12.92:pow((v.x+.055)/1.055,2.4),v.y<=.04045
                             const bool camera=input.BindPoint==5 && std::string(input.Name)=="CameraCB";
                             const bool sceneLights=input.BindPoint==7 && std::string(input.Name)=="SceneLightsCB";
                             const bool environment=input.BindPoint==6 && std::string(input.Name)=="EnvironmentCB";
+                            const bool ambientOcclusion=input.BindPoint==8 && std::string(input.Name)=="AmbientOcclusionCB";
                             const bool material=input.BindPoint==4 && std::string(input.Name)=="MaterialCB";
-                            if(input.Space!=0 || (!lighting&&!shadow&&!material&&!camera&&!environment&&!sceneLights) ||
+                            if(input.Space!=0 || (!lighting&&!shadow&&!material&&!camera&&!environment&&!sceneLights&&!ambientOcclusion) ||
                                 FAILED(reflection->GetConstantBufferByName(input.Name)->GetDesc(&buffer)) ||
-                                (material?(buffer.Size!=16&&buffer.Size!=32):buffer.Size!=((environment||sceneLights)?32:camera?16:lighting?sizeof(LightingConstants):sizeof(ShadowConstants))))
+                                (material?(buffer.Size!=16&&buffer.Size!=32):buffer.Size!=((environment||sceneLights)?32:(camera||ambientOcclusion)?16:lighting?sizeof(LightingConstants):sizeof(ShadowConstants))))
                                 throw std::runtime_error("instance variant still reads per-draw or incompatible constant buffer");
                         }
                     }
@@ -1936,6 +1943,7 @@ void Dx12RenderAdapter::BeginFrame()
     m_MaterialBindingTrace.clear();m_MaterialTables.clear();m_MaterialTableCount=0;m_EnvironmentTable={};m_LastMaterialTable={};m_FrameConstantsDirty=true;
     for(auto& page:m_InstancePages[m_FrameIndex])page.used=0;
     CollectFogTiming(m_FrameIndex);m_FogPassCursor=0;++m_PostFxFrame;
+    CollectAoTiming(m_FrameIndex);m_AoCursor=0;m_ActiveAo=UINT_MAX;
     m_FrameConstantPageIndex=0;m_FrameConstantAddress=0;
     for(auto& page:m_FrameConstantPages[m_FrameIndex])page.used=0;
 
@@ -2121,6 +2129,7 @@ void Dx12RenderAdapter::Present()
     const UINT submitted=m_FrameIndex;
     MoveToNextFrame();
     CollectGpuTiming(submitted);
+    CollectAoTiming(submitted);
 }
 
 void Dx12RenderAdapter::MoveToNextFrame()
@@ -2257,7 +2266,7 @@ void Dx12RenderAdapter::Shutdown()
     for(auto& p:m_SpotPso)p.Reset();m_SpotDepthBias=-1;m_SpotSlopeBias=-1;
     ReleaseParticles();
     m_RuntimeUIPso.Reset();m_RuntimeUIRoot.Reset();for(auto& buffer:m_RuntimeUIVertices)buffer.Reset();std::fill(std::begin(m_RuntimeUICapacity),std::end(m_RuntimeUICapacity),0);
-    ReleaseCustomPostFx();ReleaseFog();ReleaseEditorVisuals();ReleaseEnvironment();m_CachedBrdfGpu.Reset();ReleaseHdrTargets();m_OutputPso.Reset();m_OutputRoot.Reset();
+    ReleaseAmbientOcclusion();ReleaseCustomPostFx();ReleaseFog();ReleaseEditorVisuals();ReleaseEnvironment();m_CachedBrdfGpu.Reset();ReleaseHdrTargets();m_OutputPso.Reset();m_OutputRoot.Reset();
     ReleaseShadowResources();m_ShadowVs.Reset();m_ShadowInstanceVs.Reset();m_ShadowPso.Reset();m_ShadowInstancePso.Reset();m_ShadowDoublePso.Reset();m_ShadowDoubleInstancePso.Reset();m_ShadowMirrorPso.Reset();m_ShadowMirrorInstancePso.Reset();m_ShadowRoot.Reset();
     m_TimeHeap.Reset();for(auto& resource:m_TimeReadback)resource.Reset();m_TimeFrequency=0;
     std::fill(std::begin(m_TimePending),std::end(m_TimePending),0);
