@@ -397,7 +397,7 @@ private:
     void ApplyFog();
     void CollectFogTiming(UINT);
     void ReleaseFog();
-    bool m_HdrActive=false,m_HdrNative=false;
+    bool m_HdrActive=false; // The currently bound scene target contains linear HDR radiance.
     ScreenEffects m_ScreenEffects;
     unsigned m_PostFxFrame=0;
     AntiAliasingMode m_AntiAliasing=AntiAliasingMode::Off;

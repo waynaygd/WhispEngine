@@ -278,8 +278,10 @@ void Dx12RenderAdapter::ReleaseHdrTargets()
 void Dx12RenderAdapter::BeginHdrScene()
 {
     const bool hdrSky=m_EditorVisualFrame.active&&m_EditorVisualFrame.backgroundEnabled&&m_EditorVisualFrame.settings.background==EditorBackground::Cubemap;
-    m_HdrNative=m_EnvironmentSettings.enabled||hdrSky;
-    if (!m_HdrNative&&m_AntiAliasing==AntiAliasingMode::Off&&!m_Fog.active&&!m_ScreenEffects.Active()&&m_CustomPostFx.passes.empty())
+    // Output settings require linear scene radiance even without IBL/sky/effects.
+    // The direct SDR path is valid only for identity exposure and disabled tone mapping.
+    const bool needsOutputTransform=m_EnvironmentSettings.toneMapping||m_EnvironmentSettings.exposure!=0.f;
+    if (!needsOutputTransform&&!m_EnvironmentSettings.enabled&&!hdrSky&&m_AntiAliasing==AntiAliasingMode::Off&&!m_Fog.active&&!m_ScreenEffects.Active()&&m_CustomPostFx.passes.empty())
         return;
     ZoneScopedN("HdrSceneBegin");
     UINT w = m_ViewportTarget.rendering ? m_ViewportTarget.width : m_Width,
@@ -488,8 +490,8 @@ float4 PS(Out i):SV_Target{
     m_CmdList->SetPipelineState(m_OutputPso.Get());
     m_CmdList->SetGraphicsRootDescriptorTable(0, gpu);
     const auto& fx=m_ScreenEffects;
-    float params[20] = {m_HdrNative?m_EnvironmentSettings.exposure:0,
-                       m_HdrNative&&m_EnvironmentSettings.toneMapping ? 1.f : 0.f, float(m_AntiAliasing), float(m_PostFxFrame&1023u),
+    float params[20] = {m_EnvironmentSettings.exposure,
+                       m_EnvironmentSettings.toneMapping ? 1.f : 0.f, float(m_AntiAliasing), float(m_PostFxFrame&1023u),
                        fx.saturation,fx.contrast,fx.brightness,fx.Active()?1.f:0.f,
                        fx.tint[0],fx.tint[1],fx.tint[2],1,
                        fx.vignetteIntensity,fx.vignetteSmoothness,fx.vignetteRoundness,0,

@@ -35,5 +35,11 @@ SceneSettings SceneSettingsFromJson(const Json& j){
         b.skyIntensity=Number(a,"intensity",1,0,32);b.gradientBlend=Number(a,"blend",.65f,.1f,8);b.skyRotation=Number(a,"rotation",0,-36000,36000);b.cubemap=a.value("asset",b.cubemap);b.useIblEnvironment=a.value("useIbl",false);
         EditorVisualSettings visual;static_cast<SceneBackground&>(visual)=b;if(!ValidEditorVisualSettings(visual)||!ecs::ComponentRegistry::ValidateAssetKey(b.cubemap,ecs::AssetKind::Environment))throw std::runtime_error("Invalid scene background");
     }
+    // Legacy scenes without an authored toneMapping value used SDR unless IBL
+    // or a cubemap background selected the native HDR path. Preserve that look
+    // on read; explicit true/false always wins and the serialized schema is unchanged.
+    const bool authoredToneMapping=j.contains("environment")&&j.at("environment").contains("toneMapping");
+    if(!authoredToneMapping&&!s.environment.enabled&&s.background.background!=EditorBackground::Cubemap)
+        s.environment.toneMapping=false;
     s.primaryDirectional=j.value("primaryDirectional",std::string());if(s.primaryDirectional.size()>128)throw std::runtime_error("Invalid primary directional reference");return s;
 }

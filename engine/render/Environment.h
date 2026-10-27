@@ -5,6 +5,8 @@
 #include <string>
 struct EnvironmentSettings
 {
+    // enabled controls IBL only. Exposure (EV) and toneMapping are global scene
+    // output settings, including when IBL is disabled.
     bool enabled = false, diffuse = true, specular = true, toneMapping = true;
     std::string assetPath = "environments/studio.hdr";
     float intensity = 1, rotationDegrees = 0, exposure = 0;

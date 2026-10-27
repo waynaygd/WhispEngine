@@ -146,6 +146,9 @@ static void ShadowFlags(Dx12RenderAdapter& adapter,GlfwWindow& window,ResourceMa
 static void Gpu() {
     GlfwWindow window;Check(window.Create(320,240,"DX12 material regression"),"window");Dx12RenderAdapter adapter;Check(adapter.Initialize(&window),"DX12 initialize");
     ResourceManager resources(nullptr);resources.Load<MaterialResource>("materials/stress.material.json");RenderSystem render;render.SetResourceManager(&resources);render.SetRenderAdapter(&adapter);render.SetCameraTransform({},0,0);render.SetCameraProjection(1.04719755f,320.f/240,.1f,20);
+    // Import/tint oracles below measure the legacy SDR material transfer, without
+    // a global tone curve. HdrOutputRegression covers the enabled output transform.
+    EnvironmentSettings output;output.toneMapping=false;render.SetEnvironmentSettings(&output);
     LightingSettings light;light.directional.enabled=false;light.ambientColor={1,1,1};light.ambientIntensity=1;render.SetLightingSettings(&light);
     resources.Load<ShaderResource>("dx12/textured.hlsl");resources.Load<TextureResource>("defaults/texture");resources.Load<TextureResource>("textures/material_test.png");
     World world;

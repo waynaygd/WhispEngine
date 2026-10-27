@@ -969,6 +969,19 @@ if(ENABLE_DX12)
   set_tests_properties(IblDx12Regression PROPERTIES ENVIRONMENT "WHISP_DX12_DEBUG=1" RUN_SERIAL TRUE)
 endif()
 
+if(WIN32 AND ENABLE_DX12 AND WHISP_BUILD_PHYSICS_TESTS)
+  add_executable(HdrOutputRegression tests/HdrOutputRegression.cpp)
+  target_link_libraries(HdrOutputRegression PRIVATE Engine)
+  if(ENABLE_TRACY)
+    target_link_libraries(HdrOutputRegression PRIVATE Tracy::TracyClient)
+  endif()
+  add_dependencies(HdrOutputRegression IblFixtures Dx12Shaders)
+  add_test(NAME HdrOutputDx12Regression COMMAND HdrOutputRegression)
+  set_tests_properties(HdrOutputDx12Regression PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+    ENVIRONMENT "WHISP_DX12_DEBUG=1" RUN_SERIAL TRUE TIMEOUT 120)
+endif()
+
 if(ENABLE_DX12)
   add_executable(LightSystemRegression tests/LightSystemRegression.cpp)
   target_link_libraries(LightSystemRegression PRIVATE Engine)
