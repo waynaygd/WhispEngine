@@ -1,0 +1,12 @@
+{
+  "name": "Worn harbor paving",
+  "shaderPath": "dx12/textured.hlsl",
+  "texturePath": "textures/paving.png",
+  "baseColor": [
+    1,
+    1,
+    1,
+    1
+  ],
+  "roughness": 0.94
+}

@@ -31,6 +31,8 @@ struct Widget {
  bool enabled=true;int interaction=0; // interaction is transient, never serialized.
  float opacity=1,fontSize=24,value=1;int zOrder=0,textAlignment=0;
  bool visible=true,clipChildren=false;std::array<float,4> uv{0,0,1,1};
+ bool scrollable=false,hitTest=false; // Opt-in panel input; root overlays remain transparent.
+ float scrollY=0; // Per-instance runtime state, deliberately not serialized.
 };
 struct Document {std::string name="Canvas",root="Root";bool enabled=true;Pair referenceResolution{1920,1080};int scaleMode=0,sortOrder=0;std::vector<Widget> widgets;std::vector<std::string> requiredWidgets;std::vector<AnimationClip> animations;bool operator==(const Document&)const=default;};
 void to_json(nlohmann::json&,const Widget&);void from_json(const nlohmann::json&,Widget&);

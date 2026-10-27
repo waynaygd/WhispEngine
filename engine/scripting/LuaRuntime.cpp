@@ -19,6 +19,7 @@
 #include "../ecs/MutationQueue.h"
 #include "../ecs/PhysicsQueries.h"
 #include "../ecs/PlayerSpawn.h"
+#include "../ecs/components/MaterialComponent.h"
 #include "../ecs/components/LightComponent.h"
 #include "../ecs/components/LuaScriptComponent.h"
 #include "../ecs/components/SceneIdentityComponent.h"
@@ -68,6 +69,13 @@ sol::object DataToLua(sol::state& lua,const Json& v,const Json* schema=nullptr){
  if(v.is_primitive())return ToLua(lua,v);
  if(schema&&schema->at("type")=="Vec3")return sol::make_object(lua,ecs::Vec3{v[0].get<float>(),v[1].get<float>(),v[2].get<float>()});
  auto t=lua.create_table();if(v.is_array()){int i=1;for(auto& item:v)t[i++]=DataToLua(lua,item,schema&&schema->at("type")=="Array"?&schema->at("items"):schema);}else for(auto it=v.begin();it!=v.end();++it)t[it.key()]=DataToLua(lua,it.value(),schema?&schema->at("fields").at(it.key()):nullptr);return sol::make_object(lua,t);
+}
+Json UIJson(sol::object value,unsigned depth,unsigned& budget){
+ if(depth>12||++budget>65536)throw std::runtime_error("UI: list description budget exceeded");
+ switch(value.get_type()){
+ case sol::type::boolean:return value.as<bool>();case sol::type::number:{double n=value.as<double>();if(!std::isfinite(n))throw std::runtime_error("UI: nonfinite value");return n;}
+ case sol::type::string:return value.as<std::string>();case sol::type::table:{auto t=value.as<sol::table>();Json out=t.size()?Json::array():Json::object();if(t.size()){for(std::size_t n=1;n<=t.size();++n)out.push_back(UIJson(t[n],depth+1,budget));}else for(auto& [key,item]:t){if(key.get_type()!=sol::type::string)throw std::runtime_error("UI: expected string key");out[key.as<std::string>()]=UIJson(item,depth+1,budget);}return out;}
+ default:throw std::runtime_error("UI: unsupported list property");}
 }
 bool ValidValue(const Json& field, const Json& value) {
   const auto type = field.at("type").get<std::string>();
@@ -285,6 +293,12 @@ struct LuaRuntime::Impl {
     canvas["valid"] = [this](const ui::CanvasHandle& h) {
       return world && services.runtimeUI && services.runtimeUI->Valid(h);
     };
+    canvas["replace_children"]=[this](const ui::CanvasHandle& h,const std::string& parent,sol::table descriptions){if(descriptions.size()>2048)throw std::runtime_error("UI: widget limit");std::vector<ui::Widget> nodes;unsigned budget=0;for(std::size_t n=1;n<=descriptions.size();++n)nodes.push_back(UIJson(descriptions[n],0,budget).get<ui::Widget>());UI().ReplaceChildren(h,parent,std::move(nodes));};
+    canvas["set_scroll"]=[this](const ui::CanvasHandle& h,const std::string& id,float v){UI().SetScroll(h,id,v);};
+    canvas["get_scroll"]=[this](const ui::CanvasHandle& h,const std::string& id){return UI().Read(h,id).scrollY;};
+    canvas["scroll_limit"]=[this](const ui::CanvasHandle& h,const std::string& id){return UI().ScrollLimit(h,id);};
+    canvas["set_position"]=[this](const ui::CanvasHandle& h,const std::string& id,float x,float y){UI().Set(h,id,"position",Json::array({x,y}));};
+    canvas["set_size"]=[this](const ui::CanvasHandle& h,const std::string& id,float x,float y){UI().Set(h,id,"size",Json::array({x,y}));};
     canvas["set_text"] = [this](const ui::CanvasHandle& h,
                                 const std::string& id, const std::string& v) {
       UI().Set(h, id, "text", v);
@@ -781,6 +795,8 @@ struct LuaRuntime::Impl {
         throw std::runtime_error("World.load_scene requires active Play");
       return services.loadScene(key);
     });
+    api.set_function("get_tint",[this](ecs::Entity e){Transform(e);auto* m=world->GetComponent<ecs::MaterialComponent>(e);if(!m)throw std::runtime_error("World.get_tint requires Material");auto t=lua.create_table();for(int n=0;n<4;++n)t[n+1]=m->tint[n];return t;});
+    api.set_function("set_tint",[this](ecs::Entity e,sol::table color){Transform(e);auto* m=world->GetComponent<ecs::MaterialComponent>(e);if(!m||color.size()!=4)throw std::runtime_error("World.set_tint requires Material and RGBA");float values[4];for(int n=0;n<4;++n){values[n]=color[n+1].get<float>();if(!std::isfinite(values[n])||values[n]<0||values[n]>1)throw std::runtime_error("World.set_tint invalid color");}std::copy(values,values+4,m->tint);});
     env["World"] = api;
     auto vfx=lua.create_table();
     auto particleEntity=[this](ecs::Entity e){if(stopping||!Alive(e))throw std::runtime_error("Particles: dead/foreign Entity or stopping session");};
@@ -913,6 +929,11 @@ struct LuaRuntime::Impl {
         throw std::runtime_error("UI input host unavailable");
       return services.getUIInputMode();
     });
+    uiApi.set_function("viewport_size",[this]{auto s=services.viewportSize?services.viewportSize():ecs::Vec3{1280,800,0};return std::make_tuple(s.x,s.y);});
+    uiApi.set_function("measure_text",[](const std::string& text,float size,float width){
+      static const auto metrics=[](){auto font=ui::RasterizeFont();font.texture.pixels.clear();font.texture.pixels.shrink_to_fit();return font;}();
+      return ui::MeasureText(metrics,text,size,width);
+    });
     env["ui"] = uiApi;
     auto log = lua.create_table();
     log.set_function(
@@ -974,6 +995,8 @@ struct LuaRuntime::Impl {
       return ok;
     });
     controls.set_function("mouse_position",[this,owner](){auto p=InputAllowed(owner)&&services.mousePosition?services.mousePosition():ecs::Vec3{-1,-1,1};return std::make_tuple(p.x,p.y);});
+    controls.set_function("scroll_delta",[this,owner]{return InputAllowed(owner)&&services.scrollDelta?services.scrollDelta():0.f;});
+    controls.set_function("set_cursor",[this,owner](const std::string& shape){if(InputAllowed(owner)&&services.cursorShape)services.cursorShape(shape);});
     env["Input"] = controls;
     auto character = lua.create_table();
     character.set_function(
@@ -1056,6 +1079,7 @@ struct LuaRuntime::Impl {
     camera.set_function("screen_ray",[this,selectionPermission](ecs::Entity e,float x,float y,float aspect){selectionPermission(false);auto s=ecs::ResolveCameraState(*world,e,aspect);auto [o,d]=ecs::CameraScreenRay(s,x,y);auto t=lua.create_table();t["origin"]=o;t["direction"]=d;return t;});
     camera.set_function("pointer_ray",[this,owner,selectionPermission](ecs::Entity e)->sol::object{selectionPermission(false);auto p=InputAllowed(owner)&&services.mousePosition?services.mousePosition():ecs::Vec3{-1,-1,1};if(p.x<0||p.x>1||p.y<0||p.y>1)return sol::make_object(lua,sol::nil);auto [o,d]=ecs::CameraScreenRay(ecs::ResolveCameraState(*world,e,p.z),p.x,p.y);auto t=lua.create_table();t["origin"]=o;t["direction"]=d;return sol::make_object(lua,t);});
     camera.set_function("set_orthographic_size",[this,selectionPermission](ecs::Entity e,float size){selectionPermission(false);Transform(e);auto* c=world->GetComponent<ecs::CameraComponent>(e);if(!c)throw std::runtime_error("Camera component required");auto v=*c;v.orthographicSize=size;ecs::ValidateCamera(v);*c=v;});
+    camera.set_function("world_to_screen",[this,selectionPermission](ecs::Entity e,ecs::Vec3 p,float aspect){selectionPermission(false);Vector(p);auto s=ecs::ResolveCameraState(*world,e,aspect);auto& m=s.viewProjection;float w=m[3]*p.x+m[7]*p.y+m[11]*p.z+m[15];if(w<=0)throw std::runtime_error("Point behind Camera");return ecs::Vec3{((m[0]*p.x+m[4]*p.y+m[8]*p.z+m[12])/w+1)*.5f,(1-(m[1]*p.x+m[5]*p.y+m[9]*p.z+m[13])/w)*.5f,(m[2]*p.x+m[6]*p.y+m[10]*p.z+m[14])/w};});
     camera.set_function("get_position",[spatial](ecs::Entity e){return spatial(e).pose.position;});
     camera.set_function("get_forward",[spatial](ecs::Entity e){return spatial(e).forward;});
     camera.set_function("get_right",[spatial](ecs::Entity e){return spatial(e).right;});

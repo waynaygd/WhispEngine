@@ -112,6 +112,7 @@ void EditorLayer::DrawUIDocumentProperties(Application& app,const std::string& k
  }
  if(managed){changed|=ImGui::DragFloat2("Content Fixed Size",w.size.data(),1,0,100000,"%.1f",ImGuiSliderFlags_AlwaysClamp);changed|=ImGui::Checkbox("Stretch Width",&w.stretch[0]);changed|=ImGui::Checkbox("Stretch Height",&w.stretch[1]);}
  if(w.type=="Panel"||w.type=="Button")changed|=ImGui::Checkbox("Clip Children",&w.clipChildren);
+ if(w.type=="Panel"){if(ImGui::Checkbox("Scrollable",&w.scrollable)){if(w.scrollable)w.clipChildren=true;changed=true;}changed|=ImGui::Checkbox("Block Pointer",&w.hitTest);}
  }
    if(ImGui::CollapsingHeader("Appearance",ImGuiTreeNodeFlags_DefaultOpen)){
     changed|=ImGui::ColorEdit4(w.type=="Button"?"Normal Color":"Color",w.color.data());changed|=ImGui::SliderFloat("Opacity",&w.opacity,0,1);

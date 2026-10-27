@@ -17,8 +17,8 @@
         0
       ],
       "size": [
-        1280,
-        800
+        0,
+        0
       ],
       "text": "",
       "color": [
@@ -27,91 +27,143 @@
         0,
         0
       ],
-      "fontSize": 19
+      "fontSize": 18,
+      "anchorMax": [
+        1,
+        1
+      ]
     },
     {
-      "id": "Top",
+      "id": "HUD",
       "type": "Panel",
       "parent": "Root",
       "position": [
         18,
-        16
+        -18
       ],
       "size": [
-        1244,
-        74
+        310,
+        102
       ],
       "text": "",
       "color": [
-        0.08,
-        0.12,
-        0.14,
-        0.96
+        0.075,
+        0.095,
+        0.095,
+        0.98
+      ],
+      "fontSize": 18,
+      "anchorMin": [
+        0,
+        1
+      ],
+      "anchorMax": [
+        0,
+        1
+      ],
+      "pivot": [
+        0,
+        1
+      ],
+      "hitTest": true
+    },
+    {
+      "id": "PlayerPortrait",
+      "type": "Image",
+      "parent": "HUD",
+      "position": [
+        9,
+        9
+      ],
+      "size": [
+        68,
+        84
+      ],
+      "text": "",
+      "color": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "fontSize": 18,
+      "texture": "textures/player.png"
+    },
+    {
+      "id": "PlayerName",
+      "type": "Text",
+      "parent": "HUD",
+      "position": [
+        90,
+        10
+      ],
+      "size": [
+        210,
+        24
+      ],
+      "text": "ЛЕВ ОРИН",
+      "color": [
+        0.84,
+        0.7,
+        0.46,
+        1
       ],
       "fontSize": 19
     },
     {
-      "id": "Title",
+      "id": "PlayerRole",
       "type": "Text",
-      "parent": "Top",
+      "parent": "HUD",
       "position": [
-        18,
-        8
+        90,
+        36
       ],
       "size": [
-        700,
-        27
+        210,
+        20
       ],
-      "text": "ДЕЛО О ПРОПАВШЕМ СВЕТЕ",
+      "text": "Участковый следователь",
       "color": [
-        0.87,
-        0.75,
-        0.5,
+        0.52,
+        0.62,
+        0.6,
         1
       ],
-      "fontSize": 23
-    },
-    {
-      "id": "Hint",
-      "type": "Text",
-      "parent": "Top",
-      "position": [
-        18,
-        40
-      ],
-      "size": [
-        900,
-        24
-      ],
-      "text": "ЛКМ — идти / говорить   •   J — журнал   •   C — навыки   •   Z / X — масштаб",
-      "color": [
-        0.73,
-        0.8,
-        0.78,
-        1
-      ],
-      "fontSize": 16
+      "fontSize": 14
     },
     {
       "id": "JournalToggle",
       "type": "Button",
-      "parent": "Top",
+      "parent": "HUD",
       "position": [
-        1000,
-        18
+        90,
+        64
       ],
       "size": [
-        105,
-        36
+        98,
+        28
       ],
       "text": "",
       "color": [
-        0.22,
-        0.3,
-        0.31,
+        0.17,
+        0.21,
+        0.2,
         1
       ],
-      "fontSize": 19
+      "fontSize": 18,
+      "hoverColor": [
+        0.29,
+        0.31,
+        0.26,
+        1
+      ],
+      "pressedColor": [
+        0.35,
+        0.29,
+        0.18,
+        1
+      ],
+      "transitionDuration": 0.12
     },
     {
       "id": "JournalToggleText",
@@ -119,41 +171,54 @@
       "parent": "JournalToggle",
       "position": [
         9,
-        7
+        5
       ],
       "size": [
-        100,
-        25
+        90,
+        22
       ],
       "text": "Журнал",
       "color": [
-        0.94,
-        0.87,
-        0.7,
+        0.85,
+        0.81,
+        0.69,
         1
       ],
-      "fontSize": 17
+      "fontSize": 16
     },
     {
       "id": "SkillsToggle",
       "type": "Button",
-      "parent": "Top",
+      "parent": "HUD",
       "position": [
-        1120,
-        18
+        194,
+        64
       ],
       "size": [
-        105,
-        36
+        98,
+        28
       ],
       "text": "",
       "color": [
-        0.22,
-        0.3,
-        0.31,
+        0.17,
+        0.21,
+        0.2,
         1
       ],
-      "fontSize": 19
+      "fontSize": 18,
+      "hoverColor": [
+        0.29,
+        0.31,
+        0.26,
+        1
+      ],
+      "pressedColor": [
+        0.35,
+        0.29,
+        0.18,
+        1
+      ],
+      "transitionDuration": 0.12
     },
     {
       "id": "SkillsToggleText",
@@ -161,20 +226,20 @@
       "parent": "SkillsToggle",
       "position": [
         9,
-        7
+        5
       ],
       "size": [
-        100,
-        25
+        90,
+        22
       ],
       "text": "Навыки",
       "color": [
-        0.94,
-        0.87,
-        0.7,
+        0.85,
+        0.81,
+        0.69,
         1
       ],
-      "fontSize": 17
+      "fontSize": 16
     },
     {
       "id": "Status",
@@ -182,42 +247,89 @@
       "parent": "Root",
       "position": [
         26,
-        100
+        -132
       ],
       "size": [
-        950,
-        28
+        650,
+        52
       ],
-      "text": "Причал Девять. Найдите смотрительницу Марту у конторы.",
+      "text": "",
       "color": [
-        0.88,
-        0.85,
-        0.72,
+        0.83,
+        0.79,
+        0.63,
         1
       ],
-      "fontSize": 18
+      "fontSize": 17,
+      "anchorMin": [
+        0,
+        1
+      ],
+      "anchorMax": [
+        0,
+        1
+      ]
+    },
+    {
+      "id": "Destination",
+      "type": "Image",
+      "parent": "Root",
+      "position": [
+        0,
+        0
+      ],
+      "size": [
+        26,
+        18
+      ],
+      "text": "",
+      "color": [
+        0.72,
+        0.86,
+        0.76,
+        1
+      ],
+      "fontSize": 18,
+      "texture": "textures/destination.png",
+      "visible": true,
+      "opacity": 0,
+      "zOrder": -2
     },
     {
       "id": "Dialogue",
       "type": "Panel",
       "parent": "Root",
       "position": [
-        270,
-        335
+        -16,
+        16
       ],
       "size": [
-        990,
-        445
+        440,
+        -32
       ],
       "text": "",
       "color": [
-        0.065,
-        0.09,
-        0.105,
+        0.075,
+        0.095,
+        0.095,
         0.98
       ],
-      "fontSize": 19,
-      "visible": false
+      "fontSize": 18,
+      "anchorMin": [
+        1,
+        0
+      ],
+      "anchorMax": [
+        1,
+        1
+      ],
+      "pivot": [
+        1,
+        0
+      ],
+      "visible": false,
+      "hitTest": true,
+      "clipChildren": true
     },
     {
       "id": "Portrait",
@@ -225,11 +337,11 @@
       "parent": "Dialogue",
       "position": [
         18,
-        20
+        18
       ],
       "size": [
-        136,
-        170
+        74,
+        94
       ],
       "text": "",
       "color": [
@@ -238,7 +350,7 @@
         1,
         1
       ],
-      "fontSize": 19,
+      "fontSize": 18,
       "texture": "textures/keeper.png"
     },
     {
@@ -246,299 +358,261 @@
       "type": "Text",
       "parent": "Dialogue",
       "position": [
-        177,
-        18
+        108,
+        22
       ],
       "size": [
-        760,
-        32
+        270,
+        80
       ],
       "text": "",
       "color": [
-        0.89,
-        0.74,
-        0.46,
-        1
-      ],
-      "fontSize": 23
-    },
-    {
-      "id": "Line",
-      "type": "Text",
-      "parent": "Dialogue",
-      "position": [
-        177,
-        62
-      ],
-      "size": [
-        780,
-        132
-      ],
-      "text": "",
-      "color": [
-        0.88,
-        0.89,
-        0.82,
+        0.86,
+        0.7,
+        0.43,
         1
       ],
       "fontSize": 21
-    },
-    {
-      "id": "Feedback",
-      "type": "Text",
-      "parent": "Dialogue",
-      "position": [
-        177,
-        192
-      ],
-      "size": [
-        780,
-        30
-      ],
-      "text": "",
-      "color": [
-        0.65,
-        0.8,
-        0.72,
-        1
-      ],
-      "fontSize": 17
-    },
-    {
-      "id": "Choice1",
-      "type": "Button",
-      "parent": "Dialogue",
-      "position": [
-        177,
-        224
-      ],
-      "size": [
-        780,
-        40
-      ],
-      "text": "",
-      "color": [
-        0.15,
-        0.21,
-        0.23,
-        1
-      ],
-      "fontSize": 19,
-      "visible": false
-    },
-    {
-      "id": "ChoiceText1",
-      "type": "Text",
-      "parent": "Choice1",
-      "position": [
-        12,
-        8
-      ],
-      "size": [
-        752,
-        27
-      ],
-      "text": "",
-      "color": [
-        0.89,
-        0.84,
-        0.69,
-        1
-      ],
-      "fontSize": 18
-    },
-    {
-      "id": "Choice2",
-      "type": "Button",
-      "parent": "Dialogue",
-      "position": [
-        177,
-        270
-      ],
-      "size": [
-        780,
-        40
-      ],
-      "text": "",
-      "color": [
-        0.15,
-        0.21,
-        0.23,
-        1
-      ],
-      "fontSize": 19,
-      "visible": false
-    },
-    {
-      "id": "ChoiceText2",
-      "type": "Text",
-      "parent": "Choice2",
-      "position": [
-        12,
-        8
-      ],
-      "size": [
-        752,
-        27
-      ],
-      "text": "",
-      "color": [
-        0.89,
-        0.84,
-        0.69,
-        1
-      ],
-      "fontSize": 18
-    },
-    {
-      "id": "Choice3",
-      "type": "Button",
-      "parent": "Dialogue",
-      "position": [
-        177,
-        316
-      ],
-      "size": [
-        780,
-        40
-      ],
-      "text": "",
-      "color": [
-        0.15,
-        0.21,
-        0.23,
-        1
-      ],
-      "fontSize": 19,
-      "visible": false
-    },
-    {
-      "id": "ChoiceText3",
-      "type": "Text",
-      "parent": "Choice3",
-      "position": [
-        12,
-        8
-      ],
-      "size": [
-        752,
-        27
-      ],
-      "text": "",
-      "color": [
-        0.89,
-        0.84,
-        0.69,
-        1
-      ],
-      "fontSize": 18
-    },
-    {
-      "id": "Choice4",
-      "type": "Button",
-      "parent": "Dialogue",
-      "position": [
-        177,
-        362
-      ],
-      "size": [
-        780,
-        40
-      ],
-      "text": "",
-      "color": [
-        0.15,
-        0.21,
-        0.23,
-        1
-      ],
-      "fontSize": 19,
-      "visible": false
-    },
-    {
-      "id": "ChoiceText4",
-      "type": "Text",
-      "parent": "Choice4",
-      "position": [
-        12,
-        8
-      ],
-      "size": [
-        752,
-        27
-      ],
-      "text": "",
-      "color": [
-        0.89,
-        0.84,
-        0.69,
-        1
-      ],
-      "fontSize": 18
     },
     {
       "id": "CloseDialogue",
       "type": "Button",
       "parent": "Dialogue",
       "position": [
-        18,
-        210
+        -10,
+        10
       ],
       "size": [
-        136,
-        37
+        28,
+        28
       ],
       "text": "",
       "color": [
-        0.29,
-        0.22,
+        0.18,
         0.2,
+        0.18,
         1
       ],
-      "fontSize": 19
+      "fontSize": 18,
+      "hoverColor": [
+        0.29,
+        0.31,
+        0.26,
+        1
+      ],
+      "pressedColor": [
+        0.35,
+        0.29,
+        0.18,
+        1
+      ],
+      "transitionDuration": 0.12,
+      "anchorMin": [
+        1,
+        0
+      ],
+      "anchorMax": [
+        1,
+        0
+      ],
+      "pivot": [
+        1,
+        0
+      ]
     },
     {
       "id": "CloseLabel",
       "type": "Text",
       "parent": "CloseDialogue",
       "position": [
-        10,
-        9
+        8,
+        3
       ],
       "size": [
-        130,
-        25
+        20,
+        22
       ],
-      "text": "Уйти",
+      "text": "×",
       "color": [
-        0.94,
-        0.84,
+        0.82,
+        0.75,
+        0.6,
+        1
+      ],
+      "fontSize": 22
+    },
+    {
+      "id": "ConversationLabel",
+      "type": "Text",
+      "parent": "Dialogue",
+      "position": [
+        18,
+        120
+      ],
+      "size": [
+        404,
+        24
+      ],
+      "text": "РАЗГОВОР",
+      "color": [
+        0.48,
+        0.57,
+        0.53,
+        1
+      ],
+      "fontSize": 14
+    },
+    {
+      "id": "HistoryList",
+      "type": "Panel",
+      "parent": "Dialogue",
+      "position": [
+        18,
+        150
+      ],
+      "size": [
+        -36,
+        -166
+      ],
+      "text": "",
+      "color": [
+        0.065,
+        0.085,
+        0.085,
+        1
+      ],
+      "fontSize": 18,
+      "anchorMax": [
+        1,
+        0.6
+      ],
+      "clipChildren": true,
+      "scrollable": true
+    },
+    {
+      "id": "Responses",
+      "type": "Panel",
+      "parent": "Dialogue",
+      "position": [
+        18,
+        10
+      ],
+      "size": [
+        -36,
+        -86
+      ],
+      "text": "",
+      "color": [
+        0.065,
+        0.085,
+        0.085,
+        1
+      ],
+      "fontSize": 18,
+      "anchorMin": [
+        0,
+        0.6
+      ],
+      "anchorMax": [
+        1,
+        1
+      ],
+      "clipChildren": true,
+      "scrollable": true
+    },
+    {
+      "id": "Feedback",
+      "type": "Text",
+      "parent": "Dialogue",
+      "position": [
+        20,
+        -75
+      ],
+      "size": [
+        404,
+        54
+      ],
+      "text": "",
+      "color": [
+        0.6,
+        0.78,
         0.68,
         1
       ],
-      "fontSize": 17
+      "fontSize": 16,
+      "anchorMin": [
+        0,
+        1
+      ],
+      "anchorMax": [
+        0,
+        1
+      ]
+    },
+    {
+      "id": "ScrollHint",
+      "type": "Text",
+      "parent": "Dialogue",
+      "position": [
+        20,
+        -20
+      ],
+      "size": [
+        404,
+        19
+      ],
+      "text": "Колесо мыши — история / варианты",
+      "color": [
+        0.42,
+        0.5,
+        0.46,
+        1
+      ],
+      "fontSize": 13,
+      "anchorMin": [
+        0,
+        1
+      ],
+      "anchorMax": [
+        0,
+        1
+      ]
     },
     {
       "id": "Journal",
       "type": "Panel",
       "parent": "Root",
       "position": [
-        20,
-        145
+        18,
+        -138
       ],
       "size": [
-        360,
-        370
+        370,
+        225
       ],
       "text": "",
       "color": [
-        0.08,
-        0.12,
-        0.14,
-        0.96
+        0.075,
+        0.095,
+        0.095,
+        0.98
       ],
-      "fontSize": 19,
-      "visible": false
+      "fontSize": 18,
+      "anchorMin": [
+        0,
+        1
+      ],
+      "anchorMax": [
+        0,
+        1
+      ],
+      "pivot": [
+        0,
+        1
+      ],
+      "visible": false,
+      "hitTest": true,
+      "zOrder": 2
     },
     {
       "id": "JournalTitle",
@@ -546,20 +620,20 @@
       "parent": "Journal",
       "position": [
         16,
-        14
+        15
       ],
       "size": [
-        330,
-        30
+        340,
+        29
       ],
-      "text": "ЖУРНАЛ",
+      "text": "ДЕЛО О ПРОПАВШЕМ СВЕТЕ",
       "color": [
-        0.87,
-        0.74,
-        0.5,
+        0.84,
+        0.7,
+        0.46,
         1
       ],
-      "fontSize": 23
+      "fontSize": 18
     },
     {
       "id": "Quest",
@@ -570,60 +644,53 @@
         60
       ],
       "size": [
-        330,
-        140
+        338,
+        155
       ],
       "text": "",
       "color": [
-        0.85,
-        0.88,
-        0.83,
+        0.78,
+        0.81,
+        0.75,
         1
       ],
-      "fontSize": 19
-    },
-    {
-      "id": "History",
-      "type": "Text",
-      "parent": "Journal",
-      "position": [
-        16,
-        218
-      ],
-      "size": [
-        330,
-        140
-      ],
-      "text": "",
-      "color": [
-        0.63,
-        0.74,
-        0.74,
-        1
-      ],
-      "fontSize": 16
+      "fontSize": 18
     },
     {
       "id": "Skills",
       "type": "Panel",
       "parent": "Root",
       "position": [
-        900,
-        130
+        18,
+        -138
       ],
       "size": [
-        360,
-        186
+        370,
+        210
       ],
       "text": "",
       "color": [
-        0.08,
-        0.12,
-        0.14,
-        0.96
+        0.075,
+        0.095,
+        0.095,
+        0.98
       ],
-      "fontSize": 19,
-      "visible": false
+      "fontSize": 18,
+      "anchorMin": [
+        0,
+        1
+      ],
+      "anchorMax": [
+        0,
+        1
+      ],
+      "pivot": [
+        0,
+        1
+      ],
+      "visible": false,
+      "hitTest": true,
+      "zOrder": 2
     },
     {
       "id": "SkillsTitle",
@@ -631,20 +698,20 @@
       "parent": "Skills",
       "position": [
         16,
-        14
+        15
       ],
       "size": [
-        330,
-        30
+        340,
+        29
       ],
       "text": "НАВЫКИ",
       "color": [
-        0.87,
-        0.74,
-        0.5,
+        0.84,
+        0.7,
+        0.46,
         1
       ],
-      "fontSize": 23
+      "fontSize": 18
     },
     {
       "id": "SkillsText",
@@ -655,17 +722,17 @@
         60
       ],
       "size": [
-        330,
-        115
+        338,
+        140
       ],
       "text": "",
       "color": [
-        0.85,
-        0.88,
-        0.83,
+        0.78,
+        0.81,
+        0.75,
         1
       ],
-      "fontSize": 19
+      "fontSize": 18
     }
   ]
 }

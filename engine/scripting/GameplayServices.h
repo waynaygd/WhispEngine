@@ -41,6 +41,9 @@ struct GameplayServices {
     std::function<ecs::Vec3()> mouseDelta;
     // normalized top-left viewport x/y, aspect in z; negative x means unavailable
     std::function<ecs::Vec3()> mousePosition;
+    std::function<ecs::Vec3()> viewportSize;
+    std::function<float()> scrollDelta;
+    std::function<void(const std::string&)> cursorShape;
     std::function<bool()> cursorCaptured;
     std::function<bool(bool)> captureCursor;
     std::function<bool(const std::string&,const std::string&)> bindAction;

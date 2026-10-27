@@ -31,11 +31,17 @@ DrawList LayoutDocument(const Document& document,float width,float height,const 
  const float scale=std::min(width/document.referenceResolution[0],height/document.referenceResolution[1]);
  const Rect screen{0,0,width,height};const std::array<float,4> solid{.5f/atlas.texture.width,.5f/atlas.texture.height,.5f/atlas.texture.width,.5f/atlas.texture.height};
  auto quad=[&](Rect r,const std::array<float,4>& uv,Color color,Rect clip,RenderTextureHandle texture){if(r.w<=0||r.h<=0||clip.w<=0||clip.h<=0||color[3]<=0||out.vertices.size()+6>131072)return;if(Intersect(r,clip).w<=0||Intersect(r,clip).h<=0)return;unsigned first=unsigned(out.vertices.size());out.vertices.insert(out.vertices.end(),{{r.x,r.y,uv[0],uv[1],color},{r.x+r.w,r.y,uv[2],uv[1],color},{r.x+r.w,r.y+r.h,uv[2],uv[3],color},{r.x,r.y,uv[0],uv[1],color},{r.x+r.w,r.y+r.h,uv[2],uv[3],color},{r.x,r.y+r.h,uv[0],uv[3],color}});out.commands.push_back({first,6,clip,texture});};
+ const auto logicalRects=ComputeLayout(document,{0,0,width/scale,height/scale});
  Walk(document,width,height,[&](const Widget& w,Rect r,Rect clip,float opacity){
   auto color=w.type=="Button"?((!w.enabled||w.interaction==3)?w.disabledColor:w.interaction==2?w.pressedColor:w.interaction==1?w.hoverColor:w.color):w.color;color[3]*=opacity;
   if(w.visualColor)color=*w.visualColor; color[3]*=w.visualColor?opacity:1;
   const unsigned firstCommand=unsigned(out.commands.size());
-  if(w.type=="Panel"||w.type=="Button")quad(r,solid,color,clip,font);
+  if(w.type=="Panel"||w.type=="Button"){
+   quad(r,solid,color,clip,font);
+   if(w.scrollable){auto parent=logicalRects.at(w.id);float bottom=parent.y+parent.h;for(auto& child:document.widgets)if(child.parent==w.id&&child.visible){auto c=logicalRects.at(child.id);bottom=std::max(bottom,c.y+c.h+w.scrollY);}float limit=bottom-parent.y-parent.h;
+    if(limit>0){float thumb=std::max(16.f*scale,r.h*parent.h/(parent.h+limit));quad({r.x+r.w-3*scale,r.y,2*scale,r.h},solid,{.18f,.24f,.22f,opacity},clip,font);quad({r.x+r.w-3*scale,r.y+(r.h-thumb)*std::clamp(w.scrollY/limit,0.f,1.f),2*scale,thumb},solid,{.65f,.57f,.38f,opacity},clip,font);}
+   }
+  }
   else if(w.type=="ProgressBar"){quad(r,solid,color,clip,font);auto fill=w.fillColor;fill[3]*=opacity;Rect bar=r;bar.w*=w.visualValue.value_or(w.value);quad(bar,solid,fill,clip,font);}
   else if(w.type=="Image"){auto texture=resolve(w.texture);if(texture.IsValid())quad(r,w.uv,color,clip,texture);else {auto fallback=Color{1,0,1,opacity};quad(r,solid,fallback,clip,font);out.errors.push_back("Missing or loading Image texture: "+w.texture);}}
   else if(w.type=="Text"){
@@ -74,11 +80,11 @@ void RuntimeUI::Sync(const ecs::World& source,ResourceManager& resources){
     auto to=std::find_if(next.widgets.begin(),next.widgets.end(),[&](auto& w){return w.id==it->first;});
     if(old==i.state.widgets.end()||to==next.widgets.end()||old->type!=to->type){it=i.overrides.erase(it);continue;}
     auto mask=it->second;if(mask&1)to->text=old->text;if(mask&2)to->visible=old->visible;if(mask&4)to->opacity=old->opacity;
-    if(mask&8)to->value=old->value;if(mask&16)to->texture=old->texture;if(mask&32)to->color=old->color;if(mask&64)to->enabled=old->enabled;++it;
+    if(mask&8)to->value=old->value;if(mask&16)to->texture=old->texture;if(mask&32)to->color=old->color;if(mask&64)to->enabled=old->enabled;if(mask&128)to->position=old->position;if(mask&256)to->size=old->size;++it;
    }else i.overrides.clear();
    i.animation={};i.styleDirty=true;i.state=std::move(next);i.resource=c->document;i.version=asset->GetVersion();i.asset=asset;i.serial=nextSerial++;
   }
-  if(i.styles.Changed(*asset->GetData().document,resources,i.styleDirty)||i.styleDirty){for(size_t n=0;n<i.state.widgets.size();++n){auto& w=i.state.widgets[n];i.styles.Resolve(w,asset->GetData().document->widgets[n],i.overrides[w.id]);}i.styleDirty=false;}
+  if(i.styles.Changed(*asset->GetData().document,resources,i.styleDirty)||i.styleDirty){for(auto& authored:asset->GetData().document->widgets){auto at=std::find_if(i.state.widgets.begin(),i.state.widgets.end(),[&](const auto& w){return w.id==authored.id;});if(at!=i.state.widgets.end())i.styles.Resolve(*at,authored,i.overrides[at->id]);}i.styleDirty=false;}
   if(c->enabled&&i.state.enabled)order.push_back(e);
  }
  std::erase_if(instances,[&](auto& p){return !live.contains(p.first);});
@@ -116,6 +122,7 @@ void RuntimeUI::Set(const CanvasHandle& h,const std::string& id,const std::strin
  else if(field=="image"){type("Image");auto key=value.get<std::string>();if(!ValidUTF8(key)||!ecs::ComponentRegistry::ValidateAssetKey(key,ecs::AssetKind::Texture))throw std::runtime_error("UI: unsafe Image texture key");w.texture=std::move(key);bit=16;}
  else if(field=="color"){if(!value.is_array()||value.size()!=4)throw std::runtime_error("UI: Color requires four channels");Color next;for(int n=0;n<4;++n){if(!value[n].is_number())throw std::runtime_error("UI: Color channel must be numeric");next[n]=value[n].get<float>();if(!std::isfinite(next[n])||next[n]<0||next[n]>1)throw std::runtime_error("UI: invalid Color channel");}w.color=next;bit=32;}
  else if(field=="enabled"){type("Button");w.enabled=boolean();bit=64;}
+ else if(field=="position"||field=="size"){if(!value.is_array()||value.size()!=2)throw std::runtime_error("UI: expected pair");Pair p;for(int a=0;a<2;++a){p[a]=value[a].get<float>();if(!std::isfinite(p[a])||std::abs(p[a])>100000||(field=="size"&&p[a]<0))throw std::runtime_error("UI: invalid geometry");}if(field=="position"){w.position=p;bit=128;}else{w.size=p;bit=256;}}
  else throw std::runtime_error("UI: unknown widget property");
  i.overrides[id]|=bit;
  if((field=="visible"&&!w.visible)||(field=="opacity"&&w.opacity==0)||(field=="enabled"&&!w.enabled)){
@@ -127,12 +134,42 @@ void RuntimeUI::Set(const CanvasHandle& h,const std::string& id,const std::strin
   else if(affected(hovered,hoverWidget)){const_cast<Widget&>(Read(h,hoverWidget)).interaction=0;hovered={};hoverWidget.clear();}
  }
 }
+void RuntimeUI::ReplaceChildren(const CanvasHandle& h,const std::string& parent,std::vector<Widget> nodes){
+ auto& instance=Resolve(h);auto& container=Read(h,parent);if(container.type!="Panel")throw std::runtime_error("UI: list parent must be Panel");
+ const float oldScroll=container.scrollY;const bool scrolling=container.scrollable;auto next=instance.state;std::set<std::string> removed{parent};bool more=true;
+ while(more){more=false;for(auto& w:next.widgets)if(removed.contains(w.parent)&&removed.insert(w.id).second)more=true;}
+ removed.erase(parent);for(auto& required:next.requiredWidgets)if(removed.contains(required))throw std::runtime_error("UI: cannot remove required Widget");
+ std::erase_if(next.widgets,[&](auto& w){return removed.contains(w.id);});std::set<std::string> added;
+ for(auto& w:nodes){if(w.id==parent||!added.insert(w.id).second)throw std::runtime_error("UI: duplicate list ID");}
+ for(auto& w:nodes)if(w.parent!=parent&&!added.contains(w.parent))throw std::runtime_error("UI: dynamic child escapes list parent");
+ next.widgets.insert(next.widgets.end(),nodes.begin(),nodes.end());auto error=Validate(next);if(!error.empty())throw std::runtime_error(error);
+ CancelPointer();instance.state=std::move(next);for(auto& id:removed)instance.overrides.erase(id);
+ SetScroll(h,parent,scrolling?oldScroll:0);
+}
+float RuntimeUI::ScrollLimit(const CanvasHandle& h,const std::string& id)const{
+ auto& document=Resolve(h).state;auto& panel=Read(h,id);if(!panel.scrollable)return 0;
+ const float scale=std::min(viewportWidth/document.referenceResolution[0],viewportHeight/document.referenceResolution[1]);
+ auto rects=ComputeLayout(document,{0,0,viewportWidth/scale,viewportHeight/scale});auto r=rects.at(id);float bottom=r.y+r.h;
+ for(auto& w:document.widgets)if(w.parent==id&&w.visible){auto c=rects.at(w.id);bottom=std::max(bottom,c.y+c.h+panel.scrollY);}
+ return std::clamp(bottom-r.y-r.h,0.f,100000.f);
+}
+void RuntimeUI::SetScroll(const CanvasHandle& h,const std::string& id,float value){
+ if(!std::isfinite(value))throw std::runtime_error("UI: nonfinite scroll");auto& w=const_cast<Widget&>(Read(h,id));if(!w.scrollable){if(value==0)return;throw std::runtime_error("UI: panel is not scrollable");}
+ w.scrollY=std::clamp(value,0.f,ScrollLimit(h,id));CancelPointer();
+}
+bool RuntimeUI::Scroll(float x,float y,float width,float height,float delta){
+ if(width<1||height<1)return false;viewportWidth=width;viewportHeight=height;
+ if(!std::isfinite(delta)||delta==0)return false;CanvasHandle target;std::string id;
+ for(auto e:order){auto h=Get(e);Walk(Resolve(h).state,width,height,[&](const Widget& w,Rect r,Rect clip,float opacity){if(w.scrollable&&opacity>0&&Contains(Intersect(r,clip),x,y)){target=h;id=w.id;}});}
+ if(!Valid(target))return false;SetScroll(target,id,Read(target,id).scrollY-delta*48);return true;
+}
 void RuntimeUI::Emit(const CanvasHandle& h,const std::string& widget,const std::string& type){if(events.size()<1024)events.push_back({h,widget,type});}
 bool RuntimeUI::Pointer(float x,float y,float width,float height,bool down,bool available){
+ if(width>=1&&height>=1){viewportWidth=width;viewportHeight=height;}
  if(!available){CancelPointer();pointerDown=down;const bool consumed=gestureOwned;if(!down)gestureOwned=false;return consumed;}
- CanvasHandle target;std::string id;
+ CanvasHandle target;std::string id;bool blocked=false;
  for(auto e:order){auto* canvas=world->GetComponent<ecs::UICanvasComponent>(e);if(!canvas||!canvas->enabled)continue;
-  auto h=Get(e);Walk(instances.at(e).state,width,height,[&](const Widget& w,Rect r,Rect clip,float opacity){if(w.type=="Button"&&w.enabled&&opacity>0&&Contains(Intersect(r,clip),x,y)){target=h;id=w.id;}});
+  auto h=Get(e);Walk(instances.at(e).state,width,height,[&](const Widget& w,Rect r,Rect clip,float opacity){if(opacity>0&&Contains(Intersect(r,clip),x,y)){if(w.hitTest||w.scrollable){blocked=true;target={};id.clear();}if(w.type=="Button"&&w.enabled){target=h;id=w.id;}}});
  }
  auto same=[](const CanvasHandle& a,const std::string& x,const CanvasHandle& b,const std::string& y){return a.entity==b.entity&&a.session==b.session&&a.serial==b.serial&&x==y;};
 
@@ -143,9 +180,10 @@ bool RuntimeUI::Pointer(float x,float y,float width,float height,bool down,bool 
  if(down&&!pointerDown&&Valid(target)){pressed=target;pressWidget=id;gestureOwned=true;Emit(pressed,pressWidget,"pointer_down");}
  if(!down&&pointerDown&&Valid(pressed)){Emit(pressed,pressWidget,"pointer_up");if(same(pressed,pressWidget,target,id))Emit(pressed,pressWidget,"click");pressed={};pressWidget.clear();}
  for(auto& [e,i]:instances)for(auto& w:i.state.widgets)w.interaction=same(pressed,pressWidget,Get(e),w.id)?2:same(hovered,hoverWidget,Get(e),w.id)?1:0;
- pointerDown=down;const bool consumed=Valid(target)||gestureOwned;if(!down)gestureOwned=false;return consumed;
+ pointerDown=down;const bool consumed=blocked||Valid(target)||gestureOwned;if(!down)gestureOwned=false;return consumed;
 }
 DrawList RuntimeUI::Build(const ecs::World& source,ResourceManager& resources,float width,float height,const FontAtlas& atlas,RenderTextureHandle font,const TextureResolver& textures,const FontResolver& fonts){
+ if(width>=1&&height>=1){viewportWidth=width;viewportHeight=height;}
  Sync(source,resources);DrawList out;out.width=width;out.height=height;
  for(auto e:order){out.errors.insert(out.errors.end(),instances.at(e).styles.errors.begin(),instances.at(e).styles.errors.end());auto draw=LayoutDocument(instances.at(e).state,width,height,atlas,font,textures,fonts);unsigned offset=unsigned(out.vertices.size());if(offset+draw.vertices.size()>131072){out.errors.push_back("UI vertex budget exceeded");break;}out.vertices.insert(out.vertices.end(),draw.vertices.begin(),draw.vertices.end());for(auto command:draw.commands){command.first+=offset;out.commands.push_back(command);}out.errors.insert(out.errors.end(),draw.errors.begin(),draw.errors.end());}if(!out.errors.empty()&&Logger::Get().RuntimeSessionActive()){
   // Loading is a normal resource state, not a completed-session error.

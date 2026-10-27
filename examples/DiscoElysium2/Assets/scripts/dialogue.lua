@@ -27,7 +27,7 @@ function M.prepare(graph)
     end
     assert(nodes[graph.start], 'Missing dialogue entry')
     for _, n in ipairs(graph.nodes) do
-        assert(#n.choices <= 4, 'Too many response widgets')
+
         for _, c in ipairs(n.choices) do
             for _, target in ipairs({c.next, c.success, c.failure}) do
                 assert(target == '' or nodes[target], 'Missing dialogue target: '..target)

@@ -150,22 +150,21 @@ still belongs to the actor's own script, through Character.move_world/stop.
 ## Dialogue/state
 
 Each graph has a stable start ID and array of uniquely identified nodes. Nodes
-provide speaker, portrait resource, text and up to four choices. Choices provide
+provide speaker, portrait resource, text and a dynamic list of choices. Choices provide
 next ID, required/excluded flags, a flag to set, quest update and optional skill
 check ID. SkillChecks rows select the skill, target difficulty and evidence bonus.
 The runtime rolls 2d6, selects success/failure node IDs and displays the arithmetic.
 Tests use isolated authoring copies to exercise both outcomes deterministically.
 Closing a dialogue stops movement and keeps session flags; reopening reconstructs
 the graph and evaluates choices from those flags. Cyrillic is UTF-8 throughout.
-The journal shows current quest state and the latest three dialogue excerpts.
+The journal shows current quest state. The dialogue column retains full conversation entries and player replies in a scrollable history.
 
 ## Limits
 
 This is a small primitive-based vertical slice. Navigation is flat and static:
 no slopes, stairs, multiple floors, moving-obstacle avoidance or navmesh baking.
 There is no savegame, voice acting, combat, character animation or portrait animation.
-Game progress resets on Stop. Camera rotation is fixed; zoom uses Z/X. The current
-four response widgets impose a four-choice limit per dialogue node. Engine UI
+Game progress resets on Stop. Camera rotation is fixed; zoom uses Z/X or the mouse wheel over the world. Response count is bounded by the existing 2,048-widget document budget, with two ordinary widgets per response. Engine UI
 supports its existing resolution scaling; there is no new world-space UI layer.
 
 The regression executable runs CPU gameplay, DX12 application integration and a
@@ -173,3 +172,9 @@ Vulkan rendering smoke test. Native actions are deterministic injected inputs;
 they exercise the real scheduler/physics/UI event pipeline without depending on
 foreground OS cursor focus. Vulkan smoke does not prove every dialogue branch on
 that renderer; the renderer-independent gameplay suite covers those branches.
+
+## Gameplay & UI Overhaul 1.0
+
+`ui.measure_text(text, font_size, width)` returns wrapped UTF-8 text and its measured height using the runtime font. `Camera.world_to_screen(camera, world_position)` supports world markers. Runtime canvases support replacing dynamic children and setting scroll, position and opacity. A scrollable Panel must also clip its children; `hitTest` makes only its own rectangle block pointer input. Wheel events over a scrollable panel scroll it; wheel events over the world reach gameplay. Dynamic entries use the existing widgets, events and renderer.
+
+The transcript keeps up to 400 full entries per Play session and uses the existing 2,048-widget budget. Choices are data-driven, with two widgets per choice, and share that budget. The camera follow, composition offset, bounds and zoom range are configurable in the player Behaviour. Movement uses the existing character controller and static navigation grid, with configurable acceleration, braking and turn response.

@@ -112,6 +112,18 @@
             "success": "",
             "failure": "",
             "quest": ""
+          },
+          {
+            "text": "Расскажите подробнее о причале.",
+            "next": "harbor_questions",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
           }
         ],
         "portrait": "textures/keeper.png"
@@ -207,6 +219,218 @@
           }
         ],
         "portrait": "textures/keeper.png"
+      },
+      {
+        "id": "harbor_questions",
+        "speaker": "Марта Рейн",
+        "portrait": "textures/keeper.png",
+        "text": "Спрашивайте. Здесь всё связано с водой, долгами и плохо выполненной работой.",
+        "choices": [
+          {
+            "text": "Когда погас буй?",
+            "next": "harbor_topic_0",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          },
+          {
+            "text": "Кто ждёт паром?",
+            "next": "harbor_topic_1",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          },
+          {
+            "text": "Почему фонарь нельзя заменить?",
+            "next": "harbor_topic_2",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          },
+          {
+            "text": "Что случилось с радиостанцией?",
+            "next": "harbor_topic_3",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          },
+          {
+            "text": "Можно осмотреть контору?",
+            "next": "harbor_topic_4",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          },
+          {
+            "text": "Кому принадлежит лодка?",
+            "next": "harbor_topic_5",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          },
+          {
+            "text": "Вернуться к делу.",
+            "next": "start",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          }
+        ]
+      },
+      {
+        "id": "harbor_topic_0",
+        "speaker": "Марта Рейн",
+        "portrait": "textures/keeper.png",
+        "text": "Чуть после трёх. В журнале есть отметка, но я тогда проверяла склад.",
+        "choices": [
+          {
+            "text": "У меня ещё вопросы.",
+            "next": "harbor_questions",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          }
+        ]
+      },
+      {
+        "id": "harbor_topic_1",
+        "speaker": "Марта Рейн",
+        "portrait": "textures/keeper.png",
+        "text": "Рабочие с другого берега. Утром без света их рейс отменят.",
+        "choices": [
+          {
+            "text": "У меня ещё вопросы.",
+            "next": "harbor_questions",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          }
+        ]
+      },
+      {
+        "id": "harbor_topic_2",
+        "speaker": "Марта Рейн",
+        "portrait": "textures/keeper.png",
+        "text": "Запасной отправили на ремонт. В кассе лежит заявка, которой уже месяц.",
+        "choices": [
+          {
+            "text": "У меня ещё вопросы.",
+            "next": "harbor_questions",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          }
+        ]
+      },
+      {
+        "id": "harbor_topic_3",
+        "speaker": "Марта Рейн",
+        "portrait": "textures/keeper.png",
+        "text": "Она пережила этот причал. Илья каждый вечер чинит контакты заново.",
+        "choices": [
+          {
+            "text": "У меня ещё вопросы.",
+            "next": "harbor_questions",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          }
+        ]
+      },
+      {
+        "id": "harbor_topic_4",
+        "speaker": "Марта Рейн",
+        "portrait": "textures/keeper.png",
+        "text": "Да. Но начните с мокрой квитанции: её нашли перед грузовыми ящиками.",
+        "choices": [
+          {
+            "text": "У меня ещё вопросы.",
+            "next": "harbor_questions",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          }
+        ]
+      },
+      {
+        "id": "harbor_topic_5",
+        "speaker": "Марта Рейн",
+        "portrait": "textures/keeper.png",
+        "text": "Рыбакам с восточного берега. Они шли домой в тумане.",
+        "choices": [
+          {
+            "text": "У меня ещё вопросы.",
+            "next": "harbor_questions",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          }
+        ]
       }
     ]
   }
