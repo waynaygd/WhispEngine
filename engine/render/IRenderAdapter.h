@@ -127,6 +127,8 @@ public:
     virtual EditorVisualDiagnostics GetEditorVisualDiagnostics()const{return {};}
     virtual void BeginMainPass() {}
     virtual void EndMainPass() {}
+    // Complete opaque world effects before compositing transparent world layers.
+    virtual void BeginWorldTransparency() {}
     // Same color target/material path, independent shared depth for all viewmodels.
     virtual void DrawParticles(const ParticleDrawList&) {}
     virtual ParticleGpuStatistics GetParticleStatistics()const{return {};}

@@ -399,6 +399,7 @@ namespace ecs {
                     for(std::size_t i=batch.begin;i<batch.begin+batch.count;++i)SubmitRenderPacket(m_RenderPackets[i]);
                 };
                 for(const auto& batch:m_Batches)if(m_RenderPackets[batch.begin].renderMode==MeshRenderMode::World)submitBatch(batch);
+                m_Renderer->BeginWorldTransparency();
                 m_Renderer->DrawParticles(m_WorldParticles);
                 if((m_Statistics.viewmodelSubmeshes||!m_FirstPersonParticles.vertices.empty())&&m_Renderer->BeginViewmodelPass()){
                     for(const auto& batch:m_Batches)if(m_RenderPackets[batch.begin].renderMode==MeshRenderMode::FirstPerson)submitBatch(batch);

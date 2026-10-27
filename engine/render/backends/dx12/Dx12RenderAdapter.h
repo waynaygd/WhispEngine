@@ -103,6 +103,7 @@ public:
     EditorVisualDiagnostics GetEditorVisualDiagnostics()const override{return m_EditorVisualDiagnostics;}
     void BeginMainPass() override;
     void EndMainPass() override;
+    void BeginWorldTransparency() override;
     void DrawParticles(const ParticleDrawList&) override;
     ParticleGpuStatistics GetParticleStatistics()const override{return m_ParticleStats;}
     bool BeginViewmodelPass() override;
@@ -370,7 +371,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Resource> m_RuntimeUIVertices[FrameCount];
     UINT64 m_RuntimeUICapacity[FrameCount]{};
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_ParticleRoot;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_ParticlePso[4];
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_ParticlePso[6];
     Microsoft::WRL::ComPtr<ID3D12Resource> m_ParticleVertices[FrameCount],m_ParticleReadback[FrameCount];
     Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_ParticleQueries;
     UINT64 m_ParticleCapacity[FrameCount]{},m_ParticleUsed=0;unsigned m_ParticleQueryCount[FrameCount]{};
@@ -383,7 +384,7 @@ private:
     void DrawCustomPostFx(const std::vector<const PostFxPass*>&,D3D12_CPU_DESCRIPTOR_HANDLE);
     void EnsurePostFxTarget(HdrTarget&,UINT,UINT);
     void ReleaseCustomPostFx();
-    struct FogPassResources {HdrTarget target,volume;Microsoft::WRL::ComPtr<ID3D12Resource> constants,readback;bool pending=false;};
+    struct FogPassResources {HdrTarget target,volume;Microsoft::WRL::ComPtr<ID3D12Resource> constants,readback;UINT shadowSrvIndex=UINT_MAX;bool pending=false;};
     std::vector<FogPassResources> m_FogPasses[FrameCount];
     FogFrame m_Fog;
     FogDiagnostics m_FogDiagnostics{true};
@@ -391,6 +392,8 @@ private:
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_FogPso,m_FogVolumePso,m_FogCompositePso;
     Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_FogTime;
     UINT m_FogPassCursor=0;
+    UINT m_TransparentFogPass=UINT_MAX;
+    bool m_InViewmodelPass=false;
     double m_FogGpuMs=0;
     void EnsureFogTarget(HdrTarget&,UINT,UINT);
     bool EnsureFogPipeline();
