@@ -326,6 +326,8 @@ private:
     bool m_PlayerMouseCaptured = false;
     ui::InputMode m_UIInputMode=ui::InputMode::GameOnly;
     bool m_UIPointerConsumed=false;
+    float m_GameplayScroll=0;
+    std::map<std::string,void*> m_GameplayCursors;
     bool m_PlayerAltWasDown = false;
     bool m_DebugCollidersEnabled = false;
     bool m_PhysicsDebugPose = false;

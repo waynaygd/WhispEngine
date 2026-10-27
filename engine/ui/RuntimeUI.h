@@ -44,6 +44,7 @@ class RuntimeUI {
  std::unordered_map<ecs::Entity,Instance,ecs::EntityHash> instances;
  const ecs::World* world=nullptr;ResourceManager* manager=nullptr;
  std::uint64_t session=1,nextSerial=1,epoch=0;
+ float viewportWidth=1280,viewportHeight=800;
  std::unordered_map<std::string,ResourceHandle<UIResource>> documents;
  std::vector<ecs::Entity> order;
  CanvasHandle hovered,pressed;std::string hoverWidget,pressWidget;bool pointerDown=false,gestureOwned=false;
@@ -64,6 +65,10 @@ public:
  bool Valid(const CanvasHandle&)const;
  const Widget& Read(const CanvasHandle&,const std::string&)const;
  void Set(const CanvasHandle&,const std::string&,const std::string& property,const nlohmann::json&);
+ void ReplaceChildren(const CanvasHandle&,const std::string&,std::vector<Widget>);
+ void SetScroll(const CanvasHandle&,const std::string&,float);
+ float ScrollLimit(const CanvasHandle&,const std::string&)const;
+ bool Scroll(float x,float y,float width,float height,float delta);
  // Coordinates are render-target pixels. Disabled routing cancels the gesture.
  bool Pointer(float x,float y,float width,float height,bool down,bool available);
  std::vector<PointerEvent> TakeEvents(){auto out=std::move(events);events.clear();return out;}

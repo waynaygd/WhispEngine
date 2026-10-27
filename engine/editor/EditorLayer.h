@@ -110,7 +110,7 @@ public:
     void ProjectOpened(Application&);
     bool UIDraftsDirty()const{if(!m_DirtyUIStyles.empty())return true;for(auto& [key,s]:m_UIDocuments)if(s.dirty)return true;return false;}
     bool AuthoringSceneDirty()const{const auto* history=m_PrefabHistory?&*m_PrefabHistory:m_EditHistory?&*m_EditHistory:nullptr;return history?(history->external||history->revision!=history->saved):IsSceneDirty();}
-    bool HasProjectEdits()const{return ScriptDraftsDirty()||UIDraftsDirty()||ProjectSettingsDirty()||m_MaterialDirty||AuthoringSceneDirty()||(m_PrefabHistory&&IsSceneDirty());}
+    bool HasProjectEdits()const{return m_DataDirty||ScriptDraftsDirty()||UIDraftsDirty()||ProjectSettingsDirty()||m_MaterialDirty||AuthoringSceneDirty()||(m_PrefabHistory&&IsSceneDirty());}
     void ShowProjectSettings(Application&);
     void RevertProjectSettings(Application&);
     bool SaveProjectSettingsDraft(Application&);
@@ -470,6 +470,11 @@ private:
     void DrawViewportOverlays(Application&,const ImVec2&,const ImVec2&);
     void DrawSceneHierarchy(Application& app);
     void DrawInspector(Application& app);
+    bool DrawDataInspector(Application& app);
+    bool SaveDataDraft(Application& app);
+    std::string m_DataKey,m_DataSchemaText,m_DataMessage;
+    nlohmann::json m_DataDraft;
+    bool m_DataDirty=false;
     bool DrawInspectorResource(const ecs::PropertyDescriptor&,std::string&);
     std::string m_InspectorSearch;
     std::string m_InspectorPrefabCacheKey,m_InspectorPrefabError;

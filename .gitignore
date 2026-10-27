@@ -52,3 +52,4 @@ compile_commands.json
 
 # Project OBJ meshes are authored resources, not compiler objects.
 !test_projects/**/*.obj
+!examples/**/*.obj

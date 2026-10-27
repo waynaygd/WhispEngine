@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "kind": "DataAsset",
+  "type": "NPCDefinition",
+  "schema": {
+    "type": "Object",
+    "fields": {
+      "id": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      },
+      "tag": {
+        "type": "String"
+      },
+      "dialogue": {
+        "type": "Resource",
+        "suffix": ".data.json"
+      },
+      "portrait": {
+        "type": "Resource",
+        "suffix": ".png"
+      },
+      "range": {
+        "type": "Number"
+      }
+    }
+  },
+  "value": {
+    "id": "cashier",
+    "name": "Нина Соль",
+    "tag": "Cashier",
+    "dialogue": "data/cashier.data.json",
+    "portrait": "textures/cashier.png",
+    "range": 1.8
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "kind": "DataTable",
+  "type": "Skills",
+  "schema": {
+    "type": "Object",
+    "fields": {
+      "id": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      },
+      "value": {
+        "type": "Number",
+        "min": 0,
+        "max": 10
+      },
+      "description": {
+        "type": "String"
+      }
+    }
+  },
+  "rows": [
+    {
+      "id": "logic",
+      "name": "Логика",
+      "value": 4,
+      "description": "Сопоставлять факты; журнал даёт +2."
+    },
+    {
+      "id": "empathy",
+      "name": "Эмпатия",
+      "value": 5,
+      "description": "Понимать причины поступков."
+    },
+    {
+      "id": "perception",
+      "name": "Наблюдательность",
+      "value": 3,
+      "description": "Замечать следы в тумане."
+    }
+  ]
+}

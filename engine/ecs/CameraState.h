@@ -53,4 +53,15 @@ inline CameraState ResolveCameraState(const World& world,Entity entity,float asp
     if(!c||!c->enabled)throw std::runtime_error("Camera: dead, foreign, disabled or absent CameraComponent");
     return BuildCameraState(ResolveCameraPose(world,entity,interpolation),*c,aspect,entity);
 }
+// Normalized viewport coordinates, top-left origin. Matches both backend projections.
+inline std::pair<Vec3,Vec3> CameraScreenRay(const CameraState& s,float x,float y){
+    if(!std::isfinite(x)||!std::isfinite(y)||x<0||x>1||y<0||y>1)throw std::runtime_error("Camera: screen coordinate outside [0,1]");
+    const bool ortho=s.settings.projection==CameraProjection::Orthographic;
+    float half=ortho?s.settings.orthographicSize*.5f:std::tan(s.settings.fieldOfView*.5f);
+    float dx=(x*2-1)*half*s.aspect,dy=(1-y*2)*half;
+    Vec3 offset{s.right.x*dx+s.up.x*dy,s.right.y*dx+s.up.y*dy,s.right.z*dx+s.up.z*dy};
+    auto origin=s.pose.position;auto direction=s.forward;
+    if(ortho){origin.x+=offset.x;origin.y+=offset.y;origin.z+=offset.z;}else{direction.x+=offset.x;direction.y+=offset.y;direction.z+=offset.z;float n=std::sqrt(direction.x*direction.x+direction.y*direction.y+direction.z*direction.z);direction.x/=n;direction.y/=n;direction.z/=n;}
+    return {origin,direction};
+}
 }

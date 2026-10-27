@@ -31,6 +31,7 @@ std::map<std::string,Rect> ComputeLayout(const Document& d,Rect canvas){
   for(auto* c:children[w.id]){auto cr=LayoutRect(*c,r);for(int a=0;a<2;++a)if(c->layout&&c->autoSize[a]){float old=a?cr.h:cr.w,next=measured[c->id][a];if(a){cr.y+=(old-next)*c->pivot[a];cr.h=next;}else{cr.x+=(old-next)*c->pivot[a];cr.w=next;}}
    if(slots.contains(c->id))cr=slots.at(c->id);self(self,*c,cr,offset,factor);}
  };
- auto r=LayoutRect(*root,canvas);if(root->layout&&root->autoSize[0])r.w=measured[root->id][0];if(root->layout&&root->autoSize[1])r.h=measured[root->id][1];arrange(arrange,*root,r,{0,0},{1,1});return out;
+ auto r=LayoutRect(*root,canvas);if(root->layout&&root->autoSize[0])r.w=measured[root->id][0];if(root->layout&&root->autoSize[1])r.h=measured[root->id][1];arrange(arrange,*root,r,{0,0},{1,1});
+ auto scroll=[&](auto&& self,const Widget& w,float offset)->void{out[w.id].y-=offset;for(auto* c:children[w.id])self(self,*c,offset+(w.scrollable?w.scrollY:0));};scroll(scroll,*root,0);return out;
 }
 }

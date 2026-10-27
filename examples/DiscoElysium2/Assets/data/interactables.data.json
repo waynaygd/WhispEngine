@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "kind": "DataAsset",
+  "type": "InteractableCatalog",
+  "schema": {
+    "type": "Object",
+    "fields": {
+      "definitions": {
+        "type": "Array",
+        "items": {
+          "type": "Resource",
+          "suffix": ".data.json"
+        }
+      }
+    }
+  },
+  "value": {
+    "definitions": [
+      "data/keeper_npc.data.json",
+      "data/radio_npc.data.json",
+      "data/cashier_npc.data.json",
+      "data/receipt_npc.data.json",
+      "data/ledger_npc.data.json"
+    ]
+  }
+}

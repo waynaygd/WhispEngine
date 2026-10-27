@@ -1,0 +1,3730 @@
+{
+  "version": 4,
+  "settings": {
+    "ambient": {
+      "color": [
+        0.59,
+        0.68,
+        0.7
+      ],
+      "intensity": 0.38
+    },
+    "legacyDirectional": {
+      "enabled": false
+    },
+    "environment": {
+      "enabled": false
+    },
+    "background": {
+      "mode": 0,
+      "solid": [
+        0.055,
+        0.095,
+        0.115
+      ]
+    }
+  },
+  "entities": [
+    {
+      "id": "Quay",
+      "components": {
+        "Tag": {
+          "name": "Quay"
+        },
+        "Transform": {
+          "position": [
+            0,
+            -0.25,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            19,
+            0.5,
+            17
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.24,
+            0.28,
+            0.27,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            9.5,
+            0.25,
+            8.5
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "Sea",
+      "components": {
+        "Tag": {
+          "name": "Sea"
+        },
+        "Transform": {
+          "position": [
+            0,
+            -0.75,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            250,
+            0.25,
+            250
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.07,
+            0.18,
+            0.22,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "Office",
+      "components": {
+        "Tag": {
+          "name": "Office"
+        },
+        "Transform": {
+          "position": [
+            -7,
+            1.65,
+            5
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            4,
+            3.3,
+            3
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.31,
+            0.33,
+            0.3,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            2.0,
+            1.65,
+            1.5
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "OfficeRoof",
+      "components": {
+        "Tag": {
+          "name": "OfficeRoof"
+        },
+        "Transform": {
+          "position": [
+            -7,
+            3.4,
+            5
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            4.5,
+            0.25,
+            3.5
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.18,
+            0.24,
+            0.23,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OfficeDoor",
+      "components": {
+        "Tag": {
+          "name": "OfficeDoor"
+        },
+        "Transform": {
+          "position": [
+            -6,
+            1,
+            3.48
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            2,
+            0.06
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.12,
+            0.2,
+            0.22,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OfficeWindow0",
+      "components": {
+        "Tag": {
+          "name": "OfficeWindow0"
+        },
+        "Transform": {
+          "position": [
+            -8,
+            2.2,
+            3.45
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.6,
+            0.7,
+            0.08
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.67,
+            0.55,
+            0.3,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OfficeWindow1",
+      "components": {
+        "Tag": {
+          "name": "OfficeWindow1"
+        },
+        "Transform": {
+          "position": [
+            -7,
+            2.2,
+            3.45
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.6,
+            0.7,
+            0.08
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.67,
+            0.55,
+            0.3,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OfficeWindow2",
+      "components": {
+        "Tag": {
+          "name": "OfficeWindow2"
+        },
+        "Transform": {
+          "position": [
+            -6,
+            2.2,
+            3.45
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.6,
+            0.7,
+            0.08
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.67,
+            0.55,
+            0.3,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "CargoA",
+      "components": {
+        "Tag": {
+          "name": "CargoA"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.8,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2.5,
+            1.6,
+            2.4
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.42,
+            0.33,
+            0.23,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.25,
+            0.8,
+            1.2
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "CargoB",
+      "components": {
+        "Tag": {
+          "name": "CargoB"
+        },
+        "Transform": {
+          "position": [
+            2,
+            0.55,
+            1.2
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.5,
+            1.1,
+            1.5
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.36,
+            0.3,
+            0.22,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.75,
+            0.55,
+            0.75
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "Bench",
+      "components": {
+        "Tag": {
+          "name": "Bench"
+        },
+        "Transform": {
+          "position": [
+            -3,
+            0.4,
+            -1
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2,
+            0.8,
+            0.7
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.33,
+            0.31,
+            0.25,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            1.0,
+            0.4,
+            0.35
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "RadioDesk",
+      "components": {
+        "Tag": {
+          "name": "RadioDesk"
+        },
+        "Transform": {
+          "position": [
+            5,
+            0.55,
+            3
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.5,
+            1.1,
+            1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.29,
+            0.33,
+            0.31,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.75,
+            0.55,
+            0.5
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "Bollard-8_-6",
+      "components": {
+        "Tag": {
+          "name": "Bollard-8_-6"
+        },
+        "Transform": {
+          "position": [
+            -8,
+            0.35,
+            -6
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.45,
+            0.7,
+            0.45
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/post.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.16,
+            0.2,
+            0.2,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.225,
+            0.35,
+            0.225
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "Bollard-8_0",
+      "components": {
+        "Tag": {
+          "name": "Bollard-8_0"
+        },
+        "Transform": {
+          "position": [
+            -8,
+            0.35,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.45,
+            0.7,
+            0.45
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/post.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.16,
+            0.2,
+            0.2,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.225,
+            0.35,
+            0.225
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "Bollard-8_6",
+      "components": {
+        "Tag": {
+          "name": "Bollard-8_6"
+        },
+        "Transform": {
+          "position": [
+            -8,
+            0.35,
+            6
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.45,
+            0.7,
+            0.45
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/post.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.16,
+            0.2,
+            0.2,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.225,
+            0.35,
+            0.225
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "Bollard8_-6",
+      "components": {
+        "Tag": {
+          "name": "Bollard8_-6"
+        },
+        "Transform": {
+          "position": [
+            8,
+            0.35,
+            -6
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.45,
+            0.7,
+            0.45
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/post.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.16,
+            0.2,
+            0.2,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.225,
+            0.35,
+            0.225
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "Bollard8_0",
+      "components": {
+        "Tag": {
+          "name": "Bollard8_0"
+        },
+        "Transform": {
+          "position": [
+            8,
+            0.35,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.45,
+            0.7,
+            0.45
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/post.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.16,
+            0.2,
+            0.2,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.225,
+            0.35,
+            0.225
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "Bollard8_6",
+      "components": {
+        "Tag": {
+          "name": "Bollard8_6"
+        },
+        "Transform": {
+          "position": [
+            8,
+            0.35,
+            6
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.45,
+            0.7,
+            0.45
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/post.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.16,
+            0.2,
+            0.2,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.225,
+            0.35,
+            0.225
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "Camera",
+      "components": {
+        "Tag": {
+          "name": "Camera"
+        },
+        "Transform": {
+          "position": [
+            -15,
+            15,
+            -20
+          ],
+          "rotation": [
+            0.6154797086703874,
+            0.7853981633974483,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "Camera": {
+          "enabled": true,
+          "projection": 1,
+          "orthographicSize": 20,
+          "nearClip": 0.1,
+          "farClip": 150,
+          "priority": 50
+        }
+      }
+    },
+    {
+      "id": "Detective",
+      "components": {
+        "Tag": {
+          "name": "Detective"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.85,
+            -5
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/coat.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.16,
+            0.29,
+            0.32,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.3,
+            0.85,
+            0.3
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0
+        },
+        "Rigidbody": {
+          "mass": 75,
+          "useGravity": true,
+          "isStatic": false,
+          "lockRotation": true
+        },
+        "CharacterMovement": {
+          "moveSpeed": 3.4,
+          "jumpSpeed": 0
+        },
+        "UICanvas": {
+          "document": "ui/harbor.ui.json",
+          "enabled": true,
+          "sortOrder": 1
+        },
+        "LuaScript": {
+          "scriptPath": "scripts/harbor.lua",
+          "enabled": true,
+          "inputEnabled": true,
+          "cameraEnabled": true,
+          "properties": {
+            "camera": {
+              "$entity": "Camera"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "DetectiveHead",
+      "components": {
+        "Tag": {
+          "name": "DetectiveHead"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.88,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/face.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.69,
+            0.55,
+            0.4,
+            1
+          ]
+        }
+      },
+      "parent": "Detective"
+    },
+    {
+      "id": "Keeper",
+      "components": {
+        "Tag": {
+          "name": "Keeper"
+        },
+        "Transform": {
+          "position": [
+            -4,
+            0.85,
+            3
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/coat.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.49,
+            0.29,
+            0.2,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.35,
+            1.1,
+            0.325
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0,
+          "offset": [
+            0,
+            0.25,
+            0
+          ]
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "KeeperHead",
+      "components": {
+        "Tag": {
+          "name": "KeeperHead"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.88,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/face.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.7,
+            0.55,
+            0.4,
+            1
+          ]
+        }
+      },
+      "parent": "Keeper"
+    },
+    {
+      "id": "Radio",
+      "components": {
+        "Tag": {
+          "name": "Radio"
+        },
+        "Transform": {
+          "position": [
+            5,
+            0.85,
+            1
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/coat.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.16,
+            0.35,
+            0.36,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.35,
+            1.1,
+            0.325
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0,
+          "offset": [
+            0,
+            0.25,
+            0
+          ]
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "RadioHead",
+      "components": {
+        "Tag": {
+          "name": "RadioHead"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.88,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/face.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.7,
+            0.55,
+            0.4,
+            1
+          ]
+        }
+      },
+      "parent": "Radio"
+    },
+    {
+      "id": "Cashier",
+      "components": {
+        "Tag": {
+          "name": "Cashier"
+        },
+        "Transform": {
+          "position": [
+            -5,
+            0.85,
+            -3
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/coat.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.42,
+            0.24,
+            0.34,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.35,
+            1.1,
+            0.325
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0,
+          "offset": [
+            0,
+            0.25,
+            0
+          ]
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "CashierHead",
+      "components": {
+        "Tag": {
+          "name": "CashierHead"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.88,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/face.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.7,
+            0.55,
+            0.4,
+            1
+          ]
+        }
+      },
+      "parent": "Cashier"
+    },
+    {
+      "id": "Receipt",
+      "components": {
+        "Tag": {
+          "name": "Receipt"
+        },
+        "Transform": {
+          "position": [
+            -1,
+            0.16,
+            -2.2
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.65,
+            0.25,
+            0.5
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.78,
+            0.73,
+            0.5,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.325,
+            0.125,
+            0.25
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "Ledger",
+      "components": {
+        "Tag": {
+          "name": "Ledger"
+        },
+        "Transform": {
+          "position": [
+            4.7,
+            1.15,
+            3
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.65,
+            0.18,
+            0.5
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.49,
+            0.34,
+            0.24,
+            1
+          ]
+        },
+        "Collider": {
+          "halfExtents": [
+            0.325,
+            0.09,
+            0.25
+          ],
+          "autoFitFromMesh": false,
+          "friction": 0.85,
+          "restitution": 0
+        },
+        "Rigidbody": {
+          "isStatic": true,
+          "useGravity": false
+        }
+      }
+    },
+    {
+      "id": "HarborSun",
+      "components": {
+        "Tag": {
+          "name": "HarborSun"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0.9,
+            -0.5,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "DirectionalLight": {
+          "color": [
+            1,
+            0.84,
+            0.63
+          ],
+          "intensity": 1.7
+        }
+      }
+    },
+    {
+      "id": "OverhaulDetectiveLeg-1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulDetectiveLeg-1"
+        },
+        "Transform": {
+          "position": [
+            -0.14,
+            -0.6,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.18,
+            0.5,
+            0.21
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.1,
+            0.14,
+            0.14,
+            1
+          ]
+        }
+      },
+      "parent": "Detective"
+    },
+    {
+      "id": "OverhaulDetectiveBoot-1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulDetectiveBoot-1"
+        },
+        "Transform": {
+          "position": [
+            -0.14,
+            -0.83,
+            0.04
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.2,
+            0.12,
+            0.31
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.07,
+            0.09,
+            0.09,
+            1
+          ]
+        }
+      },
+      "parent": "Detective"
+    },
+    {
+      "id": "OverhaulDetectiveSleeve-1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulDetectiveSleeve-1"
+        },
+        "Transform": {
+          "position": [
+            -0.34,
+            0.24,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            -0.12
+          ],
+          "scale": [
+            0.16,
+            0.58,
+            0.2
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.16,
+            0.29,
+            0.32,
+            1
+          ]
+        }
+      },
+      "parent": "Detective"
+    },
+    {
+      "id": "OverhaulDetectiveHand-1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulDetectiveHand-1"
+        },
+        "Transform": {
+          "position": [
+            -0.37,
+            -0.08,
+            0.02
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.13,
+            0.17,
+            0.14
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/face.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.65,
+            0.5,
+            0.36,
+            1
+          ]
+        }
+      },
+      "parent": "Detective"
+    },
+    {
+      "id": "OverhaulDetectiveLeg1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulDetectiveLeg1"
+        },
+        "Transform": {
+          "position": [
+            0.14,
+            -0.6,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.18,
+            0.5,
+            0.21
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.1,
+            0.14,
+            0.14,
+            1
+          ]
+        }
+      },
+      "parent": "Detective"
+    },
+    {
+      "id": "OverhaulDetectiveBoot1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulDetectiveBoot1"
+        },
+        "Transform": {
+          "position": [
+            0.14,
+            -0.83,
+            0.04
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.2,
+            0.12,
+            0.31
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.07,
+            0.09,
+            0.09,
+            1
+          ]
+        }
+      },
+      "parent": "Detective"
+    },
+    {
+      "id": "OverhaulDetectiveSleeve1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulDetectiveSleeve1"
+        },
+        "Transform": {
+          "position": [
+            0.34,
+            0.24,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0.12
+          ],
+          "scale": [
+            0.16,
+            0.58,
+            0.2
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.16,
+            0.29,
+            0.32,
+            1
+          ]
+        }
+      },
+      "parent": "Detective"
+    },
+    {
+      "id": "OverhaulDetectiveHand1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulDetectiveHand1"
+        },
+        "Transform": {
+          "position": [
+            0.37,
+            -0.08,
+            0.02
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.13,
+            0.17,
+            0.14
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/face.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.65,
+            0.5,
+            0.36,
+            1
+          ]
+        }
+      },
+      "parent": "Detective"
+    },
+    {
+      "id": "OverhaulDetectiveNose",
+      "components": {
+        "Tag": {
+          "name": "OverhaulDetectiveNose"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.87,
+            0.15
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.09,
+            0.1,
+            0.12
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.68,
+            0.53,
+            0.4,
+            1
+          ]
+        }
+      },
+      "parent": "Detective"
+    },
+    {
+      "id": "OverhaulDetectiveCollar",
+      "components": {
+        "Tag": {
+          "name": "OverhaulDetectiveCollar"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.66,
+            0.04
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.22,
+            0.15,
+            0.25
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.6,
+            0.58,
+            0.48,
+            1
+          ]
+        }
+      },
+      "parent": "Detective"
+    },
+    {
+      "id": "OverhaulDetectiveHat",
+      "components": {
+        "Tag": {
+          "name": "OverhaulDetectiveHat"
+        },
+        "Transform": {
+          "position": [
+            0,
+            1.07,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.4,
+            0.08,
+            0.35
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.13,
+            0.18,
+            0.17,
+            1
+          ]
+        }
+      },
+      "parent": "Detective"
+    },
+    {
+      "id": "OverhaulKeeperLeg-1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulKeeperLeg-1"
+        },
+        "Transform": {
+          "position": [
+            -0.14,
+            -0.6,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.18,
+            0.5,
+            0.21
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.1,
+            0.14,
+            0.14,
+            1
+          ]
+        }
+      },
+      "parent": "Keeper"
+    },
+    {
+      "id": "OverhaulKeeperBoot-1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulKeeperBoot-1"
+        },
+        "Transform": {
+          "position": [
+            -0.14,
+            -0.83,
+            0.04
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.2,
+            0.12,
+            0.31
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.07,
+            0.09,
+            0.09,
+            1
+          ]
+        }
+      },
+      "parent": "Keeper"
+    },
+    {
+      "id": "OverhaulKeeperSleeve-1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulKeeperSleeve-1"
+        },
+        "Transform": {
+          "position": [
+            -0.34,
+            0.24,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            -0.12
+          ],
+          "scale": [
+            0.16,
+            0.58,
+            0.2
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.49,
+            0.29,
+            0.2,
+            1
+          ]
+        }
+      },
+      "parent": "Keeper"
+    },
+    {
+      "id": "OverhaulKeeperHand-1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulKeeperHand-1"
+        },
+        "Transform": {
+          "position": [
+            -0.37,
+            -0.08,
+            0.02
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.13,
+            0.17,
+            0.14
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/face.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.65,
+            0.5,
+            0.36,
+            1
+          ]
+        }
+      },
+      "parent": "Keeper"
+    },
+    {
+      "id": "OverhaulKeeperLeg1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulKeeperLeg1"
+        },
+        "Transform": {
+          "position": [
+            0.14,
+            -0.6,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.18,
+            0.5,
+            0.21
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.1,
+            0.14,
+            0.14,
+            1
+          ]
+        }
+      },
+      "parent": "Keeper"
+    },
+    {
+      "id": "OverhaulKeeperBoot1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulKeeperBoot1"
+        },
+        "Transform": {
+          "position": [
+            0.14,
+            -0.83,
+            0.04
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.2,
+            0.12,
+            0.31
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.07,
+            0.09,
+            0.09,
+            1
+          ]
+        }
+      },
+      "parent": "Keeper"
+    },
+    {
+      "id": "OverhaulKeeperSleeve1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulKeeperSleeve1"
+        },
+        "Transform": {
+          "position": [
+            0.34,
+            0.24,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0.12
+          ],
+          "scale": [
+            0.16,
+            0.58,
+            0.2
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.49,
+            0.29,
+            0.2,
+            1
+          ]
+        }
+      },
+      "parent": "Keeper"
+    },
+    {
+      "id": "OverhaulKeeperHand1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulKeeperHand1"
+        },
+        "Transform": {
+          "position": [
+            0.37,
+            -0.08,
+            0.02
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.13,
+            0.17,
+            0.14
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/face.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.65,
+            0.5,
+            0.36,
+            1
+          ]
+        }
+      },
+      "parent": "Keeper"
+    },
+    {
+      "id": "OverhaulKeeperNose",
+      "components": {
+        "Tag": {
+          "name": "OverhaulKeeperNose"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.87,
+            0.15
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.09,
+            0.1,
+            0.12
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.68,
+            0.53,
+            0.4,
+            1
+          ]
+        }
+      },
+      "parent": "Keeper"
+    },
+    {
+      "id": "OverhaulKeeperCollar",
+      "components": {
+        "Tag": {
+          "name": "OverhaulKeeperCollar"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.66,
+            0.04
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.22,
+            0.15,
+            0.25
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.6,
+            0.58,
+            0.48,
+            1
+          ]
+        }
+      },
+      "parent": "Keeper"
+    },
+    {
+      "id": "OverhaulKeeperHat",
+      "components": {
+        "Tag": {
+          "name": "OverhaulKeeperHat"
+        },
+        "Transform": {
+          "position": [
+            0,
+            1.07,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.4,
+            0.08,
+            0.35
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.13,
+            0.18,
+            0.17,
+            1
+          ]
+        }
+      },
+      "parent": "Keeper"
+    },
+    {
+      "id": "OverhaulRadioLeg-1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulRadioLeg-1"
+        },
+        "Transform": {
+          "position": [
+            -0.14,
+            -0.6,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.18,
+            0.5,
+            0.21
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.1,
+            0.14,
+            0.14,
+            1
+          ]
+        }
+      },
+      "parent": "Radio"
+    },
+    {
+      "id": "OverhaulRadioBoot-1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulRadioBoot-1"
+        },
+        "Transform": {
+          "position": [
+            -0.14,
+            -0.83,
+            0.04
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.2,
+            0.12,
+            0.31
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.07,
+            0.09,
+            0.09,
+            1
+          ]
+        }
+      },
+      "parent": "Radio"
+    },
+    {
+      "id": "OverhaulRadioSleeve-1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulRadioSleeve-1"
+        },
+        "Transform": {
+          "position": [
+            -0.34,
+            0.24,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            -0.12
+          ],
+          "scale": [
+            0.16,
+            0.58,
+            0.2
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.16,
+            0.35,
+            0.36,
+            1
+          ]
+        }
+      },
+      "parent": "Radio"
+    },
+    {
+      "id": "OverhaulRadioHand-1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulRadioHand-1"
+        },
+        "Transform": {
+          "position": [
+            -0.37,
+            -0.08,
+            0.02
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.13,
+            0.17,
+            0.14
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/face.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.65,
+            0.5,
+            0.36,
+            1
+          ]
+        }
+      },
+      "parent": "Radio"
+    },
+    {
+      "id": "OverhaulRadioLeg1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulRadioLeg1"
+        },
+        "Transform": {
+          "position": [
+            0.14,
+            -0.6,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.18,
+            0.5,
+            0.21
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.1,
+            0.14,
+            0.14,
+            1
+          ]
+        }
+      },
+      "parent": "Radio"
+    },
+    {
+      "id": "OverhaulRadioBoot1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulRadioBoot1"
+        },
+        "Transform": {
+          "position": [
+            0.14,
+            -0.83,
+            0.04
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.2,
+            0.12,
+            0.31
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.07,
+            0.09,
+            0.09,
+            1
+          ]
+        }
+      },
+      "parent": "Radio"
+    },
+    {
+      "id": "OverhaulRadioSleeve1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulRadioSleeve1"
+        },
+        "Transform": {
+          "position": [
+            0.34,
+            0.24,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0.12
+          ],
+          "scale": [
+            0.16,
+            0.58,
+            0.2
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.16,
+            0.35,
+            0.36,
+            1
+          ]
+        }
+      },
+      "parent": "Radio"
+    },
+    {
+      "id": "OverhaulRadioHand1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulRadioHand1"
+        },
+        "Transform": {
+          "position": [
+            0.37,
+            -0.08,
+            0.02
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.13,
+            0.17,
+            0.14
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/face.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.65,
+            0.5,
+            0.36,
+            1
+          ]
+        }
+      },
+      "parent": "Radio"
+    },
+    {
+      "id": "OverhaulRadioNose",
+      "components": {
+        "Tag": {
+          "name": "OverhaulRadioNose"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.87,
+            0.15
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.09,
+            0.1,
+            0.12
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.68,
+            0.53,
+            0.4,
+            1
+          ]
+        }
+      },
+      "parent": "Radio"
+    },
+    {
+      "id": "OverhaulRadioCollar",
+      "components": {
+        "Tag": {
+          "name": "OverhaulRadioCollar"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.66,
+            0.04
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.22,
+            0.15,
+            0.25
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.6,
+            0.58,
+            0.48,
+            1
+          ]
+        }
+      },
+      "parent": "Radio"
+    },
+    {
+      "id": "OverhaulRadioHat",
+      "components": {
+        "Tag": {
+          "name": "OverhaulRadioHat"
+        },
+        "Transform": {
+          "position": [
+            0,
+            1.07,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.4,
+            0.08,
+            0.35
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.13,
+            0.18,
+            0.17,
+            1
+          ]
+        }
+      },
+      "parent": "Radio"
+    },
+    {
+      "id": "OverhaulCashierLeg-1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulCashierLeg-1"
+        },
+        "Transform": {
+          "position": [
+            -0.14,
+            -0.6,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.18,
+            0.5,
+            0.21
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.1,
+            0.14,
+            0.14,
+            1
+          ]
+        }
+      },
+      "parent": "Cashier"
+    },
+    {
+      "id": "OverhaulCashierBoot-1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulCashierBoot-1"
+        },
+        "Transform": {
+          "position": [
+            -0.14,
+            -0.83,
+            0.04
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.2,
+            0.12,
+            0.31
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.07,
+            0.09,
+            0.09,
+            1
+          ]
+        }
+      },
+      "parent": "Cashier"
+    },
+    {
+      "id": "OverhaulCashierSleeve-1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulCashierSleeve-1"
+        },
+        "Transform": {
+          "position": [
+            -0.34,
+            0.24,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            -0.12
+          ],
+          "scale": [
+            0.16,
+            0.58,
+            0.2
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.42,
+            0.24,
+            0.34,
+            1
+          ]
+        }
+      },
+      "parent": "Cashier"
+    },
+    {
+      "id": "OverhaulCashierHand-1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulCashierHand-1"
+        },
+        "Transform": {
+          "position": [
+            -0.37,
+            -0.08,
+            0.02
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.13,
+            0.17,
+            0.14
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/face.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.65,
+            0.5,
+            0.36,
+            1
+          ]
+        }
+      },
+      "parent": "Cashier"
+    },
+    {
+      "id": "OverhaulCashierLeg1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulCashierLeg1"
+        },
+        "Transform": {
+          "position": [
+            0.14,
+            -0.6,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.18,
+            0.5,
+            0.21
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.1,
+            0.14,
+            0.14,
+            1
+          ]
+        }
+      },
+      "parent": "Cashier"
+    },
+    {
+      "id": "OverhaulCashierBoot1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulCashierBoot1"
+        },
+        "Transform": {
+          "position": [
+            0.14,
+            -0.83,
+            0.04
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.2,
+            0.12,
+            0.31
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.07,
+            0.09,
+            0.09,
+            1
+          ]
+        }
+      },
+      "parent": "Cashier"
+    },
+    {
+      "id": "OverhaulCashierSleeve1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulCashierSleeve1"
+        },
+        "Transform": {
+          "position": [
+            0.34,
+            0.24,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0.12
+          ],
+          "scale": [
+            0.16,
+            0.58,
+            0.2
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.42,
+            0.24,
+            0.34,
+            1
+          ]
+        }
+      },
+      "parent": "Cashier"
+    },
+    {
+      "id": "OverhaulCashierHand1",
+      "components": {
+        "Tag": {
+          "name": "OverhaulCashierHand1"
+        },
+        "Transform": {
+          "position": [
+            0.37,
+            -0.08,
+            0.02
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.13,
+            0.17,
+            0.14
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/face.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.65,
+            0.5,
+            0.36,
+            1
+          ]
+        }
+      },
+      "parent": "Cashier"
+    },
+    {
+      "id": "OverhaulCashierNose",
+      "components": {
+        "Tag": {
+          "name": "OverhaulCashierNose"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.87,
+            0.15
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.09,
+            0.1,
+            0.12
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.68,
+            0.53,
+            0.4,
+            1
+          ]
+        }
+      },
+      "parent": "Cashier"
+    },
+    {
+      "id": "OverhaulCashierCollar",
+      "components": {
+        "Tag": {
+          "name": "OverhaulCashierCollar"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.66,
+            0.04
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.22,
+            0.15,
+            0.25
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.6,
+            0.58,
+            0.48,
+            1
+          ]
+        }
+      },
+      "parent": "Cashier"
+    },
+    {
+      "id": "OverhaulCashierHat",
+      "components": {
+        "Tag": {
+          "name": "OverhaulCashierHat"
+        },
+        "Transform": {
+          "position": [
+            0,
+            1.07,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.4,
+            0.08,
+            0.35
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.13,
+            0.18,
+            0.17,
+            1
+          ]
+        }
+      },
+      "parent": "Cashier"
+    },
+    {
+      "id": "OverhaulPaving",
+      "components": {
+        "Tag": {
+          "name": "OverhaulPaving"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.012,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/paving.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/paving.material.json",
+          "tint": [
+            1,
+            1,
+            1,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OverhaulCrateBand-0.8",
+      "components": {
+        "Tag": {
+          "name": "OverhaulCrateBand-0.8"
+        },
+        "Transform": {
+          "position": [
+            -0.8,
+            1.612,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.1,
+            0.025,
+            2.4
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.2,
+            0.23,
+            0.19,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OverhaulCrateBand0.8",
+      "components": {
+        "Tag": {
+          "name": "OverhaulCrateBand0.8"
+        },
+        "Transform": {
+          "position": [
+            0.8,
+            1.612,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.1,
+            0.025,
+            2.4
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.2,
+            0.23,
+            0.19,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OverhaulBenchSlat-0.22",
+      "components": {
+        "Tag": {
+          "name": "OverhaulBenchSlat-0.22"
+        },
+        "Transform": {
+          "position": [
+            -3,
+            0.82,
+            -1.22
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2,
+            0.07,
+            0.15
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.44,
+            0.32,
+            0.19,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OverhaulBenchSlat0",
+      "components": {
+        "Tag": {
+          "name": "OverhaulBenchSlat0"
+        },
+        "Transform": {
+          "position": [
+            -3,
+            0.82,
+            -1
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2,
+            0.07,
+            0.15
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.44,
+            0.32,
+            0.19,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OverhaulBenchSlat0.22",
+      "components": {
+        "Tag": {
+          "name": "OverhaulBenchSlat0.22"
+        },
+        "Transform": {
+          "position": [
+            -3,
+            0.82,
+            -0.78
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            2,
+            0.07,
+            0.15
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.44,
+            0.32,
+            0.19,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OverhaulRadio",
+      "components": {
+        "Tag": {
+          "name": "OverhaulRadio"
+        },
+        "Transform": {
+          "position": [
+            5,
+            1.28,
+            3
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.72,
+            0.36,
+            0.36
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.13,
+            0.2,
+            0.19,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OverhaulRadioDial",
+      "components": {
+        "Tag": {
+          "name": "OverhaulRadioDial"
+        },
+        "Transform": {
+          "position": [
+            4.8,
+            1.3,
+            2.8
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.14,
+            0.12,
+            0.03
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.7,
+            0.59,
+            0.35,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OverhaulAntenna",
+      "components": {
+        "Tag": {
+          "name": "OverhaulAntenna"
+        },
+        "Transform": {
+          "position": [
+            5.2,
+            1.85,
+            3
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.025,
+            0.85,
+            0.025
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.25,
+            0.3,
+            0.28,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OverhaulLamp-5.5",
+      "components": {
+        "Tag": {
+          "name": "OverhaulLamp-5.5"
+        },
+        "Transform": {
+          "position": [
+            -5.5,
+            1.8,
+            4
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.1,
+            3.6,
+            0.1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.16,
+            0.21,
+            0.2,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OverhaulLampHead-5.5",
+      "components": {
+        "Tag": {
+          "name": "OverhaulLampHead-5.5"
+        },
+        "Transform": {
+          "position": [
+            -5.5,
+            3.6,
+            4
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.55,
+            0.22,
+            0.55
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.68,
+            0.55,
+            0.32,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OverhaulLight-5.5",
+      "components": {
+        "Tag": {
+          "name": "Harbor lamp"
+        },
+        "Transform": {
+          "position": [
+            -5.5,
+            3.4,
+            4
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PointLight": {
+          "color": [
+            1,
+            0.75,
+            0.42
+          ],
+          "intensity": 8,
+          "range": 7
+        }
+      }
+    },
+    {
+      "id": "OverhaulLamp6",
+      "components": {
+        "Tag": {
+          "name": "OverhaulLamp6"
+        },
+        "Transform": {
+          "position": [
+            6,
+            1.8,
+            4
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.1,
+            3.6,
+            0.1
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.16,
+            0.21,
+            0.2,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OverhaulLampHead6",
+      "components": {
+        "Tag": {
+          "name": "OverhaulLampHead6"
+        },
+        "Transform": {
+          "position": [
+            6,
+            3.6,
+            4
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.55,
+            0.22,
+            0.55
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/harbor_cube.obj",
+          "visible": true
+        },
+        "Material": {
+          "materialPath": "materials/harbor.material.json",
+          "tint": [
+            0.68,
+            0.55,
+            0.32,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "OverhaulLight6",
+      "components": {
+        "Tag": {
+          "name": "Harbor lamp"
+        },
+        "Transform": {
+          "position": [
+            6,
+            3.4,
+            4
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "PointLight": {
+          "color": [
+            1,
+            0.75,
+            0.42
+          ],
+          "intensity": 8,
+          "range": 7
+        }
+      }
+    }
+  ]
+}

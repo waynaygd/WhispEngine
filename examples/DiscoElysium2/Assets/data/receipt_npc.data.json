@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "kind": "DataAsset",
+  "type": "NPCDefinition",
+  "schema": {
+    "type": "Object",
+    "fields": {
+      "id": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      },
+      "tag": {
+        "type": "String"
+      },
+      "dialogue": {
+        "type": "Resource",
+        "suffix": ".data.json"
+      },
+      "portrait": {
+        "type": "Resource",
+        "suffix": ".png"
+      },
+      "range": {
+        "type": "Number"
+      }
+    }
+  },
+  "value": {
+    "id": "receipt",
+    "name": "Квитанция",
+    "tag": "Receipt",
+    "dialogue": "data/receipt.data.json",
+    "portrait": "textures/receipt.png",
+    "range": 1.8
+  }
+}

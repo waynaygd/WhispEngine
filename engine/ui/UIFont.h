@@ -12,6 +12,8 @@ FontAtlas RasterizeFont();
 std::vector<unsigned> FontCoverage();
 FontAtlas RasterizeFontFile(const std::filesystem::path&,float size=32,const std::vector<unsigned>& coverage=FontCoverage());
 std::vector<unsigned> DecodeUTF8(const std::string&);
+// Wrapped UTF-8 plus logical height, using the renderer's glyph advances/line metrics.
+std::pair<std::string,float> MeasureText(const FontAtlas&,const std::string&,float fontSize,float width);
 struct FontView {const FontAtlas* atlas=nullptr;RenderTextureHandle texture;std::string error;};
 using FontResolver=std::function<FontView(const std::string&)>;
 }

@@ -25,6 +25,9 @@ target_include_directories(ImGuizmo PUBLIC
 target_link_libraries(ImGuizmo PUBLIC DearImGui)
 
 add_library(Engine
+  ui/UITextMetrics.cpp
+  resources/DataResource.cpp
+  editor/EditorData.cpp
   ui/UICustomFont.cpp
   ui/FontCache.cpp
   resources/FontResource.cpp
@@ -182,6 +185,7 @@ if(WIN32)
 endif()
 
 if(MSVC)
+  set_source_files_properties(scripting/LuaRuntime.cpp PROPERTIES COMPILE_OPTIONS "/bigobj")
   set_source_files_properties(ui/UIDocument.cpp editor/EditorRuntimeUI.cpp
   editor/WidgetDesignerTools.cpp
   editor/EditorWidgetDesigner.cpp PROPERTIES COMPILE_OPTIONS "/utf-8")

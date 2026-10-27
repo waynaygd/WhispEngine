@@ -233,6 +233,7 @@ void EditorLayer::DrawInspector(Application& app){
     struct StyleScope{bool font;~StyleScope(){ImGui::PopStyleVar();if(font)ImGui::PopFont();}} styleScope{font!=nullptr};
     ImGui::SetNextWindowSizeConstraints(ImVec2(270*dpi,180*dpi),ImVec2(FLT_MAX,FLT_MAX));
     if(!ImGui::Begin("Inspector",&m_ShowInspector)){ImGui::End();return;}
+    if(DrawDataInspector(app)){ImGui::End();return;}
     auto& world=app.GetWorld();auto e=m_Selection.active;
     if(!world.IsAlive(e)){ImGui::TextUnformatted("No entity selected");ImGui::End();return;}
     ImGui::SetNextItemWidth(std::max(60.f,ImGui::GetContentRegionAvail().x-55*dpi));

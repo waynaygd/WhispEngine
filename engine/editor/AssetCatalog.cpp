@@ -21,6 +21,8 @@ namespace {
 template<class F>bool Guard(F fn,std::string* error){try{fn();if(error)error->clear();return true;}catch(const std::exception& e){if(error)*error=e.what();return false;}}
 }
 AssetCatalog::AssetCatalog(){
+    Register({"DataAsset","[DA]","data",ecs::AssetKind::None,{".json"}});
+    Register({"DataTable","[DT]","data",ecs::AssetKind::None,{".json"}});
     Register({"Font","[Font]","",ecs::AssetKind::Font,{".ttf",".otf"}});
     Register({"UI Document","[UI]","",ecs::AssetKind::UIDocument,{".json"}});
     Register({"Custom PostFX","[FX]","",ecs::AssetKind::PostFx,{".json"}});
@@ -66,6 +68,8 @@ void AssetCatalog::Refresh(){
             if(type.kind==ecs::AssetKind::Prefab&&!item.path().filename().string().ends_with(".prefab.json"))continue;
             if(type.kind==ecs::AssetKind::UIDocument&&!item.path().filename().string().ends_with(".ui.json"))continue;
             if(type.name=="UI Style"&&!item.path().filename().string().ends_with(".uistyle.json"))continue;
+            if(type.name=="DataAsset"&&!item.path().filename().string().ends_with(".data.json"))continue;
+            if(type.name=="DataTable"&&!item.path().filename().string().ends_with(".table.json"))continue;
             if(type.kind==ecs::AssetKind::PostFx&&!item.path().filename().string().ends_with(".postfx.json"))continue;
             auto ext=item.path().extension().string();std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});
             if(type.name=="Unknown"){

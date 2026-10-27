@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "kind": "DataTable",
+  "type": "Items",
+  "schema": {
+    "type": "Object",
+    "fields": {
+      "id": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      },
+      "description": {
+        "type": "String"
+      }
+    }
+  },
+  "rows": [
+    {
+      "id": "receipt",
+      "name": "Мокрая квитанция",
+      "description": "Улика с номером аварийного буя."
+    },
+    {
+      "id": "ledger",
+      "name": "Запись в журнале",
+      "description": "Уточняет время: +2 к Логике."
+    }
+  ]
+}

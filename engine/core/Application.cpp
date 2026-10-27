@@ -1872,7 +1872,7 @@ void Application::SetUIInputMode(const std::string& value){
 bool Application::GameplayActionAllowed(const std::string& action)const{return GameplayInputAllowed()&&!(m_UIPointerConsumed&&m_InputManager.IsMouseAction(action));}
 void Application::UpdateGameplayInput(float uiDelta)
 {
-    m_InputManager.BeginFrame();m_UIPointerConsumed=false;
+    m_InputManager.BeginFrame();m_UIPointerConsumed=false;m_GameplayScroll=0;
     if(m_RenderSystem&&m_ResourceManager)GetRuntimeUI().Sync(GetWorld(),*m_ResourceManager);
     if(m_RenderSystem)GetRuntimeUI().Advance(uiDelta);
     auto* primary=dynamic_cast<GlfwWindow*>(GetWindow());auto* window=primary?primary->GetGlfwHandle():nullptr;
@@ -1890,6 +1890,7 @@ void Application::UpdateGameplayInput(float uiDelta)
     const bool available=focused&&!text&&!IsGameplayMouseCaptured()&&m_UIInputMode!=ui::InputMode::GameOnly;
     float px=-1,py=-1;if(inside&&m_EditorLayer.IsViewportHovered()&&bounds[2]>bounds[0]&&bounds[3]>bounds[1]){px=float((x-bounds[0])*width/(bounds[2]-bounds[0]));py=float((y-bounds[1])*height/(bounds[3]-bounds[1]));}
     m_UIPointerConsumed=GetRuntimeUI().Pointer(px,py,width,height,glfwGetMouseButton(window,GLFW_MOUSE_BUTTON_LEFT)==GLFW_PRESS,available);
+    float wheel=float(primary->ConsumeScrollDeltaY());if(available&&inside){const bool consumed=GetRuntimeUI().Scroll(px,py,width,height,wheel);if(!consumed&&!m_UIPointerConsumed)m_GameplayScroll=wheel;}
 }
 scripting::GameplayServices Application::GameplayCapabilities()
 {
@@ -1899,17 +1900,29 @@ scripting::GameplayServices Application::GameplayCapabilities()
     host.pressed=[this](const std::string& a){return GameplayActionAllowed(a)&&m_InputManager.FramePressed(a);};
     host.released=[this](const std::string& a){return GameplayActionAllowed(a)&&m_InputManager.FrameReleased(a);};
     host.mouseDelta=[this]{return GameplayInputAllowed()&&!m_UIPointerConsumed&&m_PlayerMouseCaptured?m_InputManager.MouseDelta():ecs::Vec3{};};
+    host.mousePosition=[this]{
+        if(!GameplayInputAllowed()||m_UIPointerConsumed||m_Windows.empty())return ecs::Vec3{-1,-1,1};
+        auto* native=dynamic_cast<GlfwWindow*>(GetWindow());if(!native)return ecs::Vec3{-1,-1,1};auto p=native->PointerPosition();auto b=m_EditorLayer.GetViewportBounds();
+        float w=float(m_EditorLayer.GetViewportPixelWidth()),h=float(m_EditorLayer.GetViewportPixelHeight());
+        if(b[2]<=b[0]||b[3]<=b[1]||h<=0)return ecs::Vec3{-1,-1,1};
+        return ecs::Vec3{float((p[0]-b[0])/(b[2]-b[0])),float((p[1]-b[1])/(b[3]-b[1])),w/h};
+    };
+    host.viewportSize=[this]{return ecs::Vec3{float(m_EditorLayer.GetViewportPixelWidth()),float(m_EditorLayer.GetViewportPixelHeight()),0};};
+    host.scrollDelta=[this]{return m_GameplayScroll;};
+    host.cursorShape=[this](const std::string& shape){auto* primary=dynamic_cast<GlfwWindow*>(GetWindow());if(!primary)return;auto* window=primary->GetGlfwHandle();if(shape=="arrow"){glfwSetCursor(window,nullptr);return;}
+        int kind=shape=="hand"?GLFW_HAND_CURSOR:shape=="crosshair"?GLFW_CROSSHAIR_CURSOR:shape=="not_allowed"?GLFW_NOT_ALLOWED_CURSOR:0;if(!kind)throw std::runtime_error("Unknown standard cursor");auto& slot=m_GameplayCursors[shape];if(!slot)slot=glfwCreateStandardCursor(kind);glfwSetCursor(window,static_cast<GLFWcursor*>(slot));};
     host.cursorCaptured=[this]{return m_PlayerMouseCaptured;};
     host.captureCursor=[this](bool capture){return CaptureGameplayCursor(capture);};
     host.bindAction=[this](const std::string& action,const std::string& key){return m_InputManager.BindNamedAction(action,key);};
     host.actions=[this]{return m_InputManager.Actions();};
     host.runtimeUI=m_RenderSystem?&GetRuntimeUI():nullptr;
     host.setUIInputMode=[this](const std::string& value){SetUIInputMode(value);};host.getUIInputMode=[this](){return GetUIInputMode();};
-    host.resetUIInput=[this](){m_UIInputMode=ui::InputMode::GameOnly;m_UIPointerConsumed=false;ReleasePlayerMouse();};
+    host.resetUIInput=[this](){m_UIInputMode=ui::InputMode::GameOnly;m_UIPointerConsumed=false;ReleasePlayerMouse();if(auto* primary=dynamic_cast<GlfwWindow*>(GetWindow()))glfwSetCursor(primary->GetGlfwHandle(),nullptr);};
     host.postfxResources=m_ResourceManager.get();host.camera=&m_GameplayCamera;return host;
 }
 void Application::Shutdown()
 {
+    for(auto& [key,cursor]:m_GameplayCursors)if(cursor)glfwDestroyCursor(static_cast<GLFWcursor*>(cursor));m_GameplayCursors.clear();
     SetEditorPlayMode(false);m_Mutations.Clear();
     if(!m_Windows.empty())m_EditorLayer.PersistPreferences(*this);
     if (auto* primary = dynamic_cast<GlfwWindow*>(GetWindow()))

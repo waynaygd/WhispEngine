@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "kind": "DataAsset",
+  "type": "CharacterStats",
+  "schema": {
+    "type": "Object",
+    "fields": {
+      "name": {
+        "type": "String"
+      },
+      "coat": {
+        "type": "Color"
+      },
+      "origin": {
+        "type": "Vec3"
+      },
+      "role": {
+        "type": "Enum",
+        "values": [
+          "detective",
+          "witness"
+        ]
+      },
+      "active": {
+        "type": "Boolean"
+      }
+    }
+  },
+  "value": {
+    "name": "Следователь Лев Орин",
+    "coat": [
+      0.14,
+      0.25,
+      0.3,
+      1
+    ],
+    "origin": [
+      0,
+      0,
+      -4
+    ],
+    "role": "detective",
+    "active": true
+  }
+}

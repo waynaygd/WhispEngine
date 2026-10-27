@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "kind": "DataAsset",
+  "type": "DialogueGraph",
+  "schema": {
+    "type": "Object",
+    "fields": {
+      "start": {
+        "type": "String"
+      },
+      "nodes": {
+        "type": "Array",
+        "items": {
+          "type": "Object",
+          "fields": {
+            "id": {
+              "type": "String"
+            },
+            "speaker": {
+              "type": "String"
+            },
+            "portrait": {
+              "type": "Resource",
+              "suffix": ".png"
+            },
+            "text": {
+              "type": "String"
+            },
+            "choices": {
+              "type": "Array",
+              "items": {
+                "type": "Object",
+                "fields": {
+                  "text": {
+                    "type": "String"
+                  },
+                  "next": {
+                    "type": "String"
+                  },
+                  "requires": {
+                    "type": "String"
+                  },
+                  "excludes": {
+                    "type": "String"
+                  },
+                  "flag": {
+                    "type": "String"
+                  },
+                  "check": {
+                    "type": "String"
+                  },
+                  "difficulty": {
+                    "type": "Number"
+                  },
+                  "success": {
+                    "type": "String"
+                  },
+                  "failure": {
+                    "type": "String"
+                  },
+                  "quest": {
+                    "type": "String"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "value": {
+    "start": "start",
+    "nodes": [
+      {
+        "id": "start",
+        "speaker": "Квитанция",
+        "text": "Синяя бумага прилипла к ящику. «Аварийный буй № 9. Выдача: И. Ветров». Чернила расплылись, но номер читается.",
+        "choices": [
+          {
+            "text": "Забрать как улику.",
+            "next": "",
+            "requires": "",
+            "excludes": "",
+            "flag": "receipt",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": "Квитанция указывает на аварийный буй. Спросите радиста Илью."
+          }
+        ],
+        "portrait": "textures/receipt.png"
+      }
+    ]
+  }
+}

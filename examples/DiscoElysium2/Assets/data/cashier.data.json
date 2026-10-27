@@ -1,0 +1,129 @@
+{
+  "version": 1,
+  "kind": "DataAsset",
+  "type": "DialogueGraph",
+  "schema": {
+    "type": "Object",
+    "fields": {
+      "start": {
+        "type": "String"
+      },
+      "nodes": {
+        "type": "Array",
+        "items": {
+          "type": "Object",
+          "fields": {
+            "id": {
+              "type": "String"
+            },
+            "speaker": {
+              "type": "String"
+            },
+            "portrait": {
+              "type": "Resource",
+              "suffix": ".png"
+            },
+            "text": {
+              "type": "String"
+            },
+            "choices": {
+              "type": "Array",
+              "items": {
+                "type": "Object",
+                "fields": {
+                  "text": {
+                    "type": "String"
+                  },
+                  "next": {
+                    "type": "String"
+                  },
+                  "requires": {
+                    "type": "String"
+                  },
+                  "excludes": {
+                    "type": "String"
+                  },
+                  "flag": {
+                    "type": "String"
+                  },
+                  "check": {
+                    "type": "String"
+                  },
+                  "difficulty": {
+                    "type": "Number"
+                  },
+                  "success": {
+                    "type": "String"
+                  },
+                  "failure": {
+                    "type": "String"
+                  },
+                  "quest": {
+                    "type": "String"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "value": {
+    "start": "start",
+    "nodes": [
+      {
+        "id": "start",
+        "speaker": "Нина Соль • кассир",
+        "text": "Смена закончилась, а я всё считаю пустые билеты. Да, я видела Илью с фонарём. Он шёл к воде, а не к выходу.",
+        "choices": [
+          {
+            "text": "Почему вы сразу не сказали?",
+            "next": "truth",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          },
+          {
+            "text": "Мне нужно подумать.",
+            "next": "",
+            "requires": "",
+            "excludes": "",
+            "flag": "",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": ""
+          }
+        ],
+        "portrait": "textures/cashier.png"
+      },
+      {
+        "id": "truth",
+        "speaker": "Нина Соль",
+        "text": "Потому что лодка вышла из тумана целой. Он нарушил правило и спас людей. Скажите ему: правда уже не страшнее молчания.",
+        "choices": [
+          {
+            "text": "Спасибо. Это меняет дело.",
+            "next": "",
+            "requires": "",
+            "excludes": "",
+            "flag": "testimony",
+            "check": "",
+            "difficulty": 0,
+            "success": "",
+            "failure": "",
+            "quest": "Нина подтверждает: фонарь спас лодку. Поговорите с Ильёй."
+          }
+        ],
+        "portrait": "textures/cashier.png"
+      }
+    ]
+  }
+}
