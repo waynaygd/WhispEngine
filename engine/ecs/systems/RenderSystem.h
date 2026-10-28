@@ -55,6 +55,8 @@ public:
     void SetPlacementPreview(const std::vector<PlacementRenderItem>& items){m_PlacementItems=items;}
     void SetViewportUnlit(bool value){m_ViewportUnlit=value;}
     bool IsViewportUnlit()const{return m_ViewportUnlit;}
+    void SetEditorDisplayOverridesEnabled(bool value){m_EditorDisplayOverridesEnabled=value;}
+    bool IsEditorUnlit()const{return m_EditorDisplayOverridesEnabled&&m_ViewportUnlit;}
     ~RenderSystem() override;
 
     const char* Name() const override { return "RenderSystem"; }
@@ -207,6 +209,7 @@ private:
     int m_ShadingModelOverride=-1;
     bool m_InstancingEnabled=true;
     bool m_ViewportUnlit=false;
+    bool m_EditorDisplayOverridesEnabled=false;
     std::string m_FogWarning;
     EvaluatedPostProcess m_EvaluatedPostProcess;
     const SceneBackground* m_AtmosphereSettings=nullptr;

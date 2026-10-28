@@ -1697,6 +1697,7 @@ int Application::Run()
                 }
 
                 if(m_RenderSystem){
+                    m_RenderSystem->SetEditorDisplayOverridesEnabled(!IsEditorPlayMode()&&wc.editorUiAvailable);
                     m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled&&!(IsEditorPlayMode()&&IsGameplayMouseCaptured()));
                     m_RenderSystem->SetEditorIsolation(!IsEditorPlayMode()&&wc.editorUiAvailable?m_EditorLayer.IsolationEntities():std::vector<ecs::Entity>{});
                     const auto& preview=m_EditorLayer.GetPlacementPreview();

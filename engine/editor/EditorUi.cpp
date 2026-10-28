@@ -18,6 +18,7 @@
 #include <misc/cpp/imgui_stdlib.h>
 #include <chrono>
 #include <algorithm>
+#include <cstdio>
 namespace editor {
 namespace {
 bool Matches(const std::string& text,const std::string& filter){
@@ -59,6 +60,55 @@ bool EditorLayer::PersistPreferences(Application& app){
     p.uiPreview=m_ShowRuntimeUI;p.visualPanel=m_ShowVisualSettings;p.visuals=m_VisualSettings;p.grid=m_ShowGrid;p.lightGizmos=m_ShowLightGizmos;p.cameraGizmos=m_ShowCameraGizmos;p.cameraFrustum=m_ShowCameraFrustum;p.cameraPreview=m_ShowCameraPreview;p.xray=m_LightXray;p.lightXrayMode=m_LightXrayMode;p.transformPrecision=m_TransformPrecision;p.rotationSnapping=m_RotationSnapping;p.physicsStress=m_ShowPhysicsStress;p.snapping=m_Snapping;p.operation=m_GizmoOperation;p.space=m_GizmoMode;
     p.translationSnap=m_SnapTranslation;p.rotationSnap=m_SnapRotation;p.scaleSnap=m_SnapScale;p.cameraSpeed=app.GetCameraMoveSpeed();p.cameraSensitivity=app.GetCameraSensitivity();std::string error;if(!SavePreferences(PreferencesPath(),p,&error)){m_EditorError=error;Logger::Get().Warn(error);return false;}return true;
 }
+void EditorLayer::DrawRotationSnapControls(){
+    ImGui::Checkbox("Rotate Snap",&m_RotationSnapping);
+    Help("Snap gizmo rotations in Scene and Prefab Editor. Uses the same toggle and step as Inspector Transform Options; no Entity data or Undo entry.");
+    ImGui::SameLine();ImGui::SetNextItemWidth(86*ImGui::GetStyle().FontScaleDpi);
+    char preview[32];std::snprintf(preview,sizeof(preview),"%g deg",double(m_SnapRotation));
+    if(ImGui::BeginCombo("##Rotation step",preview)){
+        for(float step:{5.f,10.f,15.f,30.f,45.f,90.f}){
+            char label[32];std::snprintf(label,sizeof(label),"%g deg",double(step));
+            if(ImGui::Selectable(label,m_SnapRotation==step))m_SnapRotation=step;
+        }
+        ImGui::Separator();ImGui::SetNextItemWidth(130*ImGui::GetStyle().FontScaleDpi);
+        PrecisionDragFloat("Custom step (deg)",&m_SnapRotation,.1f,.1f,180);
+        ImGui::EndCombo();
+    }
+    Help("Rotation snap step: 5, 10, 15, 30, 45, 90 degrees, or Custom. Ctrl-click Custom to type. Saved by the existing Editor Preferences policy.");
+}
+void EditorLayer::DrawViewportTransformControls(Application& app){
+    const float dpi=ImGui::GetStyle().FontScaleDpi;
+    ImGui::PushID("ViewportTransform");
+    const bool blocked=app.IsEditorPlayMode()||(!ActiveDocumentIs(DocumentType::Scene)&&!ActiveDocumentIs(DocumentType::Prefab));
+    auto tools=[&]{
+        ImGui::BeginDisabled(blocked);
+        for(int i=0;i<3;++i){if(i)ImGui::SameLine();const char* names[]={"Move","Rotate","Scale"};const char* tips[]={"Move selection (W)","Rotate selection (E)","Scale selection (R)"};
+            if(Action(names[i],blocked?"Activate a Scene/Prefab document and stop Play to edit transforms.":tips[i],true,m_GizmoOperation==i,80))m_GizmoOperation=i;
+        }
+        ImGui::SameLine();ImGui::SetNextItemWidth(82*dpi);
+        auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(m_Selection.active);
+        const bool localScale=m_Selection.items.size()==1&&m_GizmoOperation==2&&t&&(std::abs(t->rotation.x)+std::abs(t->rotation.y)+std::abs(t->rotation.z)>1e-6f);
+        if(localScale)m_GizmoMode=0;
+        ImGui::BeginDisabled(localScale);ImGui::Combo("##Transform space",&m_GizmoMode,"Local\0World\0");ImGui::EndDisabled();
+        Help(localScale?"Rotated scale uses Local axes to avoid unsupported shear.":"Local / World axes. Shared with the main toolbar, Scene and Prefab gizmos.");
+        ImGui::EndDisabled();
+    };
+    const bool narrow=ImGui::GetContentRegionAvail().x<600*dpi;
+    if(narrow){
+        if(ImGui::Button("Transform"))ImGui::OpenPopup("Transform tools");Help("Move (W), Rotate (E), Scale (R), Local / World. Expanded here when the viewport is narrow.");
+        if(ImGui::BeginPopup("Transform tools")){tools();ImGui::EndPopup();}
+    }else tools();
+    // Snap is always reachable; wrap the whole group together on very narrow docks.
+    ImGui::SameLine();if(ImGui::GetContentRegionAvail().x<215*dpi)ImGui::NewLine();
+    ImGui::BeginDisabled(blocked);
+    if(ImGui::GetContentRegionAvail().x<215*dpi){
+        char label[64];std::snprintf(label,sizeof(label),"Snap: %s / %g deg",m_RotationSnapping?"ON":"OFF",double(m_SnapRotation));
+        if(ImGui::Button(label))ImGui::OpenPopup("Rotation snap options");Help("Rotation snap toggle, presets and custom step.");
+        if(ImGui::BeginPopup("Rotation snap options")){DrawRotationSnapControls();ImGui::EndPopup();}
+    }else DrawRotationSnapControls();
+    ImGui::EndDisabled();
+    ImGui::PopID();
+}
 void EditorLayer::DrawToolbar(Application& app){
     auto* viewport=ImGui::GetMainViewport();const float dpi=ImGui::GetStyle().FontScaleDpi;
     ImGui::SetNextWindowPos(viewport->WorkPos);ImGui::SetNextWindowSize({viewport->WorkSize.x,ImGui::GetFrameHeightWithSpacing()+8});
@@ -75,7 +125,7 @@ void EditorLayer::DrawToolbar(Application& app){
     auto transforms=[&](){
         const char* blocked=play?"Stop Play to edit authored transforms.":(!ActiveDocumentIs(DocumentType::Scene)&&!ActiveDocumentIs(DocumentType::Prefab))?"Activate a Scene or Prefab document to use transform tools.":nullptr;
         ImGui::BeginDisabled(blocked!=nullptr);
-        for(int i=0;i<3;++i){if(i)ImGui::SameLine();const char* names[]={"Move","Rotate","Scale"};if(Action(names[i],blocked?blocked:i==0?"Move selection (W)":i==1?"Rotate selection (E)":"Scale selection (R)",true,m_GizmoOperation==i,60))m_GizmoOperation=i;}
+        for(int i=0;i<3;++i){if(i)ImGui::SameLine();const char* names[]={"Move","Rotate","Scale"};if(Action(names[i],blocked?blocked:i==0?"Move selection (W)":i==1?"Rotate selection (E)":"Scale selection (R)",true,m_GizmoOperation==i,80))m_GizmoOperation=i;}
         auto* t=app.GetWorld().GetComponent<ecs::TransformComponent>(m_Selection.active);
         const bool localScale=m_Selection.items.size()==1&&m_GizmoOperation==2&&t&&(std::abs(t->rotation.x)+std::abs(t->rotation.y)+std::abs(t->rotation.z)>1e-6f);if(localScale)m_GizmoMode=0;
         ImGui::SameLine();if(Action("Local",blocked?blocked:"Use local transform axes.",true,m_GizmoMode==0,52))m_GizmoMode=0;

@@ -5,6 +5,7 @@
 #include "SunSynchronization.h"
 #include "EditorWidgets.h"
 #include "EditorLayer.h"
+#include "EditorTheme.h"
 #include "../scene/SceneSerializer.h"
 
 #include "../core/Application.h"
@@ -622,17 +623,21 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     const bool showEditorControls=!(playMode&&app.IsGameplayMouseCaptured());
     if(!maximized&&showEditorControls){
     DrawViewportCreateMenu(app);
-    ImGui::SameLine();DrawPlacementMenu(app);
-    ImGui::SameLine();DrawViewportTools(app);
+    Inline("Placement");DrawPlacementMenu(app);
+    Inline("View");DrawViewportTools(app);
     ImGui::SameLine();
     if(ImGui::GetContentRegionAvail().x<ImGui::CalcTextSize("Display").x+ImGui::GetStyle().FramePadding.x*2)ImGui::NewLine();
     if(ImGui::Button("Display"))ImGui::OpenPopup("Viewport display");
     if(ImGui::BeginPopup("Viewport display")){
-        int shading=app.IsViewportUnlit()?1:0;ImGui::SetNextItemWidth(140*ImGui::GetStyle().FontScaleDpi);
+        ImGui::BeginDisabled(playMode);
+        int shading=!playMode&&app.IsViewportUnlit()?1:0;ImGui::SetNextItemWidth(140*ImGui::GetStyle().FontScaleDpi);
         if(ImGui::Combo("Lighting",&shading,"Lit\0Unlit\0"))app.SetViewportUnlit(shading==1);
+        ImGui::EndDisabled();Help("Editor shading: Lit (Alt+3), Unlit (Alt+4). Unlit suppresses artistic screen effects; authored settings and Runtime stay unchanged.");
         if(!playMode){ImGui::Checkbox("Game View (G)",&m_GameView);if(ImGui::Checkbox("UI Preview (Ctrl+U)",&m_ShowRuntimeUI))PersistPreferences(app);ImGui::Checkbox("Grid",&m_ShowGrid);ImGui::Checkbox("Light Gizmos",&m_ShowLightGizmos);ImGui::SameLine();ImGui::Checkbox("Camera Gizmos",&m_ShowCameraGizmos);}
         ImGui::EndPopup();
     }
+    Inline("Unlit");if(Action(!playMode&&app.IsViewportUnlit()?"Unlit":"Lit","Editor Lit (Alt+3) / Unlit (Alt+4). Unlit hides artistic PostFX without changing scene data. Runtime keeps the authored stack.",!playMode,!playMode&&app.IsViewportUnlit()))app.SetViewportUnlit(!app.IsViewportUnlit());
+    DrawViewportTransformControls(app);
     ImGui::Separator();
     }
 
@@ -716,6 +721,15 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     iconLayers.Merge(iconDraw);
     ImGui::GetWindowDrawList()->PushClipRect(contentMin,ImVec2(contentMin.x+viewportSize.x,contentMin.y+viewportSize.y),true);
     if(!m_LightIconClicked&&!m_LightPointerCaptured&&!m_LightHandleHovered&&!m_VertexSourcePicking)DrawGizmo(app, contentMin, viewportSize);
+    // A gizmo is draw-list geometry, not an ImGui item. Own the same canvas ID
+    // as gameplay so a drag cannot move an undocked panel under the handle.
+    if(!playMode){
+        auto* window=ImGui::GetCurrentWindow();auto& context=*ImGui::GetCurrentContext();const auto canvas=window->GetID("ViewportCanvas");
+        if(ImGuizmo::IsUsing()&&(!context.ActiveId||context.ActiveId==window->MoveId||context.ActiveId==canvas)){
+            ImGui::SetActiveID(canvas,window);context.MovingWindow=nullptr;
+        }
+        if(context.ActiveId==canvas){ImGui::KeepAliveID(canvas);if(!ImGui::IsMouseDown(0))ImGui::ClearActiveID();}
+    }
     ImGui::GetWindowDrawList()->PopClipRect();
     DrawSurfaceMove(app,contentMin,viewportSize,true);
     DrawVertexSnap(app,contentMin,viewportSize,true);

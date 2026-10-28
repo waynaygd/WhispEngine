@@ -425,6 +425,8 @@ private:
     std::string m_ProjectName="MyGame",m_ProjectLocation,m_ProjectDescriptor,m_PendingProject,m_ProjectError;
     std::vector<RecentProject> m_RecentProjects;
     void DrawToolbar(Application&);
+    void DrawRotationSnapControls();
+    void DrawViewportTransformControls(Application&);
     void DrawEditorVisualSettings(Application&,IRenderAdapter*);
     void PrepareEditorSky(Application&,IRenderAdapter*);
     EditorVisualSettings m_VisualSettings;

@@ -50,7 +50,8 @@ static void Cpu(){
     ui.NavigateAssetFolder("materials");auto lua=ui.CreateLuaScriptAsset(app,scriptDirectory);Check(lua==scriptDirectory+"/new_behaviour.lua"&&ui.AssetFolder()==scriptDirectory,"Lua creation uses supplied context rather than selected folder");
     cleanup.paths.push_back(editor::ResolveEditableLuaScript(lua));
     auto second=ui.CreateLuaScriptAsset(app,scriptDirectory);Check(second!=lua&&!second.empty(),"Lua creation does not overwrite existing script");cleanup.paths.push_back(editor::ResolveEditableLuaScript(second));
-    Check(!ui.CreateLuaScriptAsset(app,"materials").size()&&!ui.CreateLuaScriptAsset(app,"scripts/../../escape").size(),"Lua creation rejects incompatible/traversal destinations");
+    const auto arbitrary="materials/editor-ux-"+id;auto arbitraryLua=ui.CreateLuaScriptAsset(app,arbitrary);Check(arbitraryLua.starts_with(arbitrary+"/")&&!arbitraryLua.empty(),"3.1 contract: Lua creation accepts arbitrary Assets folders");cleanup.paths.push_back(editor::ResolveEditableLuaScript(arbitraryLua));cleanup.paths.push_back(AssetPaths::ResolveAssetRoot()/arbitrary);
+    Check(ui.CreateLuaScriptAsset(app,"scripts/../../escape").empty(),"Lua creation still rejects traversal");
     ui.SelectEntity(entity);auto prefab=ui.CreatePrefabAsset(app,prefabDirectory);Check(prefab.starts_with(prefabDirectory+"/")&&ui.AssetFolder()==prefabDirectory,"Prefab creation uses explicit context");cleanup.paths.push_back(scripting::SafeAsset(prefab,".prefab.json"));
     auto spawned=scripting::SpawnPrefab(app.GetWorld(),prefab,{});Check(app.GetWorld().HasComponent<ecs::TransformComponent>(spawned),"created prefab uses existing JSON schema");app.DestroySceneEntity(spawned);
     ui.ClearSelection();Check(ui.CreatePrefabAsset(app,prefabDirectory).empty()&&ui.CreatePrefabAsset(app,"scripts").empty(),"Prefab creation requires selection and compatible directory");

@@ -177,7 +177,7 @@ namespace ecs {
         lightCamera.view=m_RenderCamera.view;lightCamera.projection=m_RenderCamera.projection;
         lightCamera.nearPlane=m_CameraNearPlane;lightCamera.farPlane=m_CameraFarPlane;
         auto lights=GatherSceneLights(world,m_LightingSettings?*m_LightingSettings:m_DefaultLighting,lightCamera,m_Interpolation);
-        if(m_ViewportUnlit)lights.lighting.enabled=false;
+        if(IsEditorUnlit())lights.lighting.enabled=false;
         auto fog=GatherFog(world,lightCamera);
         PostProcessSettings postBase;postBase.fog=fog.settings;postBase.fog.enabled=fog.active;
         if(m_EnvironmentSettings)postBase.environment=*m_EnvironmentSettings;
@@ -191,9 +191,11 @@ namespace ecs {
             if(fog.active&&!m_Renderer->GetFogDiagnostics().supported)warning="Fog is not supported by this render backend";
             if(warning!=m_FogWarning){m_FogWarning=warning;if(!warning.empty())Logger::Get().Warn(warning);}
             m_Renderer->SetFog(fog);
-            m_Renderer->SetScreenEffects(m_EvaluatedPostProcess.screenEffects);
+            // Presentation only; preserve the evaluated stack and HDR output contract.
+            m_Renderer->SetScreenEffects(IsEditorUnlit()?ScreenEffects{}:m_EvaluatedPostProcess.screenEffects);
             m_PostFxTime+=std::isfinite(dt)?std::max(dt,0.f):0;
-            if(m_ResourceManager)m_Renderer->SetCustomPostFx(ResolvePostFx(m_EvaluatedPostProcess.customEffects,*m_ResourceManager,m_PostFxOverrides,m_PostFxTime,dt));
+            if(!IsEditorUnlit()&&m_ResourceManager)m_Renderer->SetCustomPostFx(ResolvePostFx(m_EvaluatedPostProcess.customEffects,*m_ResourceManager,m_PostFxOverrides,m_PostFxTime,dt));
+            else m_Renderer->SetCustomPostFx({});
         }
         if(m_Renderer){m_Renderer->SetCameraPosition({m_CameraPosition.x,m_CameraPosition.y,m_CameraPosition.z,0});
             m_Renderer->SetLighting(BuildLightingConstants(lights.lighting));
@@ -202,7 +204,7 @@ namespace ecs {
         if (m_Renderer == nullptr)
             return;
         if(m_EnvironmentSettings){
-            auto environment=m_EvaluatedPostProcess.environment;if(m_ViewportUnlit){environment.diffuse=environment.specular=false;environment.ambientOcclusion.enabled=false;}
+            auto environment=m_EvaluatedPostProcess.environment;if(IsEditorUnlit()){environment.diffuse=environment.specular=false;environment.ambientOcclusion.enabled=false;}
             m_Renderer->SetEnvironmentSettings(environment);
             if(m_ResourceManager&&m_EnvironmentSettings->enabled){
                 const auto& key=m_EnvironmentSettings->assetPath;
@@ -348,7 +350,7 @@ namespace ecs {
                 ZoneScopedN("ShadowPass");
                 const auto start=std::chrono::steady_clock::now();
                 auto settings=SanitizeShadowSettings(m_ShadowSettings?*m_ShadowSettings:m_DefaultShadows);
-                settings.enabled=settings.enabled&&lights.primaryCastShadows&&!m_ViewportUnlit;
+                settings.enabled=settings.enabled&&lights.primaryCastShadows&&!IsEditorUnlit();
                 const auto light=BuildLightingConstants(lights.lighting);
                 ShadowFrame frame;
                 if(m_RenderCamera.settings.projection==CameraProjection::Orthographic){
@@ -379,7 +381,7 @@ namespace ecs {
                     m_Renderer->EndShadowPass();
                 }
                 // Spot maps share caster submissions; their light-pose basis is independent of the camera.
-                const bool spotEnabled=(m_ShadowSettings?m_ShadowSettings->enabled:m_DefaultShadows.enabled)&&!m_ViewportUnlit;
+                const bool spotEnabled=(m_ShadowSettings?m_ShadowSettings->enabled:m_DefaultShadows.enabled)&&!IsEditorUnlit();
                 m_Renderer->SetSpotShadowFrames(spotEnabled?std::span<const SpotShadowFrame>(lights.spotShadows):std::span<const SpotShadowFrame>{},spotEnabled?lights.spotShadowRequests:0);
                 if(spotEnabled)for(size_t slot=0;slot<lights.spotShadows.size();++slot)if(m_Renderer->BeginSpotShadowPass(unsigned(slot))){
                     const auto& spot=lights.spotShadows[slot];
@@ -403,7 +405,7 @@ namespace ecs {
             else {m_WorldParticles.vertices.clear();m_WorldParticles.commands.clear();m_FirstPersonParticles.vertices.clear();m_FirstPersonParticles.commands.clear();}
             // Reuse opaque depth submission (including non-shadow-casting meshes).
             // First-person geometry/particles are excluded from world occlusion.
-            if(!m_ViewportUnlit&&m_Renderer->BeginAmbientOcclusion(m_RenderCamera.viewProjection,m_RenderCamera.projection)){
+            if(!IsEditorUnlit()&&m_Renderer->BeginAmbientOcclusion(m_RenderCamera.viewProjection,m_RenderCamera.projection)){
                 for(const auto& batch:m_Batches){const auto& packet=m_RenderPackets[batch.begin];
                     if(packet.renderMode!=MeshRenderMode::World)continue;
                     m_Renderer->SetMeshRange(packet.range);m_Renderer->SetMaterialState(packet.materialState);
@@ -619,7 +621,7 @@ namespace ecs {
         if (m_Renderer == nullptr)
             return;
         if(m_EnvironmentSettings){
-            auto environment=m_EvaluatedPostProcess.environment;if(m_ViewportUnlit)environment.diffuse=environment.specular=false;
+            auto environment=m_EvaluatedPostProcess.environment;if(IsEditorUnlit())environment.diffuse=environment.specular=false;
             m_Renderer->SetEnvironmentSettings(environment);
             if(m_ResourceManager&&m_EnvironmentSettings->enabled){
                 const auto& key=m_EnvironmentSettings->assetPath;

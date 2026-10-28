@@ -423,7 +423,7 @@ void EditorLayer::DrawInspector(Application& app){
         if(d.key=="Transform"&&ImGui::TreeNode("Transform Options")){
             ImGui::SetNextItemWidth(-1);ImGui::Combo("Precision",&m_TransformPrecision,"Compact\0Precise\0Full Precision (9 significant digits)\0");
             ImGui::Checkbox("Rotation Snap",&m_RotationSnapping);ImGui::SameLine();
-            if(ImGui::BeginCombo("Step",std::to_string(m_SnapRotation).c_str())){for(float step:{15.f,30.f,45.f,90.f})if(ImGui::Selectable((std::to_string(int(step))+" deg").c_str(),m_SnapRotation==step))m_SnapRotation=step;ImGui::EndCombo();}
+            if(ImGui::BeginCombo("Step",std::to_string(m_SnapRotation).c_str())){for(float step:{5.f,10.f,15.f,30.f,45.f,90.f})if(ImGui::Selectable((std::to_string(int(step))+" deg").c_str(),m_SnapRotation==step))m_SnapRotation=step;ImGui::EndCombo();}
             PrecisionDragFloat("Custom step (deg)",&m_SnapRotation,.1f,.1f,180);
             ImGui::Combo("Quarter-turn axis",&m_RotateAxis,"X\0Y\0Z\0");
             ImGui::BeginDisabled(app.IsEditorPlayMode()||app.GetSceneBackground().sunSync==SunSyncMode::SkyDrivesLight&&PrimarySun(world)==e);
