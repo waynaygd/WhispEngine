@@ -66,6 +66,7 @@ void EditorLayer::ResetProjectState(IRenderAdapter* renderer){
     m_HierarchyVisible.clear();m_AssetActionSource.clear();m_AssetActionPath.clear();m_AssetActionBlockers.clear();m_AssetActionWarnings.clear();
     m_AssetActionRequested=m_FolderPopup=m_ImportPopup=m_RenameRequested=m_SceneDialogRequested=false;
     m_ImportSource.clear();m_ImportRoot.clear();m_ImportTarget.clear();m_ImportPreview.clear();m_ImportTargetFolder.clear();m_ImportPackageName.clear();
+    m_ImportResults.clear();m_ImportFailed.clear();m_MovePlan.reset();m_MoveBlockers.clear();m_MovePopup=false;
     m_SceneSearch.clear();m_AssetFilter.clear();m_EditorError.clear();m_BackgroundOverride=false;
 }
 void EditorLayer::ProjectOpened(Application& app){

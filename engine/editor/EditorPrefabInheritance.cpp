@@ -20,7 +20,8 @@ void EditorLayer::TrackPrefabChanges(Application& app){
 bool EditorLayer::CreateChildPrefab(Application& app,const std::string& parent,const std::string& key){
  try{
   if(app.IsEditorPlayMode())throw std::runtime_error("Stop Play before creating a Child Prefab");
-  if(parent==key||!key.starts_with("prefabs/"))throw std::runtime_error("Choose a new key inside prefabs/");
+  if(parent==key)throw std::runtime_error("Choose a new Child Prefab key");
+  (void)scripting::SafeAsset(key,".prefab.json");
   auto child=scripting::NewChildPrefab(parent);auto resolved=scripting::ResolvePrefabDelta(child,scripting::ReadPrefab(parent));(void)resolved;
   FinishTransaction(app);auto path=scripting::SafeAsset(key,".prefab.json");
   if(!SceneSerializer::WriteAtomic(path,child,&m_EditorError,false))throw std::runtime_error(m_EditorError);

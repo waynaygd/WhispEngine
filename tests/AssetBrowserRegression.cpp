@@ -84,6 +84,11 @@ int main(){try{
     gpu->BeginFrame();gpu->Clear(0,0,0,1);ui.BeginAssetThumbnailFrame(app);auto failed=ui.RequestAssetThumbnail(app,ecs::AssetKind::Texture,missing);
     Check(failed.state=="Failed"&&!failed.error.empty()&&!failed.texture.IsValid(),"failed state and diagnostic");gpu->EndFrame();gpu->Present();
     SyntheticEditorInput input;app.SetFrameLimit(1);ui.SelectAsset("","");ui.SetAssetSearch("cube");ui.SetAssetTypeFilter(ecs::AssetKind::Mesh);
+    auto* browserWindow=ImGui::FindWindowByName("Asset Browser");Check(browserWindow,"browser fixture window");
+    const auto oldDock=browserWindow->DockId;const auto oldPosition=browserWindow->Pos,oldSize=browserWindow->Size;
+    // Card-size assertions need unoccluded image space, independent of the
+    // restored user's dock width or clipping in a short bottom panel.
+    ImGui::SetWindowDock(browserWindow,0,ImGuiCond_Always);ImGui::SetWindowPos(browserWindow,{0,400},ImGuiCond_Always);ImGui::SetWindowSize(browserWindow,{900,320},ImGuiCond_Always);
     ImGui::SetWindowFocus("Asset Browser");for(int i=0;i<8;++i)app.Run();
     auto cubeId=gpu->GetTexturePreviewId(handles[3]);auto cube=Card(cubeId);Check(cube.has_value(),"name search and mesh filter retain cube image");
     Check(gpu->SaveFrameImage("diagnostics/asset-browser/browser.ppm"),"browser screenshot");
@@ -91,10 +96,11 @@ int main(){try{
     const auto smallWidth=cube->GetWidth();ui.SetAssetCardSize(220);app.Run();app.Run();cube=Card(cubeId);Check(cube&&cube->GetWidth()>smallWidth+20,"card size changes image size");
     ui.SetAssetTypeFilter(ecs::AssetKind::Texture);app.Run();app.Run();Check(!Card(cubeId),"type filter removes mesh");
     ui.SetAssetTypeFilter(ecs::AssetKind::Mesh);ui.SetAssetCardSize(120);app.Run();app.Run();cube=Card(cubeId);Check(bool(cube),"restore mesh card");
+    ImGui::SetWindowDock(browserWindow,oldDock,ImGuiCond_Always);ImGui::SetWindowPos(browserWindow,oldPosition,ImGuiCond_Always);ImGui::SetWindowSize(browserWindow,oldSize,ImGuiCond_Always);app.Run();app.Run();
     auto floor=ui.CreatePrimitive(app,"plane");app.GetWorld().GetComponent<ecs::TransformComponent>(floor)->scale={20,1,20};ui.ClearSelection();
     Check(app.SetEditorCameraPose({0,6,-8},0,-.55f),"placement camera above floor");for(int i=0;i<12;++i)app.Run();
     const auto surfaceDraws=app.GetRenderStatistics().visibleSubmeshes;
-    const auto before=app.GetWorld().GetAliveCount();Check(before==1,"placement fixture contains only its owned floor");auto source=cube->GetCenter();
+    const auto before=app.GetWorld().GetAliveCount();Check(before==1,"placement fixture contains only its owned floor");cube=Card(cubeId);Check(cube.has_value(),"drag uses current card bounds after layout restore");auto source=cube->GetCenter();
     SyntheticEditorInput::Position(source.x,source.y);app.Run();SyntheticEditorInput::Button(0,true);app.Run();SyntheticEditorInput::Position(source.x+10,source.y);app.Run();
     auto* payload=ImGui::GetDragDropPayload();Check(payload&&payload->IsDataType("WHISP_ASSET"),"card starts existing asset drag payload");
     auto viewport=ui.GetViewportBounds();const float x=(viewport[0]+viewport[2])*.5f,y=(viewport[1]+viewport[3])*.5f;

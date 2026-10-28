@@ -34,7 +34,7 @@ void ValidateNodes(ecs::World& world,const SceneSettings& settings,const Json& n
 bool EditorLayer::CreatePrefab(Application& app,const std::string& key){
     try{
         AuthoringOnly(app);FinishTransaction(app);if(m_Selection.items.size()!=1)throw std::runtime_error("Select exactly one root and its subtree");
-        if(!key.starts_with("prefabs/"))throw std::runtime_error("Choose a .prefab.json path inside Assets/prefabs");
+        (void)scripting::SafeAsset(key,".prefab.json");
         auto root=m_Selection.active;if(scripting::PrefabRoot(app.GetWorld(),root).IsValid())throw std::runtime_error("Selection already belongs to a prefab instance");
         auto data=scripting::CapturePrefab(app.GetWorld(),root);auto before=CaptureSubtree(app,root);
         before.files.push_back({key,std::nullopt,data});auto path=scripting::SafeAsset(key,".prefab.json");

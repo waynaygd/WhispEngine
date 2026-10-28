@@ -537,6 +537,7 @@ void EditorLayer::HandleEditorShortcuts(Application& app){
 void EditorLayer::RefreshAssetLists(float dt)
 {
     m_AssetRefreshTimer += dt;
+    if(m_AssetCatalog.PollExternalChanges(dt))m_AssetListsDirty=true;
     if (!m_AssetListsDirty)
         return;
 

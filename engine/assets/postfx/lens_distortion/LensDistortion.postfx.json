@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "id": "whisp.lens_distortion",
+  "name": "Lens Distortion",
+  "description": "Display-space radial distortion. Zero strength is an identity transform.",
+  "stage": "AfterTonemap",
+  "order": 0,
+  "shader": "LensDistortion.hlsl",
+  "parameters": [
+    { "name": "strength", "type": "float", "default": 0.1, "min": -0.5, "max": 0.5 }
+  ]
+}

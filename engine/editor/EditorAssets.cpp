@@ -74,6 +74,9 @@ bool EditorLayer::AssetBrowserOwnsKeyboard()const{
 std::vector<std::string> EditorLayer::AssetFileBlockers(Application& app,const std::string& key)const{
     std::vector<std::string> reasons;
     if(app.IsEditorPlayMode())reasons.push_back("Stop Play before modifying asset files");
+    if(m_DataDirty)reasons.push_back("Save or Discard the DataAsset draft before changing asset files");
+    if(!m_DataKey.empty()&&AssetCatalog::ContainsReference(m_DataDraft,key))reasons.push_back("Open DataAsset draft references this asset: "+m_DataKey);
+    for(const auto& [origin,s]:m_ScriptSessions)if(s->Dirty()&&s->key!=key)reasons.push_back("Save or Discard other Lua drafts before dependency checks: "+s->key);
     for(auto& [origin,s]:m_ScriptSessions)if(s->key==key&&s->Dirty())reasons.push_back("Save or Discard the open Lua draft first");
     if(m_MaterialDirty)reasons.push_back("Save or Revert unsaved material edits first");
     if(app.IsPrefabEditing())reasons.push_back("Return from Prefab Editor before changing asset files");
@@ -114,10 +117,13 @@ void EditorLayer::InvalidateAssetFileUi(Application& app,const std::string& old,
         const auto path=std::filesystem::u8path(old);
         resources->StopWatchingAsset(old);
         resources->Unload<MaterialResource>(path);resources->Unload<TextureResource>(path);resources->Unload<EnvironmentResource>(path);resources->Unload<UIResource>(path);
+        resources->Unload<FontResource>(path);resources->Unload<DataResource>(path);
         if(!replacement.empty()){
             if(replacement.ends_with(".ui.json")||replacement.ends_with(".uistyle.json"))resources->WatchForHotReload<UIResource>(replacement);
             else if(replacement.ends_with(".material.json")||replacement.starts_with("materials/"))resources->WatchForHotReload<MaterialResource>(replacement);
-            else if(replacement.starts_with("textures/"))resources->WatchForHotReload<TextureResource>(replacement);
+            else if(std::set<std::string>{".png",".jpg",".jpeg",".bmp",".tga",".dds"}.contains(AssetCatalog::FileSuffix(replacement)))resources->WatchForHotReload<TextureResource>(replacement);
+            else if(replacement.ends_with(".ttf")||replacement.ends_with(".otf"))resources->WatchForHotReload<FontResource>(replacement);
+            else if(replacement.ends_with(".data.json")||replacement.ends_with(".table.json"))resources->WatchForHotReload<DataResource>(replacement);
         }
     }
     const bool editing=m_EditingMaterial==old;if(editing){m_EditingMaterial=replacement;m_MaterialError.clear();}
@@ -204,9 +210,9 @@ std::string AssetLoadError(ResourceManager* resources,ecs::AssetKind kind,const 
 std::string EditorLayer::CreateLuaScriptAsset(Application& app,const std::string& directory){
         try{
             if(app.IsEditorPlayMode())throw std::runtime_error("Stop Play before creating assets");
-            if(directory!="scripts"&&!directory.starts_with("scripts/"))throw std::runtime_error("Choose scripts or a subfolder");
-            std::string key=directory+"/new_behaviour.lua";unsigned n=1;
-            while(std::filesystem::exists(scripting::SafeAsset(key,".lua")))key=directory+"/new_behaviour_"+std::to_string(n++)+".lua";
+            const auto prefix=directory.empty()?"":directory+"/";
+            std::string key=prefix+"new_behaviour.lua";unsigned n=1;
+            while(std::filesystem::exists(scripting::SafeAsset(key,".lua")))key=prefix+"new_behaviour_"+std::to_string(n++)+".lua";
             auto path=scripting::SafeAsset(key,".lua");std::filesystem::create_directories(path.parent_path());
             std::ofstream file(path,std::ios::binary);file<<NewLuaBehaviour();file.close();if(!file)throw std::runtime_error("Script write failed");m_SelectedAsset=key;m_SelectedAssetKind="Lua Script";m_AssetListsDirty=true;NavigateAssetFolder(directory);m_EditorError.clear();return key;
         }catch(const std::exception& error){m_EditorError=error.what();}
@@ -215,9 +221,8 @@ std::string EditorLayer::CreateLuaScriptAsset(Application& app,const std::string
 std::string EditorLayer::CreatePrefabAsset(Application& app,const std::string& directory){
         try{
             if(app.IsEditorPlayMode())throw std::runtime_error("Stop Play before creating assets");
-            if(directory!="prefabs"&&!directory.starts_with("prefabs/"))throw std::runtime_error("Choose prefabs or a subfolder");
             if(!app.GetWorld().IsAlive(m_Selection.active))throw std::runtime_error("Select an entity first");
-            std::string key=directory+"/entity_"+ecs::NewSceneIdentity()+".prefab.json";
+            std::string key=(directory.empty()?"":directory+"/")+"entity_"+ecs::NewSceneIdentity()+".prefab.json";
             if(!CreatePrefab(app,key))throw std::runtime_error(m_EditorError);
             m_SelectedAsset=key;m_SelectedAssetKind="Prefab";m_AssetListsDirty=true;NavigateAssetFolder(directory);m_EditorError.clear();return key;
         }catch(const std::exception& error){m_EditorError=error.what();}
@@ -264,14 +269,19 @@ void EditorLayer::DrawAssetBrowser(Application& app){
         ImGui::TextDisabled("%s",directory.empty()?"Project root":directory.c_str());
         const bool edit=!app.IsEditorPlayMode();
         if(ImGui::BeginMenu("Create Asset")){
+            for(const char* type:{"PostFX","Lens Distortion","HLSL","Empty Prefab"})if(ImGui::MenuItem(type,nullptr,false,edit)){
+                const std::string suffix=std::string(type)=="Empty Prefab"?".prefab.json":std::string(type)=="HLSL"?".hlsl":".postfx.json";
+                auto key=(directory.empty()?"":directory+"/")+"New-"+ecs::NewSceneIdentity()+suffix;
+                if(m_AssetCatalog.CreateStarter(key,type,&m_EditorError)){m_AssetListsDirty=true;SelectAsset(key,std::string(type)=="Empty Prefab"?"Prefab":std::string(type)=="HLSL"?"Shader":"Custom PostFX");}
+            }
             auto item=[&](const char* label,const char* root,bool extra=true){
-                const bool allowed=edit&&extra&&(directory==root||directory.starts_with(std::string(root)+"/"));
+                const bool allowed=edit&&extra;
                 const bool clicked=ImGui::MenuItem(label,nullptr,false,allowed);
                 if(!allowed&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("%s. Use %s or a subfolder.",!edit?"Stop Play first":!extra?"Select an entity first":"Choose a compatible folder",root);
                 return clicked;
             };
             for(bool table:{false,true})if(item(table?"DataTable":"DataAsset","data")){
-                auto key=directory+"/New-"+ecs::NewSceneIdentity()+(table?".table.json":".data.json");
+                auto key=(directory.empty()?"":directory+"/")+"New-"+ecs::NewSceneIdentity()+(table?".table.json":".data.json");
                 nlohmann::json schema={{"type","Object"},{"fields",{{table?"id":"name",{{"type","String"}}}}}};
                 nlohmann::json d={{"version",1},{"kind",table?"DataTable":"DataAsset"},{"type",table?"NewTable":"NewAsset"},{"schema",schema}};
                 if(table)d["rows"]=nlohmann::json::array();else d["value"]=DataLoader::Default(schema);
@@ -279,13 +289,38 @@ void EditorLayer::DrawAssetBrowser(Application& app){
             }
             if(item("Lua Script","scripts"))CreateLuaScriptAsset(app,directory);
             if(item("Prefab","prefabs",app.GetWorld().IsAlive(m_Selection.active))){m_PrefabNewKey=(directory.empty()?"prefabs":directory)+"/new.prefab.json";m_PrefabCreatePopup=true;}
-            if(item("UI Document","ui")){auto key=directory+"/Canvas-"+ecs::NewSceneIdentity()+".ui.json";if(UILoader::Save(key,ui::EmptyDocument(),&m_EditorError)){m_AssetListsDirty=true;OpenUIDesigner(app,key);}}
-            if(item("Material","materials"))action(1,directory+"/new.material.json");
+            if(item("UI Document","ui")){auto key=(directory.empty()?"":directory+"/")+"Canvas-"+ecs::NewSceneIdentity()+".ui.json";if(UILoader::Save(key,ui::EmptyDocument(),&m_EditorError)){m_AssetListsDirty=true;OpenUIDesigner(app,key);}}
+            if(item("Material","materials"))action(1,(directory.empty()?"":directory+"/")+"new.material.json");
             ImGui::EndMenu();
         }
         if(ImGui::MenuItem("New Folder",nullptr,false,edit)){m_FolderParent=directory;m_FolderPopup=true;}
         if(ImGui::MenuItem("Import Asset...",nullptr,false,edit)){BeginAssetImport();m_ImportTargetFolder=directory;}
         if(ImGui::MenuItem("Refresh"))m_AssetListsDirty=true;
+    };
+    auto folderDrop=[&](const std::string& folder){
+        auto preview=[&](const std::vector<std::string>& keys){
+            m_MovePlan=AssetMovePlan{};m_MovePlan->sources=keys;m_MovePlan->folder=folder;
+            for(const auto& key:keys)m_MovePlan->roots.emplace_back(key,(folder.empty()?"":folder+"/")+AssetPaths::ToUtf8String(std::filesystem::u8path(key).filename()));
+            m_MoveBlockers.clear();m_EditorError.clear();m_MovePopup=true;
+            try{
+                m_MovePlan=AssetCatalog::PlanMove(keys,folder);
+                for(const auto& [from,to]:m_MovePlan->files)for(const auto& reason:AssetFileBlockers(app,from))m_MoveBlockers.push_back(from+": "+reason);
+            }catch(const std::exception& e){m_MoveBlockers.push_back(e.what());}
+        };
+        if(ImGui::BeginDragDropTarget()){
+            if(const auto* p=ImGui::AcceptDragDropPayload("WHISP_ASSET_MOVE"))try{
+                auto keys=nlohmann::json::parse(static_cast<const char*>(p->Data),static_cast<const char*>(p->Data)+p->DataSize).get<std::vector<std::string>>();preview(keys);
+            }catch(const std::exception& e){m_EditorError=e.what();}
+            if(const auto* p=ImGui::AcceptDragDropPayload("WHISP_ASSET")){
+                if(p->DataSize==sizeof(AssetPayload)){
+                    const auto& data=*static_cast<const AssetPayload*>(p->Data);
+                    if(std::memchr(data.key,0,sizeof(data.key))){
+                        preview({data.key});
+                    }
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
     };
     // Three compact rows; optional controls move into Options at narrow widths.
     ImGui::SetNextItemWidth(90*dpi);
@@ -351,6 +386,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
         const float width=std::clamp(m_AssetTreeWidth*dpi,90*dpi,std::max(90*dpi,available-220*dpi));
         ImGui::BeginChild("Directories",ImVec2(width,0),ImGuiChildFlags_Borders);
         if(ImGui::Selectable("Project root",m_AssetDirectory.empty()))NavigateAssetFolder("");
+        folderDrop("");
         if(ImGui::BeginPopupContextItem("ProjectActions")){creationMenu("");ImGui::EndPopup();}
         auto tree=[&](auto&& self,const std::string& parent)->void {
             for(const auto& folder:m_AssetNavigation.children[parent]){
@@ -362,6 +398,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
                 if(ImGui::IsItemToggledOpen()){if(open)m_AssetExpanded.insert(folder);else m_AssetExpanded.erase(folder);}
                 if(m_AssetDirectory==folder&&m_AssetTreeReveal){ImGui::SetScrollHereY(.5f);m_AssetTreeReveal=false;}
                 if(ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen())NavigateAssetFolder(folder);
+                folderDrop(folder);
                 if(ImGui::BeginPopupContextItem("FolderActions")){creationMenu(folder);ImGui::EndPopup();}
                 if(open){self(self,folder);ImGui::TreePop();}ImGui::PopID();
             }
@@ -422,7 +459,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
                     if(!io.KeyCtrl)m_AssetSelection.clear();
                     const int from=anchor==rows.end()?index:int(anchor-rows.begin());for(int i=std::min(from,index);i<=std::max(from,index);++i)m_AssetSelection.insert(rows[i]->identity);
                 }else if(io.KeyCtrl){if(!m_AssetSelection.erase(item.identity))m_AssetSelection.insert(item.identity);m_AssetAnchor=item.identity;}
-                else {m_AssetSelection={item.identity};m_AssetAnchor=item.identity;}
+                else if(!selected||m_AssetSelection.size()<=1){m_AssetSelection={item.identity};m_AssetAnchor=item.identity;}
                 selectIdentity(m_AssetSelection.contains(item.identity)?item.identity:m_AssetSelection.empty()?std::string():*m_AssetSelection.begin());
             }
             if(m_AssetScrollSelection&&item.identity==activeIdentity()){ImGui::SetScrollHereY();m_AssetScrollSelection=false;}
@@ -462,8 +499,17 @@ void EditorLayer::DrawAssetBrowser(Application& app){
                 const auto error=thumbnail?thumbnail->error:AssetLoadError(resources,type.kind,key);if(!error.empty())ImGui::TextWrapped("%s",error.c_str());
                 ImGui::TextDisabled("%s",item.folder?"Double-click or Enter: open folder.":"Double-click: open. Drag: assign or place.");ImGui::EndTooltip();
             }
-            if((type.kind!=ecs::AssetKind::None||type.name=="Imported Scene")&&ImGui::BeginDragDropSource()){AssetPayload payload{};payload.kind=type.kind;std::memcpy(payload.key,key.data(),std::min(key.size(),sizeof(payload.key)-1));ImGui::SetDragDropPayload("WHISP_ASSET",&payload,sizeof(payload));ImGui::Text("%s %s",type.icon.c_str(),name.c_str());ImGui::EndDragDropSource();}
+            if(ImGui::BeginDragDropSource()){
+                if(item.folder||m_AssetSelection.size()>1||type.kind==ecs::AssetKind::None){
+                    std::vector<std::string> keys;
+                    if(m_AssetSelection.contains(item.identity))for(const auto& id:m_AssetSelection)keys.push_back(id.starts_with("folder:")?id.substr(7):id);
+                    else keys.push_back(key);
+                    auto payload=nlohmann::json(keys).dump();ImGui::SetDragDropPayload("WHISP_ASSET_MOVE",payload.data(),payload.size());ImGui::Text("Move %zu selected resources",keys.size());
+                }else{AssetPayload payload{};payload.kind=type.kind;std::memcpy(payload.key,key.data(),std::min(key.size(),sizeof(payload.key)-1));ImGui::SetDragDropPayload("WHISP_ASSET",&payload,sizeof(payload));ImGui::Text("%s %s",type.icon.c_str(),name.c_str());}
+                ImGui::EndDragDropSource();
+            }
             if(ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(0))m_AssetDoubleClick=item.identity;
+            if(item.folder)folderDrop(key);
             if(item.folder&&ImGui::BeginPopupContextItem("ContentFolderActions")){
                 if(!m_AssetSelection.contains(item.identity))SelectAsset(key,"Folder");
                 if(ImGui::MenuItem("Open"))openItem(item);creationMenu(key);ImGui::EndPopup();
@@ -568,6 +614,38 @@ void EditorLayer::DrawAssetBrowser(Application& app){
     if(contentOwnsKeyboard()&&!app.IsEditorPlayMode()&&m_SelectedAssetKind!="Folder"&&m_AssetSelection.size()<=1&&!m_SelectedAsset.empty()&&!io.WantTextInput&&!ImGui::IsAnyItemActive()&&!ImGui::IsDragDropActive()&&!io.KeyCtrl&&!io.KeyAlt&&!io.KeyShift&&!ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel)){
         if(ImGui::IsKeyPressed(ImGuiKey_F2,false))BeginAssetFileAction(app,2,m_SelectedAsset);
         else if(ImGui::IsKeyPressed(ImGuiKey_Delete,false))BeginAssetFileAction(app,3,m_SelectedAsset);
+    }
+    if(m_MovePopup){ImGui::OpenPopup("Move Resources");m_MovePopup=false;}
+    if(ImGui::BeginPopupModal("Move Resources",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
+        if(m_MovePlan){
+            ImGui::Text("%zu resources, %zu files -> %s",m_MovePlan->roots.size(),m_MovePlan->files.size(),m_MovePlan->folder.empty()?"Assets":m_MovePlan->folder.c_str());
+            ImGui::BeginChild("Move preview",{650,180},ImGuiChildFlags_Borders);
+            for(const auto& [from,to]:m_MovePlan->roots)ImGui::TextWrapped("%s -> %s",from.c_str(),to.c_str());
+            for(const auto& [from,to]:m_MovePlan->files)ImGui::TextWrapped("  %s -> %s",from.c_str(),to.c_str());
+            ImGui::EndChild();
+        }
+        for(const auto& reason:m_MoveBlockers)ImGui::TextWrapped("Blocked: %s",reason.c_str());
+        ImGui::BeginDisabled(!m_MovePlan||!m_MoveBlockers.empty()||app.IsEditorPlayMode());
+        if(ImGui::Button("Move all")){
+            m_MoveBlockers.clear();
+            for(const auto& [from,to]:m_MovePlan->files)for(const auto& reason:AssetFileBlockers(app,from))m_MoveBlockers.push_back(from+": "+reason);
+            if(m_MoveBlockers.empty()&&m_AssetCatalog.ExecuteMove(*m_MovePlan,&m_EditorError)){
+                const auto plan=*m_MovePlan;
+                for(const auto& [from,to]:plan.files)InvalidateAssetFileUi(app,from,to);
+                m_AssetSelection.clear();
+                for(const auto& [from,to]:plan.roots){const bool folder=std::filesystem::is_directory(AssetImport::SafeTarget(plan.root,to));m_AssetSelection.insert(folder?AssetContentItem::FolderId(to):to);}
+                m_AssetAnchor=m_AssetSelection.empty()?"":*m_AssetSelection.begin();
+                if(m_AssetAnchor.starts_with("folder:")){m_SelectedAsset=m_AssetAnchor.substr(7);m_SelectedAssetKind="Folder";}
+                else {
+                    m_SelectedAsset=m_AssetAnchor;m_SelectedAssetKind.clear();
+                    for(const auto& [from,to]:plan.roots)if(to==m_AssetAnchor)
+                        for(const auto& entry:m_AssetCatalog.Entries())if(entry.key==from){m_SelectedAssetKind=m_AssetCatalog.Types()[entry.type].name;break;}
+                }
+                m_AssetListsDirty=true;NavigateAssetFolder(plan.folder);m_MovePlan.reset();ImGui::CloseCurrentPopup();
+            }else m_AssetListsDirty=true;
+        }
+        ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("Cancel")){m_MovePlan.reset();m_MoveBlockers.clear();ImGui::CloseCurrentPopup();}
+        if(!m_EditorError.empty())ErrorText(m_EditorError.c_str());ImGui::EndPopup();
     }
     if(m_AssetActionRequested){ImGui::OpenPopup(m_AssetAction==1?"Material Asset Action":m_AssetAction==2?"Rename Asset":m_AssetAction==4?"Move Asset":"Delete Asset?");m_AssetActionRequested=false;}
     if(ImGui::BeginPopupModal("Material Asset Action",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
