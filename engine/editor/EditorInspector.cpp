@@ -45,7 +45,7 @@ nlohmann::json PropertyJson(const ecs::PropertyValue& value){
 std::string PropertyGroup(const ecs::ComponentDescriptor& d,const ecs::PropertyDescriptor& p){
     if(d.key=="Transform")return p.key=="pivot"?"Advanced":"";
     if(d.key=="MeshRenderer")return p.advanced?"Advanced":p.kind==ecs::PropertyKind::Asset?"Resources":"Rendering";
-    if(d.key=="DirectionalLight"||d.key=="PointLight"||d.key=="SpotLight")return p.key=="castShadows"?"Shadows":p.key=="range"||p.key=="attenuation"||p.key=="innerAngle"||p.key=="outerAngle"?"Shape / Range":"General";
+    if(d.key=="DirectionalLight"||d.key=="PointLight"||d.key=="SpotLight")return p.key=="castShadows"||p.key.starts_with("shadow")?"Shadows":p.key=="range"||p.key=="attenuation"||p.key=="innerAngle"||p.key=="outerAngle"?"Shape / Range":"General";
     if(d.key=="Rigidbody")return p.advanced?"Advanced":"Body";
     if(d.key=="Collider")return p.advanced?"Advanced":"Shape / Collision";
     if(d.key=="LuaScript")return p.kind==ecs::PropertyKind::Asset?"Resources":"Permissions";
@@ -65,7 +65,8 @@ ecs::PropertyValue Initial(const ecs::PropertyDescriptor& p){
     if(p.key=="scatteringColor")return postDefaults.fog.scatteringColor;
     switch(p.kind){case K::Boolean:return false;case K::Integer:return 0;case K::Number:return p.key.find("roughness")!=std::string::npos?.5f:p.key.find("Scale")!=std::string::npos||p.key.find("Strength")!=std::string::npos?1.f:std::max(p.minimum,0.f);case K::String:case K::Asset:return std::string();case K::Vector:return ecs::Vec3{};case K::Color:return std::array<float,4>{1,1,1,1};case K::AssetList:return std::vector<std::string>{};}return {};
 }
-bool Drawer(const ecs::PropertyDescriptor& p,ecs::PropertyValue& v,const char* vectorFormat="%.3g",bool degrees=false,const std::function<bool(const ecs::PropertyDescriptor&,std::string&)>& resource={}){
+bool Drawer(const ecs::PropertyDescriptor& p,ecs::PropertyValue& v,const char* vectorFormat="%.3g",bool degrees=false,const std::function<bool(const ecs::PropertyDescriptor&,std::string&)>& resource={},bool spot=false){
+    if(spot&&p.key=="shadowResolution"){auto& value=std::get<int>(v);int index=value==512?0:value==2048?2:1;bool changed=ImGui::Combo("##resolution",&index,"512\0" "1024\0" "2048\0");if(changed)value=512<<index;return changed;}
     using K=ecs::PropertyKind;bool changed=false;
     if(p.nullable){bool enabled=!std::holds_alternative<std::monostate>(v);if(ImGui::Checkbox("##override",&enabled)){v=enabled?Initial(p):ecs::PropertyValue{};changed=true;}if(ImGui::IsItemHovered())ImGui::SetTooltip("Override this property for the selected entity; unchecked inherits the underlying asset or evaluated scene state.");if(!enabled){ImGui::SameLine();ImGui::TextDisabled("Inherit");return changed;}ImGui::SameLine();}
     switch(p.kind){
@@ -155,7 +156,7 @@ void EditorLayer::DrawBulkInspector(Application& app){
                 if(relative&&draft==m_PropertyDrafts.end())value=p.key=="scale"?ecs::PropertyValue(ecs::Vec3{1,1,1}):ecs::PropertyValue(ecs::Vec3{});
                 const bool drivenRotation=d.key=="Transform"&&p.key=="rotation"&&app.GetSceneBackground().sunSync==SunSyncMode::SkyDrivesLight&&app.GetSceneBackground().sunMetadata&&m_Selection.Contains(PrimarySun(world));
                 const bool drivenLight=d.key=="DirectionalLight"&&(p.key=="color"||p.key=="intensity")&&app.GetSceneBackground().background==EditorBackground::DayNight&&app.GetSceneBackground().driveLightProperties&&m_Selection.Contains(PrimarySun(world));
-                const bool readOnly=p.readOnly||((d.key=="PointLight"||d.key=="SpotLight")&&p.key=="castShadows")||drivenRotation||drivenLight||(d.key=="DirectionalLight"&&p.key=="primary");
+                const bool readOnly=p.readOnly||(d.key=="PointLight"&&p.key=="castShadows")||drivenRotation||drivenLight||(d.key=="DirectionalLight"&&p.key=="primary");
                 ImGui::BeginDisabled(readOnly);bool changed=false,finished=false;unsigned mask=15;
                 if(p.nullable){
                     bool enabled=!std::holds_alternative<std::monostate>(state.value);bool mixedEnabled=false;
@@ -187,7 +188,10 @@ void EditorLayer::DrawBulkInspector(Application& app){
                 }else if(p.kind==K::Number){float number=std::get<float>(value);changed=numeric(number,state.IsMixed(),"%.6g");value=number;
                 }else if(p.kind==K::Integer){
                     int number=std::get<int>(value);ImGui::SetNextItemWidth(-1);
-                    if(!p.choices.empty()){
+                    if(d.key=="SpotLight"&&p.key=="shadowResolution"){
+                        const char* label=state.IsMixed()?"Mixed":number==512?"512":number==2048?"2048":"1024";
+                        if(ImGui::BeginCombo("##resolution",label)){for(int resolution:{512,1024,2048})if(ImGui::Selectable(std::to_string(resolution).c_str(),!state.IsMixed()&&number==resolution)){number=resolution;changed=finished=true;}ImGui::EndCombo();}
+                    }else if(!p.choices.empty()){
                         const char* label=state.IsMixed()?"Mixed":number>=0&&number<int(p.choices.size())?p.choices[number].c_str():"Invalid";
                         if(ImGui::BeginCombo("##enum",label)){for(int choice=0;choice<int(p.choices.size());++choice)if(ImGui::Selectable(p.choices[choice].c_str(),!state.IsMixed()&&choice==number)){number=choice;changed=finished=true;}ImGui::EndCombo();}
                     }else if(state.IsMixed()){
@@ -232,7 +236,7 @@ void EditorLayer::DrawInspector(Application& app){
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,ImVec2(6*dpi,5*dpi));
     struct StyleScope{bool font;~StyleScope(){ImGui::PopStyleVar();if(font)ImGui::PopFont();}} styleScope{font!=nullptr};
     ImGui::SetNextWindowSizeConstraints(ImVec2(270*dpi,180*dpi),ImVec2(FLT_MAX,FLT_MAX));
-    if(!ImGui::Begin("Inspector",&m_ShowInspector)){ImGui::End();return;}
+    if(!editor::BeginEditorPanel("Inspector",&m_ShowInspector)){ImGui::End();return;}
     if(DrawDataInspector(app)){ImGui::End();return;}
     auto& world=app.GetWorld();auto e=m_Selection.active;
     if(!world.IsAlive(e)){ImGui::TextUnformatted("No entity selected");ImGui::End();return;}
@@ -299,10 +303,10 @@ void EditorLayer::DrawInspector(Application& app){
             auto value=draft!=m_PropertyDrafts.end()?draft->second:p.get(world,e);
             if(draft==m_PropertyDrafts.end()&&m_InspectorWorldTransform&&d.key=="Transform"){auto t=world.WorldTransform(e);if(p.key=="position")value=t.position;else if(p.key=="rotation")value=t.rotation;else if(p.key=="scale")value=t.scale;}
             const bool skyDriven=d.key=="Transform"&&p.key=="rotation"&&app.GetSceneBackground().sunSync==SunSyncMode::SkyDrivesLight&&app.GetSceneBackground().sunMetadata&&world.HasComponent<ecs::DirectionalLightComponent>(e)&&PrimarySun(world)==e;
-            const bool unsupportedShadow=(d.key=="PointLight"||d.key=="SpotLight")&&p.key=="castShadows";
+            const bool unsupportedShadow=d.key=="PointLight"&&p.key=="castShadows";
             const bool readOnly=p.readOnly||skyDriven||unsupportedShadow;
-            ImGui::BeginDisabled(readOnly);bool changed=Drawer(p,value,d.key=="Transform"?TransformFormat(m_TransformPrecision):"%.6g",d.key=="Transform"&&p.key=="rotation",resource);bool activated=ImGui::IsItemActivated();bool deactivated=ImGui::IsItemDeactivatedAfterEdit();ImGui::EndDisabled();
-            if(unsupportedShadow&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Unsupported: only the primary Directional light has a shadow pass. The reserved stored flag is preserved.");else if(skyDriven&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Sky Drives Light controls this orientation. Select Independent to edit it manually.");else if(p.readOnly&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Readonly: %s",p.tooltip.c_str());else if(ImGui::IsItemHovered()&&!p.tooltip.empty())ImGui::SetTooltip("%s",p.tooltip.c_str());
+            ImGui::BeginDisabled(readOnly);bool changed=Drawer(p,value,d.key=="Transform"?TransformFormat(m_TransformPrecision):"%.6g",d.key=="Transform"&&p.key=="rotation",resource,d.key=="SpotLight");bool activated=ImGui::IsItemActivated();bool deactivated=ImGui::IsItemDeactivatedAfterEdit();ImGui::EndDisabled();
+            if(unsupportedShadow&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Point shadows are unsupported. DX12 supports primary Directional and four Spot shadow slots.");else if(skyDriven&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Sky Drives Light controls this orientation. Select Independent to edit it manually.");else if(p.readOnly&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("Readonly: %s",p.tooltip.c_str());else if(ImGui::IsItemHovered()&&!p.tooltip.empty())ImGui::SetTooltip("%s",p.tooltip.c_str());
             if(activated||changed){if(!m_Transaction)PushUndoBeforeChange(app,"Edit "+d.label+" / "+p.label);m_PropertyDrafts[id]=value;}
             if(changed){
                 bool applied=false;
@@ -419,7 +423,7 @@ void EditorLayer::DrawInspector(Application& app){
         if(d.key=="Transform"&&ImGui::TreeNode("Transform Options")){
             ImGui::SetNextItemWidth(-1);ImGui::Combo("Precision",&m_TransformPrecision,"Compact\0Precise\0Full Precision (9 significant digits)\0");
             ImGui::Checkbox("Rotation Snap",&m_RotationSnapping);ImGui::SameLine();
-            if(ImGui::BeginCombo("Step",std::to_string(m_SnapRotation).c_str())){for(float step:{15.f,30.f,45.f,90.f})if(ImGui::Selectable((std::to_string(int(step))+" deg").c_str(),m_SnapRotation==step))m_SnapRotation=step;ImGui::EndCombo();}
+            if(ImGui::BeginCombo("Step",std::to_string(m_SnapRotation).c_str())){for(float step:{5.f,10.f,15.f,30.f,45.f,90.f})if(ImGui::Selectable((std::to_string(int(step))+" deg").c_str(),m_SnapRotation==step))m_SnapRotation=step;ImGui::EndCombo();}
             PrecisionDragFloat("Custom step (deg)",&m_SnapRotation,.1f,.1f,180);
             ImGui::Combo("Quarter-turn axis",&m_RotateAxis,"X\0Y\0Z\0");
             ImGui::BeginDisabled(app.IsEditorPlayMode()||app.GetSceneBackground().sunSync==SunSyncMode::SkyDrivesLight&&PrimarySun(world)==e);
@@ -435,7 +439,7 @@ void EditorLayer::DrawInspector(Application& app){
             ImGui::TextWrapped("Position marks the feet. Player size: %.2f x %.2f x %.2f. Scale is ignored. Y rotation sets facing; X sets camera pitch. The body stays upright.",half.x*2,half.y*2,half.z*2);
             }
         }
-        if(d.key=="PointLight"||d.key=="SpotLight")ImGui::TextWrapped("Point/Spot shadows are a reserved flag. Range is in world units; Transform scale is ignored.");
+        if(d.key=="PointLight")ImGui::TextWrapped("Point shadows are unsupported. Range is in world units; Transform scale is ignored."); if(d.key=="SpotLight")ImGui::TextWrapped("DX12 Spot shadows: up to four visible lights, priority by projected influence and intensity. Volumetric scattering is not shadowed.");
         if(d.key=="DirectionalLight"||d.key=="SpotLight")ImGui::TextWrapped("Outgoing rays follow Transform local +Z; Inspector rotation is in degrees (stored radians).");
         if(d.key=="Material"){if(ImGui::Button("Open Material Asset Editor")){auto* material=world.GetComponent<ecs::MaterialComponent>(e);OpenDocument(app,material->materialPath);}}
         }

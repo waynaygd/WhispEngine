@@ -10,11 +10,18 @@ inline void Help(const char* text){if(text&&ImGui::IsItemHovered(ImGuiHoveredFla
 inline void Inline(const char* label,float extra=0){ImGui::SameLine();if(ImGui::GetContentRegionAvail().x<ImGui::CalcTextSize(label).x+ImGui::GetStyle().FramePadding.x*2+extra*ImGui::GetStyle().FontScaleDpi)ImGui::NewLine();}
 inline bool Action(const char* label,const char* help,bool enabled=true,bool selected=false,float width=0){
     ImGui::BeginDisabled(!enabled);if(selected)ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.21f,.35f,.47f,1));
-    const std::string_view name=label;const bool icon=name=="Save"||name=="Play"||name=="Pause"||name=="Resume"||name=="Stop";
+    const std::string_view name=label;const bool icon=name=="Save"||name=="Play"||name=="Pause"||name=="Resume"||name=="Stop"||name=="Move"||name=="Rotate"||name=="Scale";
     if(icon)ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign,ImVec2(.85f,.5f));
     const bool pressed=ImGui::Button(label,{width*ImGui::GetStyle().FontScaleDpi,0});if(icon)ImGui::PopStyleVar();
     if(icon){auto p=ImGui::GetItemRectMin();const float u=ImGui::GetStyle().FontScaleDpi;const float y=(ImGui::GetItemRectMax().y+p.y)*.5f;auto* d=ImGui::GetWindowDrawList();auto c=ImGui::GetColorU32(ImGuiCol_Text);p.x+=6*u;
-        if(name=="Play"||name=="Resume")d->AddTriangleFilled({p.x,y-5*u},{p.x,y+5*u},{p.x+8*u,y},c);
+        if(name=="Move"){
+            d->AddLine({p.x,y},{p.x+10*u,y},c,1.5f*u);d->AddLine({p.x+5*u,y-5*u},{p.x+5*u,y+5*u},c,1.5f*u);
+            d->AddTriangleFilled({p.x-2*u,y},{p.x+2*u,y-3*u},{p.x+2*u,y+3*u},c);d->AddTriangleFilled({p.x+12*u,y},{p.x+8*u,y-3*u},{p.x+8*u,y+3*u},c);
+        }else if(name=="Rotate"){
+            d->AddCircle({p.x+5*u,y},5*u,c,16,1.5f*u);d->AddTriangleFilled({p.x+5*u,y-7*u},{p.x+5*u,y-u},{p.x+11*u,y-4*u},c);
+        }else if(name=="Scale"){
+            d->AddRect({p.x,y},{p.x+5*u,y+5*u},c);d->AddLine({p.x+3*u,y+2*u},{p.x+10*u,y-5*u},c,1.5f*u);d->AddTriangleFilled({p.x+10*u,y-5*u},{p.x+5*u,y-5*u},{p.x+10*u,y},c);
+        }else if(name=="Play"||name=="Resume")d->AddTriangleFilled({p.x,y-5*u},{p.x,y+5*u},{p.x+8*u,y},c);
         else if(name=="Pause"){d->AddRectFilled({p.x,y-5*u},{p.x+3*u,y+5*u},c);d->AddRectFilled({p.x+5*u,y-5*u},{p.x+8*u,y+5*u},c);}
         else {d->AddRect({p.x,y-4*u},{p.x+8*u,y+4*u},c,1);if(name=="Save")d->AddLine({p.x+2*u,y},{p.x+6*u,y},c);}
     }

@@ -42,6 +42,7 @@ struct ImGuiContext;
 
 namespace editor
 {
+bool BeginEditorPanel(const char* name,bool* open=nullptr,int flags=0);
 class LuaCodeEditor;
 class EditorLayer
 {
@@ -92,7 +93,7 @@ public:
     void NavigateAssetFolder(const std::string& folder){auto key=AssetCatalog::DirectoryKey(std::filesystem::u8path(folder));m_AssetNavigation.Go(key);m_AssetDirectory=key;m_AssetTreeReveal=true;for(auto parent=AssetNavigation::Parent(key);!parent.empty();parent=AssetNavigation::Parent(parent))m_AssetExpanded.insert(parent);}
     const std::string& AssetFolder()const{return m_AssetDirectory;}
     const std::string& ImportTargetFolder()const{return m_ImportTargetFolder;}
-    void BeginAssetImport(){m_ImportTargetFolder=m_AssetDirectory;m_ImportTarget.clear();m_ImportPackageName.clear();m_ImportPopup=true;m_ImportPreview.clear();}
+    void BeginAssetImport(){m_ImportTargetFolder=m_AssetDirectory;m_ImportTarget.clear();m_ImportPackageName.clear();m_ImportPopup=true;m_ImportPreview.clear();m_ImportResults.clear();m_ImportFailed.clear();}
     bool RotateSelectedQuarter(Application&,int axis,int turns,bool world);
     void SetPhysicsPanelVisible(bool v){m_ShowPhysicsStress=v;}
     bool IsPhysicsPanelVisible()const{return m_ShowPhysicsStress;}
@@ -352,6 +353,11 @@ public:
     void UndoEdit(Application& app){Undo(app);}
     void RedoEdit(Application& app){Redo(app);}
     int GetViewportPixelWidth() const { return m_ViewportPixelWidth; }
+    bool DetachViewport(Application&);
+    void DockViewport(Application&);
+    bool IsViewportDetached()const{return m_ViewportPlacement.detached;}
+    unsigned ViewportPlatformId()const{return m_ViewportPlatformId;}
+    void* ViewportPlatformHandle()const;
     int GetViewportPixelHeight() const { return m_ViewportPixelHeight; }
     bool IsViewportHovered() const { return m_ViewportHovered; }
     std::array<float,4> GetViewportBounds()const{return {m_ViewportMinX,m_ViewportMinY,m_ViewportMaxX,m_ViewportMaxY};}
@@ -361,6 +367,11 @@ public:
     bool IsPointInsideViewport(double x, double y) const;
 
 private:
+    void PrepareDetachedViewport(Application&,IRenderAdapter*);
+    void RestoreViewportPlacement(Application&);
+    WorkspaceLayout::ViewportPlacement m_ViewportPlacement;
+    bool m_ViewportPlacementPending=false,m_ViewportDockPending=false;
+    unsigned m_ViewportPlatformId=0,m_ViewportReturnDock=0;
     std::string BookmarkSceneKey(const Application&)const;
     bool DrawViewportTools(Application&);
     void HandleViewportToolShortcuts(Application&);
@@ -425,6 +436,8 @@ private:
     std::string m_ProjectName="MyGame",m_ProjectLocation,m_ProjectDescriptor,m_PendingProject,m_ProjectError;
     std::vector<RecentProject> m_RecentProjects;
     void DrawToolbar(Application&);
+    void DrawRotationSnapControls();
+    void DrawViewportTransformControls(Application&);
     void DrawEditorVisualSettings(Application&,IRenderAdapter*);
     void PrepareEditorSky(Application&,IRenderAdapter*);
     EditorVisualSettings m_VisualSettings;
@@ -559,8 +572,11 @@ private:
     bool m_ShowLightGizmos=true,m_LightXray=false;
     int m_LightXrayMode=1,m_TransformPrecision=1,m_RotateAxis=1;
     bool m_RotationSnapping=false,m_ShowPhysicsStress=false;
+    bool m_PlayInNewWindow=false;
     AssetNavigation m_AssetNavigation;
     std::string m_ImportTargetFolder,m_ImportPackageName;
+    std::vector<std::pair<std::string,std::string>> m_ImportResults;
+    std::vector<std::string> m_ImportFailed;
 
     bool DrawScalePlanes(Application&,const ImVec2&,const ImVec2&,const float* model);
     int m_ScalePlane=0;
@@ -659,6 +675,9 @@ private:
     float m_SnapTranslation=1,m_SnapRotation=15,m_SnapScale=.1f;
     Statistics m_Statistics;
     AssetCatalog m_AssetCatalog;
+    std::optional<AssetMovePlan> m_MovePlan;
+    std::vector<std::string> m_MoveBlockers;
+    bool m_MovePopup=false;
     bool m_AssetGrid=true,m_AssetActionRequested=false;
     int m_AssetView=0,m_AssetCategory=0;
     bool m_AssetTree=true,m_AssetDetails=false,m_AssetScrollSelection=false,m_AssetTreeReveal=false;

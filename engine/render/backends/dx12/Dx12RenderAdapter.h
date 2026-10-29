@@ -16,6 +16,16 @@ struct GLFWwindow;
 class Dx12RenderAdapter final : public IRenderAdapter
 {
 public:
+	bool SupportsGameOutput() const override {return true;}
+    bool SupportsEditorPlatformWindows()const override{return true;}
+    void EnableEditorPlatformWindows()override{m_EnablePlatformWindows=true;}
+    std::vector<std::uint8_t> ReadBackPlatformPixels(unsigned viewportId);
+
+	bool OpenGameOutput(IWindow*) override;
+	void CloseGameOutput() override;
+	bool ResizeGameOutput(unsigned,unsigned) override;
+	std::array<unsigned,2> GameOutputSize() const override {return m_GameSwapchain?m_GameSize:std::array<unsigned,2>{};}
+	std::vector<std::uint8_t> ReadBackGameOutputPixels();
 	bool Initialize(IWindow* window) override;
 	bool InitializeEditorUi(IWindow* window) override;
 	void BeginEditorUiFrame() override;
@@ -67,6 +77,10 @@ public:
     void SetAntiAliasing(AntiAliasingMode mode) override {m_AntiAliasing=AntiAliasingMode(std::clamp(int(mode),0,2));}
     AntiAliasingDiagnostics GetAntiAliasingDiagnostics()const override {AntiAliasingDiagnostics d;d.mode=m_AntiAliasing;for(const auto& t:m_HdrTargets)if(t.color)d.intermediateBytes+=t.allocationBytes;return d;}
     void SetEnvironmentSettings(const EnvironmentSettings& s) override {m_EnvironmentSettings=SanitizeEnvironment(s);}
+    bool BeginAmbientOcclusion(const std::array<float,16>&,const std::array<float,16>&) override;
+    void EndAmbientOcclusion() override;
+    AmbientOcclusionDiagnostics GetAmbientOcclusionDiagnostics() const override{return m_AoDiagnostics;}
+    std::vector<float> ReadBackAmbientOcclusion(unsigned input=0); // depth/raw(AO,N)/filtered
     void SetSceneLights(std::span<const GpuSceneLight>,LightRenderingMode,const SceneLightDiagnostics& = {}) override;
     SceneLightDiagnostics GetSceneLightDiagnostics() const override {return m_SceneLightDiagnostics;}
     std::vector<std::uint32_t> ReadBackLightTiles();
@@ -80,6 +94,10 @@ public:
     void SetBaseColor(const std::array<float,4>& p) override { m_BaseColor=p; }
     void SetCameraPosition(const std::array<float,4>& p) override { if(std::memcmp(m_Camera.data(),p.data(),sizeof(p))!=0){m_Camera=p;m_FrameConstantsDirty=true;} }
     void SetLighting(const LightingConstants& c) override { if(std::memcmp(&m_Lighting,&c,sizeof(c))!=0){m_Lighting=c;m_FrameConstantsDirty=true;} }
+    void SetSpotShadowFrames(std::span<const SpotShadowFrame>,unsigned) override;
+    bool BeginSpotShadowPass(unsigned) override;
+    SpotShadowDiagnostics GetSpotShadowDiagnostics() const override {return m_SpotDiagnostics;}
+    std::vector<float> ReadBackSpotShadowDepth(unsigned);
     void SetNormalMatrix(const std::array<float,12>& n) override { m_Normal=n; }
     bool SupportsInstancing(RenderShaderHandle handle) const override;
     bool DrawMeshInstanced(RenderMeshHandle handle, std::span<const RenderInstanceData> instances) override;
@@ -103,6 +121,7 @@ public:
     EditorVisualDiagnostics GetEditorVisualDiagnostics()const override{return m_EditorVisualDiagnostics;}
     void BeginMainPass() override;
     void EndMainPass() override;
+    void BeginWorldTransparency() override;
     void DrawParticles(const ParticleDrawList&) override;
     ParticleGpuStatistics GetParticleStatistics()const override{return m_ParticleStats;}
     bool BeginViewmodelPass() override;
@@ -122,8 +141,15 @@ public:
     bool SaveFrameImage(const std::string&) override;
 
 private:
+    bool m_EnablePlatformWindows=false;
     RenderTextureHandle CreateTexture(const TextureData&, bool renderTarget, bool deferred=false);
-    std::vector<std::uint8_t> ReadBackColorPixels(ID3D12Resource*);
+    std::vector<std::uint8_t> ReadBackColorPixels(ID3D12Resource*,D3D12_RESOURCE_STATES state=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    void CopyGameOutput();
+    Microsoft::WRL::ComPtr<IDXGISwapChain3> m_GameSwapchain;
+    std::array<Microsoft::WRL::ComPtr<ID3D12Resource>,2> m_GameBuffers;
+    std::array<unsigned,2> m_GameSize{};
+    unsigned m_GameLastBuffer=0;
+    bool m_GameVisible=false,m_GameCopied=false;
     GLFWwindow* m_EditorUiWindow=nullptr;
     float m_EditorUiScale=1;
     EditorVisualFrame m_EditorVisualFrame;
@@ -140,6 +166,9 @@ private:
     void ReleaseEditorVisuals();
     struct LightFrameResources {
         Microsoft::WRL::ComPtr<ID3D12Resource> lights,counts,indices,stats,readback;
+        Microsoft::WRL::ComPtr<ID3D12Resource> spotConstants;
+        D3D12_GPU_DESCRIPTOR_HANDLE spotTable{};
+        UINT spotCount=0;
         std::uint64_t lightCapacity=0,tileCapacity=0;
         bool pending=false,optimized=false;
         UINT count=0,tilesX=1,tilesY=1,width=1,height=1;
@@ -205,6 +234,20 @@ private:
         D3D12_GPU_DESCRIPTOR_HANDLE srv{};
         UINT descriptor=UINT_MAX,resolution=0;
     };
+    bool EnsureShadowTarget(UINT,ShadowTarget&);
+    void PrepareSpotBindings(LightFrameResources&);
+    void SwapSpotPipeline();
+    void ReleaseSpotResources();
+    ShadowTarget m_SpotTargets[FrameCount][MaxSpotShadows];
+    std::vector<SpotShadowFrame> m_SpotFrames;
+    std::array<SpotShadowGpu,MaxSpotShadows> m_SpotGpu{};
+    std::array<Microsoft::WRL::ComPtr<ID3D12PipelineState>,6> m_SpotPso;
+    int m_SpotDepthBias=-1;
+    float m_SpotSlopeBias=-1;
+    UINT m_ActiveSpot=UINT_MAX,m_LastSpotFrame=0;
+    ShadowConstants m_SpotSavedDirectional{};
+    SpotShadowDiagnostics m_SpotDiagnostics;
+    unsigned m_LastSpotOverflow=0;
     ShadowTarget m_ShadowTargets[FrameCount];
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_ShadowRoot;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_ShadowPso,m_ShadowInstancePso,m_ShadowDoublePso,m_ShadowDoubleInstancePso;
@@ -362,6 +405,32 @@ private:
         UINT64 allocationBytes=0;
     };
     HdrTarget m_HdrTargets[FrameCount];
+    struct AoPass {
+        Microsoft::WRL::ComPtr<ID3D12Resource> depth,constants,readback;
+        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> dsvHeap;
+        HdrTarget raw,filtered;
+        D3D12_GPU_DESCRIPTOR_HANDLE table{};
+        UINT width=0,height=0;
+        UINT64 depthBytes=0;
+        bool ready=false,pending=false;
+    };
+    std::vector<AoPass> m_AoPasses[FrameCount];
+    UINT m_AoCursor=0,m_ActiveAo=UINT_MAX,m_LastAoFrame=0,m_LastAoPass=0;
+    AmbientOcclusionDiagnostics m_AoDiagnostics{true};
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_AoRoot;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_AoRawPso,m_AoFilterPso,m_AoDebugRawPso,m_AoDebugFilteredPso;
+    Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_AoTime;
+    std::array<Microsoft::WRL::ComPtr<ID3D12PipelineState>,6> m_AoDepthPso;
+    int m_AoDepthBias=-1;float m_AoSlopeBias=-1;
+    ShadowConstants m_AoSavedShadow;
+    RenderSubmissionStatistics m_AoSavedStatistics;
+    bool EnsureAoPipeline();
+    void SwapAoPipeline();
+    void BindAmbientOcclusion();
+    void DrawAmbientOcclusionDebug();
+    void CollectAoTiming(UINT);
+    void ReleaseAmbientOcclusion();
+    void EnsureAoTarget(HdrTarget&,UINT,UINT,DXGI_FORMAT);
     struct PostFxCompile {std::vector<unsigned char> vs,ps;std::string error;std::shared_ptr<const PostFxDefinition> definition;};
     struct PostFxGpu {std::shared_ptr<const PostFxDefinition> requested,active;std::future<PostFxCompile> pending;Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;std::string error;};
     std::map<std::string,PostFxGpu> m_PostFxGpu;
@@ -370,7 +439,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Resource> m_RuntimeUIVertices[FrameCount];
     UINT64 m_RuntimeUICapacity[FrameCount]{};
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_ParticleRoot;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_ParticlePso[4];
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_ParticlePso[6];
     Microsoft::WRL::ComPtr<ID3D12Resource> m_ParticleVertices[FrameCount],m_ParticleReadback[FrameCount];
     Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_ParticleQueries;
     UINT64 m_ParticleCapacity[FrameCount]{},m_ParticleUsed=0;unsigned m_ParticleQueryCount[FrameCount]{};
@@ -383,7 +452,7 @@ private:
     void DrawCustomPostFx(const std::vector<const PostFxPass*>&,D3D12_CPU_DESCRIPTOR_HANDLE);
     void EnsurePostFxTarget(HdrTarget&,UINT,UINT);
     void ReleaseCustomPostFx();
-    struct FogPassResources {HdrTarget target,volume;Microsoft::WRL::ComPtr<ID3D12Resource> constants,readback;bool pending=false;};
+    struct FogPassResources {HdrTarget target,volume;Microsoft::WRL::ComPtr<ID3D12Resource> constants,readback;UINT shadowSrvIndex=UINT_MAX;bool pending=false;};
     std::vector<FogPassResources> m_FogPasses[FrameCount];
     FogFrame m_Fog;
     FogDiagnostics m_FogDiagnostics{true};
@@ -391,13 +460,15 @@ private:
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_FogPso,m_FogVolumePso,m_FogCompositePso;
     Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_FogTime;
     UINT m_FogPassCursor=0;
+    UINT m_TransparentFogPass=UINT_MAX;
+    bool m_InViewmodelPass=false;
     double m_FogGpuMs=0;
     void EnsureFogTarget(HdrTarget&,UINT,UINT);
     bool EnsureFogPipeline();
     void ApplyFog();
     void CollectFogTiming(UINT);
     void ReleaseFog();
-    bool m_HdrActive=false,m_HdrNative=false;
+    bool m_HdrActive=false; // The currently bound scene target contains linear HDR radiance.
     ScreenEffects m_ScreenEffects;
     unsigned m_PostFxFrame=0;
     AntiAliasingMode m_AntiAliasing=AntiAliasingMode::Off;

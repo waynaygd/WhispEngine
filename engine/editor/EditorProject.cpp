@@ -66,6 +66,7 @@ void EditorLayer::ResetProjectState(IRenderAdapter* renderer){
     m_HierarchyVisible.clear();m_AssetActionSource.clear();m_AssetActionPath.clear();m_AssetActionBlockers.clear();m_AssetActionWarnings.clear();
     m_AssetActionRequested=m_FolderPopup=m_ImportPopup=m_RenameRequested=m_SceneDialogRequested=false;
     m_ImportSource.clear();m_ImportRoot.clear();m_ImportTarget.clear();m_ImportPreview.clear();m_ImportTargetFolder.clear();m_ImportPackageName.clear();
+    m_ImportResults.clear();m_ImportFailed.clear();m_MovePlan.reset();m_MoveBlockers.clear();m_MovePopup=false;
     m_SceneSearch.clear();m_AssetFilter.clear();m_EditorError.clear();m_BackgroundOverride=false;
 }
 void EditorLayer::ProjectOpened(Application& app){
@@ -109,7 +110,7 @@ void EditorLayer::DrawProjectBrowser(Application& app){
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,ImVec2(10,7));
         ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding,12);
         ImGui::PushStyleColor(ImGuiCol_WindowBg,ImVec4(.055f,.065f,.085f,1));
-        if(ImGui::Begin("Project Browser",startup?nullptr:&m_ShowProjectBrowser,flags)){
+        if(editor::BeginEditorPanel("Project Browser",startup?nullptr:&m_ShowProjectBrowser,flags)){
             if(startup){
                 const auto space=ImGui::GetContentRegionAvail();
                 const ImVec2 size(std::min(920.f*ImGui::GetStyle().FontScaleDpi,space.x),std::min((m_RecentProjects.empty()?500.f:660.f)*ImGui::GetStyle().FontScaleDpi,space.y));

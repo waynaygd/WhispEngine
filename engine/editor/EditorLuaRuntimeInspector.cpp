@@ -44,7 +44,7 @@ void Values(const std::vector<scripting::LuaInspectedValue>& values,const std::s
 void EditorLayer::DrawLuaRuntimeInspector(Application& app){
     using namespace scripting;
     UpdateLuaRuntimeInspector(app,ImGui::GetTime());
-    if(!ImGui::Begin("Lua Runtime Inspector",&m_ShowLuaRuntimeInspector)){ImGui::End();return;}
+    if(!editor::BeginEditorPanel("Lua Runtime Inspector",&m_ShowLuaRuntimeInspector)){ImGui::End();return;}
     auto& world=app.GetWorld();const auto e=m_Selection.active;
     if(!app.IsEditorPlayMode()){ImGui::TextWrapped("Runtime state is available only during Play. No authored Script Fields are substituted here.");ImGui::End();return;}
     const auto* tag=world.GetComponent<ecs::TagComponent>(e);

@@ -2331,7 +2331,17 @@ namespace IMGUIZMO_NAMESPACE
             const vec_t movePlanNormal[] = { gContext.mModelLocal.v.up, gContext.mModelLocal.v.dir, gContext.mModelLocal.v.right, gContext.mModelLocal.v.dir, gContext.mModelLocal.v.up, gContext.mModelLocal.v.right, -gContext.mCameraDir };
             // pickup plan
 
-            gContext.mTranslationPlan = BuildPlan(gContext.mModelLocal.v.position, movePlanNormal[type - MT_SCALE_X]);
+            vec_t pickupNormal = movePlanNormal[type - MT_SCALE_X];
+            if (type >= MT_SCALE_X && type <= MT_SCALE_Z)
+            {
+               // A fixed local plane can contain both the camera and mouse ray
+               // (front view, X scale): capture succeeds but delta stays zero.
+               const vec_t axes[] = {gContext.mModelLocal.v.right, gContext.mModelLocal.v.up, gContext.mModelLocal.v.dir};
+               const vec_t& axis = axes[type - MT_SCALE_X];
+               vec_t facing = gContext.mCameraDir - axis * Dot(gContext.mCameraDir, axis);
+               if (Dot(facing, facing) > 1e-6f) { facing.Normalize(); pickupNormal = facing; }
+            }
+            gContext.mTranslationPlan = BuildPlan(gContext.mModelLocal.v.position, pickupNormal);
             const float len = IntersectRayPlane(gContext.mRayOrigin, gContext.mRayVector, gContext.mTranslationPlan);
             gContext.mTranslationPlanOrigin = gContext.mRayOrigin + gContext.mRayVector * len;
             gContext.mMatrixOrigin = gContext.mModelLocal.v.position;

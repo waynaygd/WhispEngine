@@ -177,7 +177,7 @@ namespace ecs {
         lightCamera.view=m_RenderCamera.view;lightCamera.projection=m_RenderCamera.projection;
         lightCamera.nearPlane=m_CameraNearPlane;lightCamera.farPlane=m_CameraFarPlane;
         auto lights=GatherSceneLights(world,m_LightingSettings?*m_LightingSettings:m_DefaultLighting,lightCamera,m_Interpolation);
-        if(m_ViewportUnlit)lights.lighting.enabled=false;
+        if(IsEditorUnlit())lights.lighting.enabled=false;
         auto fog=GatherFog(world,lightCamera);
         PostProcessSettings postBase;postBase.fog=fog.settings;postBase.fog.enabled=fog.active;
         if(m_EnvironmentSettings)postBase.environment=*m_EnvironmentSettings;
@@ -191,9 +191,11 @@ namespace ecs {
             if(fog.active&&!m_Renderer->GetFogDiagnostics().supported)warning="Fog is not supported by this render backend";
             if(warning!=m_FogWarning){m_FogWarning=warning;if(!warning.empty())Logger::Get().Warn(warning);}
             m_Renderer->SetFog(fog);
-            m_Renderer->SetScreenEffects(m_EvaluatedPostProcess.screenEffects);
+            // Presentation only; preserve the evaluated stack and HDR output contract.
+            m_Renderer->SetScreenEffects(IsEditorUnlit()?ScreenEffects{}:m_EvaluatedPostProcess.screenEffects);
             m_PostFxTime+=std::isfinite(dt)?std::max(dt,0.f):0;
-            if(m_ResourceManager)m_Renderer->SetCustomPostFx(ResolvePostFx(m_EvaluatedPostProcess.customEffects,*m_ResourceManager,m_PostFxOverrides,m_PostFxTime,dt));
+            if(!IsEditorUnlit()&&m_ResourceManager)m_Renderer->SetCustomPostFx(ResolvePostFx(m_EvaluatedPostProcess.customEffects,*m_ResourceManager,m_PostFxOverrides,m_PostFxTime,dt));
+            else m_Renderer->SetCustomPostFx({});
         }
         if(m_Renderer){m_Renderer->SetCameraPosition({m_CameraPosition.x,m_CameraPosition.y,m_CameraPosition.z,0});
             m_Renderer->SetLighting(BuildLightingConstants(lights.lighting));
@@ -202,7 +204,7 @@ namespace ecs {
         if (m_Renderer == nullptr)
             return;
         if(m_EnvironmentSettings){
-            auto environment=m_EvaluatedPostProcess.environment;if(m_ViewportUnlit)environment.diffuse=environment.specular=false;
+            auto environment=m_EvaluatedPostProcess.environment;if(IsEditorUnlit()){environment.diffuse=environment.specular=false;environment.ambientOcclusion.enabled=false;}
             m_Renderer->SetEnvironmentSettings(environment);
             if(m_ResourceManager&&m_EnvironmentSettings->enabled){
                 const auto& key=m_EnvironmentSettings->assetPath;
@@ -348,7 +350,7 @@ namespace ecs {
                 ZoneScopedN("ShadowPass");
                 const auto start=std::chrono::steady_clock::now();
                 auto settings=SanitizeShadowSettings(m_ShadowSettings?*m_ShadowSettings:m_DefaultShadows);
-                settings.enabled=settings.enabled&&lights.primaryCastShadows&&!m_ViewportUnlit;
+                settings.enabled=settings.enabled&&lights.primaryCastShadows&&!IsEditorUnlit();
                 const auto light=BuildLightingConstants(lights.lighting);
                 ShadowFrame frame;
                 if(m_RenderCamera.settings.projection==CameraProjection::Orthographic){
@@ -378,10 +380,40 @@ namespace ecs {
                     }
                     m_Renderer->EndShadowPass();
                 }
+                // Spot maps share caster submissions; their light-pose basis is independent of the camera.
+                const bool spotEnabled=(m_ShadowSettings?m_ShadowSettings->enabled:m_DefaultShadows.enabled)&&!IsEditorUnlit();
+                m_Renderer->SetSpotShadowFrames(spotEnabled?std::span<const SpotShadowFrame>(lights.spotShadows):std::span<const SpotShadowFrame>{},spotEnabled?lights.spotShadowRequests:0);
+                if(spotEnabled)for(size_t slot=0;slot<lights.spotShadows.size();++slot)if(m_Renderer->BeginSpotShadowPass(unsigned(slot))){
+                    const auto& spot=lights.spotShadows[slot];
+                    auto intersects=[&](size_t i){const auto& packet=m_RenderPackets[i];auto it=m_ShadowLocalBounds.find(packet.mesh.value);if(it==m_ShadowLocalBounds.end())return true;
+                        ShadowCasterBounds bounds{{INFINITY,INFINITY,INFINITY},{-INFINITY,-INFINITY,-INFINITY}};const auto& model=m_InstanceData[i].model;
+                        for(int c=0;c<8;++c)for(int row=0;row<3;++row){float value=model[12+row];for(int k=0;k<3;++k)value+=model[k*4+row]*(c&(1<<k)?it->second.maximum[k]:it->second.minimum[k]);bounds.minimum[row]=std::min(bounds.minimum[row],value);bounds.maximum[row]=std::max(bounds.maximum[row],value);}
+                        return SpotCasterIntersects(spot,bounds);
+                    };
+                    for(const auto& batch:m_ShadowBatches){const auto& packet=m_RenderPackets[batch.begin];m_Renderer->SetMeshRange(packet.range);m_Renderer->SetMaterialState(packet.materialState);
+                        size_t cursor=batch.begin,end=batch.begin+batch.count;
+                        while(cursor<end){while(cursor<end&&!intersects(cursor))++cursor;const size_t begin=cursor;while(cursor<end&&intersects(cursor))++cursor;const size_t count=cursor-begin;if(!count)continue;
+                            if(m_InstancingEnabled&&count>1&&m_Renderer->DrawShadowMeshInstanced(packet.mesh,std::span<const RenderInstanceData>(m_InstanceData.data()+begin,count)))continue;
+                            for(size_t i=begin;i<cursor;++i)m_Renderer->DrawShadowMesh(packet.mesh,m_InstanceData[i]);
+                        }
+                    }
+                    m_Renderer->EndShadowPass();
+                }
                 m_Statistics.shadowMs=elapsed(start);
             }
             if(m_Particles)m_Particles->Build(world,m_RenderCamera,m_Interpolation,[this](const std::string& key){return GetOrCreateTexture(key);},m_WorldParticles,m_FirstPersonParticles);
             else {m_WorldParticles.vertices.clear();m_WorldParticles.commands.clear();m_FirstPersonParticles.vertices.clear();m_FirstPersonParticles.commands.clear();}
+            // Reuse opaque depth submission (including non-shadow-casting meshes).
+            // First-person geometry/particles are excluded from world occlusion.
+            if(!IsEditorUnlit()&&m_Renderer->BeginAmbientOcclusion(m_RenderCamera.viewProjection,m_RenderCamera.projection)){
+                for(const auto& batch:m_Batches){const auto& packet=m_RenderPackets[batch.begin];
+                    if(packet.renderMode!=MeshRenderMode::World)continue;
+                    m_Renderer->SetMeshRange(packet.range);m_Renderer->SetMaterialState(packet.materialState);
+                    if(m_InstancingEnabled&&batch.count>1&&m_Renderer->DrawShadowMeshInstanced(packet.mesh,std::span<const RenderInstanceData>(m_InstanceData.data()+batch.begin,batch.count)))continue;
+                    for(size_t i=batch.begin;i<batch.begin+batch.count;++i)m_Renderer->DrawShadowMesh(packet.mesh,m_InstanceData[i]);
+                }
+                m_Renderer->EndAmbientOcclusion();
+            }
             m_Renderer->BeginMainPass();
             {
                 ZoneScopedN("RenderSubmit");
@@ -399,6 +431,7 @@ namespace ecs {
                     for(std::size_t i=batch.begin;i<batch.begin+batch.count;++i)SubmitRenderPacket(m_RenderPackets[i]);
                 };
                 for(const auto& batch:m_Batches)if(m_RenderPackets[batch.begin].renderMode==MeshRenderMode::World)submitBatch(batch);
+                m_Renderer->BeginWorldTransparency();
                 m_Renderer->DrawParticles(m_WorldParticles);
                 if((m_Statistics.viewmodelSubmeshes||!m_FirstPersonParticles.vertices.empty())&&m_Renderer->BeginViewmodelPass()){
                     for(const auto& batch:m_Batches)if(m_RenderPackets[batch.begin].renderMode==MeshRenderMode::FirstPerson)submitBatch(batch);
@@ -588,7 +621,7 @@ namespace ecs {
         if (m_Renderer == nullptr)
             return;
         if(m_EnvironmentSettings){
-            auto environment=m_EvaluatedPostProcess.environment;if(m_ViewportUnlit)environment.diffuse=environment.specular=false;
+            auto environment=m_EvaluatedPostProcess.environment;if(IsEditorUnlit())environment.diffuse=environment.specular=false;
             m_Renderer->SetEnvironmentSettings(environment);
             if(m_ResourceManager&&m_EnvironmentSettings->enabled){
                 const auto& key=m_EnvironmentSettings->assetPath;

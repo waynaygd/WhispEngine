@@ -2,6 +2,7 @@
 #include "components/LightComponent.h"
 #include "RenderInterpolation.h"
 #include "../render/Lighting.h"
+#include "../render/SpotShadows.h"
 #include <chrono>
 namespace ecs
 {
@@ -11,6 +12,8 @@ struct GatheredLights
     LightingSettings lighting;
     SceneLightDiagnostics diagnostics;
     bool primaryCastShadows=true;
+    std::vector<SpotShadowFrame> spotShadows;
+    unsigned spotShadowRequests=0;
 };
 inline Vec3 LightDirection(const RenderPose& pose)
 {
@@ -48,14 +51,22 @@ inline GatheredLights GatherSceneLights(World& world,const LightingSettings& leg
         out.lighting.directional.color=primary->p.color;out.lighting.directional.intensity=primary->p.intensity;out.lighting.directional.enabled=true;
         out.primaryCastShadows=primary->p.castShadows;out.diagnostics.primaryEcs=true;
         out.diagnostics.primaryIndex=primary->entity.index;out.diagnostics.primaryGeneration=primary->entity.generation;}
+    struct Candidate{double score;SpotShadowFrame frame;};std::vector<Candidate> candidates;
     for(const auto& e:entries){if(&e==primary||!legacy.enabled||e.p.intensity<=0)continue;
         GpuSceneLight l;auto d=LightDirection(e.pose);
         l.positionRange={e.pose.position.x,e.pose.position.y,e.pose.position.z,e.p.range};
         l.directionType={d.x,d.y,d.z,float(e.type)};l.colorIntensity={e.p.color[0],e.p.color[1],e.p.color[2],e.p.intensity};
         l.coneAttenuation={std::cos(e.p.innerAngle*.0174532925199433f),std::cos(e.p.outerAngle*.0174532925199433f),e.p.attenuation,1};
         l.screenBounds=ProjectLightBounds(l,camera);if(l.screenBounds[0]<=1&&l.screenBounds[1]<=1&&l.screenBounds[2]>=0&&l.screenBounds[3]>=0)++out.diagnostics.influencing;
+        if(e.type==LightType::Spot&&e.p.castShadows&&e.p.shadowStrength>0){
+            const auto& b=l.screenBounds;double area=std::max(0.f,std::min(1.f,b[2])-std::max(0.f,b[0]))*std::max(0.f,std::min(1.f,b[3])-std::max(0.f,b[1]));
+            if(area>0){++out.spotShadowRequests;const auto q=e.pose.rotation;ShadowVector up{2*(q.x*q.y-q.w*q.z),1-2*(q.x*q.x+q.z*q.z),2*(q.y*q.z+q.w*q.x)};
+                if(auto f=BuildSpotShadowFrame(unsigned(out.lights.size()),l,e.p,up))candidates.push_back({area*e.p.intensity*std::max({e.p.color[0],e.p.color[1],e.p.color[2]}),*f});}
+        }
         out.lights.push_back(l);
     }
+    std::stable_sort(candidates.begin(),candidates.end(),[](const auto& a,const auto& b){return a.score>b.score;});
+    for(size_t i=0;i<std::min<size_t>(candidates.size(),MaxSpotShadows);++i)out.spotShadows.push_back(candidates[i].frame);
     out.diagnostics.gatherMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();return out;
 }
 }

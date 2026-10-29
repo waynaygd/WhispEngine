@@ -23,13 +23,14 @@ bool Dx12RenderAdapter::BeginViewmodelPass(){
  }
  // World fog/selection use the untouched World depth before the overlay. HDR
  // output, AA and screen effects still process the complete color image once.
- if(!m_WorldEffectsDone){ApplyFog();DrawEditorVisual(true);m_WorldEffectsDone=true;}
+ BeginWorldTransparency();m_InViewmodelPass=true;
  auto color=m_HdrActive?m_HdrTargets[m_FrameIndex].rtv:m_ViewportTarget.rendering?m_ViewportTarget.rtv:m_RtvHeap->GetCPUDescriptorHandleForHeapStart();
  if(!m_HdrActive&&!m_ViewportTarget.rendering)color.ptr+=SIZE_T(m_FrameIndex)*m_RtvSize;
  auto depth=target.heap->GetCPUDescriptorHandleForHeapStart();m_CmdList->ClearDepthStencilView(depth,D3D12_CLEAR_FLAG_DEPTH,1,0,0,nullptr);m_CmdList->OMSetRenderTargets(1,&color,FALSE,&depth);
  return true;
 }
 void Dx12RenderAdapter::EndViewmodelPass(){
+ m_InViewmodelPass=false;
  auto color=m_HdrActive?m_HdrTargets[m_FrameIndex].rtv:m_ViewportTarget.rendering?m_ViewportTarget.rtv:m_RtvHeap->GetCPUDescriptorHandleForHeapStart();
  if(!m_HdrActive&&!m_ViewportTarget.rendering)color.ptr+=SIZE_T(m_FrameIndex)*m_RtvSize;
  auto depth=m_ViewportTarget.rendering?m_ViewportTarget.dsv:m_DsvHeap->GetCPUDescriptorHandleForHeapStart();m_CmdList->OMSetRenderTargets(1,&color,FALSE,&depth);

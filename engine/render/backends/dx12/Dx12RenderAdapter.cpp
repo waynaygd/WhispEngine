@@ -692,6 +692,7 @@ return float4(float3(v.x<=.04045?v.x/12.92:pow((v.x+.055)/1.055,2.4),v.y<=.04045
             for(UINT i=0;i<d.BoundResources;++i){D3D12_SHADER_INPUT_BIND_DESC b{};reflection->GetResourceBindingDesc(i,&b);
                 if(b.Type==D3D_SIT_CBUFFER&&b.BindPoint==6){D3D12_SHADER_BUFFER_DESC cb{};reflection->GetConstantBufferByName(b.Name)->GetDesc(&cb);if(b.Space||std::string(b.Name)!="EnvironmentCB"||cb.Size!=32)throw std::runtime_error("Incompatible EnvironmentCB");}
                 if(b.Type==D3D_SIT_CBUFFER&&b.BindPoint==7){D3D12_SHADER_BUFFER_DESC cb{};reflection->GetConstantBufferByName(b.Name)->GetDesc(&cb);if(b.Space||std::string(b.Name)!="SceneLightsCB"||cb.Size!=32)throw std::runtime_error("Incompatible SceneLightsCB");}
+                if(b.Type==D3D_SIT_CBUFFER&&b.BindPoint==8){D3D12_SHADER_BUFFER_DESC cb{};reflection->GetConstantBufferByName(b.Name)->GetDesc(&cb);if(b.Space||std::string(b.Name)!="AmbientOcclusionCB"||cb.Size!=16)throw std::runtime_error("Incompatible AmbientOcclusionCB");}
                 if(b.BindPoint>=9&&b.BindPoint<=11&&b.Type!=D3D_SIT_CBUFFER){if(b.Space||b.BindCount!=1||b.Type!=D3D_SIT_STRUCTURED||b.Dimension!=D3D_SRV_DIMENSION_BUFFER)throw std::runtime_error("Incompatible scene light SRV");}
                 if(b.Type==D3D_SIT_TEXTURE&&b.BindPoint>=5&&b.BindPoint<=8){if(b.Space||b.BindCount!=1||b.Dimension!=(b.BindPoint==8?D3D_SRV_DIMENSION_TEXTURE2D:D3D_SRV_DIMENSION_TEXTURECUBE))throw std::runtime_error("Incompatible IBL SRV");}
             }};
@@ -699,7 +700,7 @@ return float4(float3(v.x<=.04045?v.x/12.92:pow((v.x+.055)/1.055,2.4),v.y<=.04045
         CD3DX12_DESCRIPTOR_RANGE descriptorRange;
         descriptorRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
 
-        D3D12_ROOT_PARAMETER rootParameters[14]{};
+        D3D12_ROOT_PARAMETER rootParameters[18]{};
         rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
         rootParameters[0].Descriptor.ShaderRegister = 0;
         rootParameters[0].Descriptor.RegisterSpace = 0;
@@ -736,6 +737,16 @@ return float4(float3(v.x<=.04045?v.x/12.92:pow((v.x+.055)/1.055,2.4),v.y<=.04045
             rootParameters[10+i].Descriptor={9+i,0};rootParameters[10+i].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;}
         rootParameters[13].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
         rootParameters[13].Constants={7,0,8};rootParameters[13].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+        rootParameters[14].ParameterType=D3D12_ROOT_PARAMETER_TYPE_SRV;
+        rootParameters[14].Descriptor={12,0};rootParameters[14].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+        CD3DX12_DESCRIPTOR_RANGE spotRange;spotRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV,4,13);
+        rootParameters[15].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParameters[15].DescriptorTable={1,&spotRange};rootParameters[15].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+        CD3DX12_DESCRIPTOR_RANGE aoRange;aoRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV,1,17);
+        rootParameters[16].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParameters[16].DescriptorTable={1,&aoRange};rootParameters[16].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+        rootParameters[17].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        rootParameters[17].Constants={8,0,4};rootParameters[17].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
         CD3DX12_STATIC_SAMPLER_DESC staticSampler(0, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
         staticSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         staticSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -822,10 +833,11 @@ return float4(float3(v.x<=.04045?v.x/12.92:pow((v.x+.055)/1.055,2.4),v.y<=.04045
                             const bool camera=input.BindPoint==5 && std::string(input.Name)=="CameraCB";
                             const bool sceneLights=input.BindPoint==7 && std::string(input.Name)=="SceneLightsCB";
                             const bool environment=input.BindPoint==6 && std::string(input.Name)=="EnvironmentCB";
+                            const bool ambientOcclusion=input.BindPoint==8 && std::string(input.Name)=="AmbientOcclusionCB";
                             const bool material=input.BindPoint==4 && std::string(input.Name)=="MaterialCB";
-                            if(input.Space!=0 || (!lighting&&!shadow&&!material&&!camera&&!environment&&!sceneLights) ||
+                            if(input.Space!=0 || (!lighting&&!shadow&&!material&&!camera&&!environment&&!sceneLights&&!ambientOcclusion) ||
                                 FAILED(reflection->GetConstantBufferByName(input.Name)->GetDesc(&buffer)) ||
-                                (material?(buffer.Size!=16&&buffer.Size!=32):buffer.Size!=((environment||sceneLights)?32:camera?16:lighting?sizeof(LightingConstants):sizeof(ShadowConstants))))
+                                (material?(buffer.Size!=16&&buffer.Size!=32):buffer.Size!=((environment||sceneLights)?32:(camera||ambientOcclusion)?16:lighting?sizeof(LightingConstants):sizeof(ShadowConstants))))
                                 throw std::runtime_error("instance variant still reads per-draw or incompatible constant buffer");
                         }
                     }
@@ -1172,7 +1184,7 @@ std::vector<std::uint8_t> Dx12RenderAdapter::ReadBackTexturePixels(RenderTexture
     auto it=m_UploadedTextures.find(handle.value);
     return it==m_UploadedTextures.end()?std::vector<std::uint8_t>{}:ReadBackColorPixels(it->second.texture.Get());
 }
-std::vector<std::uint8_t> Dx12RenderAdapter::ReadBackColorPixels(ID3D12Resource* color)
+std::vector<std::uint8_t> Dx12RenderAdapter::ReadBackColorPixels(ID3D12Resource* color,D3D12_RESOURCE_STATES state)
 {
     if(!color||m_FrameRecording)return {};
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};UINT rows=0;UINT64 rowBytes=0,totalBytes=0;
@@ -1183,11 +1195,11 @@ std::vector<std::uint8_t> Dx12RenderAdapter::ReadBackColorPixels(ID3D12Resource*
     const auto bufferDesc=CD3DX12_RESOURCE_DESC::Buffer(totalBytes);
     ThrowIfFailed(m_Device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bufferDesc,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&staging)),"Readback allocation failed");
     ExecuteImmediateCommandList(m_Device.Get(),m_Queue.Get(),m_Fence.Get(),m_FenceEvent,m_FenceValue,[&](ID3D12GraphicsCommandList* command) {
-        auto before=CD3DX12_RESOURCE_BARRIER::Transition(color,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COPY_SOURCE);command->ResourceBarrier(1,&before);
+        auto before=CD3DX12_RESOURCE_BARRIER::Transition(color,state,D3D12_RESOURCE_STATE_COPY_SOURCE);command->ResourceBarrier(1,&before);
         D3D12_TEXTURE_COPY_LOCATION src{};src.pResource=color;src.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
         D3D12_TEXTURE_COPY_LOCATION dst{};dst.pResource=staging.Get();dst.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;dst.PlacedFootprint=footprint;
         command->CopyTextureRegion(&dst,0,0,0,&src,nullptr);
-        auto after=CD3DX12_RESOURCE_BARRIER::Transition(color,D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);command->ResourceBarrier(1,&after);
+        auto after=CD3DX12_RESOURCE_BARRIER::Transition(color,D3D12_RESOURCE_STATE_COPY_SOURCE,state);command->ResourceBarrier(1,&after);
     });
     void* mapped=nullptr;D3D12_RANGE range{0,static_cast<SIZE_T>(totalBytes)};
     ThrowIfFailed(staging->Map(0,&range,&mapped),"Readback Map failed");
@@ -1301,6 +1313,7 @@ void Dx12RenderAdapter::BeginEditorUiFrame()
         return;
 
     float dpiX=1,dpiY=1;glfwGetWindowContentScale(m_EditorUiWindow,&dpiX,&dpiY);const float dpi=(std::max)(dpiX,dpiY);
+    if(m_EnablePlatformWindows){if(!ImGui::GetPlatformIO().Renderer_CreateWindow)ImGui_ImplDX12_InstallViewportCallbacks();auto& io=ImGui::GetIO();io.ConfigFlags|=ImGuiConfigFlags_ViewportsEnable;io.ConfigDpiScaleFonts=true;io.ConfigDpiScaleViewports=true;}
     if(std::abs(dpi-m_EditorUiScale)>.01f){m_EditorUiScale=dpi;editor::ApplyEditorTheme(dpi);}
     ImGui_ImplDX12_NewFrame();
     ImGui_ImplGlfw_NewFrame();
@@ -1931,6 +1944,7 @@ void Dx12RenderAdapter::BeginFrame()
     m_MaterialBindingTrace.clear();m_MaterialTables.clear();m_MaterialTableCount=0;m_EnvironmentTable={};m_LastMaterialTable={};m_FrameConstantsDirty=true;
     for(auto& page:m_InstancePages[m_FrameIndex])page.used=0;
     CollectFogTiming(m_FrameIndex);m_FogPassCursor=0;++m_PostFxFrame;
+    CollectAoTiming(m_FrameIndex);m_AoCursor=0;m_ActiveAo=UINT_MAX;
     m_FrameConstantPageIndex=0;m_FrameConstantAddress=0;
     for(auto& page:m_FrameConstantPages[m_FrameIndex])page.used=0;
 
@@ -2083,6 +2097,7 @@ void Dx12RenderAdapter::DrawTestCube()
 
 void Dx12RenderAdapter::EndFrame()
 {
+    CopyGameOutput();
     if(m_TimeHeap) {
         m_CmdList->EndQuery(m_TimeHeap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_FrameIndex*TimingQueries+1);
         // Resolve only initialized queries, including optional UI/custom stages.
@@ -2109,13 +2124,20 @@ void Dx12RenderAdapter::EndFrame()
 
 void Dx12RenderAdapter::Present()
 {
+    // Main scene/UI commands have already been submitted. Platform windows
+    // sample that same scene texture; the existing queue fence covers both.
+    if(m_EditorUiInitialized&&(ImGui::GetIO().ConfigFlags&ImGuiConfigFlags_ViewportsEnable)){
+        ImGui::UpdatePlatformWindows();ImGui::RenderPlatformWindowsDefault();
+    }
     ZoneScopedN("DX12Present");
     const auto presentStart=std::chrono::steady_clock::now();
     ThrowIfFailed(m_Swapchain->Present(0, 0), "Present failed");
+    if(m_GameSwapchain&&m_GameCopied)ThrowIfFailed(m_GameSwapchain->Present(0,0),"Game Present failed");
     m_CpuWaitMs[1]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-presentStart).count();
     const UINT submitted=m_FrameIndex;
     MoveToNextFrame();
     CollectGpuTiming(submitted);
+    CollectAoTiming(submitted);
 }
 
 void Dx12RenderAdapter::MoveToNextFrame()
@@ -2218,6 +2240,7 @@ void Dx12RenderAdapter::ShutdownEditorUi()
 
 void Dx12RenderAdapter::Shutdown()
 {
+    CloseGameOutput();
     try
     {
         if (m_Device)
@@ -2249,9 +2272,10 @@ void Dx12RenderAdapter::Shutdown()
 
     m_FrameRecording=false;
     ReleaseSceneLights();
+    for(auto& p:m_SpotPso)p.Reset();m_SpotDepthBias=-1;m_SpotSlopeBias=-1;
     ReleaseParticles();
     m_RuntimeUIPso.Reset();m_RuntimeUIRoot.Reset();for(auto& buffer:m_RuntimeUIVertices)buffer.Reset();std::fill(std::begin(m_RuntimeUICapacity),std::end(m_RuntimeUICapacity),0);
-    ReleaseCustomPostFx();ReleaseFog();ReleaseEditorVisuals();ReleaseEnvironment();m_CachedBrdfGpu.Reset();ReleaseHdrTargets();m_OutputPso.Reset();m_OutputRoot.Reset();
+    ReleaseAmbientOcclusion();ReleaseCustomPostFx();ReleaseFog();ReleaseEditorVisuals();ReleaseEnvironment();m_CachedBrdfGpu.Reset();ReleaseHdrTargets();m_OutputPso.Reset();m_OutputRoot.Reset();
     ReleaseShadowResources();m_ShadowVs.Reset();m_ShadowInstanceVs.Reset();m_ShadowPso.Reset();m_ShadowInstancePso.Reset();m_ShadowDoublePso.Reset();m_ShadowDoubleInstancePso.Reset();m_ShadowMirrorPso.Reset();m_ShadowMirrorInstancePso.Reset();m_ShadowRoot.Reset();
     m_TimeHeap.Reset();for(auto& resource:m_TimeReadback)resource.Reset();m_TimeFrequency=0;
     std::fill(std::begin(m_TimePending),std::end(m_TimePending),0);

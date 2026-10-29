@@ -238,7 +238,7 @@ nlohmann::json SceneSerializer::CaptureWorld(ecs::World& world,const SceneSettin
 bool SceneSerializer::RestoreWorld(const nlohmann::json& scene,ecs::World& world,SceneSettings& settings,std::string* error){
     try{
         if(!scene.is_object()||scene.value("version",0)!=4||!scene.contains("entities")||!scene.at("entities").is_array())throw std::runtime_error("Expected scene schema v4");
-        ecs::World staged;auto next=scene.contains("settings")?SceneSettingsFromJson(scene.at("settings")):SceneSettings{};
+        ecs::World staged;auto next=SceneSettingsFromJson(scene.value("settings",nlohmann::json::object()));
         std::set<std::string> ids;const auto& registry=ecs::ComponentRegistry::Builtins();
         for(const auto& node:scene.at("entities")){
             const auto id=node.at("id").get<std::string>();if(id.empty()||id.size()>128||!ids.insert(id).second)throw std::runtime_error("Duplicate/invalid scene entity ID: "+id);
@@ -275,7 +275,7 @@ bool SceneSerializer::LoadWorld(const std::filesystem::path& path,ecs::World& wo
                 auto& velocity=staged.AddComponent<ecs::VelocityComponent>(e);velocity.linear=c.linearVelocity;velocity.angular=c.angularVelocity;if(c.bounce)staged.AddComponent<ecs::BoundsBounceComponent>(e);
             }
         }
-        const auto migrated=CaptureWorld(staged,SceneSettings{});return RestoreWorld(migrated,world,settings,error);
+        const auto migrated=CaptureWorld(staged,SceneSettingsFromJson(nlohmann::json::object()));return RestoreWorld(migrated,world,settings,error);
     }catch(const std::exception& e){SetError(error,std::string("Scene load: ")+e.what());return false;}
 }
 bool SceneSerializer::WriteAtomic(const std::filesystem::path& path,const nlohmann::json& document,std::string* error,bool replace){

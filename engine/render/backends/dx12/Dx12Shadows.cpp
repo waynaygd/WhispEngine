@@ -91,7 +91,9 @@ bool Dx12RenderAdapter::EnsureShadowPipeline(const ShadowSettings& s) {
     }
 }
 bool Dx12RenderAdapter::EnsureShadowTarget(UINT resolution) {
-    auto& target=m_ShadowTargets[m_FrameIndex];
+    return EnsureShadowTarget(resolution,m_ShadowTargets[m_FrameIndex]);
+}
+bool Dx12RenderAdapter::EnsureShadowTarget(UINT resolution,ShadowTarget& target) {
     if(target.depth&&target.resolution==resolution)return true;
     if(m_FreeTextureDescriptorIndices.empty())return false;
     ShadowTarget next;next.resolution=resolution;
@@ -168,7 +170,7 @@ void Dx12RenderAdapter::DrawShadowMesh(RenderMeshHandle handle,const RenderInsta
     m_CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_CmdList->IASetVertexBuffers(0,1,&it->second.vertexView);m_CmdList->IASetIndexBuffer(&it->second.indexView);
     m_CmdList->DrawIndexedInstanced(MaterialIndexCount(it->second.indexCount),1,m_MeshRange.firstIndex,0,0);
-    ++m_SubmissionStatistics.shadowDrawCalls;++m_SubmissionStatistics.shadowCasters;
+    ++m_SubmissionStatistics.shadowDrawCalls;++m_SubmissionStatistics.shadowCasters;if(m_ActiveSpot!=UINT_MAX)++m_SpotDiagnostics.drawCalls;
 }
 bool Dx12RenderAdapter::DrawShadowMeshInstanced(RenderMeshHandle handle,std::span<const RenderInstanceData> instances) {
     ZoneScopedN("ShadowInstancedDraw");
@@ -179,15 +181,18 @@ bool Dx12RenderAdapter::DrawShadowMeshInstanced(RenderMeshHandle handle,std::spa
     m_CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     D3D12_VERTEX_BUFFER_VIEW views[]{it->second.vertexView,view};m_CmdList->IASetVertexBuffers(0,2,views);
     m_CmdList->IASetIndexBuffer(&it->second.indexView);m_CmdList->DrawIndexedInstanced(MaterialIndexCount(it->second.indexCount),UINT(instances.size()),m_MeshRange.firstIndex,0,0);
-    ++m_SubmissionStatistics.shadowDrawCalls;++m_SubmissionStatistics.shadowInstancedDrawCalls;
+    ++m_SubmissionStatistics.shadowDrawCalls;++m_SubmissionStatistics.shadowInstancedDrawCalls;if(m_ActiveSpot!=UINT_MAX)++m_SpotDiagnostics.drawCalls;
     m_SubmissionStatistics.shadowCasters+=instances.size();return true;
 }
 void Dx12RenderAdapter::EndShadowPass() {
     if(!m_ShadowActive)return;
+    const bool spot=m_ActiveSpot!=UINT_MAX;
+    auto& shadowTarget=spot?m_SpotTargets[m_FrameIndex][m_ActiveSpot]:m_ShadowTargets[m_FrameIndex];
     { ZoneScopedN("ShadowResourceTransition");
-      const auto barrier=CD3DX12_RESOURCE_BARRIER::Transition(m_ShadowTargets[m_FrameIndex].depth.Get(),D3D12_RESOURCE_STATE_DEPTH_WRITE,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+      const auto barrier=CD3DX12_RESOURCE_BARRIER::Transition(shadowTarget.depth.Get(),D3D12_RESOURCE_STATE_DEPTH_WRITE,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
       m_CmdList->ResourceBarrier(1,&barrier); }
     m_ShadowActive=false;
+    if(spot){m_ShadowConstants=m_SpotSavedDirectional;m_FrameConstantsDirty=true;m_ActiveSpot=UINT_MAX;SwapSpotPipeline();}
     const bool viewport=m_ViewportTarget.rendering;
     auto rtv=viewport?m_ViewportTarget.rtv:m_RtvHeap->GetCPUDescriptorHandleForHeapStart();
     if(!viewport)rtv.ptr+=SIZE_T(m_FrameIndex)*m_RtvSize;
@@ -197,11 +202,13 @@ void Dx12RenderAdapter::EndShadowPass() {
     m_CmdList->RSSetViewports(1,&vp);m_CmdList->RSSetScissorRects(1,&rect);m_CmdList->OMSetRenderTargets(1,&rtv,FALSE,&dsv);
     ShadowTimestamp(1);
 }
-void Dx12RenderAdapter::BeginMainPass() {m_WorldEffectsDone=false;BeginHdrScene();PrepareSceneLights();ShadowTimestamp(2);DrawEditorVisual(false);}
-void Dx12RenderAdapter::EndMainPass() {if(!m_WorldEffectsDone){ApplyFog();DrawEditorVisual(true);}ShadowTimestamp(3);ShadowTimestamp(4);EndHdrScene();ShadowTimestamp(5);m_PreparedScene=false;m_CachedInstances.clear();}
+void Dx12RenderAdapter::BeginMainPass() {m_WorldEffectsDone=false;m_InViewmodelPass=false;m_TransparentFogPass=UINT_MAX;BeginHdrScene();PrepareSceneLights();ShadowTimestamp(2);DrawEditorVisual(false);}
+void Dx12RenderAdapter::BeginWorldTransparency() {if(m_FrameRecording&&!m_WorldEffectsDone){ApplyFog();DrawEditorVisual(true);m_WorldEffectsDone=true;}}
+void Dx12RenderAdapter::EndMainPass() {BeginWorldTransparency();ShadowTimestamp(3);ShadowTimestamp(4);EndHdrScene();DrawAmbientOcclusionDebug();ShadowTimestamp(5);m_InViewmodelPass=false;m_TransparentFogPass=UINT_MAX;m_PreparedScene=false;m_CachedInstances.clear();}
 std::uint64_t Dx12RenderAdapter::GetShadowPreviewTextureId() const {return m_ShadowTargets[m_LastShadowSlot].srv.ptr;}
 void Dx12RenderAdapter::ReleaseShadowResources() {
     if(m_ShadowActive&&m_FrameRecording)EndShadowPass();
+    ReleaseSpotResources();
     m_ShadowActive=false;
     for(auto& target:m_ShadowTargets)if(target.depth) {
         if(m_FrameRecording) {

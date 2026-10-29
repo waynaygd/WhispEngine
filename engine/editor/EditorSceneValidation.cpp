@@ -26,7 +26,7 @@ bool EditorLayer::SelectValidationIssue(Application& app,std::size_t index,bool 
     return true;
 }
 void EditorLayer::DrawSceneValidation(Application& app){
-    if(!ImGui::Begin("Scene Validation",&m_ShowSceneValidation)){ImGui::End();return;}
+    if(!editor::BeginEditorPanel("Scene Validation",&m_ShowSceneValidation)){ImGui::End();return;}
     if(ImGui::Button("Validate Scene"))ValidateCurrentScene(app);
     if(!m_SceneValidation.validated){ImGui::TextWrapped("Validate the current Editor, Prefab or Runtime World. No scripts are executed and no resources are requested.");ImGui::End();return;}
     ImGui::SameLine();ImGui::Text("Errors: %zu | Warnings: %zu | Info: %zu",m_SceneValidation.Count(ValidationSeverity::Error),m_SceneValidation.Count(ValidationSeverity::Warning),m_SceneValidation.Count(ValidationSeverity::Info));

@@ -59,7 +59,11 @@ float Visibility(float3 position,float3 normal) {
         gradient=float2(dy.y*dx.z-dx.y*dy.z,dx.x*dy.z-dy.x*dx.z)/determinant;
     if(clip.w<=0)return 1;
     if(any(uv<0)||any(uv>1)||ndc.z<0||ndc.z>1)return 1;
-    float depth=ndc.z-max(gShadowSampling.y,0.000005); // normalized D32 raster subpixel/transform roundoff floor
+    // Preserve the original projection's world-space bias after caster extension.
+    // A few local D32 ULPs still cover raster/transform roundoff when extension
+    // compresses that offset below depth precision; avoid a fixed 5e-6 floor.
+    float precisionBias=asfloat(asuint(ndc.z)+4u)-ndc.z;
+    float depth=ndc.z-max(gShadowSampling.y,precisionBias);
     float visibility=0;
     if(gShadowParameters.z>.5 && gShadowCoverage.w>4 && gShadowSampling.w>0) {
         // Continuous tent weights anchored to texel centers, no randomized taps.
@@ -213,7 +217,45 @@ StructuredBuffer<SceneLight> gSceneLights:register(t9);
 StructuredBuffer<uint2> gLightTiles:register(t10);
 StructuredBuffer<uint> gLightIndices:register(t11);
 cbuffer SceneLightsCB:register(b7){uint gLightCount,gTilesX,gTilesY,gTiled;uint gLightWidth,gLightHeight,gTileCapacity,gLightReserved;};
-float3 LocalContribution(SceneLight light,float3 position,float3 base,float m,float rough,float3 N,float3 V,bool pbr){
+struct SpotShadowData{column_major float4x4 lightVP;float4 sampling;float4 config;};
+StructuredBuffer<SpotShadowData> gSpotShadows:register(t12);
+Texture2D<float> gSpotMap0:register(t13);
+Texture2D<float> gSpotMap1:register(t14);
+Texture2D<float> gSpotMap2:register(t15);
+Texture2D<float> gSpotMap3:register(t16);
+float SpotCompare(uint slot,float2 uv,float depth){
+    if(slot==0)return gSpotMap0.SampleCmpLevelZero(gShadowSampler,uv,depth);
+    if(slot==1)return gSpotMap1.SampleCmpLevelZero(gShadowSampler,uv,depth);
+    if(slot==2)return gSpotMap2.SampleCmpLevelZero(gShadowSampler,uv,depth);
+    return gSpotMap3.SampleCmpLevelZero(gShadowSampler,uv,depth);
+}
+float SpotVisibility(uint lightIndex,float3 position){
+    if(gReceiveShadows<.5||gLightReserved==0)return 1;
+    [unroll]for(uint slot=0;slot<4;++slot){
+        SpotShadowData shadow=gSpotShadows[slot];if(shadow.config.x!=float(lightIndex+1))continue;
+        float4 clip=mul(shadow.lightVP,float4(position,1));float3 ndc=clip.xyz/max(clip.w,1e-8);
+        float2 uv=ndc.xy*float2(.5,-.5)+.5;
+        float3 dx=ddx(float3(uv,ndc.z)),dy=ddy(float3(uv,ndc.z));float determinant=dx.x*dy.y-dx.y*dy.x;
+        float2 gradient=abs(determinant)>1e-12?float2(dy.y*dx.z-dx.y*dy.z,dx.x*dy.z-dy.x*dx.z)/determinant:0;
+        if(clip.w<=0||any(uv<0)||any(uv>1)||ndc.z<0||ndc.z>1)return 1;
+        float receiverBias=shadow.sampling.y*shadow.config.z/(clip.w*clip.w);
+        float depth=ndc.z-max(receiverBias,asfloat(asuint(ndc.z)+4u)-ndc.z),visibility=0;
+        if(shadow.config.y>.5){
+            [unroll]for(int y=-1;y<=1;++y)[unroll]for(int x=-1;x<=1;++x){
+                float2 tap=uv+float2(x,y)*shadow.sampling.x;
+                float2 center=(floor(tap/shadow.sampling.x)+.5)*shadow.sampling.x;
+                visibility+=(any(tap<0)||any(tap>1)?1:SpotCompare(slot,tap,depth+dot(gradient,center-uv)))/9;
+            }
+        }else{
+            float2 center=(floor(uv/shadow.sampling.x)+.5)*shadow.sampling.x;
+            visibility=SpotCompare(slot,uv,depth+dot(gradient,center-uv));
+        }
+        return lerp(1,visibility,shadow.sampling.z);
+    }
+    return 1;
+}
+float3 LocalContribution(uint lightIndex,SceneLight light,float3 position,float3 base,float m,float rough,float3 N,float3 V,bool pbr){
+    float visibility=light.directionType.w>1.5?SpotVisibility(lightIndex,position):1;
     float3 L=-light.directionType.xyz;float attenuation=1;
     if(light.directionType.w>.5){
         float3 delta=light.positionRange.xyz-position;float d2=dot(delta,delta);
@@ -228,6 +270,7 @@ float3 LocalContribution(SceneLight light,float3 position,float3 base,float m,fl
             attenuation*=t*t*(3-2*t);
         }
     }
+    attenuation*=visibility;
     float3 radiance=light.colorIntensity.rgb*light.colorIntensity.w*attenuation;
     return (pbr?DirectBRDF(base,m,rough,N,V,L):base*saturate(dot(N,L)))*radiance;
 }
@@ -242,9 +285,11 @@ float3 SceneDirect(float2 pixel,float3 position,float3 base,float m,float rough,
     }
     float3 sum=0;
     [loop]for(uint j=0;j<count;++j){uint index=tiled?gLightIndices[start+j]:j;
-        if(index<gLightCount)sum+=LocalContribution(gSceneLights[index],position,base,m,rough,N,V,pbr);}
+        if(index<gLightCount)sum+=LocalContribution(index,gSceneLights[index],position,base,m,rough,N,V,pbr);}
     return sum;
 }
+Texture2D<float> gScreenAo:register(t17);
+cbuffer AmbientOcclusionCB:register(b8){uint4 gAoConfig;};
 float4 Shade(VSOut input,bool hdr) {
     float3 base=SampleBaseLinear(input.uv)*DecodeSRGB(saturate(input.tint.rgb))*input.baseColor.rgb;
     float3 result=base;
@@ -263,6 +308,8 @@ float4 Shade(VSOut input,bool hdr) {
     }
     float2 mr=(mapMask&2)!=0?gMetallicRoughnessTexture.Sample(gSampler,input.uv).bg:float2(1,1);
     float ao=(mapMask&4)!=0?lerp(1,gOcclusionTexture.Sample(gSampler,input.uv).r,input.textureParameters.y):1;
+    float screenAo=gAoConfig.x!=0?gScreenAo.Load(int3(int2(input.pos.xy),0)):1;
+    ao*=screenAo; // Only the existing ambient/IBL terms consume this factor.
     if(gDirectionEnabled.w>.5 && dot(N,N)>.5) {
         float visibility=Visibility(input.worldPosition,geometryN);
         if(gShadowParameters.w>.5) {

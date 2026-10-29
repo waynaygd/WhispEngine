@@ -11,6 +11,7 @@
 #include "AntiAliasing.h"
 #include "EditorVisuals.h"
 #include "SceneLights.h"
+#include "SpotShadows.h"
 #include "Fog.h"
 #include "ScreenEffects.h"
 #include "../resources/PostFxResource.h"
@@ -28,7 +29,20 @@ struct ShaderResource;
 class IRenderAdapter
 {
 public:
+    // Camera depth prepass is optional; unsupported backends keep legacy output.
+    virtual bool BeginAmbientOcclusion(const std::array<float,16>&,const std::array<float,16>&){return false;}
+    virtual void EndAmbientOcclusion(){}
+    virtual AmbientOcclusionDiagnostics GetAmbientOcclusionDiagnostics() const{return {};}
     virtual ~IRenderAdapter() = default;
+    // A second presentation surface for the SAME rendered Runtime World.
+    // Unsupported backends reject before Application creates a native window.
+    virtual bool SupportsGameOutput() const {return false;}
+    virtual bool SupportsEditorPlatformWindows()const{return false;}
+    virtual void EnableEditorPlatformWindows(){}
+    virtual bool OpenGameOutput(IWindow*) {return false;}
+    virtual void CloseGameOutput() {}
+    virtual bool ResizeGameOutput(unsigned,unsigned) {return false;}
+    virtual std::array<unsigned,2> GameOutputSize() const {return {};}
 
     virtual bool Initialize(IWindow* window) = 0;
     virtual bool InitializeEditorUi(IWindow* window)
@@ -127,6 +141,8 @@ public:
     virtual EditorVisualDiagnostics GetEditorVisualDiagnostics()const{return {};}
     virtual void BeginMainPass() {}
     virtual void EndMainPass() {}
+    // Complete opaque world effects before compositing transparent world layers.
+    virtual void BeginWorldTransparency() {}
     // Same color target/material path, independent shared depth for all viewmodels.
     virtual void DrawParticles(const ParticleDrawList&) {}
     virtual ParticleGpuStatistics GetParticleStatistics()const{return {};}
@@ -135,6 +151,9 @@ public:
     virtual std::uint64_t GetShadowPreviewTextureId() const { return 0; }
     virtual bool SaveFrameImage(const std::string&) { return false; }
     virtual RenderGpuTimings GetGpuTimings() const { return {}; }
+    virtual void SetSpotShadowFrames(std::span<const SpotShadowFrame>,unsigned) {}
+    virtual bool BeginSpotShadowPass(unsigned) {return false;}
+    virtual SpotShadowDiagnostics GetSpotShadowDiagnostics() const {return {};}
     virtual void SetMeshRange(const RenderMeshRange&) {}
     virtual void SetMaterialState(const MaterialRenderState&) {}
     virtual void SetModelMatrix(const std::array<float,16>&) {}

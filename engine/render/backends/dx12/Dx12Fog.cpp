@@ -14,7 +14,7 @@ bool Dx12RenderAdapter::EnsureFogPipeline(){
     if(m_FogPso&&m_FogVolumePso&&m_FogCompositePso)return true;
     try{
         auto path=AssetPaths::ResolveShaderPath("dx12/fog.hlsl");
-        auto compile=[&](const char* entry,const char* target){ComPtr<ID3DBlob> code,error;auto hr=D3DCompileFromFile(path.c_str(),nullptr,nullptr,entry,target,D3DCOMPILE_ENABLE_STRICTNESS|D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&code,&error);if(FAILED(hr))throw std::runtime_error(error?std::string(static_cast<const char*>(error->GetBufferPointer()),error->GetBufferSize()):"Fog shader unavailable");return code;};
+        auto compile=[&](const char* entry,const char* target){ComPtr<ID3DBlob> code,error;auto hr=D3DCompileFromFile(path.c_str(),nullptr,D3D_COMPILE_STANDARD_FILE_INCLUDE,entry,target,D3DCOMPILE_ENABLE_STRICTNESS|D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&code,&error);if(FAILED(hr))throw std::runtime_error(error?std::string(static_cast<const char*>(error->GetBufferPointer()),error->GetBufferSize()):"Fog shader unavailable");return code;};
         auto vs=compile("VS","vs_5_1"),ps=compile("PS","ps_5_1"),integrate=compile("VolumePS","ps_5_1"),composite=compile("CompositePS","ps_5_1");
         CD3DX12_DESCRIPTOR_RANGE ranges[2];ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV,3,0);ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV,1,4);
         CD3DX12_ROOT_PARAMETER roots[3];roots[0].InitAsConstantBufferView(0);roots[1].InitAsDescriptorTable(2,ranges,D3D12_SHADER_VISIBILITY_PIXEL);roots[2].InitAsShaderResourceView(3);
@@ -59,6 +59,7 @@ void Dx12RenderAdapter::ApplyFog(){
         if(m_FogTime&&!f.readback){auto heap=CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);auto desc=CD3DX12_RESOURCE_DESC::Buffer(16);Check(m_Device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&desc,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&f.readback)),"Fog timing failed");}
         if(m_MaterialTableCount>=MaterialTablesPerFrame)throw std::runtime_error("Fog descriptor table limit");
         const UINT first=MaxTextures+(m_FrameIndex*MaterialTablesPerFrame+m_MaterialTableCount++)*4;
+        f.shadowSrvIndex=first+2;
         auto cpu=m_SrvHeap->GetCPUDescriptorHandleForHeapStart();cpu.ptr+=SIZE_T(first)*m_SrvDescriptorSize;
         m_Device->CopyDescriptorsSimple(1,cpu,source.descriptors->GetCPUDescriptorHandleForHeapStart(),D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);cpu.ptr+=m_SrvDescriptorSize;
         auto* depth=m_ViewportTarget.rendering?m_ViewportTarget.depth.Get():m_Depth.Get();
@@ -69,10 +70,11 @@ void Dx12RenderAdapter::ApplyFog(){
         if(volumetric)m_Device->CopyDescriptorsSimple(1,cpu,f.volume.descriptors->GetCPUDescriptorHandleForHeapStart(),D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         else{srv.Format=DXGI_FORMAT_R32G32B32A32_FLOAT;m_Device->CreateShaderResourceView(nullptr,&srv,cpu);}
         const auto& s=m_Fog.settings;const auto& camera=m_Fog.camera;const auto& view=camera.view;
-        std::array<float,72> constants{};auto put=[&](int slot,const auto& values){std::copy(values.begin(),values.end(),constants.begin()+slot*4);};
+        std::array<float,76> constants{};auto put=[&](int slot,const auto& values){std::copy(values.begin(),values.end(),constants.begin()+slot*4);};
         put(0,m_Camera);put(1,std::array<float,4>{view[0],view[4],view[8],0});put(2,std::array<float,4>{view[1],view[5],view[9],0});put(3,std::array<float,4>{view[2],view[6],view[10],camera.projection[15]});
         put(4,std::array<float,4>{camera.projection[0],camera.projection[5],camera.projection[10],camera.projection[14]});put(5,s.color);put(6,std::array<float,4>{s.startDistance,s.endDistance,s.density,float(s.mode)});put(7,std::array<float,4>{s.baseHeight,s.heightFalloff,s.heightDensity,s.maxDistance});put(8,s.scatteringColor);constants[35]=s.anisotropy;
         const auto& lights=m_LightFrames[m_FrameIndex][m_ActiveLightPass];
+        put(18,std::array<float,4>{float(source.width),float(source.height),0,0});
         put(9,std::array<float,4>{float(FogSamples(s.quality)),s.sceneLighting?1.f:0.f,s.extinction,float(std::min(lights.count,64u))});put(10,m_Lighting.directionEnabled);put(11,m_Lighting.colorIntensity);put(12,m_Lighting.ambientIntensity);put(13,m_ShadowConstants.lightVP);put(17,std::array<float,4>{shadow?1.f:0.f,m_ShadowConstants.sampling[1],m_ShadowConstants.parameters[1],m_ShadowConstants.coverage[0]});
         void* mapped=nullptr;D3D12_RANGE empty{0,0};Check(f.constants->Map(0,&empty,&mapped),"Fog constants map failed");std::memcpy(mapped,constants.data(),sizeof(constants));f.constants->Unmap(0,nullptr);
         D3D12_RESOURCE_BARRIER barriers[]={CD3DX12_RESOURCE_BARRIER::Transition(source.color.Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),CD3DX12_RESOURCE_BARRIER::Transition(target.color.Get(),D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET),CD3DX12_RESOURCE_BARRIER::Transition(depth,D3D12_RESOURCE_STATE_DEPTH_WRITE,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)};
@@ -95,6 +97,7 @@ void Dx12RenderAdapter::ApplyFog(){
         // The new scene target remains RTV for editor grid; old scene remains SRV.
         std::swap(source,target);auto dsv=m_ViewportTarget.rendering?m_ViewportTarget.dsv:m_DsvHeap->GetCPUDescriptorHandleForHeapStart();m_CmdList->OMSetRenderTargets(1,&source.rtv,FALSE,&dsv);
         m_FogDiagnostics.active=true;m_FogDiagnostics.samples=s.mode==FogMode::Volumetric?FogSamples(s.quality):0;m_FogDiagnostics.localLights=std::min(lights.count,64u);m_FogDiagnostics.gpuMs=m_FogGpuMs;
+        m_TransparentFogPass=pass;
         m_FogDiagnostics.gpuBytes=0;for(auto& pages:m_FogPasses)for(auto& page:pages)m_FogDiagnostics.gpuBytes+=page.target.allocationBytes+page.volume.allocationBytes+512;
     }catch(const std::exception& error){m_FogDiagnostics.error=error.what();Logger::Get().Error("Fog pass: "+m_FogDiagnostics.error);}
     m_FogDiagnostics.cpuMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();

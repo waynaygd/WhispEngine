@@ -52,7 +52,7 @@ GlfwWindow::~GlfwWindow()
         m_Window = nullptr;
     }
 
-    if (g_GlfwRefCount > 0)
+    if (m_HoldsGlfw)
     {
         --g_GlfwRefCount;
         if (g_GlfwRefCount == 0)
@@ -62,6 +62,7 @@ GlfwWindow::~GlfwWindow()
 
 bool GlfwWindow::Create(int width, int height, const std::string& title)
 {
+    if(m_Window||m_HoldsGlfw)return false;
     if (g_GlfwRefCount == 0)
     {
         if (!glfwInit())
@@ -71,7 +72,11 @@ bool GlfwWindow::Create(int width, int height, const std::string& title)
         }
     }
     ++g_GlfwRefCount;
+    m_HoldsGlfw=true;
 
+    // ImGui's platform backend leaves hidden/undecorated creation hints set.
+    // Engine-owned Editor/Game windows must not inherit those global hints.
+    glfwDefaultWindowHints();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     m_Window = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
@@ -80,6 +85,7 @@ bool GlfwWindow::Create(int width, int height, const std::string& title)
         Logger::Get().Error("glfwCreateWindow failed");
 
         --g_GlfwRefCount;
+        m_HoldsGlfw=false;
         if (g_GlfwRefCount == 0)
             glfwTerminate();
 

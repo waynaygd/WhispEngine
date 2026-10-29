@@ -5,6 +5,7 @@
 #include "core/Application.h"
 #include "core/AssetPaths.h"
 #include "resources/ResourceManager.h"
+#include "editor/AssetCatalog.h"
 #include "ecs/PostProcessEvaluation.h"
 #include "ecs/components/LuaScriptComponent.h"
 #include "ecs/components/SceneIdentityComponent.h"
@@ -68,6 +69,16 @@ static void Native(){
  auto uiBefore=gpu->ReadBackFramePixels();Check(app.GetLuaRuntime().SetPostFx(id,"amount",.9f),"runtime value change");frame();auto uiAfter=gpu->ReadBackFramePixels();auto width=int(ImGui::GetIO().DisplaySize.x);unsigned changed=0;for(int y=5;y<20;++y)for(int x=5;x<300;++x)for(int c=0;c<3;++c)changed+=uiBefore[(y*width+x)*4+c]!=uiAfter[(y*width+x)*4+c];Check(changed==0,"custom shader leaves ImGui pixels unchanged");
  for(auto size:{std::pair{640,240},std::pair{240,400},std::pair{400,300}}){ui.SetDiagnosticViewport(size.first,size.second);frame();Check(image().size()==size_t(size.first*size.second*4),"custom ping-pong resize");}
  auto fullscreen=[&](){ImGui::FocusWindow(ImGui::FindWindowByName(ui.IsViewportMaximized()?"Viewport##Maximized":"Viewport"));SyntheticEditorInput::Key(ImGuiKey_F11,true);frame(1);SyntheticEditorInput::Key(ImGuiKey_F11,false);frame();};fullscreen();Check(ui.IsViewportMaximized(),"custom F11");fullscreen();Check(!ui.IsViewportMaximized(),"custom unmaximize");app.SetEditorPlayMode(false);frame();Check(app.GetLuaRuntime().PostFxOverrides().empty(),"Stop clears Runtime overrides");Check(SceneSerializer::CaptureWorld(app.GetWorld(),app.GetSceneSettings())==saved,"Play leaves authored scene unchanged");
- app.SetEditorPlayMode(true);Check(app.GetLuaRuntime().PostFxOverrides().empty(),"new Runtime session starts without old overrides");app.SetEditorPlayMode(false);frame();Check(gpu->GetValidationErrorCount()==0,"zero DX12 resource errors");std::filesystem::create_directories("diagnostics/custom-postfx");Check(gpu->SaveFrameImage("diagnostics/custom-postfx/editor.ppm"),"native capture");app.Shutdown();
+ app.SetEditorPlayMode(true);Check(app.GetLuaRuntime().PostFxOverrides().empty(),"new Runtime session starts without old overrides");app.SetEditorPlayMode(false);frame();editor::AssetCatalog starters;
+ for(auto type:{"PostFX","Lens Distortion"}){
+  auto starter=fixture.directory+"/starter-"+std::string(type)+".postfx.json";
+  Check(starters.CreateStarter(starter,type,&error),error);
+  fixture.files.push_back(PostFxLoader::SafePath(starter));
+  auto def=PostFxLoader::Load(starter,{});Check(def.success,def.errorMessage);
+  fixture.files.push_back(PostFxLoader::SafePath(def.data.definition->shader));
+  volume().customEffects.clear();Check(ui.AddCustomPostFx(app,entity,starter),ui.GetError());ready(starter);
+  Check(gpu->CustomPostFxStatus(starter)=="Ready","created template compiles/binds on actual DX12");
+ }
+ Check(gpu->GetValidationErrorCount()==0,"zero DX12 resource errors");std::filesystem::create_directories("diagnostics/custom-postfx");Check(gpu->SaveFrameImage("diagnostics/custom-postfx/editor.ppm"),"native capture");app.Shutdown();
 }
 int main(){ScopedEditorPreferenceRestore preferences;try{Native();std::cout<<"Custom PostFX: "<<checks<<" checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<"CUSTOM POSTFX FAILED after "<<checks<<": "<<error.what()<<'\n';return 1;}}

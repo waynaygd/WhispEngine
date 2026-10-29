@@ -1,5 +1,7 @@
 #pragma once
 #include <filesystem>
+#include <algorithm>
+#include <array>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -58,6 +60,19 @@ public:
     const IWindow* GetWindow()const { return m_Windows.empty() ? nullptr : m_Windows[0].window.get(); }
     ui::DrawList BuildUIDesignerPreview(const ui::Document& document,ui::Pair preview){return m_RenderSystem?m_RenderSystem->BuildUIDesignerPreview(document,preview,GetRenderAdapter()):ui::DrawList{};}
     IRenderAdapter* GetRenderAdapter(){return m_Windows.empty()?nullptr:m_Windows.front().renderer.get();}
+    bool RequestPlayInNewWindow();
+    bool SupportsPlayInNewWindow()const{return !m_Windows.empty()&&m_Windows.front().renderer->SupportsGameOutput();}
+    bool IsStandalonePlay()const{return bool(m_GameWindow);}
+    IWindow* GetStandaloneGameWindow()const{return m_GameWindow.get();}
+    IWindow* GameplayWindow()const{return m_GameWindow?m_GameWindow.get():const_cast<IWindow*>(GetWindow());}
+    GLFWwindow* EditorViewportNativeWindow()const;
+    GLFWwindow* GameplayNativeWindow()const;
+    std::array<double,2> EditorPointerPosition()const;
+    std::array<double,2> GameplayPointerPosition()const;
+    void ReleaseEditorCameraCapture();
+    std::array<unsigned,2> GameplayViewportSize()const;
+    void SetStandaloneWindowSize(int width,int height){m_GameWindowSize={std::clamp(width,320,7680),std::clamp(height,200,4320)};}
+    std::array<int,2> StandaloneWindowSize()const{return m_GameWindowSize;}
     editor::EditorLayer& GetEditorLayer(){return m_EditorLayer;}
     void SetViewportUnlit(bool value){if(m_RenderSystem)m_RenderSystem->SetViewportUnlit(value);}
     bool IsViewportUnlit()const{return m_RenderSystem&&m_RenderSystem->IsViewportUnlit();}
@@ -65,7 +80,7 @@ public:
     std::string GetUIInputMode()const;
     ui::RuntimeUI& GetRuntimeUI(){return m_RenderSystem->RuntimeUI();}
     bool IsGameplayMouseCaptured()const{return m_PlayerMouseCaptured;}
-    bool IsViewportMouseCaptured()const{return m_Camera.controlsActive||m_PlayerMouseCaptured;}
+    bool IsViewportMouseCaptured()const{return m_Camera.controlsActive||(!IsStandalonePlay()&&m_PlayerMouseCaptured);}
     ecs::World& GetWorld() { return m_RuntimeWorld?*m_RuntimeWorld:(m_PrefabWorld?*m_PrefabWorld:m_World); }
     bool IsPrefabEditing()const{return bool(m_PrefabWorld);}
     bool BeginPrefabContext(std::unique_ptr<ecs::World>);
@@ -214,7 +229,11 @@ private:
     ecs::Entity SpawnEcsDemoEntity(const EcsDemoEntityConfig& entityCfg);
     void UpdateEcs(float dt);
     void UpdateCameraController(float dt);
+    bool UpdateEditorCameraGestures(float dt);
+    double EditorScrollDelta();
     void UpdateGameplayInput(float uiDelta);
+    void ServiceStandaloneWindow();
+    void CloseStandaloneWindow();
     bool GameplayInputAllowed() const;
     bool GameplayActionAllowed(const std::string&)const;
     bool CaptureGameplayCursor(bool);
@@ -261,9 +280,17 @@ private:
         double cursorYBeforeCapture = 0.0;
         double lastMouseX = 0.0;
         double lastMouseY = 0.0;
+        GLFWwindow* captureWindow=nullptr;
+        int editorGesture=0;
+        unsigned lastWheelEvent=0;
+        ecs::Vec3 orbitTarget{};float orbitDistance=5;
     };
 
     std::vector<WindowContext> m_Windows;
+    std::unique_ptr<IWindow> m_GameWindow;
+    GLFWwindow* m_GameplayCaptureWindow=nullptr;
+    bool m_RequestStandalone=false;
+    std::array<int,2> m_GameWindowSize{1280,720};
     AppConfig m_Config;
     std::unique_ptr<ResourceManager> m_ResourceManager;
     std::unique_ptr<JobSystem> m_JobSystem;

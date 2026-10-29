@@ -842,14 +842,11 @@ void Application::ExitGameplayScene()
 
 void Application::UpdateCameraController(float dt)
 {
+    if(IsStandalonePlay())return;
     if(m_ProjectBrowserActive)return;
-    auto* primary = dynamic_cast<GlfwWindow*>(GetWindow());
-    if (primary == nullptr)
-        return;
-
-    GLFWwindow* window = primary->GetGlfwHandle();
-    if (window == nullptr)
-        return;
+    GLFWwindow* window=EditorViewportNativeWindow();if(!window)return;
+    if(m_Camera.controlsActive&&m_Camera.captureWindow!=window)ReleaseEditorCameraCapture();
+    if(UpdateEditorCameraGestures(dt))return;
 
     // A Lua camera lease excludes editor navigation, independent of Player presence.
     if(m_EditorPlayMode&&(m_LuaRuntime.HasCameraOwner()||m_GameplayCamera.Active(GetWorld()).IsValid())){
@@ -860,7 +857,7 @@ void Application::UpdateCameraController(float dt)
         return;
     }
 
-    const double scrollDeltaY = primary->ConsumeScrollDeltaY();
+    const double scrollDeltaY = EditorScrollDelta();
     const bool focused = glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE;
     double cursorX = 0.0;
     double cursorY = 0.0;
@@ -868,7 +865,7 @@ void Application::UpdateCameraController(float dt)
 
     const bool editorWantsMouse =
         ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse;
-    const bool mouseOverViewport = m_EditorLayer.IsPointInsideViewport(cursorX, cursorY);
+    const bool mouseOverViewport = m_EditorLayer.IsPointInsideViewport(EditorPointerPosition()[0], EditorPointerPosition()[1]);
     const auto inputOwner=m_EditorLayer.InputOwnership(glfwGetMouseButton(window,GLFW_MOUSE_BUTTON_RIGHT)==GLFW_PRESS,glfwGetMouseButton(window,GLFW_MOUSE_BUTTON_LEFT)==GLFW_PRESS,m_Camera.controlsActive,IsEditorPlayMode());
     const bool editorBlocksMouseLook = (!m_Camera.controlsActive&&inputOwner!=editor::InputOwner::Camera) || m_EditorLayer.BlocksCamera() || (!m_Camera.controlsActive&&glfwGetMouseButton(window,GLFW_MOUSE_BUTTON_LEFT)==GLFW_PRESS) ||
         (!m_Camera.controlsActive&&(!mouseOverViewport||!m_EditorLayer.IsViewportHovered())) ||
@@ -895,7 +892,7 @@ void Application::UpdateCameraController(float dt)
         glfwSetCursorPos(window, centerX, centerY);
         m_Camera.lastMouseX = centerX;
         m_Camera.lastMouseY = centerY;
-        m_Camera.controlsActive = true;
+        m_Camera.controlsActive = true;m_Camera.captureWindow=window;
     }
     else if ((!rightMouseDown || !focused) && m_Camera.controlsActive)
     {
@@ -904,7 +901,7 @@ void Application::UpdateCameraController(float dt)
             glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_FALSE);
 
         glfwSetCursorPos(window, m_Camera.cursorXBeforeCapture, m_Camera.cursorYBeforeCapture);
-        m_Camera.controlsActive = false;
+        m_Camera.controlsActive = false;m_Camera.captureWindow=nullptr;
     }
 
     m_Camera.previousRightMouseDown = rightMouseDown;
@@ -1105,14 +1102,7 @@ void Application::SetEditorPlayMode(bool enabled)
     // A Play/Stop transition must release editor free-fly capture as well.
     // Keep previousRightMouseDown until release, so a held RMB cannot recapture
     // and move the restored editor pose in the Stop frame.
-    if(m_Camera.controlsActive){
-        if(auto* primary=dynamic_cast<GlfwWindow*>(GetWindow()))if(auto* window=primary->GetGlfwHandle()){
-            glfwSetInputMode(window,GLFW_CURSOR,GLFW_CURSOR_NORMAL);
-            if(glfwRawMouseMotionSupported())glfwSetInputMode(window,GLFW_RAW_MOUSE_MOTION,GLFW_FALSE);
-            glfwSetCursorPos(window,m_Camera.cursorXBeforeCapture,m_Camera.cursorYBeforeCapture);
-        }
-        m_Camera.controlsActive=false;
-    }
+    if(m_Camera.controlsActive)ReleaseEditorCameraCapture();
     if(enabled){
         m_EditorLayer.FinishTransaction(*this);
         m_EditInputBindings=m_InputManager.CaptureBindings();
@@ -1155,6 +1145,7 @@ void Application::SetEditorPlayMode(bool enabled)
         m_StateMachine.Clear(*this);RequestStateChange(std::make_unique<LoadingState>());m_StateMachine.ApplyPending(*this);
         m_LastCloneMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
     }else{
+        CloseStandaloneWindow();
         m_PlayerEntity={};m_PlayError.clear();
         ReleasePlayerMouse();
         if(m_PhysicsSystem)m_PhysicsSystem->ResetState();
@@ -1471,9 +1462,10 @@ int Application::Run()
 
         if (!m_Windows.empty())
             m_Windows[0].window->PollEvents();
+        ServiceStandaloneWindow();
 
         auto* primary = dynamic_cast<GlfwWindow*>(GetWindow());
-        if (primary&&!m_ProjectBrowserActive)
+        if (primary&&!m_ProjectBrowserActive&&glfwGetWindowAttrib(primary->GetGlfwHandle(),GLFW_FOCUSED))
         {
             GLFWwindow* w = primary->GetGlfwHandle();
             static bool prevF5 = false;
@@ -1681,8 +1673,8 @@ int Application::Run()
                 // Route mouse ownership before the GLFW/ImGui NewFrame pair.
                 // Keep the guard through ImGui::Render/EndFrame as well.
                 bool mouseButtonsDown=false;double mouseX=0,mouseY=0;
-                if(auto* glfwWindow=dynamic_cast<GlfwWindow*>(wc.window.get())){
-                    auto* native=glfwWindow->GetGlfwHandle();glfwGetCursorPos(native,&mouseX,&mouseY);
+                if(auto* native=EditorViewportNativeWindow()){
+                    auto p=EditorPointerPosition();mouseX=p[0];mouseY=p[1];
                     for(int b=0;b<=GLFW_MOUSE_BUTTON_LAST;++b)mouseButtonsDown|=glfwGetMouseButton(native,b)==GLFW_PRESS;
                 }
                 auto cameraMouseFrame=m_EditorLayer.RouteCameraMouse(IsViewportMouseCaptured(),mouseButtonsDown,ImVec2(float(mouseX),float(mouseY)));
@@ -1697,6 +1689,7 @@ int Application::Run()
                 }
 
                 if(m_RenderSystem){
+                    m_RenderSystem->SetEditorDisplayOverridesEnabled(!IsEditorPlayMode()&&wc.editorUiAvailable);
                     m_RenderSystem->SetDebugCollidersEnabled(m_DebugCollidersEnabled&&!(IsEditorPlayMode()&&IsGameplayMouseCaptured()));
                     m_RenderSystem->SetEditorIsolation(!IsEditorPlayMode()&&wc.editorUiAvailable?m_EditorLayer.IsolationEntities():std::vector<ecs::Entity>{});
                     const auto& preview=m_EditorLayer.GetPlacementPreview();
@@ -1720,13 +1713,14 @@ int Application::Run()
                 if(m_RenderSystem)m_RenderSystem->SetUIPreview(m_EditorPlayMode||m_EditorLayer.IsUIPreviewVisible());
                 wc.renderer->SetAntiAliasing(m_AntiAliasing);
                 // Resolve the current render pose before sky/background submission too.
-                const int cameraWidth=m_EditorLayer.GetViewportPixelWidth(),cameraHeight=m_EditorLayer.GetViewportPixelHeight();
+                const auto gameSize=GameplayViewportSize();
+                const int cameraWidth=int(gameSize[0]),cameraHeight=int(gameSize[1]);
                 if(cameraWidth>1&&cameraHeight>1)UpdateRenderSystemCameraAspect(float(cameraWidth)/cameraHeight);
                 else UpdateRenderSystemCamera(wc.window.get());
                 if(&wc==&m_Windows.front()&&IsSimulationRunning())m_LuaRuntime.Particles().Update(GetWorld(),dt,m_RenderCameraState);
                 wc.renderer->SetEditorVisuals(m_EditorLayer.BuildVisualFrame(*this));
-                const int viewportWidth = m_EditorLayer.GetViewportPixelWidth();
-                const int viewportHeight = m_EditorLayer.GetViewportPixelHeight();
+                const int viewportWidth = int(gameSize[0]);
+                const int viewportHeight = int(gameSize[1]);
                 const auto preview=m_EditorLayer.GetCameraPreviewRequest();
                 auto* previewCamera=GetWorld().GetComponent<ecs::CameraComponent>(preview.entity);
                 bool previewEligible=(&wc==&m_Windows.front())&&!m_EditorPlayMode&&wc.editorUiAvailable&&wc.renderer->SupportsCameraPreview()&&preview.width>1&&preview.height>1&&previewCamera&&previewCamera->enabled&&ecs::ValidCamera(*previewCamera)&&GetWorld().HasComponent<ecs::TransformComponent>(preview.entity);
@@ -1837,28 +1831,27 @@ int Application::Run()
 void Application::ReleasePlayerMouse()
 {
     if(!m_PlayerMouseCaptured)return;
-    if(auto* primary=dynamic_cast<GlfwWindow*>(GetWindow()))if(auto* window=primary->GetGlfwHandle()){
+    if(auto* window=m_GameplayCaptureWindow?m_GameplayCaptureWindow:GameplayNativeWindow()){
         glfwSetInputMode(window,GLFW_CURSOR,GLFW_CURSOR_NORMAL);
         if(glfwRawMouseMotionSupported())glfwSetInputMode(window,GLFW_RAW_MOUSE_MOTION,GLFW_FALSE);
     }
-    m_PlayerMouseCaptured=false;m_InputManager.ResetMouseDelta();
+    m_PlayerMouseCaptured=false;m_GameplayCaptureWindow=nullptr;m_InputManager.ResetMouseDelta();
 }
 bool Application::GameplayInputAllowed() const
 {
     if(!IsSimulationRunning()||m_UIInputMode==ui::InputMode::UIOnly)return false;
-    auto* primary=dynamic_cast<GlfwWindow*>(const_cast<Application*>(this)->GetWindow());
-    auto* window=primary?primary->GetGlfwHandle():nullptr;
-    if(!window||!glfwGetWindowAttrib(window,GLFW_FOCUSED)||m_EditorLayer.BlocksGameplayInput())return false;
-    const auto pointer=primary->PointerPosition();
-    return m_PlayerMouseCaptured||m_EditorLayer.IsPointInsideViewport(pointer[0],pointer[1]);
+    auto* window=GameplayNativeWindow();
+    if(!window||!glfwGetWindowAttrib(window,GLFW_FOCUSED)||(!IsStandalonePlay()&&m_EditorLayer.BlocksGameplayInput()))return false;
+    const auto pointer=GameplayPointerPosition();
+    return IsStandalonePlay()||m_PlayerMouseCaptured||m_EditorLayer.IsPointInsideViewport(pointer[0],pointer[1]);
 }
 bool Application::CaptureGameplayCursor(bool capture)
 {
     if(!capture){ReleasePlayerMouse();return true;}
     if(!GameplayInputAllowed())return false;
-    auto* primary=dynamic_cast<GlfwWindow*>(GetWindow());auto* window=primary?primary->GetGlfwHandle():nullptr;
+    auto* window=GameplayNativeWindow();
     if(!window)return false;
-    if(!m_PlayerMouseCaptured){glfwSetInputMode(window,GLFW_CURSOR,GLFW_CURSOR_DISABLED);if(glfwRawMouseMotionSupported())glfwSetInputMode(window,GLFW_RAW_MOUSE_MOTION,GLFW_TRUE);m_PlayerMouseCaptured=true;m_InputManager.ResetMouseDelta();}
+    if(!m_PlayerMouseCaptured){glfwSetInputMode(window,GLFW_CURSOR,GLFW_CURSOR_DISABLED);if(glfwRawMouseMotionSupported())glfwSetInputMode(window,GLFW_RAW_MOUSE_MOTION,GLFW_TRUE);m_PlayerMouseCaptured=true;m_GameplayCaptureWindow=window;m_InputManager.ResetMouseDelta();}
     return true;
 }
 std::string Application::GetUIInputMode()const{return m_UIInputMode==ui::InputMode::UIOnly?"UIOnly":m_UIInputMode==ui::InputMode::GameAndUI?"GameAndUI":"GameOnly";}
@@ -1872,25 +1865,26 @@ void Application::SetUIInputMode(const std::string& value){
 bool Application::GameplayActionAllowed(const std::string& action)const{return GameplayInputAllowed()&&!(m_UIPointerConsumed&&m_InputManager.IsMouseAction(action));}
 void Application::UpdateGameplayInput(float uiDelta)
 {
-    m_InputManager.BeginFrame();m_UIPointerConsumed=false;m_GameplayScroll=0;
+    m_InputManager.SetWindow(GameplayNativeWindow());m_InputManager.BeginFrame();m_UIPointerConsumed=false;m_GameplayScroll=0;
     if(m_RenderSystem&&m_ResourceManager)GetRuntimeUI().Sync(GetWorld(),*m_ResourceManager);
     if(m_RenderSystem)GetRuntimeUI().Advance(uiDelta);
-    auto* primary=dynamic_cast<GlfwWindow*>(GetWindow());auto* window=primary?primary->GetGlfwHandle():nullptr;
+    auto* window=GameplayNativeWindow();
     if(!window)return;
     const bool focused=glfwGetWindowAttrib(window,GLFW_FOCUSED)==GLFW_TRUE;
-    const bool text=m_EditorLayer.BlocksGameplayInput();
+    const bool text=!IsStandalonePlay()&&m_EditorLayer.BlocksGameplayInput();
     const bool tab=glfwGetKey(window,GLFW_KEY_TAB)==GLFW_PRESS;
     if(focused&&!text&&glfwGetKey(window,GLFW_KEY_ESCAPE)==GLFW_PRESS){SetEditorPlayMode(false);return;}
     if(!focused||!IsSimulationRunning()||text||(tab&&!m_PlayerAltWasDown))ReleasePlayerMouse();
     m_PlayerAltWasDown=tab;
     if(m_UIInputMode==ui::InputMode::UIOnly)ReleasePlayerMouse();
-    const auto pointer=primary->PointerPosition();double x=pointer[0],y=pointer[1];const auto bounds=m_EditorLayer.GetViewportBounds();
-    const float width=float(m_EditorLayer.GetViewportPixelWidth()),height=float(m_EditorLayer.GetViewportPixelHeight());
-    const bool inside=m_EditorLayer.IsPointInsideViewport(x,y);
+    const auto pointer=GameplayPointerPosition();double x=pointer[0],y=pointer[1];const auto bounds=m_EditorLayer.GetViewportBounds();
+    const auto size=GameplayViewportSize();const float width=float(size[0]),height=float(size[1]);
+    int cw=1,ch=1;glfwGetWindowSize(window,&cw,&ch);
+    const bool inside=IsStandalonePlay()?(x>=0&&y>=0&&x<cw&&y<ch):m_EditorLayer.IsPointInsideViewport(x,y);
     const bool available=focused&&!text&&!IsGameplayMouseCaptured()&&m_UIInputMode!=ui::InputMode::GameOnly;
-    float px=-1,py=-1;if(inside&&m_EditorLayer.IsViewportHovered()&&bounds[2]>bounds[0]&&bounds[3]>bounds[1]){px=float((x-bounds[0])*width/(bounds[2]-bounds[0]));py=float((y-bounds[1])*height/(bounds[3]-bounds[1]));}
+    float px=-1,py=-1;if(IsStandalonePlay()&&inside){px=float(x*width/std::max(1,cw));py=float(y*height/std::max(1,ch));}else if(inside&&m_EditorLayer.IsViewportHovered()&&bounds[2]>bounds[0]&&bounds[3]>bounds[1]){px=float((x-bounds[0])*width/(bounds[2]-bounds[0]));py=float((y-bounds[1])*height/(bounds[3]-bounds[1]));}
     m_UIPointerConsumed=GetRuntimeUI().Pointer(px,py,width,height,glfwGetMouseButton(window,GLFW_MOUSE_BUTTON_LEFT)==GLFW_PRESS,available);
-    float wheel=float(primary->ConsumeScrollDeltaY());if(available&&inside){const bool consumed=GetRuntimeUI().Scroll(px,py,width,height,wheel);if(!consumed&&!m_UIPointerConsumed)m_GameplayScroll=wheel;}
+    float wheel=IsStandalonePlay()?float(static_cast<GlfwWindow*>(m_GameWindow.get())->ConsumeScrollDeltaY()):float(EditorScrollDelta());if(available&&inside){const bool consumed=GetRuntimeUI().Scroll(px,py,width,height,wheel);if(!consumed&&!m_UIPointerConsumed)m_GameplayScroll=wheel;}
 }
 scripting::GameplayServices Application::GameplayCapabilities()
 {
@@ -1902,14 +1896,15 @@ scripting::GameplayServices Application::GameplayCapabilities()
     host.mouseDelta=[this]{return GameplayInputAllowed()&&!m_UIPointerConsumed&&m_PlayerMouseCaptured?m_InputManager.MouseDelta():ecs::Vec3{};};
     host.mousePosition=[this]{
         if(!GameplayInputAllowed()||m_UIPointerConsumed||m_Windows.empty())return ecs::Vec3{-1,-1,1};
-        auto* native=dynamic_cast<GlfwWindow*>(GetWindow());if(!native)return ecs::Vec3{-1,-1,1};auto p=native->PointerPosition();auto b=m_EditorLayer.GetViewportBounds();
-        float w=float(m_EditorLayer.GetViewportPixelWidth()),h=float(m_EditorLayer.GetViewportPixelHeight());
+        auto* native=GameplayNativeWindow();if(!native)return ecs::Vec3{-1,-1,1};auto p=GameplayPointerPosition();auto b=m_EditorLayer.GetViewportBounds();
+        auto size=GameplayViewportSize();float w=float(size[0]),h=float(size[1]);
+        if(IsStandalonePlay()){int cw=1,ch=1;glfwGetWindowSize(native,&cw,&ch);return ecs::Vec3{float(p[0]/std::max(1,cw)),float(p[1]/std::max(1,ch)),h>0?w/h:1};}
         if(b[2]<=b[0]||b[3]<=b[1]||h<=0)return ecs::Vec3{-1,-1,1};
         return ecs::Vec3{float((p[0]-b[0])/(b[2]-b[0])),float((p[1]-b[1])/(b[3]-b[1])),w/h};
     };
-    host.viewportSize=[this]{return ecs::Vec3{float(m_EditorLayer.GetViewportPixelWidth()),float(m_EditorLayer.GetViewportPixelHeight()),0};};
+    host.viewportSize=[this]{auto s=GameplayViewportSize();return ecs::Vec3{float(s[0]),float(s[1]),0};};
     host.scrollDelta=[this]{return m_GameplayScroll;};
-    host.cursorShape=[this](const std::string& shape){auto* primary=dynamic_cast<GlfwWindow*>(GetWindow());if(!primary)return;auto* window=primary->GetGlfwHandle();if(shape=="arrow"){glfwSetCursor(window,nullptr);return;}
+    host.cursorShape=[this](const std::string& shape){auto* window=GameplayNativeWindow();if(!window)return;if(shape=="arrow"){glfwSetCursor(window,nullptr);return;}
         int kind=shape=="hand"?GLFW_HAND_CURSOR:shape=="crosshair"?GLFW_CROSSHAIR_CURSOR:shape=="not_allowed"?GLFW_NOT_ALLOWED_CURSOR:0;if(!kind)throw std::runtime_error("Unknown standard cursor");auto& slot=m_GameplayCursors[shape];if(!slot)slot=glfwCreateStandardCursor(kind);glfwSetCursor(window,static_cast<GLFWcursor*>(slot));};
     host.cursorCaptured=[this]{return m_PlayerMouseCaptured;};
     host.captureCursor=[this](bool capture){return CaptureGameplayCursor(capture);};
@@ -1917,11 +1912,12 @@ scripting::GameplayServices Application::GameplayCapabilities()
     host.actions=[this]{return m_InputManager.Actions();};
     host.runtimeUI=m_RenderSystem?&GetRuntimeUI():nullptr;
     host.setUIInputMode=[this](const std::string& value){SetUIInputMode(value);};host.getUIInputMode=[this](){return GetUIInputMode();};
-    host.resetUIInput=[this](){m_UIInputMode=ui::InputMode::GameOnly;m_UIPointerConsumed=false;ReleasePlayerMouse();if(auto* primary=dynamic_cast<GlfwWindow*>(GetWindow()))glfwSetCursor(primary->GetGlfwHandle(),nullptr);};
+    host.resetUIInput=[this](){m_UIInputMode=ui::InputMode::GameOnly;m_UIPointerConsumed=false;ReleasePlayerMouse();if(auto* window=GameplayNativeWindow())glfwSetCursor(window,nullptr);};
     host.postfxResources=m_ResourceManager.get();host.camera=&m_GameplayCamera;return host;
 }
 void Application::Shutdown()
 {
+    ReleaseEditorCameraCapture();
     for(auto& [key,cursor]:m_GameplayCursors)if(cursor)glfwDestroyCursor(static_cast<GLFWcursor*>(cursor));m_GameplayCursors.clear();
     SetEditorPlayMode(false);m_Mutations.Clear();
     if(!m_Windows.empty())m_EditorLayer.PersistPreferences(*this);

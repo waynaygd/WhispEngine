@@ -55,44 +55,57 @@ void EditorLayer::DrawImportDialogs(Application& app){
    if(GetOpenFileNameW(&dialog)){auto path=std::filesystem::path(file);m_ImportSource.clear();const wchar_t* next=file+wcslen(file)+1;if(*next){for(;*next;next+=wcslen(next)+1){if(!m_ImportSource.empty())m_ImportSource+="\n";m_ImportSource+=AssetPaths::ToUtf8String(path/next);}path=path/(file+wcslen(file)+1);}else m_ImportSource=AssetPaths::ToUtf8String(path);auto ext=path.extension().string();std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});auto folder=((ext==".ttf"||ext==".otf")?"fonts/":ext==".hdr"?"environments/":ext==".obj"||ext==".gltf"||ext==".glb"?"models/":"textures/");m_ImportPackageName=AssetPaths::ToUtf8String(path.stem());if(m_ImportTargetFolder.empty())m_ImportTargetFolder=std::string(folder)+"imported";m_ImportRoot=AssetPaths::ToUtf8String(path.parent_path());m_ImportPreview.clear();}
   }
 #endif
-  if(ImGui::InputText("Dependency root (optional)",&m_ImportRoot))m_ImportPreview.clear();
-  if(ImGui::IsItemHovered())ImGui::SetTooltip("Choose the common source folder when models reference ../textures or ../buffers. Only referenced files inside this root are copied.");
-  const auto sources=ImportSources(m_ImportSource);const auto first=sources.empty()?std::filesystem::path{}:sources.front();auto extension=first.extension().string();std::transform(extension.begin(),extension.end(),extension.begin(),[](unsigned char c){return char(std::tolower(c));});const bool standaloneImage=extension==".ttf"||extension==".otf"||extension==".png"||extension==".jpg"||extension==".jpeg"||extension==".dds";const bool sceneModel=extension==".gltf"||extension==".glb";ImGui::BeginDisabled(!sceneModel);
-  ImGui::Combo("Model import mode",&m_ModelImportMode,"Import as Single Mesh\0Import as Separate Mesh Assets\0Instantiate Imported Scene\0");ImGui::EndDisabled();
-  ImGui::TextWrapped("Separate/scene modes: static glTF/GLB, selected scene; unsupported skin/animation/shear is diagnosed. Flat ECS entities, shared independent mesh assets.");
+  const auto sources=ImportSources(m_ImportSource);
+  auto extOf=[](const std::filesystem::path& p){auto e=p.extension().string();for(auto& c:e)c=char(std::tolower(static_cast<unsigned char>(c)));return e;};
+  const bool hasGltf=std::any_of(sources.begin(),sources.end(),[&](const auto& p){auto e=extOf(p);return e==".gltf"||e==".glb";});
+  const bool hasPackage=std::any_of(sources.begin(),sources.end(),[&](const auto& p){auto e=extOf(p);return e==".obj"||e==".gltf"||e==".glb"||e==".hdr";});
+  if(hasPackage){
+    if(ImGui::InputText("Dependency root (optional)",&m_ImportRoot))m_ImportPreview.clear();
+    if(ImGui::IsItemHovered())ImGui::SetTooltip("Choose the common source folder when models reference ../textures or ../buffers. Only referenced files inside this root are copied.");
+  }
+  if(hasGltf)ImGui::Combo("Model import mode",&m_ModelImportMode,"Import as Single Mesh\0Import as Separate Mesh Assets\0Instantiate Imported Scene\0");
   if(ImGui::InputText("Target Folder",&m_ImportTargetFolder))m_ImportPreview.clear();
-  if(!standaloneImage&&ImGui::InputText("Package name",&m_ImportPackageName))m_ImportPreview.clear();
-  m_ImportTarget=m_ImportTargetFolder+(m_ImportTargetFolder.empty()?"":"/")+(standaloneImage?AssetPaths::ToUtf8String(first.filename()):m_ImportPackageName);
-  ImGui::TextWrapped(standaloneImage?"Destination file: %s":"Final package: %s",m_ImportTarget.c_str());
-  const char* allowed=(extension==".ttf"||extension==".otf")?"fonts":extension==".hdr"?"environments":extension==".obj"||sceneModel?"models":"textures";
-  bool validDestination=m_ImportTargetFolder==allowed||m_ImportTargetFolder.starts_with(std::string(allowed)+"/");
-  if(!validDestination){ImGui::TextWrapped("This asset requires %s/. Current folder is preserved; explicitly choose an allowed destination.",allowed);if(ImGui::Button("Use suggested destination")){m_ImportTargetFolder=std::string(allowed)+"/imported";m_ImportPreview.clear();}}
-  if(!standaloneImage&&m_ImportPackageName.empty())ImGui::TextDisabled("Enter a new package name; existing files are never overwritten.");
-  if(standaloneImage)ImGui::TextWrapped("Textures and Font Assets import directly into Target Folder with their original filename. Existing files are never overwritten.");else ImGui::TextWrapped("Import preserves dependency paths inside a new package. Existing packages are protected: choose a new name on collision. Models: models/, images: textures/, HDR: environments/.");
-  auto plans=[&](){
-   std::vector<ImportPlan> result;std::set<std::string> keys;
-   if(sources.empty())throw std::runtime_error("Choose at least one source file");
-   for(const auto& source:sources){
-    if(sources.size()>1&&!standaloneImage)throw std::runtime_error("Batch import supports standalone textures/fonts; import a model with its dependencies as one package");
-    ImportPlan plan;const auto target=standaloneImage?m_ImportTargetFolder+"/"+AssetPaths::ToUtf8String(source.filename()):m_ImportTarget;
-    if(!AssetImport::Scan(source,target,plan,&m_EditorError,std::filesystem::u8path(m_ImportRoot),standaloneImage))throw std::runtime_error(m_EditorError);
-    auto folded=target;std::transform(folded.begin(),folded.end(),folded.begin(),[](unsigned char c){return char(std::tolower(c));});
-    if(!keys.insert(folded).second)throw std::runtime_error("Batch contains duplicate destination filenames: "+target);
+  if(sources.size()==1&&hasPackage&&ImGui::InputText("Package name (optional)",&m_ImportPackageName))m_ImportPreview.clear();
+  ImGui::TextWrapped("Destination is relative to Assets. Images/fonts keep their filename. Models/HDR use one package per source, preserving dependency paths. Audio has no importer yet.");
+  auto scan=[&](const std::filesystem::path& source){
+    auto ext=extOf(source);const bool single=ext==".ttf"||ext==".otf"||ext==".png"||ext==".jpg"||ext==".jpeg"||ext==".dds";
+    const auto name=single?AssetPaths::ToUtf8String(source.filename()):sources.size()==1&&!m_ImportPackageName.empty()?m_ImportPackageName:AssetPaths::ToUtf8String(source.stem());
+    const auto target=(m_ImportTargetFolder.empty()?"":m_ImportTargetFolder+"/")+name;
+    ImportPlan plan;std::string error;
+    if(!AssetImport::Scan(source,target,plan,&error,std::filesystem::u8path(m_ImportRoot),single))throw std::runtime_error(error);
     if(std::filesystem::exists(AssetImport::SafeTarget(AssetImport::ProjectRoot(),target)))throw std::runtime_error("Destination exists; nothing overwritten: "+target);
-    result.push_back(std::move(plan));
-   }return result;
+    return plan;
   };
-  if(ImGui::Button("Scan dependencies"))try{auto scanned=plans();m_ImportPreview.clear();for(const auto& plan:scanned){m_ImportPreview+=(plan.standaloneImage?plan.package:plan.package+"/"+plan.entry)+"\n"+std::to_string(plan.files.size())+" files, "+std::to_string(plan.bytes/1024)+" KiB\n";}m_EditorError.clear();}catch(const std::exception& e){m_ImportPreview.clear();m_EditorError=e.what();}
-  if(!m_ImportPreview.empty())ImGui::TextWrapped("%s",m_ImportPreview.c_str());
-  ImGui::BeginDisabled(app.IsEditorPlayMode()||m_ImportPreview.empty());if(Decision("Import (no overwrite)"))try{
-   const auto scanned=plans();for(const auto& plan:scanned){
-    if(!AssetImport::Publish(AssetImport::ProjectRoot(),plan,&m_EditorError,ModelImportMode(sceneModel?m_ModelImportMode:0)))throw std::runtime_error(m_EditorError);
-    m_SelectedAsset=plan.standaloneImage?plan.package:plan.package+"/"+plan.entry;
-    if(sceneModel&&m_ModelImportMode!=0){m_SelectedAsset+=".wscene";m_SelectedAssetKind="Imported Scene";if(m_ModelImportMode==2)InstantiateImportedScene(app,m_SelectedAsset);}
-    NavigateAssetFolder(plan.standaloneImage?m_ImportTargetFolder:plan.package);m_AssetFilter.clear();m_AssetKindFilter=0;m_AssetListsDirty=true;
-    if(auto* r=app.GetResourceManager()){if(plan.package.starts_with("models/")){if(!sceneModel||m_ModelImportMode==0){m_SelectedAssetKind="Mesh";r->LoadAsync<MeshResource>(m_SelectedAsset);}}else if(plan.package.starts_with("textures/")){m_SelectedAssetKind="Texture";r->LoadAsync<TextureResource>(m_SelectedAsset);}else{m_SelectedAssetKind="Environment";r->LoadAsync<EnvironmentResource>(m_SelectedAsset);}}
-   }ImGui::CloseCurrentPopup();
-  }catch(const std::exception& e){m_AssetListsDirty=true;m_EditorError=e.what();}ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_EditorError.empty())ErrorText(m_EditorError.c_str());ImGui::EndPopup();
+  if(ImGui::Button("Scan dependencies")){
+    m_ImportPreview.clear();
+    for(const auto& source:sources)try{
+      auto plan=scan(source);m_ImportPreview+=plan.package+" ("+std::to_string(plan.bytes)+" bytes)\n";
+      for(const auto& file:plan.files)m_ImportPreview+="  "+file.relative+"\n";
+    }catch(const std::exception& e){m_ImportPreview+=AssetPaths::ToUtf8String(source)+": "+e.what()+"\n";}
+  }
+  if(!m_ImportPreview.empty()){ImGui::BeginChild("Package preview",{620,130},ImGuiChildFlags_Borders);ImGui::TextUnformatted(m_ImportPreview.c_str());ImGui::EndChild();}
+  auto publish=[&](const std::vector<std::filesystem::path>& items){
+    m_ImportResults.clear();m_ImportFailed.clear();m_EditorError.clear();
+    for(const auto& source:items){const auto name=AssetPaths::ToUtf8String(source);try{
+      auto plan=scan(source);auto ext=extOf(source);const bool gltf=ext==".gltf"||ext==".glb";
+      std::string error;if(!AssetImport::Publish(AssetImport::ProjectRoot(),plan,&error,ModelImportMode(gltf?m_ModelImportMode:0)))throw std::runtime_error(error);
+      m_SelectedAsset=plan.standaloneImage?plan.package:plan.package+"/"+plan.entry;
+      if(gltf&&m_ModelImportMode!=0){m_SelectedAsset+=".wscene";m_SelectedAssetKind="Imported Scene";if(m_ModelImportMode==2)InstantiateImportedScene(app,m_SelectedAsset);}
+      else m_SelectedAssetKind=ext==".obj"||gltf?"Mesh":ext==".hdr"?"Environment":ext==".ttf"||ext==".otf"?"Font":"Texture";
+      NavigateAssetFolder(plan.standaloneImage?m_ImportTargetFolder:plan.package);m_AssetFilter.clear();m_AssetKindFilter=0;m_AssetListsDirty=true;
+      m_ImportResults.emplace_back(name,"Imported: "+m_SelectedAsset);
+    }catch(const std::exception& e){m_ImportResults.emplace_back(name,"FAILED: "+std::string(e.what()));m_ImportFailed.push_back(name);}}
+    if(!m_ImportFailed.empty())m_EditorError=std::to_string(m_ImportFailed.size())+" import(s) failed. Successful items are retained; retry only failed items.";
+  };
+  ImGui::BeginDisabled(app.IsEditorPlayMode()||sources.empty());
+  if(Decision("Import (no overwrite)"))publish(sources);
+  ImGui::EndDisabled();
+  ImGui::SameLine();ImGui::BeginDisabled(app.IsEditorPlayMode()||m_ImportFailed.empty());
+  if(ImGui::Button("Retry failed")){std::vector<std::filesystem::path> failed;for(const auto& p:m_ImportFailed)failed.push_back(std::filesystem::u8path(p));publish(failed);}
+  ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();
+  if(!m_ImportResults.empty()){ImGui::BeginChild("Import results",{620,150},ImGuiChildFlags_Borders);for(const auto& [source,result]:m_ImportResults)ImGui::TextWrapped("%s\n%s",source.c_str(),result.c_str());ImGui::EndChild();}
+  if(!m_EditorError.empty())ErrorText(m_EditorError.c_str());ImGui::EndPopup();
+
  }
 }
 }

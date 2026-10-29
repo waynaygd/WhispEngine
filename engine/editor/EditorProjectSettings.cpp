@@ -39,7 +39,7 @@ void EditorLayer::DrawProjectSettings(Application& app){
     ImGui::SetNextWindowSize(ImVec2(740,480),ImGuiCond_FirstUseEver);ImGui::SetNextWindowSizeConstraints(ImVec2(280,250),ImVec2(FLT_MAX,FLT_MAX));
     bool open=true;
     auto close=[&]{for(const auto& d:m_Documents)if(d.type==DocumentType::ProjectSettings){auto id=d.id;RequestDocumentNavigation(app,id,true);break;}};
-    if(!ImGui::Begin("Project Settings",&open,ProjectSettingsDirty()?ImGuiWindowFlags_UnsavedDocument:0)){ImGui::End();if(!open)close();return;}
+    if(!editor::BeginEditorPanel("Project Settings",&open,ProjectSettingsDirty()?ImGuiWindowFlags_UnsavedDocument:0)){ImGui::End();if(!open)close();return;}
     if(!project){ImGui::TextWrapped("Open a .whispproject in Project Browser to edit project settings.");ImGui::End();if(!open)close();return;}
     ImGui::TextUnformatted(project->name.c_str());ImGui::SameLine();ImGui::TextDisabled(ProjectSettingsDirty()?"Unsaved changes":"Saved");
     if(app.IsEditorPlayMode())ImGui::TextDisabled("Stop Play to edit or save Project Settings.");

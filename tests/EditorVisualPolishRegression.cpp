@@ -35,6 +35,9 @@ static std::array<float,16> ViewProjection(const EditorVisualFrame& f){
 static void Gpu(bool brokenShader){
     GlfwWindow window;Check(window.Create(320,240,"Editor Visual Polish regression"),"window");glfwHideWindow(window.GetGlfwHandle());
     Dx12RenderAdapter a;Check(a.Initialize(&window),"DX12 initialize");ResourceManager resources(nullptr);
+    // The gradient/cubemap oracles below isolate source color from the global
+    // tone curve. HdrOutputRegression tests tone mapping for every sky/IBL flag.
+    EnvironmentSettings outputSettings;outputSettings.toneMapping=false;a.SetEnvironmentSettings(outputSettings);
     auto shader=a.CreateShaderProgram(resources.Load<ShaderResource>("dx12/textured_unlit.hlsl")->GetData());Check(shader.IsValid(),"retained scene unlit shader");
     TextureData white;white.pixels={255,255,255,255};auto texture=a.CreateTexture2D(white);MeshData quad;quad.vertices.resize(4);quad.indices={0,1,2,0,2,3};float xz[4][2]={{-1,-1},{-1,1},{1,1},{1,-1}};for(int i=0;i<4;++i){quad.vertices[i].position[0]=xz[i][0];quad.vertices[i].position[1]=1;quad.vertices[i].position[2]=xz[i][1];quad.vertices[i].normal[1]=1;}auto mesh=a.UploadMesh(quad);
     EditorVisualFrame f;f.active=true;f.camera={0,5,0};f.forward={0,-1,0};f.up={0,0,1};f.right={1,0,0};f.aspect=320.f/240;f.tanHalfFov=1;f.nearPlane=.1f;f.farPlane=1000;f.settings.background=EditorBackground::Solid;f.settings.gridOpacity=.8f;f.settings.fadeDistance=200;
@@ -59,7 +62,6 @@ static void Gpu(bool brokenShader){
     f.forward={0,0,1};f.up={0,1,0};f.camera={0,3,0};auto sky=draw(false);std::size_t top=(10*320+160)*4,bottom=(230*320+160)*4;Check(sky[top]!=sky[bottom]||sky[top+1]!=sky[bottom+1],"top and bottom sky gradient differ");
     {float x=(2*160.5f/320-1)*f.aspect,y=1-2*10.5f/240;float directionY=y/std::sqrt(x*x+y*y+1),blend=std::pow(directionY,f.settings.gradientBlend);for(int c=0;c<3;++c){float expected=f.settings.horizon[c]+(f.settings.top[c]-f.settings.horizon[c])*blend;Check(std::abs(int(sky[top+c])-int(std::lround(255*LinearToSrgb(expected))))<=2,"procedural gradient numerical color oracle");}}
     f.showGrid=true;auto level=draw(false);Check(a.GetEditorVisualDiagnostics().gridDraws==1&&level.size()==sky.size(),"horizon rays stable");f.camera={0,-5,0};f.forward={0,1,0};f.up={0,0,1};f.right={-1,0,0};Check(draw(false)!=empty,"below-plane camera stable");
-    EnvironmentSettings outputSettings;outputSettings.toneMapping=false;a.SetEnvironmentSettings(outputSettings); // Numeric SDR oracle without Reinhard; HDR sky activation is independent of IBL.
     f.showGrid=false;f.camera={0,0,0};f.forward={0,0,1};f.up={0,1,0};f.right={1,0,0};f.settings.background=EditorBackground::Cubemap;f.settings.cubemap="environments/visual-regression.hdr";
     EnvironmentResource cube;cube.sourcePath=f.settings.cubemap;cube.placeholder=false;cube.environment.resolution=4;cube.environment.mipCount=1;std::array<std::array<float,3>,6> colors{{{.8f,.1f,.05f},{.1f,.7f,.05f},{.05f,.1f,.8f},{.3f,.45f,.7f},{.2f,.4f,.6f},{.6f,.4f,.2f}}};for(auto color:colors){std::vector<float> face;for(int i=0;i<16;++i)face.insert(face.end(),{color[0],color[1],color[2],1});cube.environment.subresources.push_back(std::move(face));}
     a.BeginFrame();a.Clear(.02f,.03f,.04f,1);Check(a.UploadEditorSky(cube,1),"GPU cubemap upload");a.EndFrame();a.Present();

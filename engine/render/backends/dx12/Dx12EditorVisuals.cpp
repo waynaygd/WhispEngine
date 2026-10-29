@@ -85,7 +85,8 @@ void Dx12RenderAdapter::DrawEditorVisual(bool grid){
     put(0,f.camera,0);put(1,f.right,f.tanHalfFov*f.aspect);put(2,f.up,f.tanHalfFov);put(3,f.forward,f.nearPlane);
     constants[16]=f.farPlane;constants[17]=float(m_ViewportTarget.rendering?m_ViewportTarget.width:m_Width);constants[18]=float(m_ViewportTarget.rendering?m_ViewportTarget.height:m_Height);constants[19]=m_HdrActive?1.f:0.f;
     constants[20]=s.minorSpacing;constants[21]=s.majorSpacing;constants[22]=s.gridOpacity;constants[23]=s.fadeDistance;
-    put(6,s.top,m_HdrNative?1.f:0.f);put(7,s.horizon,0);put(8,s.bottom,0);
+    // Keep sky/halo radiance linear in every HDR target; output owns tone mapping.
+    put(6,s.top,m_HdrActive?1.f:0.f);put(7,s.horizon,0);put(8,s.bottom,0);
     constants[36]=s.background==EditorBackground::Cubemap&&!skyReady?1.f:float(s.background);constants[37]=s.skyIntensity;constants[38]=s.gradientBlend;constants[39]=s.skyRotation*.01745329252f;put(10,s.solid,0);put(11,f.sunDirection,f.sunVisible?std::cos(s.sunRadius*.5f*.01745329252f):2.f);put(12,f.sunColor,s.sunIntensity);put(13,s.nightColor,s.nightIntensity);constants[56]=s.horizonGlow;constants[57]=s.sunsetWarmth;constants[58]=s.sunGlowRadius*.01745329252f;constants[59]=s.sunGlowIntensity;
     m_CmdList->SetGraphicsRootSignature(m_EditorVisualRoot.Get());m_CmdList->SetPipelineState(m_EditorVisualPso[m_HdrActive?1:0][grid?1:0].Get());
     ID3D12DescriptorHeap* heaps[]{m_SrvHeap.Get()};m_CmdList->SetDescriptorHeaps(1,heaps);m_CmdList->SetGraphicsRoot32BitConstants(0,60,constants.data(),0);

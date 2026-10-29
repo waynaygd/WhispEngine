@@ -206,7 +206,8 @@ std::string NormalizeShaderKey(const std::filesystem::path& path)
     if (!path.is_absolute())
         return NormalizeRelativeKey(path);
 
-    return NormalizeKeyAgainstRoot(path, ResolveShaderRoot());
+      if(auto authored=NormalizeKeyAgainstRoot(path,ResolveAssetRoot());!authored.empty())return authored;
+      return NormalizeKeyAgainstRoot(path, ResolveShaderRoot());
 }
 
 std::filesystem::path ResolveAssetPath(const std::filesystem::path& relativePath)
@@ -260,6 +261,13 @@ std::filesystem::path ResolveShaderPath(const std::filesystem::path& relativePat
     const std::string key = NormalizeShaderKey(relativePath);
     if (key.empty())
         return {};
+
+      // Author shaders live alongside project assets. Backend namespaces remain
+      // engine-owned so a project cannot shadow the renderer's built-in passes.
+      if(!key.starts_with("dx12/")&&!key.starts_with("vulkan/")){
+          auto authored=ResolveAssetPath(std::filesystem::u8path(key));
+          if(!authored.empty())return authored;
+      }
 
     const std::filesystem::path shaderRoot = ResolveShaderRoot();
     if (shaderRoot.empty())

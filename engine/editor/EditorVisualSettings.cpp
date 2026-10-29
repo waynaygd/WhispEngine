@@ -13,7 +13,9 @@ namespace editor {
 EditorVisualFrame EditorLayer::BuildVisualFrame(const Application& app)const{
     EditorVisualFrame f;const bool viewport=m_ShowViewport&&m_ViewportPixelWidth>1&&m_ViewportPixelHeight>1;int width=m_ViewportPixelWidth,height=m_ViewportPixelHeight;
     if(!viewport)if(auto* window=dynamic_cast<const GlfwWindow*>(app.GetWindow()))glfwGetFramebufferSize(window->GetGlfwHandle(),&width,&height);
+    if(app.IsStandalonePlay()){const auto size=app.GameplayViewportSize();width=int(size[0]);height=int(size[1]);}
     f.active=width>1&&height>1;f.play=app.IsEditorPlayMode();f.game=m_GameView;f.showGrid=viewport&&m_ShowGrid;f.settings=m_VisualSettings;f.backgroundEnabled=m_SkyDiagnosticEnabled;
+    if(app.IsStandalonePlay()){f.game=true;f.showGrid=false;}
     if(f.play||f.game||!m_BackgroundOverride){static_cast<SceneBackground&>(f.settings)=app.GetSceneBackground();if(f.settings.useIblEnvironment){f.settings.cubemap=app.GetEnvironmentSettings().assetPath;f.settings.skyRotation=app.GetEnvironmentSettings().rotationDegrees;}}
     PostProcessSettings postBase;postBase.atmosphere=static_cast<const SceneBackground&>(f.settings);postBase.environment=app.GetEnvironmentSettings();
     auto post=ecs::EvaluatePostProcess(app.GetCameraPosition(),app.GetWorld(),postBase);static_cast<SceneBackground&>(f.settings)=post.atmosphere;
@@ -43,7 +45,7 @@ void EditorLayer::PrepareEditorSky(Application& app,IRenderAdapter* renderer){
 void EditorLayer::DrawEditorVisualSettings(Application& app,IRenderAdapter* renderer){
     // Let DockBuilder restore its nodes before selecting the newly opened tab.
     if(m_FocusVisualSettings&&ImGui::GetFrameCount()>2){ImGui::SetNextWindowFocus();m_FocusVisualSettings=false;}
-    if(!ImGui::Begin("Editor Visuals",&m_ShowVisualSettings)){ImGui::End();return;}
+    if(!editor::BeginEditorPanel("Editor Visuals",&m_ShowVisualSettings)){ImGui::End();return;}
     ImGui::PushItemWidth(std::max(90.f,ImGui::GetContentRegionAvail().x*.48f));
     ImGui::Checkbox("Editor background override",&m_BackgroundOverride);
     auto& s=m_VisualSettings;ImGui::TextDisabled("Preferences / Edit mode only");ImGui::Checkbox("Editor visuals enabled",&s.enabled);

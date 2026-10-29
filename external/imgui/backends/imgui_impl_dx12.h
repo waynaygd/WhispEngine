@@ -73,6 +73,11 @@ IMGUI_IMPL_API void     ImGui_ImplDX12_InvalidateDeviceObjects();
 
 // (Advanced) Use e.g. if you need to precisely control the timing of texture updates (e.g. for staged rendering), by setting ImDrawData::Textures = nullptr to handle this manually.
 IMGUI_IMPL_API void     ImGui_ImplDX12_UpdateTexture(ImTextureData* tex);
+// Whisp diagnostics: borrowed last-rendered platform backbuffer, PRESENT state.
+struct ImGuiViewport;
+struct ID3D12Resource;
+IMGUI_IMPL_API ID3D12Resource* ImGui_ImplDX12_ViewportBackBuffer(ImGuiViewport* viewport);
+IMGUI_IMPL_API void ImGui_ImplDX12_InstallViewportCallbacks();
 
 // [BETA] Selected render state data shared with callbacks.
 // This is temporarily stored in GetPlatformIO().Renderer_RenderState during the ImGui_ImplDX12_RenderDrawData() call.
