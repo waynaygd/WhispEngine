@@ -25,6 +25,9 @@ class IWindow;
 struct MeshData;
 struct TextureData;
 struct ShaderResource;
+struct PipelineCacheDiagnostics {
+    std::uint64_t hits=0, misses=0, creations=0, cachedCount=0;
+};
 
 class IRenderAdapter
 {
@@ -34,6 +37,7 @@ public:
     virtual void EndAmbientOcclusion(){}
     virtual AmbientOcclusionDiagnostics GetAmbientOcclusionDiagnostics() const{return {};}
     virtual ~IRenderAdapter() = default;
+    virtual PipelineCacheDiagnostics GetPipelineCacheDiagnostics() const {return {};}
     // A second presentation surface for the SAME rendered Runtime World.
     // Unsupported backends reject before Application creates a native window.
     virtual bool SupportsGameOutput() const {return false;}

@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <vector>
 #include <future>
+#include <memory>
 
 struct GLFWwindow;
 class Dx12RenderAdapter final : public IRenderAdapter
@@ -52,6 +53,8 @@ public:
     std::vector<std::uint8_t> ReadBackCameraPreviewPixels(){return ReadBackColorPixels(m_CameraPreviewTarget.color.Get());}
     void ReleaseMaterialPreview() override;
     MaterialPreviewMetrics GetMaterialPreviewMetrics()const override{return m_MaterialPreviewMetrics;}
+    PipelineCacheDiagnostics GetPipelineCacheDiagnostics()const override {auto d=m_PipelineDiagnostics;d.cachedCount=m_MeshPipelineCache.size();return d;}
+    std::uintptr_t GetLastMeshPipelineIdentity()const{return m_LastMeshPipelineIdentity;}
 	void Shutdown() override;
 
 	void SetTestTransform(const float* mvp16) override;
@@ -297,8 +300,14 @@ private:
 		D3D12_GPU_DESCRIPTOR_HANDLE gpuSrvHandle{};
 	};
 
+    struct CachedMeshPipeline {Microsoft::WRL::ComPtr<ID3D12PipelineState> state;};
+    std::unordered_map<std::string,std::weak_ptr<CachedMeshPipeline>> m_MeshPipelineCache;
+    PipelineCacheDiagnostics m_PipelineDiagnostics;
+    std::uintptr_t m_LastMeshPipelineIdentity=0;
+    void PruneMeshPipelineCache();
 	struct UploadedShader
 	{
+        std::vector<std::shared_ptr<CachedMeshPipeline>> pipelines;
 		Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature;
 		Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineState;
         bool srgbBaseColor=false;
@@ -307,6 +316,7 @@ private:
         Microsoft::WRL::ComPtr<ID3D12PipelineState> doublePipelineState,doubleInstancedPipelineState;
         Microsoft::WRL::ComPtr<ID3D12PipelineState> mirrorPipelineState,mirrorInstancedPipelineState;
 	};
+    bool BindMeshMaterial(const UploadedShader&, bool instanced, D3D12_GPU_VIRTUAL_ADDRESS drawConstants);
 
 	struct ViewportTarget
 	{

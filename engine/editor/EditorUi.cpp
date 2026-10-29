@@ -377,6 +377,7 @@ void EditorLayer::DrawConsole(Application& app,IRenderAdapter* renderer){
             auto lights=app.GetLightDiagnostics();ImGui::Text("Editor UI %.3f / hierarchy %.3f / Inspector %.3f ms",m_Statistics.uiMs,m_Statistics.hierarchyMs,m_Statistics.inspectorMs);
             ImGui::Text("World clone %.3f ms / lights %u / cull GPU %.3f",app.GetLastWorldCloneMs(),lights.total,lights.cullingGpuMs);
             if(renderer){auto t=renderer->GetGpuTimings();const auto& s=app.GetRenderStatistics();ImGui::Text("CPU frame %.3f / GPU frame %.3f / main GPU %.3f ms",app.GetFrameDeltaTime()*1000,t.frameMs,t.mainMs);ImGui::Text("Scene draws %llu / instanced %llu / gather %.3f ms",static_cast<unsigned long long>(s.submitted.drawCalls),static_cast<unsigned long long>(s.submitted.instancedDrawCalls),s.gatherMs);}
+            if(renderer){auto p=renderer->GetPipelineCacheDiagnostics();ImGui::Text("Mesh PSO cache: hits %llu / misses %llu / creations %llu / cached %llu",static_cast<unsigned long long>(p.hits),static_cast<unsigned long long>(p.misses),static_cast<unsigned long long>(p.creations),static_cast<unsigned long long>(p.cachedCount));}
             if(auto* r=app.GetResourceManager()){auto s=r->GetStats();ImGui::Text("Meshes %zu / textures %zu / materials %zu / loading %zu / failed %zu",s.meshCount,s.textureCount,s.materialCount,s.loadingCount,s.failedCount);}
             ImGui::TextUnformatted("Editor overlays are separate from scene draw statistics.");ImGui::EndTabItem();
         }ImGui::EndTabBar();

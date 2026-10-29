@@ -42,8 +42,10 @@ compile_commands.json
 # Authored procedural model sources (not compiler object files).
 !engine/assets/models/primitives/*.obj
 
-# Local architecture notes remain on disk, outside the Git index.
-/docs/
+# Keep local architecture notes ignored; version the lab compliance report.
+/docs/*
+!/docs/RenderingLab3-MaterialPipeline.md
+!/docs/RenderingLab3-Demo.md
 
 # Regenerable loader caches and runtime log.
 *.wmesh

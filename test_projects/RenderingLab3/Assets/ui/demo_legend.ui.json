@@ -1,0 +1,277 @@
+{
+  "version": 1,
+  "name": "Material System legend",
+  "root": "Root",
+  "referenceResolution": [
+    1280,
+    720
+  ],
+  "scaleMode": 0,
+  "widgets": [
+    {
+      "id": "Root",
+      "type": "Panel",
+      "parent": "",
+      "position": [
+        0,
+        0
+      ],
+      "size": [
+        0,
+        0
+      ],
+      "anchorMax": [
+        1,
+        1
+      ],
+      "color": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "Title",
+      "parent": "Root",
+      "type": "Text",
+      "position": [
+        28,
+        24
+      ],
+      "size": [
+        900,
+        32
+      ],
+      "text": "RENDERING LAB 03  /  MATERIAL AS DATA",
+      "fontSize": 24,
+      "color": [
+        0.85,
+        0.9,
+        1,
+        1
+      ],
+      "hitTest": false
+    },
+    {
+      "id": "Hint",
+      "parent": "Root",
+      "type": "Text",
+      "position": [
+        28,
+        58
+      ],
+      "size": [
+        900,
+        32
+      ],
+      "text": "One shader / shared asset / per-entity overrides",
+      "fontSize": 17,
+      "color": [
+        0.45,
+        0.62,
+        0.78,
+        1
+      ],
+      "hitTest": false
+    },
+    {
+      "id": "Label0",
+      "parent": "Root",
+      "type": "Text",
+      "position": [
+        75,
+        590
+      ],
+      "size": [
+        270,
+        32
+      ],
+      "text": "A  /  BASE",
+      "fontSize": 20,
+      "color": [
+        0.85,
+        0.9,
+        1,
+        1
+      ],
+      "hitTest": false
+    },
+    {
+      "id": "Sub0",
+      "parent": "Root",
+      "type": "Text",
+      "position": [
+        75,
+        622
+      ],
+      "size": [
+        270,
+        32
+      ],
+      "text": "shared silver / r=0.18",
+      "fontSize": 16,
+      "color": [
+        0.55,
+        0.65,
+        0.78,
+        1
+      ],
+      "hitTest": false
+    },
+    {
+      "id": "Label1",
+      "parent": "Root",
+      "type": "Text",
+      "position": [
+        355,
+        590
+      ],
+      "size": [
+        270,
+        32
+      ],
+      "text": "B  /  INSTANCE",
+      "fontSize": 20,
+      "color": [
+        0.85,
+        0.9,
+        1,
+        1
+      ],
+      "hitTest": false
+    },
+    {
+      "id": "Sub1",
+      "parent": "Root",
+      "type": "Text",
+      "position": [
+        355,
+        622
+      ],
+      "size": [
+        270,
+        32
+      ],
+      "text": "same asset / cyan tint",
+      "fontSize": 16,
+      "color": [
+        0.55,
+        0.65,
+        0.78,
+        1
+      ],
+      "hitTest": false
+    },
+    {
+      "id": "Label2",
+      "parent": "Root",
+      "type": "Text",
+      "position": [
+        635,
+        590
+      ],
+      "size": [
+        270,
+        32
+      ],
+      "text": "C  /  ROUGHNESS",
+      "fontSize": 20,
+      "color": [
+        0.85,
+        0.9,
+        1,
+        1
+      ],
+      "hitTest": false
+    },
+    {
+      "id": "Sub2",
+      "parent": "Root",
+      "type": "Text",
+      "position": [
+        635,
+        622
+      ],
+      "size": [
+        270,
+        32
+      ],
+      "text": "same asset / r=0.85",
+      "fontSize": 16,
+      "color": [
+        0.55,
+        0.65,
+        0.78,
+        1
+      ],
+      "hitTest": false
+    },
+    {
+      "id": "Label3",
+      "parent": "Root",
+      "type": "Text",
+      "position": [
+        915,
+        590
+      ],
+      "size": [
+        270,
+        32
+      ],
+      "text": "D  /  ASSIGN HERE",
+      "fontSize": 20,
+      "color": [
+        0.85,
+        0.9,
+        1,
+        1
+      ],
+      "hitTest": false
+    },
+    {
+      "id": "Sub3",
+      "parent": "Root",
+      "type": "Text",
+      "position": [
+        915,
+        622
+      ],
+      "size": [
+        270,
+        32
+      ],
+      "text": "separate copper asset",
+      "fontSize": 16,
+      "color": [
+        0.55,
+        0.65,
+        0.78,
+        1
+      ],
+      "hitTest": false
+    },
+    {
+      "id": "Footer",
+      "parent": "Root",
+      "type": "Text",
+      "position": [
+        28,
+        680
+      ],
+      "size": [
+        1200,
+        32
+      ],
+      "text": "EDIT > SAVE > GPU UPDATE     |     Console / Diagnostics > Mesh PSO cache",
+      "fontSize": 16,
+      "color": [
+        0.85,
+        0.9,
+        1,
+        1
+      ],
+      "hitTest": false
+    }
+  ]
+}
