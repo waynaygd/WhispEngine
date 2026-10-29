@@ -6,6 +6,7 @@
 #include "EditorWidgets.h"
 #include "EditorLayer.h"
 #include "EditorTheme.h"
+#include <GLFW/glfw3.h>
 #include "../scene/SceneSerializer.h"
 
 #include "../core/Application.h"
@@ -343,6 +344,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     if((ImGui::GetIO().AppFocusLost||ImGui::IsKeyPressed(ImGuiKey_Escape,false))&&m_Transaction){CancelTransaction(app);m_PropertyDrafts.clear();m_CancelGizmoUntilRelease=true;m_LightPointerCaptured=false;m_EscapeConsumed=true;}
     // F11 changes only transient presentation. Keep the authored dock tree alive.
     if(!ImGui::GetIO().WantTextInput&&!m_ModalActive&&!ImGui::GetIO().AppFocusLost&&ImGui::IsKeyPressed(ImGuiKey_F11,false)){
+        if(IsViewportDetached())DockViewport(app);
         if(HasPendingTransaction())CancelTransaction(app);
         m_LightPointerCaptured=m_PlaneScaleCaptured=m_ToolActive=false;m_CancelGizmoUntilRelease=true;
         ImGuizmo::Enable(false);ImGuizmo::Enable(true);ImGui::ClearActiveID();
@@ -378,7 +380,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     if(m_ShowLuaRuntimeInspector&&!m_WorkspaceFocus)DrawLuaRuntimeInspector(app);
     ImGui::SetNextWindowSize(ImVec2(340, 330), ImGuiCond_FirstUseEver);
     if(m_ShowPhysicsStress&&!m_WorkspaceFocus){
-    if (ImGui::Begin("Physics Stress Test",&m_ShowPhysicsStress)) {
+    if (editor::BeginEditorPanel("Physics Stress Test",&m_ShowPhysicsStress)) {
         static int selection = 2;
         constexpr int counts[] = {100, 250, 500, 1000};
         ImGui::Combo("Cubes", &selection, "100\0" "250\0" "500\0" "1000\0");
@@ -454,6 +456,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
         DrawMaterialEditor(app);
     if (m_ShowDemoWindow&&!m_WorkspaceFocus)
         ImGui::ShowDemoWindow(&m_ShowDemoWindow);
+    if(!m_ShowViewport||!m_ViewportHasBounds)app.ReleaseEditorCameraCapture();
     if(!m_ScriptKey.empty()){auto key=std::move(m_ScriptKey);m_ScriptKey.clear();OpenDocument(app,key);}
 }
 
@@ -580,7 +583,7 @@ void EditorLayer::DrawStatistics(Application& app, float dt)
         });
 
     ImGui::SetNextWindowSize(ImVec2(280.0f, 170.0f), ImGuiCond_FirstUseEver);
-    ImGui::Begin("Statistics", &m_ShowStatistics);
+    editor::BeginEditorPanel("Statistics", &m_ShowStatistics);
     ImGui::Text("Average FPS: %.1f", m_AverageFps);
     ImGui::Text("Frame time: %.3f ms (~%.1f FPS)", dt * 1000.0f, dt > 0.0f ? 1.0f / dt : 0.0f);
     ImGui::Text("Entities: %zu", world.GetAliveCount());
@@ -615,12 +618,16 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
         ImGui::SetNextWindowSizeConstraints(ImVec2(420.0f, 280.0f), ImVec2(FLT_MAX, FLT_MAX));
     }
     if(m_FocusViewportWindow){ImGui::SetNextWindowFocus();m_FocusViewportWindow=false;}
-    ImGui::Begin(ViewportWindowName(),maximized?nullptr:&m_ShowViewport,ImGuiWindowFlags_NoNavInputs|(maximized?(ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoBringToFrontOnFocus):0));
+    PrepareDetachedViewport(app,renderer);
+    editor::BeginEditorPanel(ViewportWindowName(),maximized?nullptr:&m_ShowViewport,ImGuiWindowFlags_NoNavInputs|(m_ViewportPlacement.detached?ImGuiWindowFlags_NoDocking:0)|(maximized?(ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoBringToFrontOnFocus):0));
+    m_ViewportPlatformId=ImGui::GetWindowViewport()->ID;
+    if(m_ViewportPlacement.detached){auto* w=ImGui::GetCurrentWindow();m_ViewportPlacement.x=w->Pos.x;m_ViewportPlacement.y=w->Pos.y;m_ViewportPlacement.width=w->SizeFull.x;m_ViewportPlacement.height=w->SizeFull.y;}
+    if(!m_ShowViewport){app.ReleaseEditorCameraCapture();if(app.IsEditorPlayMode()&&!app.IsStandalonePlay())app.SetEditorPlayMode(false);DockViewport(app);}
 
     const bool playMode = app.IsEditorPlayMode();
     // Gameplay owns a clean image until its existing cursor capture is released.
     // Fullscreen only changes layout; it never decides editor visibility.
-    const bool showEditorControls=!(playMode&&app.IsGameplayMouseCaptured());
+    const bool showEditorControls=!(playMode&&app.IsGameplayMouseCaptured()&&!app.IsStandalonePlay());
     if(!maximized&&showEditorControls){
     DrawViewportCreateMenu(app);
     Inline("Placement");DrawPlacementMenu(app);
@@ -638,6 +645,9 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     }
     Inline("Unlit");if(Action(!playMode&&app.IsViewportUnlit()?"Unlit":"Lit","Editor Lit (Alt+3) / Unlit (Alt+4). Unlit hides artistic PostFX without changing scene data. Runtime keeps the authored stack.",!playMode,!playMode&&app.IsViewportUnlit()))app.SetViewportUnlit(!app.IsViewportUnlit());
     DrawViewportTransformControls(app);
+    Inline("Detach Viewport");ImGui::BeginDisabled(!renderer||!renderer->SupportsEditorPlatformWindows()||maximized);
+    if(ImGui::Button(IsViewportDetached()?"Dock Viewport":"Detach Viewport")){if(IsViewportDetached())DockViewport(app);else DetachViewport(app);}
+    ImGui::EndDisabled();Help("Separate native scene Viewport / return to its existing dock. Other panels stay in the main window.");
     ImGui::Separator();
     }
 
@@ -646,7 +656,10 @@ void EditorLayer::DrawViewport(Application& app, IRenderAdapter* renderer)
     const ImVec2 available = ImGui::GetContentRegionAvail();
     const ImVec2 viewportSize(std::max(available.x, 1.0f), std::max(available.y, 1.0f));
     const ImVec2 contentMax(contentMin.x + viewportSize.x, contentMin.y + viewportSize.y);
-    const ImVec2 framebufferScale = ImGui::GetIO().DisplayFramebufferScale;
+    ImVec2 framebufferScale = ImGui::GetIO().DisplayFramebufferScale;
+    if(ImGui::GetIO().ConfigFlags&ImGuiConfigFlags_ViewportsEnable)if(auto* native=static_cast<GLFWwindow*>(ImGui::GetWindowViewport()->PlatformHandle)){
+        int w=0,h=0,fw=0,fh=0;glfwGetWindowSize(native,&w,&h);glfwGetFramebufferSize(native,&fw,&fh);if(w>0&&h>0&&fw>0&&fh>0)framebufferScale={float(fw)/w,float(fh)/h};
+    }
     m_ViewportPixelWidth = std::max(1, static_cast<int>(std::lround(viewportSize.x * framebufferScale.x)));
     m_ViewportPixelHeight = std::max(1, static_cast<int>(std::lround(viewportSize.y * framebufferScale.y)));
     if(m_DiagnosticWidth>1&&m_DiagnosticHeight>1){m_ViewportPixelWidth=m_DiagnosticWidth;m_ViewportPixelHeight=m_DiagnosticHeight;}
@@ -832,7 +845,7 @@ namespace editor {
 void EditorLayer::DrawSceneSettings(Application& app,IRenderAdapter* renderer,float dt){
     if(m_FocusSceneSettings&&ImGui::GetFrameCount()>2){ImGui::SetNextWindowFocus();m_FocusSceneSettings=false;}
     ImGui::SetNextWindowSizeConstraints(ImVec2(270,180),ImVec2(FLT_MAX,FLT_MAX));
-    if(!ImGui::Begin("Scene Settings",&m_ShowSceneSettings)){ImGui::End();return;}
+    if(!editor::BeginEditorPanel("Scene Settings",&m_ShowSceneSettings)){ImGui::End();return;}
     auto beforeSettings=app.GetSceneSettings();
     {auto settings=beforeSettings;int aa=int(settings.antiAliasing);if(ImGui::Combo("Anti-Aliasing",&aa,"OFF\0FXAA Low\0FXAA High\0")){BeginSceneTransaction(app,"Anti-aliasing");settings.antiAliasing=AntiAliasingMode(aa);app.SetSceneSettings(settings);FinishTransaction(app);beforeSettings=app.GetSceneSettings();}
     if(renderer){auto d=renderer->GetAntiAliasingDiagnostics();ImGui::Text("Effective samples: %u (post-process AA), intermediate %.2f MiB",d.effectiveSamples,d.intermediateBytes/1048576.);ImGui::Text("HDR/output GPU %.3f ms",renderer->GetGpuTimings().outputMs);}}

@@ -17,7 +17,7 @@ bool EditorLayer::OpenScriptAtLine(Application& app,const std::string& key,int l
 void EditorLayer::DrawScriptDocument(Application& app){
  auto it=std::find_if(m_Documents.begin(),m_Documents.end(),[&](auto& d){return d.id==m_ActiveDocument&&d.type==DocumentType::Lua;});if(it==m_Documents.end())return;
  PrepareWorkspacePrimaryWindow();
- if(ImGui::Begin("Script Document",nullptr,m_WorkspaceFocus?ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings:0))try{
+ if(editor::BeginEditorPanel("Script Document",nullptr,m_WorkspaceFocus?ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings:0))try{
   const auto key=it->key,canonical=it->canonical;auto& s=ScriptSession(app,key);ImGui::PushID(canonical.c_str());
   ImGui::Text("%s%s",key.c_str(),s.Dirty()?" *":"");
   ImGui::BeginDisabled(app.IsEditorPlayMode());if(ImGui::Button("Save Script"))SaveLuaDocument(app,key);ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("Validate Script"))s.Validate();ImGui::SameLine();if(ImGui::Button("Reload file"))ImGui::OpenPopup("Reload Script?");ImGui::SameLine();if(ImGui::Button("Open in Visual Studio"))OpenLuaScriptInVisualStudio(key,&m_EditorError);

@@ -42,6 +42,7 @@ struct ImGuiContext;
 
 namespace editor
 {
+bool BeginEditorPanel(const char* name,bool* open=nullptr,int flags=0);
 class LuaCodeEditor;
 class EditorLayer
 {
@@ -352,6 +353,11 @@ public:
     void UndoEdit(Application& app){Undo(app);}
     void RedoEdit(Application& app){Redo(app);}
     int GetViewportPixelWidth() const { return m_ViewportPixelWidth; }
+    bool DetachViewport(Application&);
+    void DockViewport(Application&);
+    bool IsViewportDetached()const{return m_ViewportPlacement.detached;}
+    unsigned ViewportPlatformId()const{return m_ViewportPlatformId;}
+    void* ViewportPlatformHandle()const;
     int GetViewportPixelHeight() const { return m_ViewportPixelHeight; }
     bool IsViewportHovered() const { return m_ViewportHovered; }
     std::array<float,4> GetViewportBounds()const{return {m_ViewportMinX,m_ViewportMinY,m_ViewportMaxX,m_ViewportMaxY};}
@@ -361,6 +367,11 @@ public:
     bool IsPointInsideViewport(double x, double y) const;
 
 private:
+    void PrepareDetachedViewport(Application&,IRenderAdapter*);
+    void RestoreViewportPlacement(Application&);
+    WorkspaceLayout::ViewportPlacement m_ViewportPlacement;
+    bool m_ViewportPlacementPending=false,m_ViewportDockPending=false;
+    unsigned m_ViewportPlatformId=0,m_ViewportReturnDock=0;
     std::string BookmarkSceneKey(const Application&)const;
     bool DrawViewportTools(Application&);
     void HandleViewportToolShortcuts(Application&);
@@ -561,6 +572,7 @@ private:
     bool m_ShowLightGizmos=true,m_LightXray=false;
     int m_LightXrayMode=1,m_TransformPrecision=1,m_RotateAxis=1;
     bool m_RotationSnapping=false,m_ShowPhysicsStress=false;
+    bool m_PlayInNewWindow=false;
     AssetNavigation m_AssetNavigation;
     std::string m_ImportTargetFolder,m_ImportPackageName;
     std::vector<std::pair<std::string,std::string>> m_ImportResults;

@@ -37,6 +37,7 @@ const char* EntityKind(const ecs::World& w,ecs::Entity e){
 void EditorLayer::InitializePreferences(Application& app){
     EditorPreferences p;std::string error;if(!LoadPreferences(PreferencesPath(),p,&error)&&!error.empty())Logger::Get().Warn(error);
     m_DocumentSessions=p.documentSessions;
+    m_PlayInNewWindow=p.playInNewWindow;app.SetStandaloneWindowSize(p.gameWindowWidth,p.gameWindowHeight);
     m_RecentScenes=p.recentScenes;m_RecentProjects=p.recentProjects;
     m_Bookmarks=p.bookmarks;m_SelectionFilters=p.selectionFilters;
     m_ShowHierarchy=p.hierarchy;m_ShowInspector=p.inspector;m_ShowViewport=p.viewport;m_ShowAssetBrowser=p.assets;m_ShowMaterialEditor=p.material;m_ShowSceneSettings=p.settings;m_ShowConsole=p.console;m_ShowStatistics=p.diagnostics;
@@ -46,12 +47,14 @@ void EditorLayer::InitializePreferences(Application& app){
     m_ShowRuntimeUI=p.uiPreview;m_ShowVisualSettings=p.visualPanel;m_VisualSettings=p.visuals;m_ShowGrid=p.grid;m_ShowLightGizmos=p.lightGizmos;m_ShowCameraGizmos=p.cameraGizmos;m_ShowCameraFrustum=p.cameraFrustum;m_ShowCameraPreview=p.cameraPreview;m_LightXray=p.xray;m_LightXrayMode=p.lightXrayMode;m_TransformPrecision=p.transformPrecision;m_RotationSnapping=p.rotationSnapping;m_ShowPhysicsStress=p.physicsStress;m_Snapping=p.snapping;m_GizmoOperation=p.operation;m_GizmoMode=p.space;
     m_SnapTranslation=p.translationSnap;m_SnapRotation=p.rotationSnap;m_SnapScale=p.scaleSnap;app.SetCameraNavigation(p.cameraSpeed,p.cameraSensitivity);
     InitializeWorkspaces(p);
+    RestoreViewportPlacement(app);
 }
 bool EditorLayer::PersistPreferences(Application& app){
     // End-of-session persistence retains the last normal layout, never F11's temporary viewport.
     if(ImGui::GetCurrentContext()&&!ImGui::GetCurrentContext()->WithinFrameScope)CaptureCurrentWorkspace();
     CaptureSceneDocument(app);StoreDocumentSession();
     EditorPreferences p;p.documentSessions=m_DocumentSessions;p.activeWorkspace=m_Workspace;p.workspaces=m_Workspaces;p.workspacesInitialized=true;p.recentScenes=app.GetProject()?std::vector<std::string>{}:m_RecentScenes;p.recentProjects=m_RecentProjects;p.hierarchy=m_ShowHierarchy;p.inspector=m_ShowInspector;p.viewport=m_ShowViewport;p.assets=m_ShowAssetBrowser;p.material=m_ShowMaterialEditor;p.settings=m_ShowSceneSettings;p.console=m_ShowConsole;p.diagnostics=m_ShowStatistics;
+    const auto size=app.StandaloneWindowSize();p.gameWindowWidth=size[0];p.gameWindowHeight=size[1];p.playInNewWindow=m_PlayInNewWindow;
     if(!m_BrowserProject.empty())m_BrowserSessions[m_BrowserProject]={{"folder",m_AssetDirectory},{"expanded",m_AssetExpanded}};
     p.assetView=m_AssetView;p.assetTree=m_AssetTree;p.assetTreeWidth=m_AssetTreeWidth;p.assetDetails=m_AssetDetails;p.assetSearchAll=m_AssetNavigation.projectSearch;p.browserSessions=m_BrowserSessions;
     p.assetGrid=m_AssetGrid;p.projectAssets=m_ProjectAssets;p.assetCardSize=m_AssetCardSize;p.backgroundOverride=m_BackgroundOverride;p.projectileTestInput=m_ProjectileTestInput;
@@ -113,12 +116,21 @@ void EditorLayer::DrawToolbar(Application& app){
     auto* viewport=ImGui::GetMainViewport();const float dpi=ImGui::GetStyle().FontScaleDpi;
     ImGui::SetNextWindowPos(viewport->WorkPos);ImGui::SetNextWindowSize({viewport->WorkSize.x,ImGui::GetFrameHeightWithSpacing()+8});
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{10*dpi,4*dpi});
-    ImGui::Begin("Main Toolbar",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings);
+    editor::BeginEditorPanel("Main Toolbar",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings);
     const bool play=app.IsEditorPlayMode(),prefab=app.IsPrefabEditing();const bool compact=viewport->WorkSize.x<1080*dpi;
     auto separator=[](){ImGui::SameLine();ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);ImGui::SameLine();};
     if(Action("Save",play?"Stop Play before saving.":"Save the active document (Ctrl+S).",!play,false,58))if(!SaveActiveDocument(app))Logger::Get().Error(m_EditorError);
     separator();
-    if(Action("Play",prefab?"Return to the Scene document before starting Play.":!ActiveDocumentIs(DocumentType::Scene)?"Activate the Scene document to start Play.":"Start the scene in an isolated Runtime World.",!play&&!prefab&&ActiveDocumentIs(DocumentType::Scene),play,55))app.SetEditorPlayMode(true);
+    if(Action("Play",prefab?"Return to the Scene document before starting Play.":!ActiveDocumentIs(DocumentType::Scene)?"Activate the Scene document to start Play.":m_PlayInNewWindow?"Run Game Startup in a separate native window.":"Start the scene in an isolated Runtime World.",!play&&!prefab&&ActiveDocumentIs(DocumentType::Scene),play,55)){if(m_PlayInNewWindow)app.RequestPlayInNewWindow();else app.SetEditorPlayMode(true);}
+    ImGui::SameLine();ImGui::BeginDisabled(play);
+    if(ImGui::ArrowButton("Play mode",ImGuiDir_Down))ImGui::OpenPopup("Play mode options");
+    Help("Play In Editor / Play In New Window. New Window runs the project's Game Startup settings.");
+    if(ImGui::BeginPopup("Play mode options")){
+        if(ImGui::MenuItem("In Editor",nullptr,!m_PlayInNewWindow))m_PlayInNewWindow=false;
+        if(ImGui::MenuItem("New Window",nullptr,m_PlayInNewWindow,app.SupportsPlayInNewWindow()))m_PlayInNewWindow=true;
+        if(!app.SupportsPlayInNewWindow())ImGui::TextDisabled("New Window is currently supported by DX12.");
+        ImGui::EndPopup();
+    }ImGui::EndDisabled();
     ImGui::SameLine();if(Action(app.IsEditorPaused()?"Resume":"Pause","Pause/resume the running scene. Start Play first.",play,app.IsEditorPaused(),75))app.SetEditorPaused(!app.IsEditorPaused());
     ImGui::SameLine();if(Action("Stop","Discard the Runtime World and return to editing. Start Play first.",play,false,55))app.SetEditorPlayMode(false);
     separator();
@@ -149,7 +161,7 @@ void EditorLayer::DrawToolbar(Application& app){
     ImGui::End();ImGui::PopStyleVar();
     if(!app.GetPlayError().empty()){
         bool visible=true;ImGui::SetNextWindowSize({520*dpi,0},ImGuiCond_Appearing);
-        if(ImGui::Begin("Play failed",&visible,ImGuiWindowFlags_AlwaysAutoResize))ImGui::TextWrapped("%s",app.GetPlayError().c_str());
+        if(editor::BeginEditorPanel("Play failed",&visible,ImGuiWindowFlags_AlwaysAutoResize))ImGui::TextWrapped("%s",app.GetPlayError().c_str());
         ImGui::End();if(!visible)app.DismissPlayError();
     }
 }
@@ -254,7 +266,7 @@ void EditorLayer::DrawSceneDialogs(Application& app){
 }
 void EditorLayer::DrawSceneHierarchy(Application& app){
     const auto start=std::chrono::steady_clock::now();ImGui::SetNextWindowSizeConstraints(ImVec2(180,150),ImVec2(FLT_MAX,FLT_MAX));
-    if(!ImGui::Begin("Scene Hierarchy",&m_ShowHierarchy)){ImGui::End();return;}
+    if(!editor::BeginEditorPanel("Scene Hierarchy",&m_ShowHierarchy)){ImGui::End();return;}
     m_HierarchyFocused=ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     auto& world=app.GetWorld();
     ImGui::InputTextWithHint("##filter","Search entities",&m_HierarchyFilter);
@@ -328,7 +340,7 @@ void EditorLayer::DrawRuntimeErrors(Application& app){
  else if(summary.session!=m_RuntimeErrorSession){m_RuntimeErrorSession=summary.session;m_ShowRuntimeErrors=summary.total>0;}
  if(!m_ShowRuntimeErrors)return;
  ImGui::SetNextWindowSize({640,380},ImGuiCond_FirstUseEver);
- if(ImGui::Begin("Runtime Errors",&m_ShowRuntimeErrors)){
+ if(editor::BeginEditorPanel("Runtime Errors",&m_ShowRuntimeErrors)){
   ImGui::Text("Session %llu: %llu occurrences / %zu issues",(unsigned long long)summary.session,(unsigned long long)summary.total,summary.issues.size());
   if(summary.dropped||summary.truncated)ImGui::TextWrapped("Bounded summary: %llu dropped messages, %llu truncated text fields",(unsigned long long)summary.dropped,(unsigned long long)summary.truncated);
   if(ImGui::Button("Copy All"))ImGui::SetClipboardText(summary.Copy().c_str());
@@ -354,7 +366,7 @@ void EditorLayer::DrawRuntimeErrors(Application& app){
 
 void EditorLayer::DrawConsole(Application& app,IRenderAdapter* renderer){
     ImGui::SetNextWindowSizeConstraints(ImVec2(240,130),ImVec2(FLT_MAX,FLT_MAX));
-    if(!ImGui::Begin("Console / Diagnostics",&m_ShowConsole)){ImGui::End();return;}
+    if(!editor::BeginEditorPanel("Console / Diagnostics",&m_ShowConsole)){ImGui::End();return;}
     if(ImGui::BeginTabBar("ConsoleTabs")){
         if(ImGui::BeginTabItem("Console",nullptr,m_ConsoleTargetSequence?ImGuiTabItemFlags_SetSelected:ImGuiTabItemFlags_None)){
             auto& log=Logger::Get();if(m_ConsoleRevision!=log.Revision()){m_ConsoleMessages=log.Messages();m_ConsoleRevision=log.Revision();}

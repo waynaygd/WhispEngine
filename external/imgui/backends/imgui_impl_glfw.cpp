@@ -1005,6 +1005,13 @@ static void ImGui_ImplGlfw_UpdateMouseCursor()
     for (int n = 0; n < platform_io.Viewports.Size; n++)
     {
         GLFWwindow* window = (GLFWwindow*)platform_io.Viewports[n]->PlatformHandle;
+        // Editor navigation may capture a secondary platform window. Honor its
+        // cursor mode just as we honor the main window's mode above.
+        if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED)
+        {
+            bd->LastMouseCursor = nullptr;
+            continue;
+        }
         if (imgui_cursor == ImGuiMouseCursor_None || io.MouseDrawCursor)
         {
             if (bd->LastMouseCursor != nullptr)

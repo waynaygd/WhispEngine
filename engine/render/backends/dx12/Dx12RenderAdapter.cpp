@@ -1184,7 +1184,7 @@ std::vector<std::uint8_t> Dx12RenderAdapter::ReadBackTexturePixels(RenderTexture
     auto it=m_UploadedTextures.find(handle.value);
     return it==m_UploadedTextures.end()?std::vector<std::uint8_t>{}:ReadBackColorPixels(it->second.texture.Get());
 }
-std::vector<std::uint8_t> Dx12RenderAdapter::ReadBackColorPixels(ID3D12Resource* color)
+std::vector<std::uint8_t> Dx12RenderAdapter::ReadBackColorPixels(ID3D12Resource* color,D3D12_RESOURCE_STATES state)
 {
     if(!color||m_FrameRecording)return {};
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};UINT rows=0;UINT64 rowBytes=0,totalBytes=0;
@@ -1195,11 +1195,11 @@ std::vector<std::uint8_t> Dx12RenderAdapter::ReadBackColorPixels(ID3D12Resource*
     const auto bufferDesc=CD3DX12_RESOURCE_DESC::Buffer(totalBytes);
     ThrowIfFailed(m_Device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bufferDesc,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&staging)),"Readback allocation failed");
     ExecuteImmediateCommandList(m_Device.Get(),m_Queue.Get(),m_Fence.Get(),m_FenceEvent,m_FenceValue,[&](ID3D12GraphicsCommandList* command) {
-        auto before=CD3DX12_RESOURCE_BARRIER::Transition(color,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COPY_SOURCE);command->ResourceBarrier(1,&before);
+        auto before=CD3DX12_RESOURCE_BARRIER::Transition(color,state,D3D12_RESOURCE_STATE_COPY_SOURCE);command->ResourceBarrier(1,&before);
         D3D12_TEXTURE_COPY_LOCATION src{};src.pResource=color;src.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
         D3D12_TEXTURE_COPY_LOCATION dst{};dst.pResource=staging.Get();dst.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;dst.PlacedFootprint=footprint;
         command->CopyTextureRegion(&dst,0,0,0,&src,nullptr);
-        auto after=CD3DX12_RESOURCE_BARRIER::Transition(color,D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);command->ResourceBarrier(1,&after);
+        auto after=CD3DX12_RESOURCE_BARRIER::Transition(color,D3D12_RESOURCE_STATE_COPY_SOURCE,state);command->ResourceBarrier(1,&after);
     });
     void* mapped=nullptr;D3D12_RANGE range{0,static_cast<SIZE_T>(totalBytes)};
     ThrowIfFailed(staging->Map(0,&range,&mapped),"Readback Map failed");
@@ -1313,6 +1313,7 @@ void Dx12RenderAdapter::BeginEditorUiFrame()
         return;
 
     float dpiX=1,dpiY=1;glfwGetWindowContentScale(m_EditorUiWindow,&dpiX,&dpiY);const float dpi=(std::max)(dpiX,dpiY);
+    if(m_EnablePlatformWindows){if(!ImGui::GetPlatformIO().Renderer_CreateWindow)ImGui_ImplDX12_InstallViewportCallbacks();auto& io=ImGui::GetIO();io.ConfigFlags|=ImGuiConfigFlags_ViewportsEnable;io.ConfigDpiScaleFonts=true;io.ConfigDpiScaleViewports=true;}
     if(std::abs(dpi-m_EditorUiScale)>.01f){m_EditorUiScale=dpi;editor::ApplyEditorTheme(dpi);}
     ImGui_ImplDX12_NewFrame();
     ImGui_ImplGlfw_NewFrame();
@@ -2096,6 +2097,7 @@ void Dx12RenderAdapter::DrawTestCube()
 
 void Dx12RenderAdapter::EndFrame()
 {
+    CopyGameOutput();
     if(m_TimeHeap) {
         m_CmdList->EndQuery(m_TimeHeap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_FrameIndex*TimingQueries+1);
         // Resolve only initialized queries, including optional UI/custom stages.
@@ -2122,9 +2124,15 @@ void Dx12RenderAdapter::EndFrame()
 
 void Dx12RenderAdapter::Present()
 {
+    // Main scene/UI commands have already been submitted. Platform windows
+    // sample that same scene texture; the existing queue fence covers both.
+    if(m_EditorUiInitialized&&(ImGui::GetIO().ConfigFlags&ImGuiConfigFlags_ViewportsEnable)){
+        ImGui::UpdatePlatformWindows();ImGui::RenderPlatformWindowsDefault();
+    }
     ZoneScopedN("DX12Present");
     const auto presentStart=std::chrono::steady_clock::now();
     ThrowIfFailed(m_Swapchain->Present(0, 0), "Present failed");
+    if(m_GameSwapchain&&m_GameCopied)ThrowIfFailed(m_GameSwapchain->Present(0,0),"Game Present failed");
     m_CpuWaitMs[1]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-presentStart).count();
     const UINT submitted=m_FrameIndex;
     MoveToNextFrame();
@@ -2232,6 +2240,7 @@ void Dx12RenderAdapter::ShutdownEditorUi()
 
 void Dx12RenderAdapter::Shutdown()
 {
+    CloseGameOutput();
     try
     {
         if (m_Device)

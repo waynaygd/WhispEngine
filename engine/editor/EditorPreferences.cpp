@@ -20,6 +20,8 @@ nlohmann::json PreferencesToJson(const EditorPreferences& p){
     result["workspacesInitialized"]=p.workspacesInitialized;
     auto layouts=nlohmann::json::object();for(const auto& [key,layout]:p.workspaces)layouts[key]={{"ini",layout.ini},{"visible",layout.visible}};
     result["workspaces"]=std::move(layouts);
+    for(const auto& [key,layout]:p.workspaces){const auto& v=layout.viewport;result["workspaces"][key]["viewport"]={{"detached",v.detached},{"x",v.x},{"y",v.y},{"width",v.width},{"height",v.height}};}
+    result["gameWindow"]={{"width",p.gameWindowWidth},{"height",p.gameWindowHeight},{"playInNewWindow",p.playInNewWindow}};
     const auto& f=p.selectionFilters;result["selectionFilters"]={{"meshes",f.meshes},{"lights",f.lights},{"playerStarts",f.playerStarts},{"fog",f.fog},{"physics",f.physics},{"other",f.other}};
     result["assetBrowser"]={{"view",p.assetView},{"tree",p.assetTree},{"treeWidth",p.assetTreeWidth},{"allAssets",p.assetSearchAll},{"details",p.assetDetails},{"sessions",p.browserSessions}};
     return result;
@@ -27,6 +29,7 @@ nlohmann::json PreferencesToJson(const EditorPreferences& p){
 EditorPreferences PreferencesFromJson(const nlohmann::json& j){
     // Unavailable recent descriptors remain visible; they never prevent startup.
     if(!j.is_object()||j.value("version",0)!=1)throw std::runtime_error("Unsupported editor preferences schema");EditorPreferences p;
+    if(j.contains("gameWindow")){const auto& w=j.at("gameWindow");p.gameWindowWidth=std::clamp(w.value("width",1280),320,7680);p.gameWindowHeight=std::clamp(w.value("height",720),200,4320);p.playInNewWindow=w.value("playInNewWindow",false);}
     // A damaged workspace never discards other editor preferences.
     if(j.contains("documentSessions")&&j["documentSessions"].is_object()&&j["documentSessions"].dump().size()<1024*1024)p.documentSessions=j["documentSessions"];
     p.workspacesInitialized=j.contains("workspacesInitialized")&&j["workspacesInitialized"].is_boolean()&&j["workspacesInitialized"].get<bool>();
@@ -35,6 +38,7 @@ EditorPreferences PreferencesFromJson(const nlohmann::json& j){
         if(!j["workspaces"].contains(key))continue;
         try{const auto& source=j["workspaces"][key];WorkspaceLayout layout;layout.ini=source.at("ini").get<std::string>();if(!ValidWorkspaceIni(layout.ini))continue;
             if(source.contains("visible")){if(!source["visible"].is_object())continue;for(const auto* panel:WorkspacePanels)if(source["visible"].contains(panel)&&source["visible"][panel].is_boolean())layout.visible[panel]=source["visible"][panel].get<bool>();}
+            if(source.contains("viewport")){try{const auto& v=source.at("viewport");WorkspaceLayout::ViewportPlacement a;a.detached=v.value("detached",false);a.x=v.value("x",100.f);a.y=v.value("y",100.f);a.width=v.value("width",760.f);a.height=v.value("height",520.f);if(std::isfinite(a.x)&&std::isfinite(a.y)&&std::isfinite(a.width)&&std::isfinite(a.height)&&std::abs(a.x)<=30000&&std::abs(a.y)<=30000&&a.width>=420&&a.width<=8192&&a.height>=280&&a.height<=8192)layout.viewport=a;}catch(...){}}
             p.workspaces.emplace(key,std::move(layout));
         }catch(...){}}
     if(j.contains("selectionFilters")){const auto& f=j.at("selectionFilters");auto& v=p.selectionFilters;v.meshes=f.value("meshes",true);v.lights=f.value("lights",true);v.playerStarts=f.value("playerStarts",true);v.fog=f.value("fog",true);v.physics=f.value("physics",true);v.other=f.value("other",true);}

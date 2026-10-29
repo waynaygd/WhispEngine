@@ -16,6 +16,16 @@ struct GLFWwindow;
 class Dx12RenderAdapter final : public IRenderAdapter
 {
 public:
+	bool SupportsGameOutput() const override {return true;}
+    bool SupportsEditorPlatformWindows()const override{return true;}
+    void EnableEditorPlatformWindows()override{m_EnablePlatformWindows=true;}
+    std::vector<std::uint8_t> ReadBackPlatformPixels(unsigned viewportId);
+
+	bool OpenGameOutput(IWindow*) override;
+	void CloseGameOutput() override;
+	bool ResizeGameOutput(unsigned,unsigned) override;
+	std::array<unsigned,2> GameOutputSize() const override {return m_GameSwapchain?m_GameSize:std::array<unsigned,2>{};}
+	std::vector<std::uint8_t> ReadBackGameOutputPixels();
 	bool Initialize(IWindow* window) override;
 	bool InitializeEditorUi(IWindow* window) override;
 	void BeginEditorUiFrame() override;
@@ -131,8 +141,15 @@ public:
     bool SaveFrameImage(const std::string&) override;
 
 private:
+    bool m_EnablePlatformWindows=false;
     RenderTextureHandle CreateTexture(const TextureData&, bool renderTarget, bool deferred=false);
-    std::vector<std::uint8_t> ReadBackColorPixels(ID3D12Resource*);
+    std::vector<std::uint8_t> ReadBackColorPixels(ID3D12Resource*,D3D12_RESOURCE_STATES state=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    void CopyGameOutput();
+    Microsoft::WRL::ComPtr<IDXGISwapChain3> m_GameSwapchain;
+    std::array<Microsoft::WRL::ComPtr<ID3D12Resource>,2> m_GameBuffers;
+    std::array<unsigned,2> m_GameSize{};
+    unsigned m_GameLastBuffer=0;
+    bool m_GameVisible=false,m_GameCopied=false;
     GLFWwindow* m_EditorUiWindow=nullptr;
     float m_EditorUiScale=1;
     EditorVisualFrame m_EditorVisualFrame;

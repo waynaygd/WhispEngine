@@ -23,6 +23,8 @@ struct SelectionFilters {
     bool operator==(const SelectionFilters&)const=default;
 };
 struct EditorPreferences {
+    int gameWindowWidth=1280,gameWindowHeight=720;
+    bool playInNewWindow=false;
     nlohmann::json documentSessions=nlohmann::json::object();
     EditorWorkspace activeWorkspace=EditorWorkspace::LevelEditing;
     std::map<std::string,WorkspaceLayout> workspaces;

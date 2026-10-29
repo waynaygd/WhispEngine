@@ -75,7 +75,7 @@ void EditorLayer::DrawUIDesigner(Application& app){
  auto newDocument=[&](){auto key="ui/Canvas-"+ecs::NewSceneIdentity()+".ui.json";if(UILoader::Save(key,ui::EmptyDocument(),&m_EditorError)){m_AssetListsDirty=true;OpenUIDesigner(app,key);}};
  if(m_ShowCanvasDesigner){
   PrepareWorkspacePrimaryWindow();
-  if(ImGui::Begin("Canvas Designer",&m_ShowCanvasDesigner,m_WorkspaceFocus?ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings:0)){
+  if(editor::BeginEditorPanel("Canvas Designer",&m_ShowCanvasDesigner,m_WorkspaceFocus?ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings:0)){
    ImGui::BeginDisabled(app.IsEditorPlayMode());if(ImGui::Button("New UI Document"))newDocument();ImGui::EndDisabled();Inline("Document",120);
    ImGui::SetNextItemWidth(std::max(80.f*ImGui::GetStyle().FontScaleDpi,ImGui::GetContentRegionAvail().x-ImGui::CalcTextSize("Document").x-ImGui::GetStyle().ItemInnerSpacing.x));
    if(ImGui::BeginCombo("Document",m_DesignDocument.empty()?"Choose .ui.json":m_DesignDocument.c_str())){
@@ -146,7 +146,7 @@ void EditorLayer::DrawUIDesigner(Application& app){
   }ImGui::End();
  }
  if(m_ShowWidgetHierarchy&&!m_WorkspaceFocus){
-  if(ImGui::Begin("Widget Hierarchy",&m_ShowWidgetHierarchy)&&!m_DesignDocument.empty())try{
+  if(editor::BeginEditorPanel("Widget Hierarchy",&m_ShowWidgetHierarchy)&&!m_DesignDocument.empty())try{
    auto& s=UIDocumentSession(app,m_DesignDocument);
    if(!app.IsEditorPlayMode()&&!m_UIWidgetDrag&&!ImGui::GetIO().WantTextInput&&!ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel)&&ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&ImGui::IsKeyPressed(ImGuiKey_F2,false)&&!s.selected.empty()){
     m_WidgetInlineId=s.selected;m_WidgetRenameId=s.selected;m_WidgetRename=s.selected;m_WidgetRenameFocus=true;
@@ -200,7 +200,7 @@ void EditorLayer::DrawUIDesigner(Application& app){
   }catch(const std::exception& e){ImGui::TextWrapped("UI hierarchy: %s",e.what());}ImGui::End();
  }
  if(m_ShowWidgetInspector&&!m_WorkspaceFocus){
-  if(ImGui::Begin("Widget Inspector",&m_ShowWidgetInspector)&&!m_DesignDocument.empty())try{
+  if(editor::BeginEditorPanel("Widget Inspector",&m_ShowWidgetInspector)&&!m_DesignDocument.empty())try{
    auto& s=UIDocumentSession(app,m_DesignDocument);if(!m_EditorError.empty())ImGui::TextWrapped("%s",m_EditorError.c_str());ImGui::BeginDisabled(app.IsEditorPlayMode()||bool(m_UIWidgetDrag));
    // The UI.1 property editor is shared with the UICanvas scene inspector.
    DrawUIDocumentProperties(app,m_DesignDocument,false);ImGui::EndDisabled();

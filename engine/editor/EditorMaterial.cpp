@@ -58,10 +58,10 @@ void EditorLayer::ReleaseMaterialEditor(IRenderAdapter* renderer){
 }
 void EditorLayer::DrawMaterialEditor(Application& app){
     const bool document=ActiveDocumentIs(DocumentType::Material);if(!document){
-        if(ImGui::Begin("Material Editor",&m_ShowMaterialEditor)){ImGui::TextWrapped("Open a Material Document to edit its independent draft and preview.");if(m_SelectedAssetKind=="Material"&&ImGui::Button("Open selected asset"))OpenDocument(app,m_SelectedAsset);}ImGui::End();return;
+        if(editor::BeginEditorPanel("Material Editor",&m_ShowMaterialEditor)){ImGui::TextWrapped("Open a Material Document to edit its independent draft and preview.");if(m_SelectedAssetKind=="Material"&&ImGui::Button("Open selected asset"))OpenDocument(app,m_SelectedAsset);}ImGui::End();return;
     }
     auto* session=EnsureMaterialSession(app);auto* rm=app.GetResourceManager();auto* renderer=app.GetRenderAdapter();
-    if(!session){if(ImGui::Begin("Material Editor",&m_ShowMaterialEditor))ErrorText(m_MaterialError.c_str());ImGui::End();return;}auto& s=*session;
+    if(!session){if(editor::BeginEditorPanel("Material Editor",&m_ShowMaterialEditor))ErrorText(m_MaterialError.c_str());ImGui::End();return;}auto& s=*session;
     const auto start=std::chrono::steady_clock::now();const auto probes=ProjectContext::LinkProbeCount();
     ImFont* font=nullptr;for(auto* f:ImGui::GetIO().Fonts->Fonts)if(std::strcmp(f->GetDebugName(),"Browser UI")==0){font=f;break;}if(font)ImGui::PushFont(font,0);
     if(ImGui::IsKeyPressed(ImGuiKey_Escape,false))FinishMaterialEdit(app,true);
@@ -69,7 +69,7 @@ void EditorLayer::DrawMaterialEditor(Application& app){
     if(m_FocusMaterial){ImGui::SetNextWindowFocus();m_FocusMaterial=false;}
     const float dpi=ImGui::GetStyle().FontScaleDpi;ImGui::SetNextWindowSizeConstraints({320*dpi,200*dpi},{FLT_MAX,FLT_MAX});
     PrepareWorkspacePrimaryWindow();
-    if(ImGui::Begin("Material Preview",nullptr,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse|(m_WorkspaceFocus?ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings:0))){
+    if(editor::BeginEditorPanel("Material Preview",nullptr,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse|(m_WorkspaceFocus?ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings:0))){
         ImGui::BeginDisabled(app.IsEditorPlayMode());
         if(ImGui::Button("Save Material"))SaveMaterialDraft(app);Inline("Revert / Reload");if(ImGui::Button("Revert / Reload"))ImGui::OpenPopup("Reload Material?");
         if(ImGui::BeginPopupModal("Reload Material?",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){ImGui::TextWrapped("Discard this draft and reload %s?",m_EditingMaterial.c_str());if(ImGui::Button("Discard")){if(ReloadMaterialDraft(app))ImGui::CloseCurrentPopup();}ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();if(!m_MaterialError.empty())ErrorText(m_MaterialError.c_str());ImGui::EndPopup();}
@@ -97,7 +97,7 @@ void EditorLayer::DrawMaterialEditor(Application& app){
     }ImGui::End();
     if(!m_WorkspaceFocus&&m_ShowMaterialEditor){
     ImGui::SetNextWindowSizeConstraints({260*dpi,160*dpi},{FLT_MAX,FLT_MAX});
-    if(ImGui::Begin("Material Editor",&m_ShowMaterialEditor)){
+    if(editor::BeginEditorPanel("Material Editor",&m_ShowMaterialEditor)){
         ImGui::TextWrapped("Material Properties: %s",s.draft.name.c_str());ImGui::TextDisabled("Shader: %s",s.draft.shaderPath.c_str());ImGui::BeginDisabled(app.IsEditorPlayMode());
         auto row=[&](const char* label,auto draw){ImGui::PushID(label);inspector::PropertyRow(label);const auto before=s.draft;bool changed=draw();const bool active=ImGui::IsAnyItemActive();if(changed){if(!s.transaction)s.transaction=before;m_MaterialDirty=!Equal(s.base,s.draft);rm->SetMaterialDirty(m_EditingMaterial,m_MaterialDirty);if(!active)FinishMaterialEdit(app);}if(ImGui::IsItemDeactivatedAfterEdit())FinishMaterialEdit(app);ImGui::PopID();};
         auto section=[&](const char* name,auto draw,bool open=true){if(ImGui::TreeNodeEx(name,open?ImGuiTreeNodeFlags_DefaultOpen:0)){if(inspector::BeginProperties("Properties")){draw();ImGui::EndTable();}ImGui::TreePop();}};

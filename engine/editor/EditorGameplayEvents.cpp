@@ -11,7 +11,7 @@ bool EditorLayer::SelectGameplayEventEntity(Application& app,const scripting::Ev
 }
 void EditorLayer::DrawGameplayEvents(Application& app){
     using namespace scripting;
-    if(!ImGui::Begin("Gameplay Events",&m_ShowGameplayEvents)){ImGui::End();return;}
+    if(!editor::BeginEditorPanel("Gameplay Events",&m_ShowGameplayEvents)){ImGui::End();return;}
     auto& history=app.GetLuaRuntime().Events();
     if(ImGui::Button(history.Capturing()?"Stop Capture":"Start Capture")){if(history.Capturing())history.StopCapture();else history.StartCapture();}
     ImGui::SameLine();bool paused=history.Paused();ImGui::BeginDisabled(!history.Capturing());if(ImGui::Checkbox("Pause Capture",&paused))history.PauseCapture(paused);ImGui::EndDisabled();

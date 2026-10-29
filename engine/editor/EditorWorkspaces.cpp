@@ -87,7 +87,7 @@ bool EditorLayer::CaptureCurrentWorkspace(){
     if(!ImGui::GetCurrentContext()||m_WorkspacePending||m_ResetLayout||m_WorkspaceFocus||m_ViewportMaximized||m_FixedDiagnosticLayout||!ImGui::DockBuilderGetNode(WorkspaceRoot()))return false;
     std::size_t size=0;const auto* data=ImGui::SaveIniSettingsToMemory(&size);std::string ini(data,size);
     if(!ValidWorkspaceIni(ini)){m_EditorError="The current layout cannot be saved; restore this workspace's default layout.";return false;}
-    m_Workspaces[WorkspaceKeys[int(m_Workspace)]]={std::move(ini),CaptureWorkspaceVisibility()};ImGui::GetIO().WantSaveIniSettings=false;return true;
+    m_Workspaces[WorkspaceKeys[int(m_Workspace)]]={std::move(ini),CaptureWorkspaceVisibility(),m_ViewportPlacement};ImGui::GetIO().WantSaveIniSettings=false;return true;
 }
 bool EditorLayer::SaveCurrentWorkspace(Application& app){
     if(!CaptureCurrentWorkspace()){if(m_ViewportMaximized)m_EditorError="Return from F11 fullscreen before saving the normal workspace layout.";return false;}
@@ -133,11 +133,15 @@ void EditorLayer::ConfigureDocking(){
     if(m_FixedDiagnosticLayout){ImGui::DockSpaceOverViewport(root,&dock,ImGuiDockNodeFlags_PassthruCentralNode);return;}
     if(m_WorkspacePending){
         m_Workspace=m_RequestedWorkspace;if(!m_WorkspaceFirstApply)WorkspaceDefaults();ImGui::ClearIniSettings();
+        // Placement is per existing workspace, not per Scene/Prefab.
+        m_ViewportPlacement={};if(auto saved=m_Workspaces.find(WorkspaceKeys[int(m_Workspace)]);saved!=m_Workspaces.end())m_ViewportPlacement=saved->second.viewport;
+        m_ViewportPlacementPending=m_ViewportPlacement.detached;
         bool loaded=false;
         if(auto saved=m_Workspaces.find(WorkspaceKeys[int(m_Workspace)]);saved!=m_Workspaces.end()&&ValidWorkspaceIni(saved->second.ini)){
             ImGui::LoadIniSettingsFromMemory(saved->second.ini.data(),saved->second.ini.size());if(!m_WorkspaceFirstApply)ApplyWorkspaceVisibility(saved->second.visible);loaded=ImGui::DockBuilderGetNode(root)!=nullptr;
             // Keep floating panels reachable after loading on a smaller display.
             for(auto* window:ImGui::GetCurrentContext()->Windows)if(!window->DockId&&!(window->Flags&ImGuiWindowFlags_NoSavedSettings)){
+                if(std::strcmp(window->Name,"Viewport")==0&&m_ViewportPlacement.detached)continue;
                 ImVec2 size{std::clamp(window->SizeFull.x,80.f,std::max(80.f,dock.WorkSize.x)),std::clamp(window->SizeFull.y,60.f,std::max(60.f,dock.WorkSize.y))};
                 ImGui::SetWindowSize(window,size);ImGui::SetWindowPos(window,{std::clamp(window->Pos.x,dock.WorkPos.x,dock.WorkPos.x+std::max(0.f,dock.WorkSize.x-size.x)),std::clamp(window->Pos.y,dock.WorkPos.y,dock.WorkPos.y+std::max(0.f,dock.WorkSize.y-size.y))});
             }

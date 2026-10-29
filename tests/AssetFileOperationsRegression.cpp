@@ -87,16 +87,20 @@ static void Cpu(){
         if(code)code->Release();if(diagnostic)diagnostic->Release();Check(SUCCEEDED(hr),"new mesh HLSL compiles native VS/PS");}
     Check(!catalog.CreateStarter("../escape.hlsl","HLSL",&error),"starter traversal blocked");
     (void)catalog.PollExternalChanges(.3f);
+    // Native change notifications use wall time. Advancing a synthetic 20 ms
+    // every 2 ms can finish debounce before the OS delivers a write burst.
+    auto previousPoll=std::chrono::steady_clock::now();
+    auto pollReal=[&]{auto now=std::chrono::steady_clock::now();float elapsed=std::chrono::duration<float>(now-previousPoll).count();previousPoll=now;return catalog.PollExternalChanges(elapsed);};
     Write(active/"Anywhere/external.lua","return {}");
-    bool notified=false;for(int i=0;i<100&&!notified;++i){std::this_thread::sleep_for(std::chrono::milliseconds(2));notified=catalog.PollExternalChanges(.02f);}
+    bool notified=false;for(int i=0;i<400&&!notified;++i){std::this_thread::sleep_for(std::chrono::milliseconds(2));notified=pollReal();}
     Check(notified,"native external file watcher debounced notification");
-    auto event=[&](const char* label){bool found=false;for(int i=0;i<100&&!found;++i){std::this_thread::sleep_for(std::chrono::milliseconds(2));found=catalog.PollExternalChanges(.02f);}Check(found,label);catalog.Refresh();};
+    auto event=[&](const char* label){bool found=false;for(int i=0;i<400&&!found;++i){std::this_thread::sleep_for(std::chrono::milliseconds(2));found=pollReal();}Check(found,label);catalog.Refresh();};
     fs::rename(active/"Anywhere/external.lua",active/"Anywhere/renamed.lua");event("watch external rename");
     fs::remove(active/"Anywhere/renamed.lua");event("watch external delete");
     fs::create_directory(active/"Anywhere/ExternalFolder");event("watch folder create");
     fs::remove(active/"Anywhere/ExternalFolder");event("watch folder delete");
     for(int i=0;i<15;++i)Write(active/("Anywhere/burst"+std::to_string(i)+".lua"),"return {}");event("watch rapid changes");
-    bool quiet=true;for(int i=0;i<100;++i)quiet&=!catalog.PollExternalChanges(.02f);Check(quiet,"no repeated refresh on unchanged frames");
+    bool quiet=true;for(int i=0;i<200;++i){std::this_thread::sleep_for(std::chrono::milliseconds(2));quiet&=!pollReal();}Check(quiet,"no repeated refresh on unchanged frames");
     fs::create_directories(active/"MoveSource/Sub");fs::create_directories(active/"MoveTarget");
     Write(active/"MoveSource/a.lua","return {}");Write(active/"MoveSource/b.lua","return {}");
     auto plan=AssetCatalog::PlanMove({"MoveSource/a.lua","MoveSource/b.lua"},"MoveTarget");

@@ -238,7 +238,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,ImVec2(5*browserDpi,3*browserDpi));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,ImVec2(6*browserDpi,4*browserDpi));
     struct FontScope {bool pushed;~FontScope(){ImGui::PopStyleVar(3);if(pushed)ImGui::PopFont();}} fontScope{browserFont!=nullptr};
-    ImGui::SetNextWindowSizeConstraints(ImVec2(280,140),ImVec2(FLT_MAX,FLT_MAX));if(!ImGui::Begin("Asset Browser",&m_ShowAssetBrowser)){ImGui::End();return;}
+    ImGui::SetNextWindowSizeConstraints(ImVec2(280,140),ImVec2(FLT_MAX,FLT_MAX));if(!editor::BeginEditorPanel("Asset Browser",&m_ShowAssetBrowser)){ImGui::End();return;}
     const auto& types=m_AssetCatalog.Types();auto* resources=app.GetResourceManager();
     const auto activeIdentity=[&]{return m_SelectedAssetKind=="Folder"?AssetContentItem::FolderId(m_SelectedAsset):m_SelectedAsset;};
     if(!m_SelectedAsset.empty()&&!m_AssetSelection.contains(activeIdentity())){m_AssetSelection={activeIdentity()};m_AssetAnchor=activeIdentity();}
@@ -567,7 +567,7 @@ void EditorLayer::DrawAssetBrowser(Application& app){
     // Keep explicit previews reachable even when the asset list has thousands
     // of rows or the browser occupies a short bottom dock.
     ImGui::SetNextWindowSize(ImVec2(340*dpi,320*dpi),ImGuiCond_FirstUseEver);
-    if(ImGui::Begin("Asset Details",&m_AssetDetails)){
+    if(editor::BeginEditorPanel("Asset Details",&m_AssetDetails)){
     ImGui::Separator();ImGui::TextWrapped("Selected: %s",m_SelectedAsset.empty()?"None":m_SelectedAsset.c_str());
     if(!m_SelectedAsset.empty())for(auto& type:types)if(type.name==m_SelectedAssetKind){ImGui::Text("%s %s / %s",type.icon.c_str(),type.name.c_str(),AssetLoadState(resources,type.kind,m_SelectedAsset));if(type.kind!=ecs::AssetKind::None&&ImGui::Button("Assign selected to entity"))AssignAsset(app,m_Selection.active,type.kind,m_SelectedAsset);}
     if(m_SelectedAssetKind=="Mesh"&&!m_SelectedAsset.empty()&&!app.IsEditorPlayMode()&&ImGui::Button("Create Model Entity")){CreateModelEntity(app,m_SelectedAsset,AssetPaths::ToUtf8String(std::filesystem::u8path(m_SelectedAsset).stem()));}

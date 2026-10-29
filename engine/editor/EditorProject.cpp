@@ -110,7 +110,7 @@ void EditorLayer::DrawProjectBrowser(Application& app){
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,ImVec2(10,7));
         ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding,12);
         ImGui::PushStyleColor(ImGuiCol_WindowBg,ImVec4(.055f,.065f,.085f,1));
-        if(ImGui::Begin("Project Browser",startup?nullptr:&m_ShowProjectBrowser,flags)){
+        if(editor::BeginEditorPanel("Project Browser",startup?nullptr:&m_ShowProjectBrowser,flags)){
             if(startup){
                 const auto space=ImGui::GetContentRegionAvail();
                 const ImVec2 size(std::min(920.f*ImGui::GetStyle().FontScaleDpi,space.x),std::min((m_RecentProjects.empty()?500.f:660.f)*ImGui::GetStyle().FontScaleDpi,space.y));

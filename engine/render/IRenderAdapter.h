@@ -34,6 +34,15 @@ public:
     virtual void EndAmbientOcclusion(){}
     virtual AmbientOcclusionDiagnostics GetAmbientOcclusionDiagnostics() const{return {};}
     virtual ~IRenderAdapter() = default;
+    // A second presentation surface for the SAME rendered Runtime World.
+    // Unsupported backends reject before Application creates a native window.
+    virtual bool SupportsGameOutput() const {return false;}
+    virtual bool SupportsEditorPlatformWindows()const{return false;}
+    virtual void EnableEditorPlatformWindows(){}
+    virtual bool OpenGameOutput(IWindow*) {return false;}
+    virtual void CloseGameOutput() {}
+    virtual bool ResizeGameOutput(unsigned,unsigned) {return false;}
+    virtual std::array<unsigned,2> GameOutputSize() const {return {};}
 
     virtual bool Initialize(IWindow* window) = 0;
     virtual bool InitializeEditorUi(IWindow* window)

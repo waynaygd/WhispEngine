@@ -155,6 +155,7 @@ struct ImGui_ImplDX12_FrameContext
 // Secondary viewports created by this backend will use all the fields (including Window fields),
 struct ImGui_ImplDX12_ViewportData
 {
+    UINT LastRenderedBuffer = 0;
     // Window
     ID3D12CommandQueue*             CommandQueue;
     ID3D12GraphicsCommandList*      CommandList;
@@ -1288,6 +1289,7 @@ static void ImGui_ImplDX12_RenderWindow(ImGuiViewport* viewport, void*)
 
     ImGui_ImplDX12_FrameContext* frame_context = ImGui_WaitForNextFrameContext(vd);
     UINT back_buffer_idx = vd->SwapChain->GetCurrentBackBufferIndex();
+    vd->LastRenderedBuffer = back_buffer_idx;
 
     const ImVec4 clear_color = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
     D3D12_RESOURCE_BARRIER barrier = {};
@@ -1340,6 +1342,13 @@ void ImGui_ImplDX12_InitMultiViewportSupport()
     platform_io.Renderer_RenderWindow = ImGui_ImplDX12_RenderWindow;
     platform_io.Renderer_SwapBuffers = ImGui_ImplDX12_SwapBuffers;
 }
+
+ID3D12Resource* ImGui_ImplDX12_ViewportBackBuffer(ImGuiViewport* viewport)
+{
+    auto* data=viewport?static_cast<ImGui_ImplDX12_ViewportData*>(viewport->RendererUserData):nullptr;
+    return data&&data->SwapChain?data->FrameCtx[data->LastRenderedBuffer].RenderTarget:nullptr;
+}
+void ImGui_ImplDX12_InstallViewportCallbacks(){ImGui_ImplDX12_InitMultiViewportSupport();}
 
 void ImGui_ImplDX12_ShutdownMultiViewportSupport()
 {
