@@ -1,0 +1,8 @@
+{
+  "version": 5,
+  "name": "Inheritance Child - rough silver",
+  "parentMaterial": "materials/demo_base.material.json",
+  "overrides": {
+    "roughness": 0.85
+  }
+}

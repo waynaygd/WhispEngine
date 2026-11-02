@@ -1,0 +1,53 @@
+{
+  "version": 2,
+  "root": "RoughnessSample",
+  "entities": [
+    {
+      "id": "RoughnessSample",
+      "components": {
+        "Tag": {
+          "name": "C - Prefab Roughness Sample"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.4,
+            1.4,
+            1.4
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/sphere.obj",
+          "shaderPath": "",
+          "texturePath": "",
+          "visible": true,
+          "renderMode": 0
+        },
+        "Material": {
+          "materialPath": "materials/demo_base.material.json",
+          "slotMaterials": [],
+          "shaderPath": "",
+          "texturePath": "",
+          "tint": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "overrides": {
+            "roughness": 0.85
+          }
+        }
+      }
+    }
+  ]
+}

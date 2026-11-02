@@ -1,3 +1,4 @@
+#include "../../render/ShaderGpuPreparation.h"
 #include "../FogGather.h"
 #include "RenderSystem.h"
 #include "../components/UICanvasComponent.h"
@@ -107,6 +108,8 @@ namespace ecs {
 
     void RenderSystem::ReleaseGpuResources()
     {
+        if(m_ResourceManager&&!m_UsedMaterialAssets.empty())m_ResourceManager->ClearMaterialUsage(this);
+        m_UsedMaterialAssets.clear(); // repeated release/destruction may outlive ResourceManager
         IRenderAdapter* renderer = m_ResourceOwnerRenderer != nullptr ? m_ResourceOwnerRenderer : m_Renderer;
         if (renderer != nullptr)
         {
@@ -173,6 +176,7 @@ namespace ecs {
 
         (void)dt;
         m_Statistics = {};m_MaterialDiagnostics.clear();
+        m_UsedMaterialAssets.clear();
         LightCamera lightCamera;
         lightCamera.view=m_RenderCamera.view;lightCamera.projection=m_RenderCamera.projection;
         lightCamera.nearPlane=m_CameraNearPlane;lightCamera.farPlane=m_CameraFarPlane;
@@ -292,6 +296,7 @@ namespace ecs {
                     }
                 }
                 m_Statistics.gatherMs = elapsed(start);
+                if(m_ResourceManager)m_ResourceManager->SetMaterialUsage(this,m_UsedMaterialAssets);
                 m_Statistics.visibleSubmeshes = m_RenderSnapshots.size();
                 m_Statistics.viewmodelSubmeshes=std::count_if(m_RenderSnapshots.begin(),m_RenderSnapshots.end(),[](const auto& s){return s.renderMode==MeshRenderMode::FirstPerson;});m_Statistics.worldSubmeshes=m_RenderSnapshots.size()-m_Statistics.viewmodelSubmeshes;
             }
@@ -536,9 +541,16 @@ namespace ecs {
             if(!m_MaterialResources.contains(asset)){++m_Statistics.materialPathChecks;key=AssetPaths::NormalizeAssetKey(asset);}
             m_Statistics.materialPathMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-pathStart).count();
             if(m_MaterialResources.count(key))++m_Statistics.materialCacheHits;else ++m_Statistics.materialCacheMisses;
+            m_UsedMaterialAssets.push_back(key);
             const auto resource=key.empty()?nullptr:GetOrLoadMaterial(key);
             if(!resource||resource->IsLoading())return finish(false);
-            if(resource->IsUsable())material=resource->GetData();
+            if(resource->HasError()&&m_FailedMaterialKeys.insert(key+"#"+std::to_string(resource->GetVersion())).second)
+                Logger::Get().Warn("Material '"+key+"': "+resource->GetErrorMessage()+(resource->GetData().placeholder?"; using default material fallback":"; using last working material values"));
+            if(resource->IsUsable()){
+                const auto resolved=m_ResourceManager->ResolveMaterial(key);
+                if(!resolved.success&&resolved.data.placeholder&&!resource->GetData().parentMaterial.empty())return finish(false);
+                material=resolved.data;
+            }
         }
         if(component)ApplyMaterialOverrides(material,component->overrides);
         // Legacy scene paths are explicit overrides; preserve their existing priority.
@@ -579,7 +591,7 @@ namespace ecs {
         snapshot.shader=GetOrCreateShader(shaderKey);
         const auto shaderSource=m_ResourceManager->Get<ShaderResource>(shaderKey);
         m_Statistics.materialShaderMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-shaderStart).count();
-        const bool colorPipeline=shaderSource && shaderSource->GetData().fragmentSource.find("PBR_COLOR_PIPELINE_V1")!=std::string::npos;
+        const bool colorPipeline=shaderSource && (shaderSource->GetData().gpuHandle.IsValid()?shaderSource->GetData().gpuColorPipeline:shaderSource->GetData().fragmentSource.find("PBR_COLOR_PIPELINE_V1")!=std::string::npos);
         for(int i=0;i<4;++i) {
             snapshot.tint[i]=(colorPipeline?1.f:material.baseColor[i])*(component?component->tint[i]:1.f);
             snapshot.baseColor[i]=colorPipeline?material.baseColor[i]:1.f;
@@ -729,6 +741,8 @@ namespace ecs {
             }
         }
 
+        if(resource&&resource->HasError()&&m_FailedTextureKeys.insert(key+"#"+std::to_string(resource->GetVersion())).second)
+            Logger::Get().Warn("Texture '"+key+"': "+resource->GetErrorMessage()+(optionalMap?"; optional map disabled (neutral fallback)":resource->GetData().placeholder?"; using default texture fallback":"; using last working texture data"));
         // Keep loading/failed owners too: an Image must not revalidate its path
         // every frame while loading or displaying a missing-texture diagnostic.
         if(resource)m_TextureResources[key]=resource;
@@ -770,23 +784,26 @@ namespace ecs {
 
         if (resource == nullptr || resource->IsLoading() || !resource->IsUsable())
             return RenderShaderHandle::Invalid();
+        if(resource->HasError()&&m_FailedShaderKeys.insert(key+"#"+std::to_string(resource->GetVersion())).second)
+            Logger::Get().Warn("Shader '"+key+"': "+resource->GetErrorMessage()+"; retaining working GPU shader if available, otherwise draw skipped");
         auto& shader = resource->GetData();
         const std::uint64_t version =
             resource->GetVersion();
 
         if (shader.gpuHandle.IsValid() &&
-            shader.gpuHandleVersion == version)
+            (shader.gpuHandleVersion == version || shader.gpuAttemptVersion == version))
         {
             m_ShaderResources[key] = resource;
             return shader.gpuHandle;
         }
 
+        if(shader.gpuAttemptVersion==version&&!shader.gpuError.empty())return RenderShaderHandle::Invalid();
         QueueGpuFinalization(
             GpuFinalizeKind::Shader,
             key,
             version);
 
-        return RenderShaderHandle::Invalid();
+        return shader.gpuHandle; // Keep drawing the working generation until replacement is ready.
     }
 
     ResourceHandle<MaterialResource> RenderSystem::GetOrLoadMaterial(const std::string& key)
@@ -1100,31 +1117,9 @@ namespace ecs {
             return;
         }
 
-        if (shader.gpuHandle.IsValid())
-        {
-            m_Renderer->DestroyShader(
-                shader.gpuHandle);
-
-            shader.gpuHandle =
-                RenderShaderHandle::Invalid();
-
-            shader.gpuHandleVersion = 0;
+        if(!PrepareShaderGpu(*m_Renderer,shader,currentVersion,key)) {
+            m_FailedShaderGpuVersions[key]=currentVersion;return;
         }
-
-        const RenderShaderHandle handle =
-            m_Renderer->CreateShaderProgram(shader);
-
-        if (!handle.IsValid())
-        {
-            m_FailedShaderGpuVersions[key] =
-                currentVersion;
-
-            return;
-        }
-
-        shader.gpuHandle = handle;
-        shader.gpuHandleVersion = currentVersion;
-
         m_ShaderResources[key] = resource;
 
         m_FailedShaderKeys.erase(key);

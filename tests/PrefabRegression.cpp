@@ -85,9 +85,19 @@ static void Cpu(){
 }
 #if defined(ENABLE_DX12)
 static void Gpu(){
- struct Backup{std::filesystem::path path;std::string bytes;Backup(std::filesystem::path p):path(std::move(p)){std::ifstream f(path,std::ios::binary);bytes.assign(std::istreambuf_iterator<char>(f),{});}~Backup(){std::ofstream f(path,std::ios::binary|std::ios::trunc);f<<bytes;}} source(AssetPaths::ResolveAssetOutputPath("prefabs/cabinet.prefab.json"));
- Application app;Check(app.Initialize(),"DX12 editor initialize");glfwHideWindow(dynamic_cast<GlfwWindow*>(app.GetWindow())->GetGlfwHandle());SyntheticEditorInput input;
- auto& ui=app.GetEditorLayer();auto* gpu=dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter());std::string error;Check(app.OpenScene("scenes/prefab_cabinet_demo.json",&error),error);auto& scene=app.GetWorld();
+ struct Backup{std::filesystem::path path;std::string bytes;Backup(std::filesystem::path p):path(std::move(p)){std::ifstream f(path,std::ios::binary);bytes.assign(std::istreambuf_iterator<char>(f),{});}~Backup(){std::ofstream f(path,std::ios::binary|std::ios::trunc);f<<bytes;}} ;
+ Application app;Check(app.Initialize(Application::StartupMode::ProjectBrowser),"DX12 editor initialize");glfwHideWindow(dynamic_cast<GlfwWindow*>(app.GetWindow())->GetGlfwHandle());SyntheticEditorInput input;
+ // Own the startup context: old recent-document preferences must not replace
+ // the fixture during the first native frame. Never edit the shared Cabinet asset.
+ const auto fixture=AssetPaths::GetExecutableDirectory()/("prefab-gpu-owned-"+NewSceneIdentity());
+ std::filesystem::create_directories(fixture/"Scenes");
+ for(const auto* key:{"prefabs/cabinet.prefab.json","models/primitives/cube.obj","materials/default_primitive.material.json","scripts/cabinet_door.lua"}){
+     const auto target=fixture/"Assets"/key;std::filesystem::create_directories(target.parent_path());std::filesystem::copy_file(AssetPaths::ResolveAssetPath(key),target);
+ }
+ std::filesystem::copy_file(AssetPaths::ResolveAssetPath("scenes/prefab_cabinet_demo.json"),fixture/"Scenes/Cabinet.json");
+ const auto descriptor=fixture/"PrefabGpu.whispproject";{std::ofstream f(descriptor);f<<Json{{"formatVersion",1},{"name","Prefab GPU isolated"},{"directories",{{"assets","Assets"},{"scenes","Scenes"}}},{"startupScene","Scenes/Cabinet.json"}}.dump(2);}
+ auto& ui=app.GetEditorLayer();auto* gpu=dynamic_cast<Dx12RenderAdapter*>(app.GetRenderAdapter());std::string error;Check(app.OpenProject(descriptor,Application::ProjectDecision::Discard,&error),error);auto& scene=app.GetWorld();
+ Backup source(AssetPaths::ResolveAssetOutputPath("prefabs/cabinet.prefab.json"));
  ui.ResetLayout();ui.SetGameView(false);ui.SetLightGizmosVisible(false);ui.SetAssetGrid(true);ui.SetAssetCardSize(120);ui.SetAssetSearch("cabinet");ui.SetAssetTypeFilter(AssetKind::Prefab);ui.NavigateAssetFolder("prefabs");ui.GetSelectionFilters()={};app.SetViewportUnlit(true);app.SetEditorCameraPose({0,3,-2},0,-.12f);
  auto frame=[&](unsigned n=3){app.SetFrameLimit(n);Check(app.Run()==0,"editor frames");};auto point=[&](ImVec2 p){SyntheticEditorInput::Position(p.x,p.y);frame();};
  frame(20);Check(scene.GetAliveCount()==18,"three Cabinet instances in demo scene");Check(app.GetRenderStatistics().visibleSubmeshes>=15,"actual compound geometry rendered");
@@ -101,7 +111,11 @@ static void Gpu(){
  auto bounds=ui.GetViewportBounds();auto drop=ImVec2((bounds[0]+bounds[2])*.5f,(bounds[1]+bounds[3])*.5f);point(drop);Check(scene.GetAliveCount()==18,"prefab drag has no premature scene mutation");SyntheticEditorInput::Button(0,false);frame();Check(scene.GetAliveCount()==24,"actual prefab drop instantiates whole subtree");auto placed=ui.GetSelectedEntity();Check(scene.Subtree(placed).size()==6&&scene.HasComponent<PrefabInstanceComponent>(placed),"drop creates linked compound instance");
  ui.UndoEdit(app);frame();Check(scene.GetAliveCount()==18,"viewport prefab drop one Undo");ui.RedoEdit(app);frame();Check(scene.GetAliveCount()==24,"viewport prefab drop one Redo");
  // Real double click on the same browser card opens the reused editor panels.
- frame(25);point(card);SyntheticEditorInput::Button(0,true);frame(1);SyntheticEditorInput::Button(0,false);frame(1);SyntheticEditorInput::Button(0,true);frame(1);SyntheticEditorInput::Button(0,false);frame(4);
+ frame(25);point(card);
+ // One software-GPU frame may exceed ImGui's default 0.30 s double-click
+ // interval. Extend only this synthetic input interval; retain native card events.
+ auto& io=ImGui::GetIO();const float doubleClickTime=io.MouseDoubleClickTime;io.MouseDoubleClickTime=2.f;
+ SyntheticEditorInput::Button(0,true);frame(1);SyntheticEditorInput::Button(0,false);frame(1);SyntheticEditorInput::Button(0,true);frame(1);SyntheticEditorInput::Button(0,false);frame(4);io.MouseDoubleClickTime=doubleClickTime;
  Check(app.IsPrefabEditing()&&ui.EditingPrefab()=="prefabs/cabinet.prefab.json",ui.GetError()+" / real double click opens Prefab Editor");auto root=ui.GetSelectedEntity();Check(app.GetWorld().GetAliveCount()==6,"Prefab Editor contains only source subtree");Check(ImGui::FindWindowByName("Inspector")->Active&&ImGui::FindWindowByName("Scene Hierarchy")->Active,"shared hierarchy and Inspector panels");
  auto child=Child(app.GetWorld(),root,"HandleLeft");auto before=app.GetWorld().LocalTransform(child);Check(ui.SetProperty(app,child,ComponentId("Transform"),"scale",Vec3{.16f,.26f,.8f}),ui.GetError());ui.SelectEntity(child);frame();Check(app.GetWorld().LocalTransform(child).scale.x!=before.scale.x,"existing Inspector transaction in Prefab Editor");ui.UndoEdit(app);Check(app.GetWorld().LocalTransform(child).scale.x==before.scale.x,"Prefab Editor component Undo");ui.RedoEdit(app);
  std::filesystem::create_directories("diagnostics/prefab");Check(gpu->SaveFrameImage("diagnostics/prefab/editor.ppm"),"Prefab Editor screenshot");Check(ui.SavePrefabEditor(app),ui.GetError());frame();Check(!app.IsPrefabEditing(),"save returns to scene");for(auto e:scene.Entities())if(scene.HasComponent<PrefabInstanceComponent>(e))Check(scene.LocalTransform(Child(scene,e,"HandleLeft")).scale.x==.16f,"source edit updates all four displayed instances");

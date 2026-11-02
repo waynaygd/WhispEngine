@@ -1,0 +1,587 @@
+{
+  "version": 4,
+  "settings": {
+    "ambient": {
+      "color": [
+        1,
+        1,
+        1
+      ],
+      "intensity": 0.18
+    },
+    "legacyDirectional": {
+      "enabled": false
+    },
+    "environment": {
+      "asset": "",
+      "enabled": false,
+      "diffuse": false,
+      "specular": false,
+      "toneMapping": true,
+      "exposure": 0
+    },
+    "shadows": {
+      "enabled": false
+    },
+    "background": {
+      "version": 1,
+      "mode": 0,
+      "solid": [
+        0.015,
+        0.022,
+        0.035
+      ],
+      "asset": "",
+      "useIbl": false,
+      "visibleSunDisc": false
+    },
+    "antiAliasing": 1,
+    "primaryDirectional": "KeyLight"
+  },
+  "entities": [
+    {
+      "id": "A",
+      "components": {
+        "Tag": {
+          "name": "A - Base Material"
+        },
+        "Transform": {
+          "position": [
+            -2.7,
+            0,
+            5
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.4,
+            1.4,
+            1.4
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/sphere.obj",
+          "shaderPath": "",
+          "texturePath": "",
+          "visible": true,
+          "renderMode": 0
+        },
+        "Material": {
+          "materialPath": "materials/demo_base.material.json",
+          "slotMaterials": [],
+          "shaderPath": "",
+          "texturePath": "",
+          "tint": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "overrides": {}
+        }
+      }
+    },
+    {
+      "id": "PedestalA",
+      "components": {
+        "Tag": {
+          "name": "Display pedestal A"
+        },
+        "Transform": {
+          "position": [
+            -2.7,
+            -0.84,
+            5
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.6,
+            0.28,
+            1.6
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/cube.obj",
+          "shaderPath": "",
+          "texturePath": "",
+          "visible": true,
+          "renderMode": 0
+        },
+        "Material": {
+          "materialPath": "materials/demo_stage.material.json",
+          "slotMaterials": [],
+          "shaderPath": "",
+          "texturePath": "",
+          "tint": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "overrides": {}
+        }
+      }
+    },
+    {
+      "id": "B",
+      "components": {
+        "Tag": {
+          "name": "B - Instance / Cyan Tint"
+        },
+        "Transform": {
+          "position": [
+            -0.9000000000000001,
+            0,
+            5
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.4,
+            1.4,
+            1.4
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/sphere.obj",
+          "shaderPath": "",
+          "texturePath": "",
+          "visible": true,
+          "renderMode": 0
+        },
+        "Material": {
+          "materialPath": "materials/demo_base.material.json",
+          "slotMaterials": [],
+          "shaderPath": "",
+          "texturePath": "",
+          "tint": [
+            0.12,
+            0.8,
+            0.95,
+            1
+          ],
+          "overrides": {}
+        }
+      }
+    },
+    {
+      "id": "PedestalB",
+      "components": {
+        "Tag": {
+          "name": "Display pedestal B"
+        },
+        "Transform": {
+          "position": [
+            -0.9000000000000001,
+            -0.84,
+            5
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.6,
+            0.28,
+            1.6
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/cube.obj",
+          "shaderPath": "",
+          "texturePath": "",
+          "visible": true,
+          "renderMode": 0
+        },
+        "Material": {
+          "materialPath": "materials/demo_stage.material.json",
+          "slotMaterials": [],
+          "shaderPath": "",
+          "texturePath": "",
+          "tint": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "overrides": {}
+        }
+      }
+    },
+    {
+      "id": "C",
+      "components": {
+        "Tag": {
+          "name": "C - Instance / Roughness 0.85"
+        },
+        "Transform": {
+          "position": [
+            0.8999999999999999,
+            0,
+            5
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.4,
+            1.4,
+            1.4
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/sphere.obj",
+          "shaderPath": "",
+          "texturePath": "",
+          "visible": true,
+          "renderMode": 0
+        },
+        "Material": {
+          "materialPath": "materials/demo_base.material.json",
+          "slotMaterials": [],
+          "shaderPath": "",
+          "texturePath": "",
+          "tint": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "overrides": {
+            "roughness": 0.85
+          }
+        }
+      }
+    },
+    {
+      "id": "PedestalC",
+      "components": {
+        "Tag": {
+          "name": "Display pedestal C"
+        },
+        "Transform": {
+          "position": [
+            0.8999999999999999,
+            -0.84,
+            5
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.6,
+            0.28,
+            1.6
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/cube.obj",
+          "shaderPath": "",
+          "texturePath": "",
+          "visible": true,
+          "renderMode": 0
+        },
+        "Material": {
+          "materialPath": "materials/demo_stage.material.json",
+          "slotMaterials": [],
+          "shaderPath": "",
+          "texturePath": "",
+          "tint": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "overrides": {}
+        }
+      }
+    },
+    {
+      "id": "D",
+      "components": {
+        "Tag": {
+          "name": "D - Separate Asset / Assign Here"
+        },
+        "Transform": {
+          "position": [
+            2.7,
+            0,
+            5
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.4,
+            1.4,
+            1.4
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/sphere.obj",
+          "shaderPath": "",
+          "texturePath": "",
+          "visible": true,
+          "renderMode": 0
+        },
+        "Material": {
+          "materialPath": "materials/demo_alternate.material.json",
+          "slotMaterials": [],
+          "shaderPath": "",
+          "texturePath": "",
+          "tint": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "overrides": {}
+        }
+      }
+    },
+    {
+      "id": "PedestalD",
+      "components": {
+        "Tag": {
+          "name": "Display pedestal D"
+        },
+        "Transform": {
+          "position": [
+            2.7,
+            -0.84,
+            5
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.6,
+            0.28,
+            1.6
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/cube.obj",
+          "shaderPath": "",
+          "texturePath": "",
+          "visible": true,
+          "renderMode": 0
+        },
+        "Material": {
+          "materialPath": "materials/demo_stage.material.json",
+          "slotMaterials": [],
+          "shaderPath": "",
+          "texturePath": "",
+          "tint": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "overrides": {}
+        }
+      }
+    },
+    {
+      "id": "Floor",
+      "components": {
+        "Tag": {
+          "name": "Neutral display platform"
+        },
+        "Transform": {
+          "position": [
+            0,
+            -1.06,
+            5
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            8,
+            0.15,
+            4
+          ]
+        },
+        "MeshRenderer": {
+          "meshPath": "models/cube.obj",
+          "shaderPath": "",
+          "texturePath": "",
+          "visible": true,
+          "renderMode": 0
+        },
+        "Material": {
+          "materialPath": "materials/demo_stage.material.json",
+          "slotMaterials": [],
+          "shaderPath": "",
+          "texturePath": "",
+          "tint": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "overrides": {}
+        }
+      }
+    },
+    {
+      "id": "DemoCamera",
+      "components": {
+        "Tag": {
+          "name": "Demo Camera - Play overview"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0.9,
+            -2.25
+          ],
+          "rotation": [
+            0.12,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "Camera": {
+          "enabled": true,
+          "projection": 0,
+          "fieldOfView": 1.04719755,
+          "nearClip": 0.1,
+          "farClip": 100,
+          "priority": 10
+        }
+      }
+    },
+    {
+      "id": "KeyLight",
+      "components": {
+        "Tag": {
+          "name": "Key - broad white highlights"
+        },
+        "Transform": {
+          "position": [
+            0,
+            3,
+            0
+          ],
+          "rotation": [
+            0.45,
+            0.28,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "DirectionalLight": {
+          "type": "directional",
+          "enabled": true,
+          "color": [
+            1,
+            0.94,
+            0.85
+          ],
+          "intensity": 3.5,
+          "castShadows": false,
+          "primary": true
+        }
+      }
+    },
+    {
+      "id": "FillLight",
+      "components": {
+        "Tag": {
+          "name": "Fill - cool"
+        },
+        "Transform": {
+          "position": [
+            0,
+            2,
+            3
+          ],
+          "rotation": [
+            -0.3,
+            2.4,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "DirectionalLight": {
+          "type": "directional",
+          "enabled": true,
+          "color": [
+            0.45,
+            0.66,
+            1
+          ],
+          "intensity": 1.2,
+          "castShadows": false,
+          "primary": false
+        }
+      }
+    },
+    {
+      "id": "Legend",
+      "components": {
+        "Tag": {
+          "name": "Legend - enable UI Preview Ctrl+U"
+        },
+        "Transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "UICanvas": {
+          "enabled": true,
+          "document": "ui/demo_legend.ui.json",
+          "sortOrder": 0
+        }
+      }
+    }
+  ]
+}

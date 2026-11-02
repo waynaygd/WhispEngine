@@ -23,6 +23,22 @@ ResourceLoadResult<MaterialResource> MaterialLoader::Parse(const std::string& ke
         if(!j.is_object())throw std::runtime_error("material must be a JSON object");
         if(j.contains("version")&&!j.at("version").is_number_integer())throw std::runtime_error("version must be an integer");
         const int version=j.value("version",1);
+        if(version==5){
+            const auto parent=SafeKey(j.at("parentMaterial").get<std::string>(),false);
+            if(parent.empty()||parent==SafeKey(key,false))throw std::runtime_error("empty parent or direct material self-inheritance: "+key);
+            if(std::filesystem::path(parent).extension()!=".json")throw std::runtime_error("parentMaterial must reference a JSON material");
+            const auto overrides=j.value("overrides",nlohmann::json::object());
+            if(!overrides.is_object())throw std::runtime_error("material overrides must be an object");
+            auto values=SerializeValues(MaterialResource{});
+            for(auto it=overrides.begin();it!=overrides.end();++it){
+                if(it.key()=="version"||it.key()=="name"||!values.contains(it.key()))throw std::runtime_error("unknown material override: "+it.key());
+                values[it.key()]=it.value();
+            }
+            auto parsed=Parse(key,values);if(!parsed.success)return parsed;
+            parsed.data.name=j.value("name",std::string("Child Material"));parsed.data.parentMaterial=parent;parsed.data.parameterOverrides=overrides;
+            for(auto it=j.begin();it!=j.end();++it)if(it.key()!="version"&&it.key()!="name"&&it.key()!="parentMaterial"&&it.key()!="overrides")throw std::runtime_error("unknown child material field: "+it.key());
+            return parsed;
+        }
         if(version!=1&&version!=2&&version!=3&&version!=4)throw std::runtime_error("unsupported material schema version");
         MaterialResource m;
         m.name=j.value("name",std::string("UnnamedMaterial"));m.sourcePath=key;
@@ -82,12 +98,25 @@ ResourceLoadResult<MaterialResource> MaterialLoader::Load(const std::string& key
         nlohmann::json j;stream>>j;return Parse(key,j);
     } catch(const std::exception& e) {result.errorMessage=e.what();return result;}
 }
-nlohmann::json MaterialLoader::Serialize(const MaterialResource& m) {
+nlohmann::json MaterialLoader::SerializeValues(const MaterialResource& m) {
     if(m.shadingModel!=ShadingModel::Lambert&&m.shadingModel!=ShadingModel::PBR)throw std::runtime_error("unknown shadingModel");
     return {{"version",4},{"normalTexturePath",m.normalTexturePath},{"metallicRoughnessTexturePath",m.metallicRoughnessTexturePath},{"occlusionTexturePath",m.occlusionTexturePath},{"emissiveTexturePath",m.emissiveTexturePath},{"normalScale",m.normalScale},{"occlusionStrength",m.occlusionStrength},{"textureTexCoords",m.textureTexCoords},{"metallic",m.metallic},{"roughness",m.roughness},{"shadingModel",m.shadingModel==ShadingModel::PBR?"PBR":"Lambert"},{"name",m.name},{"shaderPath",m.shaderPath},{"texturePath",m.texturePath},
         {"baseColor",{m.baseColor[0],m.baseColor[1],m.baseColor[2],m.baseColor[3]}},
         {"surfaceMode",m.surfaceMode==MaterialSurfaceMode::Opaque?"Opaque":m.surfaceMode==MaterialSurfaceMode::Masked?"Masked":"Transparent"},
         {"alphaCutoff",m.alphaCutoff},{"doubleSided",m.doubleSided},{"castShadows",m.castShadows},{"receiveShadows",m.receiveShadows}};
+}
+nlohmann::json MaterialLoader::Serialize(const MaterialResource& m) {
+    if(!m.parentMaterial.empty())return {{"version",5},{"name",m.name},{"parentMaterial",m.parentMaterial},{"overrides",m.parameterOverrides}};
+    return SerializeValues(m);
+}
+ResourceLoadResult<MaterialResource> MaterialLoader::Merge(const MaterialResource& parent,const MaterialResource& child){
+    auto validated=Parse(child.sourcePath,Serialize(child));if(!validated.success)return validated;
+    auto values=SerializeValues(parent);
+    for(auto it=child.parameterOverrides.begin();it!=child.parameterOverrides.end();++it)values[it.key()]=it.value();
+    values["name"]=child.name;
+    auto result=Parse(child.sourcePath,values);
+    if(result.success){result.data.parentMaterial=child.parentMaterial;result.data.parameterOverrides=child.parameterOverrides;}
+    return result;
 }
 bool MaterialLoader::Save(const std::string& key,const MaterialResource& m,std::string* error) {
     std::filesystem::path temporary;

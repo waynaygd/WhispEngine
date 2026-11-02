@@ -1,0 +1,32 @@
+{
+  "version": 4,
+  "name": "Demo Base - polished silver",
+  "shaderPath": "shaders/demo_surface.hlsl",
+  "texturePath": "",
+  "normalTexturePath": "",
+  "metallicRoughnessTexturePath": "",
+  "occlusionTexturePath": "",
+  "emissiveTexturePath": "",
+  "normalScale": 1,
+  "occlusionStrength": 1,
+  "textureTexCoords": [
+    0,
+    0,
+    0,
+    0
+  ],
+  "baseColor": [
+    0.68,
+    0.72,
+    0.78,
+    1
+  ],
+  "shadingModel": "PBR",
+  "metallic": 0.65,
+  "roughness": 0.18,
+  "surfaceMode": "Opaque",
+  "alphaCutoff": 0.5,
+  "doubleSided": false,
+  "castShadows": true,
+  "receiveShadows": true
+}

@@ -1,3 +1,4 @@
+#include "../render/ShaderGpuPreparation.h"
 #include "EditorTheme.h"
 #include "EditorLayer.h"
 #include "InspectorControls.h"
@@ -24,13 +25,15 @@ MeshData PreviewMesh(int kind){
 }
 EditorLayer::MaterialSession* EditorLayer::EnsureMaterialSession(Application& app){
     if(m_EditingMaterial.empty())return nullptr;auto* rm=app.GetResourceManager();auto resource=rm?rm->PeekIndexed<MaterialResource>(m_EditingMaterial):nullptr;
-    if(!resource||!resource->IsLoaded()){m_MaterialError=resource?resource->GetErrorMessage():"Material is not loaded. Open a Material Document.";return nullptr;}
+    if(!resource||!resource->IsUsable()||resource->GetData().placeholder){m_MaterialError=resource?resource->GetErrorMessage():"Material is not loaded. Open a Material Document.";return nullptr;}
     auto& s=m_MaterialSessions[m_EditingMaterial];
     if(!s.initialized||(!m_MaterialDirty&&s.version!=resource->GetVersion())){
         // The watcher may observe our own Save. Identical data must not erase Undo.
         if(!s.initialized||!Equal(s.base,resource->GetData())){s.base=s.draft=resource->GetData();s.undo.clear();s.redo.clear();s.transaction.reset();}
         s.version=resource->GetVersion();s.initialized=true;
     }
+    auto resolved=rm->ResolveMaterial(m_EditingMaterial,&s.draft);
+    s.resolutionError=resolved.errorMessage;if(resolved.success)s.draft=resolved.data;
     return &s;
 }
 void EditorLayer::FinishMaterialEdit(Application& app,bool cancel){
@@ -43,6 +46,7 @@ void EditorLayer::UndoMaterialEdit(Application& app,bool redo){
 }
 bool EditorLayer::SaveMaterialDraft(Application& app){
     FinishMaterialEdit(app);auto* s=EnsureMaterialSession(app);if(!s)return false;
+    if(!s->resolutionError.empty()){m_MaterialError=s->resolutionError;return false;}
     if(!MaterialLoader::Save(m_EditingMaterial,s->draft,&m_MaterialError)){m_EditorError=m_MaterialError;return false;}
     auto* rm=app.GetResourceManager();auto resource=rm->PeekIndexed<MaterialResource>(m_EditingMaterial);resource->ReplaceData(s->draft,ResourceLoadState::Loaded);s->base=s->draft;s->version=resource->GetVersion();m_MaterialDirty=false;rm->SetMaterialDirty(m_EditingMaterial,false);m_MaterialError.clear();return true;
 }
@@ -53,15 +57,19 @@ bool EditorLayer::ReloadMaterialDraft(Application& app){
     resource->ReplaceData(loaded.data,ResourceLoadState::Loaded);s.base=s.draft=loaded.data;s.version=resource->GetVersion();s.initialized=true;s.undo.clear();s.redo.clear();s.transaction.reset();m_MaterialDirty=false;rm->SetMaterialDirty(m_EditingMaterial,false);m_MaterialError.clear();return true;
 }
 void EditorLayer::ReleaseMaterialEditor(IRenderAdapter* renderer){
+    if(m_MaterialWatchManager){m_MaterialWatchManager->ClearMaterialUsage(this);m_MaterialWatchManager=nullptr;}
     if(renderer){renderer->ReleaseMaterialPreview();for(auto mesh:m_MaterialPreviewMeshes)if(mesh.IsValid())renderer->DestroyMesh(mesh);if(m_MaterialWhite.IsValid())renderer->DestroyTexture(m_MaterialWhite);for(auto& [key,release]:m_MaterialGpuCleanup)release(renderer);}
     m_MaterialPreviewMeshes={};m_MaterialWhite={};m_MaterialGpuCleanup.clear();m_MaterialPreviewImage=0;
 }
 void EditorLayer::DrawMaterialEditor(Application& app){
+    m_MaterialWatchManager=app.GetResourceManager();
     const bool document=ActiveDocumentIs(DocumentType::Material);if(!document){
+        if(m_MaterialWatchManager)m_MaterialWatchManager->ClearMaterialUsage(this);
         if(editor::BeginEditorPanel("Material Editor",&m_ShowMaterialEditor)){ImGui::TextWrapped("Open a Material Document to edit its independent draft and preview.");if(m_SelectedAssetKind=="Material"&&ImGui::Button("Open selected asset"))OpenDocument(app,m_SelectedAsset);}ImGui::End();return;
     }
     auto* session=EnsureMaterialSession(app);auto* rm=app.GetResourceManager();auto* renderer=app.GetRenderAdapter();
     if(!session){if(editor::BeginEditorPanel("Material Editor",&m_ShowMaterialEditor))ErrorText(m_MaterialError.c_str());ImGui::End();return;}auto& s=*session;
+    rm->SetMaterialUsage(this,{m_EditingMaterial},&s.draft);
     const auto start=std::chrono::steady_clock::now();const auto probes=ProjectContext::LinkProbeCount();
     ImFont* font=nullptr;for(auto* f:ImGui::GetIO().Fonts->Fonts)if(std::strcmp(f->GetDebugName(),"Browser UI")==0){font=f;break;}if(font)ImGui::PushFont(font,0);
     if(ImGui::IsKeyPressed(ImGuiKey_Escape,false))FinishMaterialEdit(app,true);
@@ -84,11 +92,10 @@ void EditorLayer::DrawMaterialEditor(Application& app){
             if(!m_MaterialPreviewMeshes[s.mesh].IsValid())m_MaterialPreviewMeshes[s.mesh]=renderer->UploadMesh(PreviewMesh(s.mesh));frame.mesh=m_MaterialPreviewMeshes[s.mesh];
             if(!m_MaterialWhite.IsValid()){TextureData white;white.pixels={255,255,255,255};m_MaterialWhite=renderer->CreateTexture2D(white);}frame.textures[0]=m_MaterialWhite;
             auto shader=rm->PeekIndexed<ShaderResource>(s.draft.shaderPath);if(!shader&&!s.draft.shaderPath.empty()){rm->LoadAsync<ShaderResource>(s.draft.shaderPath);}else if(shader&&shader->IsLoaded()){
-                const auto watch="watch:shader:"+s.draft.shaderPath;if(!m_MaterialGpuCleanup.contains(watch)){rm->WatchForHotReload<ShaderResource>(s.draft.shaderPath);m_MaterialGpuCleanup[watch]=[](auto*){};}
-                auto& data=shader->GetData();if(data.gpuHandleVersion!=shader->GetVersion()){if(data.gpuHandle.IsValid())renderer->DestroyShader(data.gpuHandle);data.gpuHandle=renderer->CreateShaderProgram(data);data.gpuHandleVersion=shader->GetVersion();const auto handle=data.gpuHandle;m_MaterialGpuCleanup["shader:"+s.draft.shaderPath]=[shader,handle](auto* r){auto& d=shader->GetData();if(d.gpuHandle==handle){if(handle.IsValid())r->DestroyShader(handle);d.gpuHandle={};d.gpuHandleVersion=0;}};}frame.shader=data.gpuHandle;frame.colorPipeline=data.fragmentSource.find("PBR_COLOR_PIPELINE_V1")!=std::string::npos;
+                auto& data=shader->GetData();if(data.gpuHandleVersion!=shader->GetVersion()&&(data.gpuAttemptVersion!=shader->GetVersion()||(!data.gpuHandle.IsValid()&&data.gpuError.empty()))){PrepareShaderGpu(*renderer,data,shader->GetVersion(),s.draft.shaderPath);const auto handle=data.gpuHandle;m_MaterialGpuCleanup["shader:"+s.draft.shaderPath]=[shader,handle](auto* r){auto& d=shader->GetData();if(d.gpuHandle==handle){if(handle.IsValid())r->DestroyShader(handle);d.gpuHandle={};d.gpuHandleVersion=0;}};}frame.shader=data.gpuHandle;frame.colorPipeline=data.gpuColorPipeline;
             }
             const std::string* maps[]={&s.draft.texturePath,&s.draft.normalTexturePath,&s.draft.metallicRoughnessTexturePath,&s.draft.occlusionTexturePath};
-            for(int i=0;i<4;++i)if(!maps[i]->empty()&&s.draft.textureTexCoords[i]==0){auto texture=rm->PeekIndexed<TextureResource>(*maps[i]);if(!texture){rm->LoadAsync<TextureResource>(*maps[i]);continue;}if(!texture->IsLoaded()||texture->IsFailed())continue;const auto watch="watch:texture:"+*maps[i];if(!m_MaterialGpuCleanup.contains(watch)){rm->WatchForHotReload<TextureResource>(*maps[i]);m_MaterialGpuCleanup[watch]=[](auto*){};}auto& data=texture->GetData();if(data.gpuHandleVersion!=texture->GetVersion()){if(data.gpuHandle.IsValid())renderer->DestroyTexture(data.gpuHandle);data.gpuHandle=renderer->CreateTexture2D(data.textureData);data.gpuHandleVersion=texture->GetVersion();const auto handle=data.gpuHandle;m_MaterialGpuCleanup["texture:"+*maps[i]]=[texture,handle](auto* r){auto& d=texture->GetData();if(d.gpuHandle==handle){if(handle.IsValid())r->DestroyTexture(handle);d.gpuHandle={};d.gpuHandleVersion=0;}};}if(data.gpuHandle.IsValid())frame.textures[i]=data.gpuHandle;else m_MaterialError="Texture GPU upload failed; using neutral fallback: "+*maps[i];}
+            for(int i=0;i<4;++i)if(!maps[i]->empty()&&s.draft.textureTexCoords[i]==0){auto texture=rm->PeekIndexed<TextureResource>(*maps[i]);if(!texture){rm->LoadAsync<TextureResource>(*maps[i]);continue;}if(!texture->IsLoaded()||texture->IsFailed())continue;auto& data=texture->GetData();if(data.gpuHandleVersion!=texture->GetVersion()){if(data.gpuHandle.IsValid())renderer->DestroyTexture(data.gpuHandle);data.gpuHandle=renderer->CreateTexture2D(data.textureData);data.gpuHandleVersion=texture->GetVersion();const auto handle=data.gpuHandle;m_MaterialGpuCleanup["texture:"+*maps[i]]=[texture,handle](auto* r){auto& d=texture->GetData();if(d.gpuHandle==handle){if(handle.IsValid())r->DestroyTexture(handle);d.gpuHandle={};d.gpuHandleVersion=0;}};}if(data.gpuHandle.IsValid())frame.textures[i]=data.gpuHandle;else m_MaterialError="Texture GPU upload failed; using neutral fallback: "+*maps[i];}
             m_MaterialUpdateMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-updateStart).count();try{m_MaterialPreviewImage=renderer->RenderMaterialPreview(frame);}catch(const std::exception& failure){m_MaterialPreviewImage=0;m_MaterialError=std::string("Preview rendering failed: ")+failure.what();}
             if(m_MaterialPreviewImage)ImGui::GetWindowDrawList()->AddImage((ImTextureID)m_MaterialPreviewImage,pos,{pos.x+previewSize.x,pos.y+previewSize.y});
             if(!frame.shader.IsValid())ImGui::GetWindowDrawList()->AddText({pos.x+12,pos.y+12},IM_COL32(255,180,120,255),"Shader loading / unavailable. See resource status and Console compiler diagnostics.");
@@ -99,9 +106,29 @@ void EditorLayer::DrawMaterialEditor(Application& app){
     ImGui::SetNextWindowSizeConstraints({260*dpi,160*dpi},{FLT_MAX,FLT_MAX});
     if(editor::BeginEditorPanel("Material Editor",&m_ShowMaterialEditor)){
         ImGui::TextWrapped("Material Properties: %s",s.draft.name.c_str());ImGui::TextDisabled("Shader: %s",s.draft.shaderPath.c_str());ImGui::BeginDisabled(app.IsEditorPlayMode());
-        auto row=[&](const char* label,auto draw){ImGui::PushID(label);inspector::PropertyRow(label);const auto before=s.draft;bool changed=draw();const bool active=ImGui::IsAnyItemActive();if(changed){if(!s.transaction)s.transaction=before;m_MaterialDirty=!Equal(s.base,s.draft);rm->SetMaterialDirty(m_EditingMaterial,m_MaterialDirty);if(!active)FinishMaterialEdit(app);}if(ImGui::IsItemDeactivatedAfterEdit())FinishMaterialEdit(app);ImGui::PopID();};
+        const std::map<std::string,std::string> fields={{"Base UV Set","textureTexCoords"},{"Normal UV Set","textureTexCoords"},{"MR UV Set","textureTexCoords"},{"AO UV Set","textureTexCoords"},{"Base Color","baseColor"},{"Base Texture","texturePath"},{"Normal Texture","normalTexturePath"},{"Metallic / Roughness Texture","metallicRoughnessTexturePath"},{"AO Texture","occlusionTexturePath"},{"Shading Model","shadingModel"},{"Metallic","metallic"},{"Roughness","roughness"},{"Normal Scale","normalScale"},{"AO Strength","occlusionStrength"},{"Shader","shaderPath"},{"Double Sided","doubleSided"},{"Cast Shadows","castShadows"},{"Receive Shadows","receiveShadows"},{"Surface Mode","surfaceMode"},{"Alpha Cutoff","alphaCutoff"}};
+        auto row=[&](const char* label,auto draw){
+            ImGui::PushID(label);inspector::PropertyRow(label);const auto before=s.draft;bool changed=false;
+            auto field=fields.find(label);const bool inheritable=!s.draft.parentMaterial.empty()&&field!=fields.end();
+            bool overridden=!inheritable||s.draft.parameterOverrides.contains(field->second);
+            if(inheritable){if(ImGui::Checkbox("##Override",&overridden)){
+                if(overridden)s.draft.parameterOverrides[field->second]=MaterialLoader::SerializeValues(s.draft).at(field->second);
+                else s.draft.parameterOverrides.erase(field->second);changed=true;
+            }if(ImGui::IsItemHovered())ImGui::SetTooltip("Override this asset parameter. Uncheck to Reset to Inherited.");ImGui::SameLine();ImGui::TextDisabled(overridden?"Override":"Inherit");ImGui::SameLine();}
+            ImGui::BeginDisabled(!overridden);const bool valueChanged=draw();ImGui::EndDisabled();
+            if(valueChanged&&inheritable)s.draft.parameterOverrides[field->second]=MaterialLoader::SerializeValues(s.draft).at(field->second);
+            changed|=valueChanged;
+            const bool active=ImGui::IsAnyItemActive();if(changed){if(!s.transaction)s.transaction=before;m_MaterialDirty=!Equal(s.base,s.draft);rm->SetMaterialDirty(m_EditingMaterial,m_MaterialDirty);if(!active)FinishMaterialEdit(app);}
+            if(ImGui::IsItemDeactivatedAfterEdit())FinishMaterialEdit(app);ImGui::PopID();
+        };
         auto section=[&](const char* name,auto draw,bool open=true){if(ImGui::TreeNodeEx(name,open?ImGuiTreeNodeFlags_DefaultOpen:0)){if(inspector::BeginProperties("Properties")){draw();ImGui::EndTable();}ImGui::TreePop();}};
         auto resource=[&](const char* label,std::string& key,ecs::AssetKind kind){row(label,[&]{ecs::PropertyDescriptor p;p.asset=kind;p.kind=ecs::PropertyKind::Asset;return DrawInspectorResource(p,key);});};
+        section("Inheritance",[&]{
+            resource("Parent Material",s.draft.parentMaterial,ecs::AssetKind::Material);
+            if(!s.draft.parentMaterial.empty())row("Reset Overrides",[&]{if(ImGui::Button("Reset to Inherited")){s.draft.parameterOverrides=nlohmann::json::object();return true;}return false;});
+        });
+        ImGui::TextWrapped("Controls show resolved values. Child assets save only explicit overrides; unchecked parameters inherit the parent.");
+        if(!s.resolutionError.empty())ErrorText(s.resolutionError.c_str());
         section("Surface",[&]{row("Name",[&]{return ImGui::InputText("##value",&s.draft.name);});row("Base Color",[&]{return LinearColorEdit("##value",s.draft.baseColor,4);});resource("Base Texture",s.draft.texturePath,ecs::AssetKind::Texture);resource("Normal Texture",s.draft.normalTexturePath,ecs::AssetKind::Texture);resource("Metallic / Roughness Texture",s.draft.metallicRoughnessTexturePath,ecs::AssetKind::Texture);resource("AO Texture",s.draft.occlusionTexturePath,ecs::AssetKind::Texture);});
         section("Parameters",[&]{row("Shading Model",[&]{int v=int(s.draft.shadingModel);bool c=ImGui::Combo("##value",&v,"Lambert\0PBR (GGX)\0");s.draft.shadingModel=ShadingModel(v);return c;});row("Metallic",[&]{return PrecisionSliderFloat("##value",&s.draft.metallic,0,1);});row("Roughness",[&]{return PrecisionSliderFloat("##value",&s.draft.roughness,0,1);});row("Normal Scale",[&]{return PrecisionDragFloat("##value",&s.draft.normalScale,.01f,0,4);});row("AO Strength",[&]{return PrecisionSliderFloat("##value",&s.draft.occlusionStrength,0,1);});});
         section("UV",[&]{const char* labels[]={"Base UV Set","Normal UV Set","MR UV Set","AO UV Set"};for(int i=0;i<4;++i)row(labels[i],[&]{return PrecisionDragInt("##value",&s.draft.textureTexCoords[i],1,0,7);});},false);
@@ -109,7 +136,7 @@ void EditorLayer::DrawMaterialEditor(Application& app){
         section("Advanced",[&]{row("Double Sided",[&]{return ImGui::Checkbox("##value",&s.draft.doubleSided);});row("Cast Shadows",[&]{return ImGui::Checkbox("##value",&s.draft.castShadows);});row("Receive Shadows",[&]{return ImGui::Checkbox("##value",&s.draft.receiveShadows);});row("Surface Mode",[&]{int v=int(s.draft.surfaceMode);bool c=ImGui::Combo("##value",&v,"Opaque\0Masked (unsupported)\0Transparent (unsupported)\0");s.draft.surfaceMode=MaterialSurfaceMode(v);return c;});if(s.draft.surfaceMode==MaterialSurfaceMode::Masked)row("Alpha Cutoff",[&]{return PrecisionSliderFloat("##value",&s.draft.alphaCutoff,0,1);});},false);
         ImGui::TextWrapped("UV0 is supported; nonzero UV sets disable that map. Preview uses direct lighting and ambient; scene IBL, shadows and postprocessing are not previewed.");
         for(const auto& key:{s.draft.shaderPath,s.draft.texturePath,s.draft.normalTexturePath,s.draft.metallicRoughnessTexturePath,s.draft.occlusionTexturePath})if(!key.empty()){
-            if(key==s.draft.shaderPath){auto r=rm->PeekIndexed<ShaderResource>(key);if(!r||r->IsLoading())ImGui::TextWrapped("Loading shader: %s",key.c_str());else if(r->HasError())ImGui::TextWrapped("%s: %s",key.c_str(),r->GetErrorMessage().c_str());}
+            if(key==s.draft.shaderPath){auto r=rm->PeekIndexed<ShaderResource>(key);if(!r||r->IsLoading())ImGui::TextWrapped("Loading shader: %s",key.c_str());else if(r->HasError())ImGui::TextWrapped("%s: %s",key.c_str(),r->GetErrorMessage().c_str());else if(!r->GetData().gpuError.empty())ImGui::TextWrapped("%s",r->GetData().gpuError.c_str());}
             else {auto r=rm->PeekIndexed<TextureResource>(key);if(!r||r->IsLoading())ImGui::TextWrapped("Loading map: %s",key.c_str());else if(r->HasError())ImGui::TextWrapped("Missing map (neutral fallback): %s: %s",key.c_str(),r->GetErrorMessage().c_str());}
         }
         ImGui::EndDisabled();if(!m_MaterialError.empty())ErrorText(m_MaterialError.c_str());

@@ -1,0 +1,32 @@
+{
+  "version": 4,
+  "name": "Neutral display stage",
+  "shaderPath": "shaders/demo_surface.hlsl",
+  "texturePath": "",
+  "normalTexturePath": "",
+  "metallicRoughnessTexturePath": "",
+  "occlusionTexturePath": "",
+  "emissiveTexturePath": "",
+  "normalScale": 1,
+  "occlusionStrength": 1,
+  "textureTexCoords": [
+    0,
+    0,
+    0,
+    0
+  ],
+  "baseColor": [
+    0.065,
+    0.085,
+    0.12,
+    1
+  ],
+  "shadingModel": "PBR",
+  "metallic": 0.15,
+  "roughness": 0.65,
+  "surfaceMode": "Opaque",
+  "alphaCutoff": 0.5,
+  "doubleSided": false,
+  "castShadows": true,
+  "receiveShadows": true
+}

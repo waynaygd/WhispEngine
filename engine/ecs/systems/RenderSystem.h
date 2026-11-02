@@ -182,6 +182,7 @@ private:
     std::unordered_map<std::string, ResourceHandle<TextureResource>> m_TextureResources;
     std::unordered_map<std::string, ResourceHandle<ShaderResource>> m_ShaderResources;
     std::unordered_map<std::string, ResourceHandle<MaterialResource>> m_MaterialResources;
+    std::vector<std::string> m_UsedMaterialAssets;
     std::unordered_map<std::uint64_t,ShadowCasterBounds> m_ShadowLocalBounds;
     std::vector<ShadowCasterBounds> m_ShadowWorldBounds;
     std::unordered_set<std::string> m_FailedMeshKeys;

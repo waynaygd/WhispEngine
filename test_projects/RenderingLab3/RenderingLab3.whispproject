@@ -1,0 +1,18 @@
+{
+  "formatVersion": 1,
+  "name": "RenderingLab3",
+  "startupScene": "Scenes/MaterialSystem.json",
+  "directories": {
+    "assets": "Assets",
+    "scenes": "Scenes"
+  },
+  "rendering": {
+    "gpuInstancing": true
+  },
+  "mapsAndModes": {
+    "gameStartupMap": "Scenes/MaterialSystem.json",
+    "defaultPlayerPrefab": "",
+    "defaultGameMode": "",
+    "modes": {}
+  }
+}

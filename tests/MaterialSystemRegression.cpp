@@ -12,6 +12,7 @@
 #include <cstring>
 #if defined(ENABLE_DX12)
 #include "render/backends/dx12/Dx12RenderAdapter.h"
+#include "render/backends/dx12/Dx12PipelineKey.h"
 #include "platform/GlfwWindow.h"
 #endif
 using namespace ecs;
@@ -45,7 +46,8 @@ struct Recorder:IRenderAdapter {
 };
 static void Schema() {
     auto legacy=MaterialLoader::Parse("materials/a.json",{{"baseColor",{.5,.6,.7,1}}});Check(legacy.success&&legacy.data.castShadows&&!legacy.data.doubleSided,"legacy defaults");Passed("legacy schema and defaults");
-    for(auto bad:{nlohmann::json{{"version",5}},nlohmann::json{{"baseColor",{"bad",0,0,1}}},nlohmann::json{{"baseColor",{2,0,0,1}}},nlohmann::json{{"doubleSided",4}},nlohmann::json{{"alphaCutoff",-1}},nlohmann::json{{"surfaceMode","unknown"}}})Check(!MaterialLoader::Parse("materials/a.json",bad).success,"invalid schema accepted");Passed("malformed types, values and future versions rejected");
+    for(int version:{1,2,3,4}){auto old=MaterialLoader::Parse("materials/a.json",{{"version",version},{"roughness",.31},{"castShadows",false},{"texturePath",""}});Check(old.success&&old.data.parentMaterial.empty()&&old.data.roughness==.31f&&!old.data.castShadows&&old.data.texturePath.empty(),"v1-v4 standalone compatibility");auto roundtrip=MaterialLoader::Parse("materials/a.json",MaterialLoader::Serialize(old.data));Check(roundtrip.success&&roundtrip.data.roughness==old.data.roughness&&!roundtrip.data.castShadows,"legacy material roundtrip");}Passed("v1-v4 compatibility and v4 save roundtrip");
+    for(auto bad:{nlohmann::json{{"version",6}},nlohmann::json{{"baseColor",{"bad",0,0,1}}},nlohmann::json{{"baseColor",{2,0,0,1}}},nlohmann::json{{"doubleSided",4}},nlohmann::json{{"alphaCutoff",-1}},nlohmann::json{{"surfaceMode","unknown"}}})Check(!MaterialLoader::Parse("materials/a.json",bad).success,"invalid schema accepted");Passed("malformed types, values and future versions rejected");
     for(const char* path:{"../escape.png","C:/escape.png","https://example.com/texture.png"})Check(!MaterialLoader::Parse("materials/a.json",{{"texturePath",path}}).success,"unsafe path accepted");Passed("resource path validation");
     auto unknown=MaterialLoader::Parse("materials/a.json",{{"future",1}});Check(unknown.success&&!unknown.data.diagnostics.empty(),"unknown field diagnostic");Passed("unknown fields diagnosed");
     for(const char* mode:{"Masked","Transparent"}) {auto m=MaterialLoader::Parse("materials/a.json",{{"surfaceMode",mode}});Check(m.success&&m.data.surfaceMode!=MaterialSurfaceMode::Opaque&&!m.data.diagnostics.empty(),"unsupported mode silently opaque");}Passed("unsupported alpha modes preserved and diagnosed");
@@ -73,7 +75,30 @@ static void Schema() {
     const auto scene=std::filesystem::path("material-regression.scene.json");Check(SceneSerializer::SaveEntityConfigs(scene,{entity},&error),"scene save");std::vector<EcsDemoEntityConfig> loaded;Check(SceneSerializer::LoadEntityConfigs(scene,loaded,&error)&&loaded.size()==1&&loaded[0].slotMaterials==entity.slotMaterials&&loaded[0].materialOverrides.castShadows==false&&loaded[0].materialTint==entity.materialTint,"scene material roundtrip");std::filesystem::remove(scene);Passed("scene v2 references, slots, tint and overrides roundtrip");
     JobSystem jobs;Check(jobs.Initialize(),"jobs");{ResourceManager async(&jobs);auto material=async.LoadAsync<MaterialResource>("materials/material_red.material.json").get();Check(material==async.LoadAsync<MaterialResource>("materials/material_red.material.json").get(),"async shared identity");jobs.WaitAll();async.PumpFinalization(100);jobs.WaitAll();async.PumpFinalization(100);Check(material->IsLoaded(),"async material failed");auto texture=async.Get<TextureResource>("textures/material_test.png");Check(texture&&texture->IsLoaded(),"async material texture dependency");async.Shutdown();}jobs.Shutdown();Passed("asynchronous shared material and texture dependency finalization");
 }
+static void InheritanceSchema() {
+    const auto prefix="materials/extra-owned-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    struct Owned {std::vector<std::filesystem::path> files;~Owned(){for(const auto& path:files){std::error_code e;std::filesystem::remove(path,e);}}} owned;
+    auto save=[&](const std::string& key,const nlohmann::json& j){auto parsed=MaterialLoader::Parse(key,j);Check(parsed.success,"inheritance fixture parses");auto path=AssetPaths::ResolveAssetOutputPath(key);Check(!std::filesystem::exists(path),"owned fixture cannot overwrite existing asset");std::string error;Check(MaterialLoader::Save(key,parsed.data,&error),error.c_str());owned.files.push_back(path);};
+    const auto base=prefix+"-base.json",child=prefix+"-child.json",grand=prefix+"-grand.json";
+    save(base,{{"version",4},{"texturePath","textures/material_test.png"},{"metallic",.65},{"roughness",.18},{"baseColor",{.7,.7,.7,1}}});
+    nlohmann::json c={{"version",5},{"name","Child"},{"parentMaterial",base},{"overrides",{{"roughness",.85}}}};
+    save(child,c);save(grand,{{"version",5},{"parentMaterial",child},{"overrides",{{"baseColor",{1,0,0,1}},{"castShadows",false},{"texturePath",""},{"occlusionStrength",0}}}});
+    ResourceManager rm(nullptr);auto r=rm.ResolveMaterial(grand);Check(r.success&&r.data.metallic==.65f&&r.data.roughness==.85f&&r.data.baseColor[0]==1&&!r.data.castShadows&&r.data.texturePath.empty()&&r.data.occlusionStrength==0,"multi-level inheritance preserves explicit false/zero/empty and inherited values");
+    auto encoded=MaterialLoader::Serialize(r.data);Check(encoded.at("version")==5&&encoded.at("overrides").size()==4&&!encoded.contains("metallic"),"child serialization remains sparse");
+    auto parent=rm.Get<MaterialResource>(base);auto edited=parent->GetData();edited.metallic=.1f;parent->ReplaceData(edited,ResourceLoadState::Loaded);Check(rm.ResolveMaterial(grand).data.metallic==.1f,"base generation invalidates dependent resolved values");
+    auto childResource=rm.Get<MaterialResource>(child);auto childData=childResource->GetData();childData.parameterOverrides.erase("roughness");childResource->ReplaceData(childData,ResourceLoadState::Loaded);Check(rm.ResolveMaterial(grand).data.roughness==.18f,"Reset to Inherited resumes parent roughness");
+    Check(!MaterialLoader::Parse(child,{{"version",5},{"parentMaterial",child}}).success,"direct self-inheritance rejected");
+    for(const auto* unsafe:{"../escape.json","C:/escape.json","https://example.com/a.json"})Check(!MaterialLoader::Parse(child,{{"version",5},{"parentMaterial",unsafe}}).success,"unsafe parent rejected");
+    Check(!MaterialLoader::Parse(child,{{"version",5},{"parentMaterial",base},{"overrides",{{"roughness",2}}}}).success,"invalid sparse override rejected");
+    childData.parentMaterial=prefix+"-missing.json";childResource->ReplaceData(childData,ResourceLoadState::Loaded);auto missing=rm.ResolveMaterial(grand);Check(!missing.success&&!missing.data.placeholder&&missing.errorMessage.find("missing")!=std::string::npos,"missing parent returns diagnostic and last-good resolved data");
+    childData.parentMaterial=grand;childResource->ReplaceData(childData,ResourceLoadState::Loaded);auto cycle=rm.ResolveMaterial(grand);Check(!cycle.success&&cycle.errorMessage.find("cycle")!=std::string::npos,"indirect cycle diagnosed without recursion crash");
+    childData.parentMaterial=base;childResource->ReplaceData(childData,ResourceLoadState::Loaded);Check(rm.ResolveMaterial(grand).success,"broken inheritance repair restores resolution");
+    auto previous=base;for(int n=0;n<33;++n){const auto key=prefix+"-depth-"+std::to_string(n)+".json";save(key,{{"version",5},{"parentMaterial",previous}});previous=key;}
+    auto deep=rm.ResolveMaterial(previous);Check(!deep.success&&deep.errorMessage.find("depth 32")!=std::string::npos,"maximum inheritance depth enforced");
+    Passed("v4/v5 inheritance, sparse roundtrip, explicit values, invalidation, reset, paths, missing parent, cycles and depth");
+}
 static void Cpu() {
+    InheritanceSchema();
     Schema();ResourceManager resources(nullptr);resources.Load<MaterialResource>("materials/stress.material.json");
     resources.Load<ShaderResource>("dx12/textured.hlsl");resources.Load<TextureResource>("defaults/texture");resources.Load<TextureResource>("textures/material_test.png");
     for(const char* key:{"models/material_slots.obj","models/material_slots.gltf"}) {
@@ -144,6 +169,27 @@ static void ShadowFlags(Dx12RenderAdapter& adapter,GlfwWindow& window,ResourceMa
     Passed("DX12 cast/receive flags, ambient preservation, double sided depth and frames in flight retirement");
 }
 static void Gpu() {
+    // Equality must depend on contents, not pointer addresses or ignored state.
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};desc.NumRenderTargets=1;desc.SampleDesc.Count=1;
+    const char code[]="shader",root[]="root";desc.VS={code,sizeof(code)};
+    auto key=[&](const auto& d){return Dx12PipelineKey(d,"dx12/test.hlsl",7,root,sizeof(root));};const auto original=key(desc);
+    auto copy=desc;const std::string codeCopy(code,sizeof(code));copy.VS={codeCopy.data(),codeCopy.size()};
+    Check(key(copy)==original,"pipeline key uses bytecode content, not addresses");
+    copy.BlendState.RenderTarget[0].SrcBlend=D3D12_BLEND_SRC_ALPHA;copy.DepthStencilState.DepthFunc=D3D12_COMPARISON_FUNC_GREATER;
+    Check(key(copy)==original,"disabled blend/depth fields are normalized");
+    auto distinct=[&](auto mutate){auto changed=desc;mutate(changed);Check(key(changed)!=original,"pipeline key state collision");};
+    distinct([](auto& d){d.RasterizerState.CullMode=D3D12_CULL_MODE_NONE;});
+    distinct([](auto& d){d.DepthStencilState.DepthEnable=TRUE;});
+    distinct([](auto& d){d.BlendState.RenderTarget[0].BlendEnable=TRUE;});
+    distinct([](auto& d){d.RTVFormats[0]=DXGI_FORMAT_R16G16B16A16_FLOAT;});
+    distinct([](auto& d){d.DSVFormat=DXGI_FORMAT_D32_FLOAT;});
+    distinct([](auto& d){d.SampleDesc.Count=4;});distinct([](auto& d){d.SampleDesc.Quality=1;});
+    distinct([](auto& d){d.SampleMask=123;});distinct([](auto& d){d.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;});
+    D3D12_INPUT_ELEMENT_DESC input{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0};
+    distinct([&](auto& d){d.InputLayout={&input,1};});
+    Check(Dx12PipelineKey(desc,"dx12/test.hlsl",8,root,sizeof(root))!=original,"shader generation participates in PSO key");
+    Check(Dx12PipelineKey(desc,"dx12/other.hlsl",7,root,sizeof(root))!=original,"shader identity participates in PSO key");
+    Passed("normalized pipeline equality and state separation");
     GlfwWindow window;Check(window.Create(320,240,"DX12 material regression"),"window");Dx12RenderAdapter adapter;Check(adapter.Initialize(&window),"DX12 initialize");
     ResourceManager resources(nullptr);resources.Load<MaterialResource>("materials/stress.material.json");RenderSystem render;render.SetResourceManager(&resources);render.SetRenderAdapter(&adapter);render.SetCameraTransform({},0,0);render.SetCameraProjection(1.04719755f,320.f/240,.1f,20);
     // Import/tint oracles below measure the legacy SDR material transfer, without
@@ -160,6 +206,44 @@ static void Gpu() {
         std::vector<Entity> entities;
         for(int i=0;i<2;++i){auto e=world.CreateEntity();entities.push_back(e);world.AddComponent<TransformComponent>(e).scale={1,1,1};world.AddComponent<MeshRendererComponent>(e).meshPath=key;auto& c=world.AddComponent<MaterialComponent>(e);c.tint[0]=.5f;c.tint[1]=.8f;c.tint[2]=.6f;}
         auto ordinary=frame(false,12);auto instanced=frame(true);
+        const auto warmed=adapter.GetPipelineCacheDiagnostics();
+        const auto instancePipeline=adapter.GetLastMeshPipelineIdentity();
+        frame(true,5);Check(adapter.GetPipelineCacheDiagnostics().creations==warmed.creations&&adapter.GetPipelineCacheDiagnostics().hits>warmed.hits,"warm mesh draws reuse PSOs without creations");
+        auto shader=resources.Get<ShaderResource>("dx12/textured.hlsl");const auto shaderData=shader->GetData();
+        for(auto e:entities)world.GetComponent<MaterialComponent>(e)->materialPath=e==entities[0]?"materials/material_red.material.json":"materials/material_green.material.json";
+        resources.Load<MaterialResource>("materials/material_red.material.json");resources.Load<MaterialResource>("materials/material_green.material.json");
+        frame(true,4);Check(adapter.GetLastMeshPipelineIdentity()==instancePipeline&&adapter.GetPipelineCacheDiagnostics().creations==warmed.creations,"two standalone materials with the same shader share a mesh PSO");
+        for(auto e:entities)world.GetComponent<MaterialComponent>(e)->materialPath.clear();Check(frame(true)==instanced,"restore imported materials");
+        auto clone=shaderData;clone.pipelineVersion=shader->GetVersion();
+        const auto equivalent=adapter.CreateShaderProgram(clone);Check(equivalent.IsValid(),"equivalent shader preparation");
+        Check(adapter.GetPipelineCacheDiagnostics().creations==warmed.creations&&adapter.GetPipelineCacheDiagnostics().cachedCount==warmed.cachedCount,"equivalent pipeline states share cached PSOs");adapter.DestroyShader(equivalent);
+        world.GetComponent<MaterialComponent>(entities[1])->tint[0]=.1f;
+        Check(frame(true)!=instanced&&adapter.GetLastMeshPipelineIdentity()==instancePipeline,"different instance constants change GPU pixels but reuse PSO");
+        world.GetComponent<MaterialComponent>(entities[1])->tint[0]=.5f;
+        Check(frame(true)==instanced,"restored instance constants");
+        auto brokenShader=shaderData;brokenShader.vertexSource="invalid HLSL";brokenShader.fragmentSource="invalid HLSL";
+        const auto oldHandle=shader->GetData().gpuHandle;shader->ReplaceData(brokenShader,ResourceLoadState::Loaded);
+        Check(frame(true,5)==instanced&&shader->GetData().gpuHandle==oldHandle&&!shader->GetData().gpuError.empty(),"failed shader reload retains working GPU shader and color contract");
+        const auto failedCreates=adapter.GetPipelineCacheDiagnostics().creations;frame(true,5);
+        Check(adapter.GetPipelineCacheDiagnostics().creations==failedCreates,"failed shader generation is not retried each frame");
+        resources.Reload<ShaderResource>(shader->GetKey());Check(frame(true,6)==instanced&&shader->GetData().gpuHandle!=oldHandle,"repaired shader reload publishes replacement without changing pixels");
+        Check(adapter.GetPipelineCacheDiagnostics().creations>warmed.creations&&adapter.GetPipelineCacheDiagnostics().cachedCount==warmed.cachedCount,"shader version invalidates old PSOs and prunes unused entries");
+        const auto stable=adapter.GetPipelineCacheDiagnostics().creations;
+        auto& firstMaterial=*world.GetComponent<MaterialComponent>(entities[0]);
+        for(auto e:entities)world.GetComponent<MaterialComponent>(e)->overrides.texturePath="textures/pipeline-deliberately-missing.png";resources.Load<TextureResource>(*firstMaterial.overrides.texturePath);
+        auto missingTexture=frame(true,5);Check(missingTexture!=instanced&&adapter.GetSubmissionStatistics().drawCalls>0,"missing base texture uses initialized fallback and continues GPU draws");
+        for(auto e:entities)world.GetComponent<MaterialComponent>(e)->overrides={};Check(frame(true,5)==instanced,"missing texture recovery");
+        firstMaterial.overrides.shaderPath="dx12/pipeline-deliberately-missing.hlsl";auto missingShader=resources.Load<ShaderResource>(*firstMaterial.overrides.shaderPath);
+        auto shaderMissingPixels=frame(true,5);Check(missingShader->HasError()&&shaderMissingPixels==instanced&&adapter.GetSubmissionStatistics().renderedInstances==2,"missing shader skips affected entity and keeps other mesh rendering");
+        firstMaterial.overrides={};Check(frame(true,5)==instanced,"missing shader recovery");
+        const std::string badKey="materials/pipeline-malformed-owned.material.json";const auto badPath=AssetPaths::ResolveAssetOutputPath(badKey);
+        Check(!std::filesystem::exists(badPath),"owned malformed fixture must not overwrite existing asset");
+        {std::ofstream file(badPath);file<<"{broken JSON";}
+        auto badMaterial=resources.Load<MaterialResource>(badKey);for(auto e:entities)world.GetComponent<MaterialComponent>(e)->materialPath=badKey;
+        Check(frame(true,5)!=instanced&&badMaterial->HasError()&&badMaterial->IsUsable()&&adapter.GetSubmissionStatistics().drawCalls>0,"malformed JSON takes initialized material fallback in live GPU path");
+        for(auto e:entities)world.GetComponent<MaterialComponent>(e)->materialPath.clear();std::filesystem::remove(badPath);Check(frame(true,5)==instanced,"malformed material recovery");
+        Check(adapter.GetPipelineCacheDiagnostics().creations==stable,"material/texture/error changes do not create mesh PSOs");
+        Passed("PSO sharing, warm reuse, version invalidation, last-good shader and live missing resources");
         Check(render.GetStatistics().materialResolves==4,"each imported instance/submesh resolves its own material");
         Check(render.GetStatistics().materialPathChecks==0,"warm imported texture bindings must not revalidate filesystem paths");
         auto texture=resources.Get<TextureResource>(mesh->GetData().meshData.materials[mesh->GetData().meshData.submeshes.front().materialSlot].texturePath);
@@ -172,6 +256,7 @@ static void Gpu() {
         const std::string missingKey="materials/p31-deliberately-missing.material.json";
         auto missing=resources.Load<MaterialResource>(missingKey);Check(missing&&missing->HasError(),"missing material diagnostic");
         world.GetComponent<MaterialComponent>(entities[0])->materialPath=missingKey;frame(true,6);
+        Check(adapter.GetSubmissionStatistics().renderedInstances==4,"missing material uses initialized fallback for both submeshes");
         world.GetComponent<MaterialComponent>(entities[0])->materialPath.clear();
         Check(frame(true,4)==instanced,"missing material can be replaced without stale bindings");Check(ordinary==instanced,"import ordinary/instance pixels differ");Check(adapter.GetSubmissionStatistics().drawCalls==2&&adapter.GetSubmissionStatistics().instancedDrawCalls==2,"GPU submesh batching");
         const float factors[2][3]={{1,.25f,.125f},{.125f,1,.25f}};const float base[3]={128*.5f,192*.8f,64*.6f};
@@ -188,11 +273,13 @@ static void Gpu() {
         for(auto e:entities){auto* c=world.GetComponent<MaterialComponent>(e);c->slotMaterials.clear();world.GetComponent<TransformComponent>(e)->scale.x=-1;}
         auto mirrored=frame(true);Check(mirrored[(120*320+80)*4+1]>30,"negative scale must preserve front face winding");Check(frame(false)==mirrored,"mirrored ordinary/instance differ");
         for(auto e:entities){auto* t=world.GetComponent<TransformComponent>(e);t->scale.x=1;t->rotation.y=3.14159265f;t->position.z=4;}
-        auto culled=frame(true);Check(culled[(120*320+80)*4+1]==10,"true backface culling not applied");for(auto e:entities)world.GetComponent<MaterialComponent>(e)->overrides.doubleSided=true;auto doubleSided=frame(true);Check(doubleSided[(120*320+80)*4+1]>30,"double sided GPU PSO missing");Check(frame(false)==doubleSided,"double sided ordinary/instance differ");
+        auto culled=frame(true);const auto backfacePipeline=adapter.GetLastMeshPipelineIdentity();Check(culled[(120*320+80)*4+1]==10,"true backface culling not applied");for(auto e:entities)world.GetComponent<MaterialComponent>(e)->overrides.doubleSided=true;auto doubleSided=frame(true);Check(adapter.GetLastMeshPipelineIdentity()!=backfacePipeline,"different rasterizer states use different PSO objects");Check(doubleSided[(120*320+80)*4+1]>30,"double sided GPU PSO missing");Check(frame(false)==doubleSided,"double sided ordinary/instance differ");
+        render.ReleaseGpuResources();Check(frame(true,12)==doubleSided,"released successful shader generation can recreate GPU allocations");
         world.DestroyEntity(entities[0]);frame(true);world.Clear();auto clear=frame(true);Check(clear[(120*320+80)*4]==8,"GPU clear retains material draw");
         Passed(std::string(key).ends_with("obj")?"DX12 OBJ multi-material colors, assignment, editing, culling and lifecycle":"DX12 glTF embedded texture colors, assignment, editing, culling and lifecycle");
     }
     ShadowFlags(adapter,window,resources);
+    const auto cache=adapter.GetPipelineCacheDiagnostics();std::cout<<"Mesh PSO cache: hits="<<cache.hits<<" misses="<<cache.misses<<" creations="<<cache.creations<<" cached="<<cache.cachedCount<<"; DX12 validation="<<adapter.GetValidationErrorCount()<<'\n';
     Check(adapter.GetValidationErrorCount()==0,"DX12 ERROR/CORRUPTION");render.ReleaseGpuResources();render.SetRenderAdapter(nullptr);adapter.Shutdown();Passed("DX12 material readback and Debug Layer");
 }
 #endif

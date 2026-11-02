@@ -50,6 +50,7 @@ public:
         // Decoders and fallback CPU copies cannot transfer GPU ownership between keys.
         if constexpr(requires(T t){t.gpuHandle;t.gpuHandleVersion;}) {
             data.gpuHandle=m_Data.gpuHandle;data.gpuHandleVersion=m_Data.gpuHandleVersion;
+            if constexpr(requires(T t){t.gpuColorPipeline;})data.gpuColorPipeline=m_Data.gpuColorPipeline;
         }
         m_Data = std::move(data);
         m_State = state;

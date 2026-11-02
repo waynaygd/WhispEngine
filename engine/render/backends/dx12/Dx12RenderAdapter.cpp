@@ -3,6 +3,7 @@
 #define NOMINMAX
 #endif
 #include "Dx12RenderAdapter.h"
+#include "Dx12PipelineKey.h"
 #include "../../../editor/EditorTheme.h"
 #ifdef _WIN32
 
@@ -630,6 +631,25 @@ bool Dx12RenderAdapter::BindMaterialTextures(bool srgb)
     m_CmdList->SetGraphicsRootDescriptorTable(1,found->second);return true;
 }
 
+void Dx12RenderAdapter::PruneMeshPipelineCache() {
+    std::erase_if(m_MeshPipelineCache,[](const auto& p){return p.second.expired();});
+}
+bool Dx12RenderAdapter::BindMeshMaterial(const UploadedShader& shader,bool instanced,D3D12_GPU_VIRTUAL_ADDRESS constants) {
+    const unsigned variant=(instanced?3:0)+(m_MaterialState.doubleSided?2:m_MaterialState.reverseWinding?1:0);
+    auto* pipeline=m_HdrActive&&shader.hdrStates[instanced?3:0]?shader.hdrStates[variant].Get():
+        instanced?(m_MaterialState.doubleSided?shader.doubleInstancedPipelineState.Get():m_MaterialState.reverseWinding?shader.mirrorInstancedPipelineState.Get():shader.instancedPipelineState.Get()):
+        (m_MaterialState.doubleSided?shader.doublePipelineState.Get():m_MaterialState.reverseWinding?shader.mirrorPipelineState.Get():shader.pipelineState.Get());
+    if(!pipeline)return false;
+    ++m_PipelineDiagnostics.hits; // Reuse of a prelinked cache entry, no key allocation per draw.
+    m_LastMeshPipelineIdentity=reinterpret_cast<std::uintptr_t>(pipeline);
+    m_CmdList->SetGraphicsRootSignature(shader.rootSignature.Get());m_CmdList->SetPipelineState(pipeline);
+    m_CmdList->SetGraphicsRootConstantBufferView(0,constants);
+    if(!BindMaterialTextures(shader.srgbBaseColor))return false;
+    BindSceneLights();BindFrameConstants();if(!BindEnvironment())return false;
+    const float material[8]={m_MaterialState.receiveShadows?1.f:0.f,m_Surface[0],m_Surface[1],m_Surface[2],m_TextureParameters[0],m_TextureParameters[1],m_TextureParameters[2],float(m_MaterialAvailableMaps)};
+    m_CmdList->SetGraphicsRoot32BitConstants(6,8,material,0);BindShadows();return true;
+}
+
 RenderShaderHandle Dx12RenderAdapter::CreateShaderProgram(const ShaderResource& shaderResource)
 {
     if (!m_Device)
@@ -777,6 +797,16 @@ return float4(float3(v.x<=.04045?v.x/12.92:pow((v.x+.055)/1.055,2.4),v.y<=.04045
                 IID_PPV_ARGS(&uploadedShader.rootSignature)),
             "DX12 CreateShaderProgram: root signature creation failed");
 
+        const auto acquire=[&](const D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc, auto& target) {
+            const auto key=Dx12PipelineKey(desc,AssetPaths::NormalizeShaderKey(shaderResource.sourcePath),shaderResource.pipelineVersion,
+                serializedRootSignature->GetBufferPointer(),serializedRootSignature->GetBufferSize());
+            auto& weak=m_MeshPipelineCache[key];auto entry=weak.lock();
+            if(entry)++m_PipelineDiagnostics.hits;
+            else {++m_PipelineDiagnostics.misses;entry=std::make_shared<CachedMeshPipeline>();
+                ThrowIfFailed(m_Device->CreateGraphicsPipelineState(&desc,IID_PPV_ARGS(&entry->state)),"DX12 cached mesh PSO creation failed");
+                ++m_PipelineDiagnostics.creations;weak=entry;}
+            target=entry->state;uploadedShader.pipelines.push_back(std::move(entry));
+        };
         D3D12_INPUT_ELEMENT_DESC layout[] = {
             {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
             {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
@@ -803,18 +833,16 @@ return float4(float3(v.x<=.04045?v.x/12.92:pow((v.x+.055)/1.055,2.4),v.y<=.04045
         psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
         psoDesc.SampleDesc.Count = 1;
 
-        ThrowIfFailed(
-            m_Device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&uploadedShader.pipelineState)),
-            "DX12 CreateShaderProgram: pipeline creation failed");
-        if(hdrPs){auto h=psoDesc;h.PS={hdrPs->GetBufferPointer(),hdrPs->GetBufferSize()};h.RTVFormats[0]=DXGI_FORMAT_R32G32B32A32_FLOAT;ThrowIfFailed(m_Device->CreateGraphicsPipelineState(&h,IID_PPV_ARGS(&uploadedShader.hdrStates[0])),"HDR PSO failed");}
+        acquire(psoDesc,uploadedShader.pipelineState);
+        if(hdrPs){auto h=psoDesc;h.PS={hdrPs->GetBufferPointer(),hdrPs->GetBufferSize()};h.RTVFormats[0]=DXGI_FORMAT_R32G32B32A32_FLOAT;acquire(h,uploadedShader.hdrStates[0]);}
 
         psoDesc.RasterizerState.FrontCounterClockwise=TRUE;
-        ThrowIfFailed(m_Device->CreateGraphicsPipelineState(&psoDesc,IID_PPV_ARGS(&uploadedShader.mirrorPipelineState)),"DX12 mirror PSO failed");
-        if(hdrPs){auto h=psoDesc;h.PS={hdrPs->GetBufferPointer(),hdrPs->GetBufferSize()};h.RTVFormats[0]=DXGI_FORMAT_R32G32B32A32_FLOAT;ThrowIfFailed(m_Device->CreateGraphicsPipelineState(&h,IID_PPV_ARGS(&uploadedShader.hdrStates[1])),"HDR PSO failed");}
+        acquire(psoDesc,uploadedShader.mirrorPipelineState);
+        if(hdrPs){auto h=psoDesc;h.PS={hdrPs->GetBufferPointer(),hdrPs->GetBufferSize()};h.RTVFormats[0]=DXGI_FORMAT_R32G32B32A32_FLOAT;acquire(h,uploadedShader.hdrStates[1]);}
         psoDesc.RasterizerState.FrontCounterClockwise=FALSE;
         psoDesc.RasterizerState.CullMode=D3D12_CULL_MODE_NONE;
-        ThrowIfFailed(m_Device->CreateGraphicsPipelineState(&psoDesc,IID_PPV_ARGS(&uploadedShader.doublePipelineState)),"DX12 double sided PSO failed");
-        if(hdrPs){auto h=psoDesc;h.PS={hdrPs->GetBufferPointer(),hdrPs->GetBufferSize()};h.RTVFormats[0]=DXGI_FORMAT_R32G32B32A32_FLOAT;ThrowIfFailed(m_Device->CreateGraphicsPipelineState(&h,IID_PPV_ARGS(&uploadedShader.hdrStates[2])),"HDR PSO failed");}
+        acquire(psoDesc,uploadedShader.doublePipelineState);
+        if(hdrPs){auto h=psoDesc;h.PS={hdrPs->GetBufferPointer(),hdrPs->GetBufferSize()};h.RTVFormats[0]=DXGI_FORMAT_R32G32B32A32_FLOAT;acquire(h,uploadedShader.hdrStates[2]);}
         psoDesc.RasterizerState.CullMode=D3D12_CULL_MODE_BACK;
         if(shaderResource.vertexSource.find("WHISP_INSTANCE_LAYOUT_V1")!=std::string::npos) {
             try {
@@ -866,15 +894,15 @@ return float4(float3(v.x<=.04045?v.x/12.92:pow((v.x+.055)/1.055,2.4),v.y<=.04045
                 };
                 psoDesc.InputLayout={instanceLayout,_countof(instanceLayout)};
                 psoDesc.VS={instanceVs->GetBufferPointer(),instanceVs->GetBufferSize()};
-                ThrowIfFailed(m_Device->CreateGraphicsPipelineState(&psoDesc,IID_PPV_ARGS(&uploadedShader.instancedPipelineState)),"DX12 instanced PSO creation failed");
-        if(hdrPs){auto h=psoDesc;h.PS={hdrPs->GetBufferPointer(),hdrPs->GetBufferSize()};h.RTVFormats[0]=DXGI_FORMAT_R32G32B32A32_FLOAT;ThrowIfFailed(m_Device->CreateGraphicsPipelineState(&h,IID_PPV_ARGS(&uploadedShader.hdrStates[3])),"HDR PSO failed");}
+                acquire(psoDesc,uploadedShader.instancedPipelineState);
+        if(hdrPs){auto h=psoDesc;h.PS={hdrPs->GetBufferPointer(),hdrPs->GetBufferSize()};h.RTVFormats[0]=DXGI_FORMAT_R32G32B32A32_FLOAT;acquire(h,uploadedShader.hdrStates[3]);}
                 psoDesc.RasterizerState.FrontCounterClockwise=TRUE;
-                ThrowIfFailed(m_Device->CreateGraphicsPipelineState(&psoDesc,IID_PPV_ARGS(&uploadedShader.mirrorInstancedPipelineState)),"DX12 mirror instanced PSO failed");
-        if(hdrPs){auto h=psoDesc;h.PS={hdrPs->GetBufferPointer(),hdrPs->GetBufferSize()};h.RTVFormats[0]=DXGI_FORMAT_R32G32B32A32_FLOAT;ThrowIfFailed(m_Device->CreateGraphicsPipelineState(&h,IID_PPV_ARGS(&uploadedShader.hdrStates[4])),"HDR PSO failed");}
+                acquire(psoDesc,uploadedShader.mirrorInstancedPipelineState);
+        if(hdrPs){auto h=psoDesc;h.PS={hdrPs->GetBufferPointer(),hdrPs->GetBufferSize()};h.RTVFormats[0]=DXGI_FORMAT_R32G32B32A32_FLOAT;acquire(h,uploadedShader.hdrStates[4]);}
                 psoDesc.RasterizerState.FrontCounterClockwise=FALSE;
                 psoDesc.RasterizerState.CullMode=D3D12_CULL_MODE_NONE;
-                ThrowIfFailed(m_Device->CreateGraphicsPipelineState(&psoDesc,IID_PPV_ARGS(&uploadedShader.doubleInstancedPipelineState)),"DX12 double sided instanced PSO failed");
-        if(hdrPs){auto h=psoDesc;h.PS={hdrPs->GetBufferPointer(),hdrPs->GetBufferSize()};h.RTVFormats[0]=DXGI_FORMAT_R32G32B32A32_FLOAT;ThrowIfFailed(m_Device->CreateGraphicsPipelineState(&h,IID_PPV_ARGS(&uploadedShader.hdrStates[5])),"HDR PSO failed");}
+                acquire(psoDesc,uploadedShader.doubleInstancedPipelineState);
+        if(hdrPs){auto h=psoDesc;h.PS={hdrPs->GetBufferPointer(),hdrPs->GetBufferSize()};h.RTVFormats[0]=DXGI_FORMAT_R32G32B32A32_FLOAT;acquire(h,uploadedShader.hdrStates[5]);}
             } catch(const std::exception& error) {
                 uploadedShader.instancedPipelineState.Reset();uploadedShader.mirrorInstancedPipelineState.Reset();uploadedShader.doubleInstancedPipelineState.Reset();
                 Logger::Get().Warn(std::string("DX12 instance variant unavailable; normal fallback: ")+error.what());
@@ -883,11 +911,13 @@ return float4(float3(v.x<=.04045?v.x/12.92:pow((v.x+.055)/1.055,2.4),v.y<=.04045
         const RenderShaderHandle handle{ m_NextShaderHandle++ };
         m_UploadedShaders.emplace(handle.value, std::move(uploadedShader));
         Logger::Get().Info("DX12 CreateShaderProgram: handle=" + std::to_string(handle.value) + " name=" + shaderResource.name);
+        PruneMeshPipelineCache();
         return handle;
     }
     catch (const std::exception& e)
     {
-        Logger::Get().Error(std::string("DX12 CreateShaderProgram exception: ") + e.what());
+        Logger::Get().Error(std::string("DX12 shader ")+shaderResource.sourcePath+": "+e.what());
+        PruneMeshPipelineCache();
         return RenderShaderHandle::Invalid();
     }
 }
@@ -922,6 +952,7 @@ void Dx12RenderAdapter::DestroyShader(RenderShaderHandle handle)
         m_BoundShaderHandle = RenderShaderHandle::Invalid();
 
     m_UploadedShaders.erase(it);
+    PruneMeshPipelineCache();
     Logger::Get().Info("DX12 DestroyShader: handle=" + std::to_string(handle.value));
 }
 
@@ -1001,17 +1032,8 @@ void Dx12RenderAdapter::DrawMesh(RenderMeshHandle handle)
     if(m_ActiveLightPass==UINT_MAX)PrepareSceneLights();
     ID3D12DescriptorHeap* descriptorHeaps[] = { m_SrvHeap.Get() };
     m_CmdList->SetDescriptorHeaps(1, descriptorHeaps);
-    m_CmdList->SetGraphicsRootSignature(shaderIt->second.rootSignature.Get());
-    m_CmdList->SetPipelineState(m_HdrActive&&shaderIt->second.hdrStates[0]?shaderIt->second.hdrStates[m_MaterialState.doubleSided?2:m_MaterialState.reverseWinding?1:0].Get():(m_MaterialState.doubleSided?shaderIt->second.doublePipelineState.Get():(m_MaterialState.reverseWinding?shaderIt->second.mirrorPipelineState.Get():shaderIt->second.pipelineState.Get())));
-    m_CmdList->SetGraphicsRootConstantBufferView(0, m_CbGpu[m_FrameIndex][cbSlot]);
-    if(!BindMaterialTextures(shaderIt->second.srgbBaseColor))return;
-    BindSceneLights();
-    BindFrameConstants();
-    if(!BindEnvironment())return;
+    if(!BindMeshMaterial(shaderIt->second,false,m_CbGpu[m_FrameIndex][cbSlot]))return;
     m_CmdList->SetGraphicsRoot32BitConstants(3,12,m_Normal.data(),0);
-    const float material[8]={m_MaterialState.receiveShadows?1.f:0.f,m_Surface[0],m_Surface[1],m_Surface[2],m_TextureParameters[0],m_TextureParameters[1],m_TextureParameters[2],float(m_MaterialAvailableMaps)};
-    m_CmdList->SetGraphicsRoot32BitConstants(6,8,material,0);
-    BindShadows();
     m_CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_CmdList->IASetVertexBuffers(0, 1, &it->second.vertexView);
     m_CmdList->IASetIndexBuffer(&it->second.indexView);
@@ -1131,18 +1153,7 @@ bool Dx12RenderAdapter::DrawMeshInstanced(RenderMeshHandle handle,std::span<cons
     if(!UploadInstances(instances,instanceView))return false;
     if(m_ActiveLightPass==UINT_MAX)PrepareSceneLights();
     ID3D12DescriptorHeap* heaps[]={m_SrvHeap.Get()};m_CmdList->SetDescriptorHeaps(1,heaps);
-    m_CmdList->SetGraphicsRootSignature(shader->second.rootSignature.Get());
-    m_CmdList->SetPipelineState(m_HdrActive&&shader->second.hdrStates[3]?shader->second.hdrStates[m_MaterialState.doubleSided?5:m_MaterialState.reverseWinding?4:3].Get():(m_MaterialState.doubleSided?shader->second.doubleInstancedPipelineState.Get():(m_MaterialState.reverseWinding?shader->second.mirrorInstancedPipelineState.Get():shader->second.instancedPipelineState.Get())));
-    // The instanced contract does not read CB0; bind a valid address nevertheless.
-    // No CB memory is overwritten here, including earlier normal draws.
-    m_CmdList->SetGraphicsRootConstantBufferView(0,m_CbGpu[m_FrameIndex][0]);
-    if(!BindMaterialTextures(shader->second.srgbBaseColor))return false;
-    BindSceneLights();
-    BindFrameConstants();
-    if(!BindEnvironment())return false;
-    const float material[8]={m_MaterialState.receiveShadows?1.f:0.f,m_Surface[0],m_Surface[1],m_Surface[2],m_TextureParameters[0],m_TextureParameters[1],m_TextureParameters[2],float(m_MaterialAvailableMaps)};
-    m_CmdList->SetGraphicsRoot32BitConstants(6,8,material,0);
-    BindShadows();
+    if(!BindMeshMaterial(shader->second,true,m_CbGpu[m_FrameIndex][0]))return false;
     m_CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     D3D12_VERTEX_BUFFER_VIEW views[]={mesh->second.vertexView,instanceView};
     m_CmdList->IASetVertexBuffers(0,2,views);m_CmdList->IASetIndexBuffer(&mesh->second.indexView);
@@ -2297,7 +2308,7 @@ void Dx12RenderAdapter::Shutdown()
     m_UploadedMeshes.clear();
     m_UploadedTextures.clear();
     m_BoundMaps={};m_TextureParameters={1,1,0,1};m_MaterialTables.clear();m_LastMaterialTable={};m_MaterialTableCount=0;m_EnvironmentTable={};m_FrameConstantsDirty=true;
-    m_UploadedShaders.clear();
+    m_UploadedShaders.clear();m_MeshPipelineCache.clear();m_PipelineDiagnostics={};m_LastMeshPipelineIdentity=0;
     ReleaseCameraPreview();
     ReleaseViewportResources();
     m_FreeTextureDescriptorIndices.clear();
