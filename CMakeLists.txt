@@ -212,7 +212,7 @@ if (WHISP_BUILD_PHYSICS_TESTS)
     engine/core/Logger.cpp
   )
   target_include_directories(PhysicsRegression PRIVATE engine)
-  target_link_libraries(PhysicsRegression PRIVATE enkiTS)
+  target_link_libraries(PhysicsRegression PRIVATE enkiTS WhispEngineJson)
   if (ENABLE_TRACY)
     target_link_libraries(PhysicsRegression PRIVATE Tracy::TracyClient)
   endif()

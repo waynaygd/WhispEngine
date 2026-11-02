@@ -55,6 +55,7 @@ public:
     MaterialPreviewMetrics GetMaterialPreviewMetrics()const override{return m_MaterialPreviewMetrics;}
     PipelineCacheDiagnostics GetPipelineCacheDiagnostics()const override {auto d=m_PipelineDiagnostics;d.cachedCount=m_MeshPipelineCache.size();return d;}
     std::uintptr_t GetLastMeshPipelineIdentity()const{return m_LastMeshPipelineIdentity;}
+    std::array<std::size_t,3> GetLiveGpuResourceCounts()const{return {m_UploadedMeshes.size(),m_UploadedTextures.size(),m_UploadedShaders.size()};}
 	void Shutdown() override;
 
 	void SetTestTransform(const float* mvp16) override;

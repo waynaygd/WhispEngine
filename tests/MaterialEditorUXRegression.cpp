@@ -1,3 +1,4 @@
+#include <thread>
 #define NOMINMAX
 #include "core/Application.h"
 #include "core/AssetPaths.h"
@@ -83,10 +84,10 @@ auto& s=EditorDocumentTestAccess::Session(e,app);const auto initialYaw=s.yaw;aut
     auto authored=rm->PeekIndexed<ShaderResource>(authoredKey);Check(authored&&authored->GetData().gpuHandle.IsValid(),"isolated authored shader prepares GPU pipeline");
     auto previewPixels=[&](const char* name){capture(name);std::ifstream image(dir/(std::string(name)+".ppm"),std::ios::binary);std::string magic;int w,h,max;image>>magic>>w>>h>>max;image.get();std::vector<unsigned char> data(std::size_t(w)*h*3);image.read(reinterpret_cast<char*>(data.data()),data.size());auto* p=ImGui::FindWindowByName("Material Preview");const int cx=int(p->Pos.x+p->Size.x*.5f),cy=int(p->Pos.y+p->Size.y*.6f);std::vector<unsigned char> result;for(int y=cy-10;y<cy+10;++y)for(int x=cx-10;x<cx+10;++x)for(int c=0;c<3;++c)result.push_back(data[(std::size_t(y)*w+x)*3+c]);return result;};
     const auto authoredHandle=authored->GetData().gpuHandle;const auto workingPixels=previewPixels("shader-working");const auto workingCache=gpu->GetPipelineCacheDiagnostics();
-    {std::ofstream file(authoredPath);file<<"invalid HLSL";}rm->PollHotReload();frame(6);
+    {std::ofstream file(authoredPath);file<<"invalid HLSL";}rm->PollHotReload();std::this_thread::sleep_for(std::chrono::milliseconds(140));rm->PollHotReload();frame(6);
     Check(authored->GetData().gpuHandle==authoredHandle&&!authored->GetData().gpuError.empty()&&previewPixels("shader-failed")==workingPixels,"real shader Hot Reload failure retains working GPU pixels");
     Check(gpu->GetPipelineCacheDiagnostics().creations==workingCache.creations,"invalid shader does not publish PSOs");
-    {std::ofstream file(authoredPath);file<<originalShader<<"\n// repaired owned shader\n";}rm->PollHotReload();frame(8);
+    {std::ofstream file(authoredPath);file<<originalShader<<"\n// repaired owned shader\n";}rm->PollHotReload();std::this_thread::sleep_for(std::chrono::milliseconds(140));rm->PollHotReload();frame(8);
     Check(authored->GetData().gpuHandle!=authoredHandle&&authored->GetData().gpuError.empty()&&previewPixels("shader-repaired")==workingPixels,"real shader Hot Reload repair replaces PSOs and preserves GPU output");
     Check(gpu->GetPipelineCacheDiagnostics().creations>workingCache.creations,"watched shader generation invalidates cache");Check(EditorDocumentTestAccess::Reload(e,app),e.GetError());frame();
     const auto otherRoot=dir/ecs::NewSceneIdentity();std::filesystem::create_directories(otherRoot);auto other=ProjectManager::Create(otherRoot,"OtherMaterialUX");Check(app.OpenProject(other->descriptorPath,Application::ProjectDecision::Discard,&error),error);frame();Check(gpu->GetMaterialPreviewMetrics().targetBytes==0,"Project Switch releases preview target");Check(app.OpenProject(descriptor,Application::ProjectDecision::Discard,&error),error);frame();Check(e.OpenDocument(app,a),e.GetError());frame(10);Check(EditorDocumentTestAccess::Image(e)!=0,"Project return creates valid preview without stale handles");

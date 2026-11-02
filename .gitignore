@@ -46,6 +46,7 @@ compile_commands.json
 /docs/*
 !/docs/RenderingLab3-MaterialPipeline.md
 !/docs/RenderingLab3-Demo.md
+!/docs/RenderingLab3-ExtraFeatures.md
 
 # Regenerable loader caches and runtime log.
 *.wmesh

@@ -1,4 +1,5 @@
 #include "ResourceManager.h"
+#include <set>
 #include "../scripting/Prefab.h"
 #include <tracy/Tracy.hpp>
 
@@ -37,6 +38,8 @@ void ResourceManager::ClearAll()
     m_MaterialCache.clear();
     m_DirtyMaterials.clear();
     m_HotReloadWatches.clear();
+    m_MaterialUsers.clear();m_ManagedMaterialWatches.clear();
+    m_ResolvedMaterials.clear();m_MaterialWatchHistory.clear();
     m_PendingAsyncKeys.clear();
     ++m_CacheEpoch;
 
@@ -82,16 +85,132 @@ void ResourceManager::StopWatchingAsset(const std::string& key){
     std::lock_guard<std::recursive_mutex> lock(m_Mutex);
     std::erase_if(m_HotReloadWatches,[&](const auto& entry){return entry.second.key==key;});
 }
+void ResourceManager::SetMaterialUsage(const void* owner,const std::vector<std::string>& roots,const MaterialResource* draft){
+    std::lock_guard<std::recursive_mutex> lock(m_Mutex);
+    if(roots.empty()&&!draft){m_MaterialUsers.erase(owner);RefreshMaterialWatches();return;}
+    auto& usage=m_MaterialUsers[owner];usage.roots=roots;
+    usage.draft=draft?std::optional<MaterialResource>(*draft):std::nullopt;
+    RefreshMaterialWatches();
+}
+void ResourceManager::ClearMaterialUsage(const void* owner){
+    std::lock_guard<std::recursive_mutex> lock(m_Mutex);
+    if(m_MaterialUsers.erase(owner))RefreshMaterialWatches();
+}
+void ResourceManager::RefreshMaterialWatches(){
+    std::unordered_set<std::string> desired;
+    const auto watch=[&](const std::string& key,ResourceKind kind){
+        if(key.empty()||key.find('#')!=std::string::npos||key.starts_with("defaults/"))return;
+        const auto token=key+"#"+std::to_string(int(kind));desired.insert(token);
+        if(m_ManagedMaterialWatches.contains(token))return;
+        try {
+            const auto path=key.starts_with("@engine/")?AssetPaths::ResolveAssetPath(key):kind==ResourceKind::Shader?(key.starts_with("dx12/")||key.starts_with("vulkan/")?AssetPaths::ResolveShaderRoot()/std::filesystem::u8path(key):AssetPaths::ResolveAssetOutputPath(key)):AssetPaths::ResolveAssetOutputPath(key);
+            if(path.empty())return;
+            ManagedMaterialWatch w;w.file.key=key;w.file.kind=kind;w.file.path=path;
+            std::error_code error;w.exists=std::filesystem::is_regular_file(path,error);
+            if(w.exists){w.file.lastWriteTime=std::filesystem::last_write_time(path,error);w.file.fileSize=std::filesystem::file_size(path,error);}
+            if(auto old=m_MaterialWatchHistory.find(token);old!=m_MaterialWatchHistory.end()){
+                if(old->second.pending||old->second.exists!=w.exists||old->second.file.lastWriteTime!=w.file.lastWriteTime||old->second.file.fileSize!=w.file.fileSize){w.pending=true;w.changed=std::chrono::steady_clock::now();}
+                m_MaterialWatchHistory.erase(old);
+            }
+            m_ManagedMaterialWatches.emplace(token,std::move(w));
+        }catch(const std::exception& e){Logger::Get().Warn("Material watch '"+key+"': "+e.what());}
+    };
+    const auto dependencies=[&](const MaterialResource& m){
+        watch(m.shaderPath,ResourceKind::Shader);
+        for(const auto* key:{&m.texturePath,&m.normalTexturePath,&m.metallicRoughnessTexturePath,&m.occlusionTexturePath})watch(*key,ResourceKind::Texture);
+    };
+    for(const auto& [owner,usage]:m_MaterialUsers){
+        for(const auto& raw:usage.roots){
+            const auto key=AssetPaths::NormalizeAssetKey(raw);watch(key,ResourceKind::Material);
+            auto material=FindCachedResource<MaterialResource>(key);
+            if(material&&material->IsUsable()&&!material->IsLoading()){
+                const auto resolved=ResolveMaterial(key,usage.draft?&*usage.draft:nullptr);dependencies(resolved.data);
+                std::unordered_set<std::string> visited;auto parent=usage.draft?usage.draft->parentMaterial:material->GetData().parentMaterial;
+                while(!parent.empty()&&visited.size()<32&&visited.insert(parent).second){watch(parent,ResourceKind::Material);auto p=FindCachedResource<MaterialResource>(parent);if(!p)break;parent=p->GetData().parentMaterial;}
+            }
+        }
+        if(usage.draft&&usage.roots.empty())dependencies(*usage.draft);
+    }
+    std::erase_if(m_ManagedMaterialWatches,[&](const auto& item){if(desired.contains(item.first))return false;m_MaterialWatchHistory[item.first]=item.second;return true;});
+}
+ResourceLoadResult<MaterialResource> ResourceManager::ResolveMaterial(const std::string& rawKey,const MaterialResource* draft){
+    std::lock_guard<std::recursive_mutex> lock(m_Mutex);
+    std::vector<std::string> chain;
+    const auto failure=[](std::string error){ResourceLoadResult<MaterialResource> r;r.errorMessage=std::move(error);return r;};
+    auto resolve=[&](auto&& self,const std::string& key,const MaterialResource* authored)->ResourceLoadResult<MaterialResource>{
+        if(chain.size()>=32)return failure("Material inheritance exceeds maximum depth 32: "+key);
+        if(auto cycle=std::find(chain.begin(),chain.end(),key);cycle!=chain.end()){
+            std::set<std::string> members(cycle,chain.end());std::string message="Material inheritance cycle:";for(const auto& member:members)message+=" "+member;return failure(message);
+        }
+        chain.push_back(key);
+        auto raw=FindCachedResource<MaterialResource>(key);if(!raw)raw=Load<MaterialResource>(key);
+        ResourceLoadResult<MaterialResource> next;std::uint64_t parentGeneration=0;
+        const auto& data=authored?*authored:raw->GetData();
+        if(authored&&!data.parentMaterial.empty()){
+            const auto validated=MaterialLoader::Parse(key,MaterialLoader::Serialize(data));
+            if(!validated.success){chain.pop_back();return validated;}
+        }
+        if(!authored&&(!raw->IsLoaded()||data.placeholder))next=failure("Material '"+key+"': "+raw->GetErrorMessage());
+        else if(data.parentMaterial.empty()){next.success=true;next.data=data;}
+        else {
+            auto parent=self(self,data.parentMaterial,nullptr);
+            if(auto p=m_ResolvedMaterials.find(data.parentMaterial);p!=m_ResolvedMaterials.end())parentGeneration=p->second.generation;
+            if(!parent.success)next=failure(parent.errorMessage);
+            else if(authored)next=MaterialLoader::Merge(parent.data,data);
+            else {
+                auto found=m_ResolvedMaterials.find(key);
+                if(found!=m_ResolvedMaterials.end()&&found->second.owner.lock()==raw&&found->second.rawVersion==raw->GetVersion()&&found->second.parentGeneration==parentGeneration&&found->second.result.success){chain.pop_back();return found->second.result;}
+                next=MaterialLoader::Merge(parent.data,data);
+            }
+        }
+        chain.pop_back();
+        if(draft)return next; // An invalid unsaved parent must never poison scene caches.
+        auto& entry=m_ResolvedMaterials[key];
+        if(entry.owner.lock()!=raw)entry={};
+        if(entry.rawVersion!=raw->GetVersion()||(next.success&&entry.parentGeneration!=parentGeneration)||entry.result.errorMessage!=next.errorMessage){
+            // Preserve last-good resolved values, independently of raw authored data.
+            if(!next.success&&!entry.result.data.placeholder)next.data=entry.result.data;
+            if(!next.success&&(entry.result.errorMessage!=next.errorMessage||entry.rawVersion!=raw->GetVersion()))Logger::Get().Warn(next.errorMessage+"; using last-good resolved material or default fallback");
+            entry.owner=raw;entry.rawVersion=raw->GetVersion();entry.parentGeneration=parentGeneration;entry.generation=++m_MaterialGeneration;entry.result=next;
+        }
+        return entry.result;
+    };
+    return resolve(resolve,AssetPaths::NormalizeAssetKey(rawKey),draft);
+}
+void ResourceManager::PollMaterialWatches(){
+    const auto now=std::chrono::steady_clock::now();
+    for(auto& [token,w]:m_ManagedMaterialWatches){
+        std::error_code error;const bool exists=std::filesystem::is_regular_file(w.file.path,error);
+        if(error==std::errc::no_such_file_or_directory)error.clear();
+        const auto time=exists?std::filesystem::last_write_time(w.file.path,error):std::filesystem::file_time_type{};
+        const auto size=exists?std::filesystem::file_size(w.file.path,error):0;
+        if(error)continue;
+        if(exists!=w.exists||time!=w.file.lastWriteTime||size!=w.file.fileSize){w.exists=exists;w.file.lastWriteTime=time;w.file.fileSize=size;w.changed=now;w.pending=true;w.dirtyWarning=false;continue;}
+        if(!w.pending||now-w.changed<std::chrono::milliseconds(120))continue;
+        if(w.file.kind==ResourceKind::Material&&m_DirtyMaterials.contains(w.file.key)){
+            if(!w.dirtyWarning)Logger::Get().Warn("Material external reload pending; unsaved draft preserved: "+w.file.key);
+            w.dirtyWarning=true;continue;
+        }
+        w.pending=false;
+        if(w.file.kind==ResourceKind::Material)Reload<MaterialResource>(w.file.key);
+        else if(w.file.kind==ResourceKind::Shader)Reload<ShaderResource>(w.file.key);
+        else Reload<TextureResource>(w.file.key);
+        if(auto manual=m_HotReloadWatches.find(token);manual!=m_HotReloadWatches.end()){manual->second.lastWriteTime=time;manual->second.fileSize=size;}
+        Logger::Get().Info("Material dependency hot reload: "+w.file.key);
+    }
+}
 void ResourceManager::PollHotReload()
 {
     std::lock_guard<std::recursive_mutex> lock(m_Mutex);
     scripting::PollPrefabReload();
+    RefreshMaterialWatches();PollMaterialWatches();
     std::vector<std::string> changedPostFx;
     const auto now=std::chrono::steady_clock::now();const bool checkFonts=now>=m_NextFontWatch;if(checkFonts)m_NextFontWatch=now+std::chrono::milliseconds(250);
 
     for (auto& [watchKey, watch] : m_HotReloadWatches)
     {
         (void)watchKey;
+        if(m_ManagedMaterialWatches.contains(watchKey))continue;
         if(watch.kind==ResourceKind::Font){if(!checkFonts)continue;++m_FontWatchChecks;}
         if (watch.path.empty() || !std::filesystem::exists(watch.path)){
             if(watch.kind==ResourceKind::Data&&watch.fileSize>0){watch.fileSize=0;(void)Reload<DataResource>(watch.key);}

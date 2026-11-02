@@ -3,6 +3,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <nlohmann/json.hpp>
 
 enum class ShadingModel { Lambert, PBR };
 enum class MaterialSurfaceMode { Opaque, Masked, Transparent };
@@ -10,6 +11,9 @@ enum class MaterialSurfaceMode { Opaque, Masked, Transparent };
 struct MaterialResource {
     std::string name = "UnnamedMaterial";
     std::string sourcePath;
+    std::string parentMaterial;
+    // Schema v5 authored data. Absence means Inherit; false/0/"" remain explicit.
+    nlohmann::json parameterOverrides=nlohmann::json::object();
     std::string shaderPath = "dx12/textured.hlsl";
     std::string texturePath; // Base Color; legacy key remains canonical.
     std::string normalTexturePath, metallicRoughnessTexturePath, occlusionTexturePath, emissiveTexturePath;

@@ -1,0 +1,13 @@
+{
+  "version": 5,
+  "name": "Inheritance Grandchild - red",
+  "parentMaterial": "materials/inheritance_child.material.json",
+  "overrides": {
+    "baseColor": [
+      0.85,
+      0.035,
+      0.025,
+      1
+    ]
+  }
+}

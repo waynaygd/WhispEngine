@@ -108,6 +108,8 @@ namespace ecs {
 
     void RenderSystem::ReleaseGpuResources()
     {
+        if(m_ResourceManager&&!m_UsedMaterialAssets.empty())m_ResourceManager->ClearMaterialUsage(this);
+        m_UsedMaterialAssets.clear(); // repeated release/destruction may outlive ResourceManager
         IRenderAdapter* renderer = m_ResourceOwnerRenderer != nullptr ? m_ResourceOwnerRenderer : m_Renderer;
         if (renderer != nullptr)
         {
@@ -174,6 +176,7 @@ namespace ecs {
 
         (void)dt;
         m_Statistics = {};m_MaterialDiagnostics.clear();
+        m_UsedMaterialAssets.clear();
         LightCamera lightCamera;
         lightCamera.view=m_RenderCamera.view;lightCamera.projection=m_RenderCamera.projection;
         lightCamera.nearPlane=m_CameraNearPlane;lightCamera.farPlane=m_CameraFarPlane;
@@ -293,6 +296,7 @@ namespace ecs {
                     }
                 }
                 m_Statistics.gatherMs = elapsed(start);
+                if(m_ResourceManager)m_ResourceManager->SetMaterialUsage(this,m_UsedMaterialAssets);
                 m_Statistics.visibleSubmeshes = m_RenderSnapshots.size();
                 m_Statistics.viewmodelSubmeshes=std::count_if(m_RenderSnapshots.begin(),m_RenderSnapshots.end(),[](const auto& s){return s.renderMode==MeshRenderMode::FirstPerson;});m_Statistics.worldSubmeshes=m_RenderSnapshots.size()-m_Statistics.viewmodelSubmeshes;
             }
@@ -537,11 +541,16 @@ namespace ecs {
             if(!m_MaterialResources.contains(asset)){++m_Statistics.materialPathChecks;key=AssetPaths::NormalizeAssetKey(asset);}
             m_Statistics.materialPathMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-pathStart).count();
             if(m_MaterialResources.count(key))++m_Statistics.materialCacheHits;else ++m_Statistics.materialCacheMisses;
+            m_UsedMaterialAssets.push_back(key);
             const auto resource=key.empty()?nullptr:GetOrLoadMaterial(key);
             if(!resource||resource->IsLoading())return finish(false);
             if(resource->HasError()&&m_FailedMaterialKeys.insert(key+"#"+std::to_string(resource->GetVersion())).second)
                 Logger::Get().Warn("Material '"+key+"': "+resource->GetErrorMessage()+(resource->GetData().placeholder?"; using default material fallback":"; using last working material values"));
-            if(resource->IsUsable())material=resource->GetData();
+            if(resource->IsUsable()){
+                const auto resolved=m_ResourceManager->ResolveMaterial(key);
+                if(!resolved.success&&resolved.data.placeholder&&!resource->GetData().parentMaterial.empty())return finish(false);
+                material=resolved.data;
+            }
         }
         if(component)ApplyMaterialOverrides(material,component->overrides);
         // Legacy scene paths are explicit overrides; preserve their existing priority.

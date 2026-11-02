@@ -171,7 +171,7 @@ bool EditorLayer::ActivateDocument(Application& app,const std::string& id,OpenDe
     }
     if(target.type==DocumentType::Material&&m_EditingMaterial!=target.key){
         const auto documents=m_Documents;for(const auto& d:documents)if(d.type==DocumentType::Material&&d.key==m_EditingMaterial&&!ResolveDocumentEdits(app,d,decision))return false;
-        m_EditingMaterial=target.key;app.GetResourceManager()->WatchForHotReload<MaterialResource>(target.key);
+        m_EditingMaterial=target.key;
     }
     CaptureSceneDocument(app);CaptureCurrentWorkspace();SetWorkspaceFocused(false);
     if(target.type==DocumentType::Prefab&&!app.IsPrefabEditing()){

@@ -450,6 +450,7 @@ void EditorLayer::Render(Application& app, IRenderAdapter* renderer, float dt)
     m_ModalActive=ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel);
     m_InputTextActive=ImGui::GetIO().WantTextInput||ImGui::IsAnyItemActive();
     HandleEditorShortcuts(app);
+    if(!ActiveDocumentIs(DocumentType::Material)&&app.GetResourceManager())app.GetResourceManager()->ClearMaterialUsage(this);
     if (m_ShowAssetBrowser&&!m_WorkspaceFocus)
         DrawAssetBrowser(app);
     if ((m_ShowMaterialEditor||ActiveDocumentIs(DocumentType::Material))&&!m_ActiveDocument.empty())

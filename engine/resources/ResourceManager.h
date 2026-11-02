@@ -287,6 +287,11 @@ public:
     void ReloadPostFx(const std::string& key);
     std::uint64_t FontWatchChecks()const {std::lock_guard<std::recursive_mutex> lock(m_Mutex);return m_FontWatchChecks;}
     void PollHotReload();
+    // Independent owners: scene rendering and the active Material Preview.
+    void SetMaterialUsage(const void* owner,const std::vector<std::string>& roots,const MaterialResource* draft=nullptr);
+    void ClearMaterialUsage(const void* owner);
+    ResourceLoadResult<MaterialResource> ResolveMaterial(const std::string& key,const MaterialResource* draft=nullptr);
+    std::size_t MaterialWatchCount()const {return m_ManagedMaterialWatches.size();}
     void PollAsyncLoads();
 
     ResourceStats GetStats() const
@@ -342,6 +347,24 @@ private:
         std::string token;
         JobSystem::TaskHandle task;
     };
+    struct MaterialUsage {std::vector<std::string> roots;std::optional<MaterialResource> draft;};
+    struct ManagedMaterialWatch {
+        HotReloadWatch file;
+        bool exists=false,pending=false,dirtyWarning=false;
+        std::chrono::steady_clock::time_point changed{};
+    };
+    std::unordered_map<const void*,MaterialUsage> m_MaterialUsers;
+    std::unordered_map<std::string,ManagedMaterialWatch> m_ManagedMaterialWatches;
+    void RefreshMaterialWatches();
+    void PollMaterialWatches();
+    struct ResolvedMaterial {
+        std::weak_ptr<Resource<MaterialResource>> owner;
+        std::uint64_t rawVersion=0,parentGeneration=0,generation=0;
+        ResourceLoadResult<MaterialResource> result;
+    };
+    std::unordered_map<std::string,ResolvedMaterial> m_ResolvedMaterials;
+    std::uint64_t m_MaterialGeneration=0;
+    std::unordered_map<std::string,ManagedMaterialWatch> m_MaterialWatchHistory;
 
     template <typename T>
     CacheMap<T>& GetCache()
@@ -709,7 +732,8 @@ private:
 
                                 if constexpr (std::is_same_v<T, MaterialResource>)
                                 {
-                                    const auto& material = cached->GetData();
+                                    const auto effective=ResolveMaterial(key);
+                                    const auto& material = effective.data;
 
                                     if (!material.shaderPath.empty())
                                         (void)LoadAsync<ShaderResource>(

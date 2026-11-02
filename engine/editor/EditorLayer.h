@@ -36,6 +36,7 @@
 #include <unordered_map>
 
 class Application;
+class ResourceManager;
 class IRenderAdapter;
 struct ImVec2;
 struct ImGuiContext;
@@ -632,6 +633,7 @@ private:
     bool m_MaterialDirty=false;
     struct MaterialSession {
         MaterialResource base,draft;
+        std::string resolutionError;
         struct Change {MaterialResource before,after;};
         std::vector<Change> undo,redo;std::optional<MaterialResource> transaction;
         std::uint64_t version=0;bool initialized=false;
@@ -649,6 +651,7 @@ private:
     void FinishMaterialEdit(Application&,bool cancel=false);
     void UndoMaterialEdit(Application&,bool redo=false);
     void ReleaseMaterialEditor(IRenderAdapter*);
+    ResourceManager* m_MaterialWatchManager=nullptr;
 
     bool m_ShowDemoWindow = false;
     bool m_ShowLuaRuntimeInspector=false,m_LuaInspectorAuto=true,m_LuaInspectionCaptured=false;
